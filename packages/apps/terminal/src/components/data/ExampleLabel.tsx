@@ -19,7 +19,7 @@ export function ExampleLabel({
     <span
       data-testid={testId}
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium uppercase tracking-wide",
         className,
       )}
       style={{

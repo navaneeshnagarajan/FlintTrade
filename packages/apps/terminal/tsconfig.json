@@ -30,8 +30,12 @@
   // imported by both the app tests and vite.config.ts. A composite reference
   // would demand a built *.d.ts (TS6305) instead of the source types.
   "include": [
+    "e2e/incidents/fixture.tsx",
+    "e2e/service-oauth-handoff.fixture.tsx",
+    "e2e/service-oauth-handoff.entry.ts",
     "src",
     "e2e/about-versions.fixture.tsx",
+    "e2e/foundation-truth.fixture.tsx",
     "vite-env.d.ts",
     "vite.reticleConnectGate.ts",
     "../../core/core/src/flinttrade_core/data/indian_charges.json",

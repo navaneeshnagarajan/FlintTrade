@@ -282,8 +282,8 @@ class StrategyHotReloader:
     """Hot-reload user strategy files from a watched directory.
 
     Uses :mod:`watchdog` to detect file changes and :mod:`importlib` to reload
-    modules.  Each reload is atomic: the old module is removed from
-    :data:`sys.modules` before the new one is imported.
+    modules. A replacement is staged and validated before publication; failed
+    imports retain the old module. Run adoption requires separate core authority.
 
     A strategy file must:
     - Pass AST validation (no dangerous imports/calls).
@@ -309,6 +309,7 @@ class StrategyHotReloader:
         self._dir = Path(strategies_dir) if strategies_dir is not None else default_strategies_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._stop_callback = stop_callback
+        self._reload_lock = threading.RLock()
 
         # name → loaded module (kept alive to prevent GC)
         self._modules: dict[str, object] = {}
@@ -364,11 +365,11 @@ class StrategyHotReloader:
                 a ``Strategy`` class.
             ImportError: If the module raises an error on import.
         """
-        if name in self._modules:
-            module = self._modules[name]
-            return _extract_strategy_class(module, name)
-
-        return self._load_fresh(name)
+        with self._reload_lock:
+            if name in self._modules:
+                module = self._modules[name]
+                return _extract_strategy_class(module, name)
+            return self._load_fresh(name)
 
     # ------------------------------------------------------------------
     # Reload
@@ -377,9 +378,9 @@ class StrategyHotReloader:
     def reload(self, name: str) -> tuple[bool, str]:
         """Reload a strategy file, replacing the cached module.
 
-        Stops any running instance via ``stop_callback`` before loading the
-        new module.  If the new module fails to load the old module is NOT
-        restored (the strategy remains stopped).
+        Stage and validate before invoking the optional handover callback.
+        A load or callback failure retains the usable incumbent module. This
+        module-cache reload is not itself authority to adopt in a trading run.
 
         Args:
             name: Strategy name to reload.
@@ -388,24 +389,15 @@ class StrategyHotReloader:
             ``(True, "reloaded successfully")`` on success, or
             ``(False, <error message>)`` on failure.
         """
-        # Stop existing instance before reload
-        if self._stop_callback is not None:
+        with self._reload_lock:
             try:
-                self._stop_callback(name)
+                self._load_fresh(name, before_publish=self._stop_callback)
+                logger.info("Strategy reloaded: %s", name)
+                return True, f"Strategy '{name}' reloaded successfully"
             except Exception as exc:  # noqa: BLE001
-                logger.warning("stop_callback raised for '%s': %s", name, exc)
-
-        # Evict from module cache and sys.modules
-        self._evict(name)
-
-        try:
-            self._load_fresh(name)
-            logger.info("Strategy reloaded: %s", name)
-            return True, f"Strategy '{name}' reloaded successfully"
-        except Exception as exc:  # noqa: BLE001
-            msg = f"Failed to reload strategy '{name}': {exc}"
-            logger.error(msg)
-            return False, msg
+                msg = f"Failed to reload strategy '{name}': {exc}"
+                logger.error(msg)
+                return False, msg
 
     # ------------------------------------------------------------------
     # Watch
@@ -526,7 +518,7 @@ class StrategyHotReloader:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load_fresh(self, name: str) -> type:
+    def _load_fresh(self, name: str, *, before_publish=None) -> type:
         """Import a strategy module from disk, bypassing the cache.
 
         Args:
@@ -555,8 +547,10 @@ class StrategyHotReloader:
         if not _has_strategy_class(source):
             raise ValueError(f"Strategy '{name}' does not define a 'Strategy' class")
 
-        # Build a unique module name to avoid collisions with built-ins
-        module_name = f"_flinttrade_strategy_{name}"
+        # Stage exact validated bytes without timestamp-based bytecode caches.
+        import hashlib
+        version = hashlib.sha256((str(py_file.resolve()) + source).encode()).hexdigest()
+        module_name = f"_flinttrade_strategy_{name}_{version}"
         spec = importlib.util.spec_from_file_location(module_name, str(py_file))
         if spec is None or spec.loader is None:
             raise ImportError(f"Cannot create import spec for {py_file}")
@@ -565,14 +559,18 @@ class StrategyHotReloader:
         # Register before exec so relative imports inside the strategy resolve
         sys.modules[module_name] = module
         try:
-            spec.loader.exec_module(module)  # type: ignore[union-attr]
+            exec(compile(source, str(py_file), "exec"), module.__dict__)
+            strategy = _extract_strategy_class(module, name)
+            if before_publish is not None:
+                before_publish(name)
         except Exception:
             sys.modules.pop(module_name, None)
             raise
 
         self._modules[name] = module
+        sys.modules[f"_flinttrade_strategy_{name}"] = module
         logger.info("Strategy loaded: %s (module=%s)", name, module_name)
-        return _extract_strategy_class(module, name)
+        return strategy
 
     def _evict(self, name: str) -> None:
         """Remove a module from the cache and from :data:`sys.modules`.

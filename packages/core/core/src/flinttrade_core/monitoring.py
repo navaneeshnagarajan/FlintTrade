@@ -14,6 +14,7 @@ Three classes:
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 import subprocess
 import threading
@@ -210,6 +211,8 @@ class HealthAggregator:
             Dict with ``status``, ``checked``, ``readable``,
             ``unreadable``, and ``files`` list.
         """
+        if not paths:
+            return {"status": "unavailable", "note": "no paths provided", "checked": 0}
         results: list[dict[str, Any]] = []
         readable = 0
         unreadable = 0
@@ -329,7 +332,7 @@ class HealthAggregator:
         except Exception:
             logger.exception("Host CPU health check failed")
             return None
-        if used_pct < 0:
+        if not math.isfinite(used_pct) or not 0 <= used_pct <= 100:
             return None
         result: dict[str, Any] = {
             "status": _utilisation_status(used_pct, degraded_above=90, error_above=98),
@@ -419,12 +422,14 @@ class HealthAggregator:
         """
         try:
             sys_mem = psutil.virtual_memory()
-            total = int(getattr(sys_mem, "total", 0) or 0)
+            total = int(sys_mem.total)
             if total <= 0:
                 return None
-            available = int(getattr(sys_mem, "available", 0) or 0)
-            used_bytes = max(total - available, 0)
-            used_pct = float(getattr(sys_mem, "percent", 0.0) or 0.0)
+            available = int(sys_mem.available)
+            used_pct = float(sys_mem.percent)
+            if not 0 <= available <= total or not math.isfinite(used_pct) or not 0 <= used_pct <= 100:
+                return None
+            used_bytes = total - available
         except Exception:
             logger.exception("Host memory health check failed")
             return None
@@ -485,12 +490,12 @@ class HealthAggregator:
         if registry is not None:
             checks["broker"] = self.check_broker_connections(registry)
         else:
-            checks["broker"] = {"status": "ok", "note": "no registry provided"}
+            checks["broker"] = {"status": "unavailable", "note": "no registry provided"}
 
         if duckdb_paths is not None:
             checks["duckdb"] = self.check_duckdb(duckdb_paths)
         else:
-            checks["duckdb"] = {"status": "ok", "note": "no paths provided"}
+            checks["duckdb"] = {"status": "unavailable", "note": "no paths provided"}
 
         checks["disk"] = self.check_disk_space(data_dir)
         checks["memory"] = self.check_memory()
@@ -499,20 +504,19 @@ class HealthAggregator:
             ("gpu", self.check_gpu()),
             ("network", self.check_network()),
         ):
-            if reading is not None:
-                checks[key] = reading
+            checks[key] = reading if reading is not None else _unavailable(f"Host {key} unavailable")
 
         # Service and disk/RAM faults roll up. CPU, GPU, and network stay
         # on their own rows so a busy host does not mark the backend down.
         statuses = [checks[key].get("status", "ok") for key in ("broker", "duckdb", "disk", "memory")]
         if "error" in statuses:
             overall = "error"
-        elif "degraded" in statuses:
+        elif "degraded" in statuses or "unavailable" in statuses:
             overall = "degraded"
         else:
             overall = "ok"
 
-        return {"status": overall, **checks}
+        return {"status": overall, "observed_at": time.time(), "vantage": "core", **checks}
 
 
 # ---------------------------------------------------------------------------

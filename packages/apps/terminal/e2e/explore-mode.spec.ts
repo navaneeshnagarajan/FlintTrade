@@ -45,11 +45,19 @@ test.describe('Explore mode', () => {
     await seedExploreDemoSession(page);
     await page.goto('/home');
 
+    // /home now opens Terminal. The same overview cards remain available
+    // from its public catalogue rather than mounting in the default preset.
+    await expect(page).toHaveURL(/\/terminal$/);
+    const terminal = page.getByRole('region', { name: 'Terminal app', exact: true });
+    await terminal.getByRole('button', { name: 'Add widget', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Recent Orders overview', exact: true }).click();
     const orders = page.getByTestId('orders-card');
-    const positions = page.getByTestId('positions-card');
     await expect(orders.getByText('BANKNIFTY')).toBeVisible({ timeout: 10_000 });
-    await expect(positions.getByText('RELIANCE')).toBeVisible({ timeout: 10_000 });
     await expect(orders.getByLabel('Loading orders')).toHaveCount(0);
+    await terminal.getByRole('button', { name: 'Add widget', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Open Positions overview', exact: true }).click();
+    const positions = page.getByTestId('positions-card');
+    await expect(positions.getByText('RELIANCE')).toBeVisible({ timeout: 10_000 });
     await expect(positions.getByLabel('Loading positions')).toHaveCount(0);
   });
 
@@ -66,9 +74,11 @@ test.describe('Explore mode', () => {
     await page.goto('/trade');
     // AppLayout names the <main> landmark after the route's sidebar label.
     // Wait for the main landmark — it is always present once AppLayout mounts
-    const main = page.getByRole('main', { name: 'Trade', exact: true });
+    const main = page.getByRole('main', { name: 'Terminal', exact: true });
     await expect(main).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('desk-toolbar')).toBeVisible();
+    await expect(main.getByRole('region', { name: 'Terminal app', exact: true })
+      .getByRole('button', { name: 'Add widget', exact: true })).toBeVisible();
+    await expect(main.getByTestId('app-layout')).toBeVisible();
   });
 
   test('/trade keeps execution mode, broker connectivity, and market session distinct', async ({ page }) => {

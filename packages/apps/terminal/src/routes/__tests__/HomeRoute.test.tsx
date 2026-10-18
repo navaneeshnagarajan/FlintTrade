@@ -87,6 +87,10 @@ vi.mock("@/stores/settingsStore", () => ({
 vi.mock("@/stores/tradingStore", () => ({
   useTradingStore: (selector: (s: { totalPnl: number }) => unknown) =>
     selector({ totalPnl: 2500 }),
+  useCurrentTradingState: () => ({
+    totalPnl: accountReadState.current?.enabled ? 2500 : 0,
+    positionsStatus: accountReadState.current?.enabled ? "ready" : "unavailable",
+  }),
 }));
 
 // ---------------------------------------------------------------------------

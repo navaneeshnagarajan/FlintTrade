@@ -17,6 +17,8 @@ export { expect };
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
 
 export interface SyntheticResponse {
+  /** Real Chromium failed fetch, not an HTTP error or JSON decoding failure. */
+  failure?: "connectionreset";
   status?: number;
   headers?: Record<string, string>;
   contentType?: string;
@@ -32,8 +34,12 @@ export interface SyntheticHandlerRegistration {
     minimum: number;
     maximum: number;
   };
-  /** Exact completed GETs; only startup additionally permits one ERR_ABORTED. */
+  /** Exact GET outcomes; only startup additionally permits one ERR_ABORTED. */
   readPhase?: "startup" | "required";
+  /** Requires exactly expectedCalls ERR_CONNECTION_RESETs and their exact console messages. */
+  expectedFailure?: "connectionreset";
+  /** Exact required GETs must complete with HTTP 404 and one native diagnostic each. */
+  expectedNotFound?: true;
   handler: (request: Request) => SyntheticResponse | Promise<SyntheticResponse>;
 }
 
@@ -73,6 +79,10 @@ export interface SyntheticReadCounts {
 
 interface ReadCompletion {
   outcome: "pending" | "completed" | "cancelled" | "failed";
+  url: string;
+  responseStatus?: number;
+  notFoundConsole: boolean;
+  errorText?: string;
   settled: Promise<void>;
 }
 
@@ -81,6 +91,7 @@ interface RegisteredHandler extends Omit<SyntheticHandlerRegistration, "expected
   maximumCalls: number;
   calls: number;
   reads: ReadCompletion[];
+  failureConsoleCalls: number;
 }
 
 interface RegisteredBenignConsoleError extends BenignConsoleError {
@@ -106,6 +117,9 @@ interface CapturedFailure {
 const DEFAULT_FRONTEND_ORIGIN = "http://localhost:5173";
 const ROUTE_PATTERN = "**/*";
 const UNHANDLED_REJECTION_PREFIX = "[flinttrade-e2e unhandled rejection] ";
+const CONNECTION_RESET = "net::ERR_CONNECTION_RESET";
+const CONNECTION_RESET_CONSOLE = `Failed to load resource: ${CONNECTION_RESET}`;
+const NOT_FOUND_CONSOLE = "Failed to load resource: the server responded with a status of 404 (Not Found)";
 const API_PATH_PREFIXES = ["/api", "/ft-api"] as const;
 
 function isViteProxiedApiPath(pathname: string): boolean {
@@ -216,9 +230,11 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
 
     registered.calls += 1;
     if (registered.method === "GET") {
-      const read: ReadCompletion = { outcome: "pending", settled: Promise.resolve() };
+      const read: ReadCompletion = { outcome: "pending", url: request.url(), notFoundConsole: false, settled: Promise.resolve() };
       read.settled = request.response().then(async (response) => {
+        read.responseStatus = response?.status();
         const error = response ? await response.finished() : request.failure();
+        read.errorText = request.failure()?.errorText;
         read.outcome = response && error === null ? "completed"
           : request.failure()?.errorText === "net::ERR_ABORTED" ? "cancelled" : "failed";
       }).catch(() => { read.outcome = "failed"; });
@@ -237,6 +253,9 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
 
     try {
+      if (registered.expectedNotFound && request.url() !== `${this.frontendOrigin}${registered.path}`) {
+        throw new Error(`handler "${registered.name}" requires its exact frontend URL for expectedNotFound`);
+      }
       const response = await registered.handler(request);
       await this.fulfil(route, response, registered);
     } catch (error: unknown) {
@@ -272,6 +291,33 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
 
     const url = message.location().url;
+    // The fault declaration owns this exact browser diagnostic for this phase.
+    // It is not a regex/benign-message waiver, and retirement checks its count.
+    const fault = [...this.handlers.values()].find((handler) =>
+      handler.expectedFailure === "connectionreset" && handler.calls > 0
+      && url === `${this.frontendOrigin}${handler.path}` && text === CONNECTION_RESET_CONSOLE);
+    if (fault) {
+      fault.failureConsoleCalls += 1;
+      if (fault.failureConsoleCalls > fault.minimumCalls) {
+        this.failures.push({ kind: "console error", evidence:
+          `fault console overuse: GET ${fault.path}; expected ${fault.minimumCalls}, observed ${fault.failureConsoleCalls}` });
+      }
+      return;
+    }
+    // A native resource diagnostic has no JavaScript arguments. Pair it only
+    // with an actual 404 response from this still-active GET registration.
+    // Completion remains mandatory at retirement/teardown: cancellation cannot
+    // spend this obligation, nor can an earlier phase or a body saying "404".
+    if (text === NOT_FOUND_CONSOLE && message.args().length === 0) {
+      const handler = [...this.handlers.values()].find((candidate) =>
+        candidate.expectedNotFound && url === `${this.frontendOrigin}${candidate.path}`);
+      const read = handler?.reads.find((candidate) =>
+        candidate.url === url && candidate.responseStatus === 404 && !candidate.notFoundConsole);
+      if (read) {
+        read.notFoundConsole = true;
+        return;
+      }
+    }
     const allowance = this.benignConsoleErrors.find(
       (candidate) => candidate.text === text && candidate.url === url,
     );
@@ -340,6 +386,20 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
 
     const expectedCalls = registration.expectedCalls ?? 1;
+    if (registration.expectedNotFound !== undefined && (
+      registration.expectedNotFound !== true || registration.method !== "GET"
+      || registration.readPhase !== "required" || typeof expectedCalls !== "number"
+      || !Number.isSafeInteger(expectedCalls) || expectedCalls < 1
+      || registration.expectedFailure !== undefined
+    )) {
+      throw new Error(`[fail-closed registry "${this.name}"] expectedNotFound requires an exact positive required GET phase without transport faults`);
+    }
+    if (registration.expectedFailure !== undefined && (
+      registration.expectedFailure !== "connectionreset" || registration.method !== "GET"
+      || registration.readPhase === undefined || typeof expectedCalls !== "number"
+    )) {
+      throw new Error(`[fail-closed registry "${this.name}"] expectedFailure requires connectionreset and an exact GET readPhase`);
+    }
     if (registration.readPhase !== undefined && (
       registration.method !== "GET" || typeof expectedCalls !== "number"
       || !["startup", "required"].includes(registration.readPhase)
@@ -399,6 +459,9 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
       calls: 0,
       reads: [],
       readPhase: registration.readPhase,
+      expectedFailure: registration.expectedFailure,
+      expectedNotFound: registration.expectedNotFound,
+      failureConsoleCalls: 0,
     });
   }
 
@@ -427,7 +490,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     if (!handler) throw new Error(`[fail-closed registry "${this.name}"] no active GET to retire: ${path}`);
     await this.waitForInFlightRouteHandlers();
     await Promise.all(handler.reads.map((read) => read.settled));
-    const error = this.buildAssertionError([handler]);
+    const error = this.buildAssertionError([handler], false);
     if (error) throw error;
     const counts = this.readCounts(path);
     // Keep retired evidence in every later assertion. The endpoint is now
@@ -511,13 +574,35 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
   }
 
-  private buildAssertionError(handlers = [...this.handlers.values(), ...this.retiredReads]): Error | undefined {
+  private buildAssertionError(handlers = [...this.handlers.values(), ...this.retiredReads], finalObligations = true): Error | undefined {
     const evidence = this.failures.map((failure) => failure.evidence);
     for (const handler of handlers) {
+      if (handler.expectedNotFound) {
+        const matching = handler.reads.filter((read) => read.outcome === "completed"
+          && read.url === `${this.frontendOrigin}${handler.path}` && read.responseStatus === 404 && read.notFoundConsole).length;
+        if (matching !== handler.minimumCalls) {
+          evidence.push(`404 response/console usage mismatch: "${handler.name}" GET ${handler.path}; `
+            + `expected ${handler.minimumCalls} completed HTTP 404s with native diagnostics, observed ${matching}`);
+        }
+      }
       if (handler.readPhase) {
         const completed = handler.reads.filter((read) => read.outcome === "completed").length;
         const cancelled = handler.reads.filter((read) => read.outcome === "cancelled").length;
         const cancelledBudget = handler.readPhase === "startup" ? 1 : 0;
+        if (handler.expectedFailure) {
+          const failed = handler.reads.filter((read) => read.outcome === "failed" && read.errorText === CONNECTION_RESET).length;
+          if (failed !== handler.minimumCalls || completed !== 0 || cancelled > cancelledBudget
+            || handler.calls !== failed + cancelled) {
+            evidence.push(`fault phase usage mismatch: "${handler.name}" GET ${handler.path}; `
+              + `expected exactly ${handler.minimumCalls} ${CONNECTION_RESET} and at most ${cancelledBudget} cancelled startup read(s); `
+              + `observed ${handler.calls} calls, ${failed} matching failures, ${completed} completed, ${cancelled} cancelled`);
+          }
+          if (handler.failureConsoleCalls !== handler.minimumCalls) {
+            evidence.push(`fault console usage mismatch: GET ${handler.path}; `
+              + `expected ${handler.minimumCalls} exact ${CONNECTION_RESET_CONSOLE}, observed ${handler.failureConsoleCalls}`);
+          }
+          continue;
+        }
         if (completed !== handler.minimumCalls || cancelled > cancelledBudget
           || handler.calls !== completed + cancelled) {
           evidence.push(`read phase usage mismatch: "${handler.name}" GET ${handler.path}; `
@@ -535,7 +620,10 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
       }
     }
     for (const allowance of this.benignConsoleErrors) {
-      if (allowance.calls !== allowance.expectedCalls) {
+      // Retirement verifies one read phase, not obligations of future actions.
+      // Overuse is already captured as a failure; final assertion/disposal still
+      // requires every exact test-wide allowance, without resetting its ledger.
+      if (finalObligations && allowance.calls !== allowance.expectedCalls) {
         evidence.push(
           `unused console error allowance or usage mismatch: ${allowance.text} at ` +
             `${allowance.url || "<no source URL>"}; expected ${allowance.expectedCalls} ` +
@@ -606,6 +694,17 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     response: SyntheticResponse,
     handler: RegisteredHandler,
   ): Promise<void> {
+    if (response.failure !== undefined) {
+      if (response.failure !== "connectionreset" || handler.expectedFailure !== response.failure
+        || Object.keys(response).some((key) => key !== "failure")) {
+        throw new Error(`handler "${handler.name}" returned an undeclared, mismatched or mixed transport failure`);
+      }
+      await route.abort(response.failure);
+      return;
+    }
+    if (handler.expectedNotFound && response.status !== 404) {
+      throw new Error(`handler "${handler.name}" did not return its declared HTTP 404`);
+    }
     const hasBody = response.body !== undefined;
     const hasJson = Object.prototype.hasOwnProperty.call(response, "json");
     if (hasBody && hasJson) {
@@ -711,8 +810,10 @@ export function registerOperatorStatusProbes(
     expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
     pingCalls?: SyntheticHandlerRegistration["expectedCalls"];
     includeLlmConfig?: boolean;
-    /** Heartbeat the desk paints on the Laya row. Omitted leaves that row Down. */
+    /** Live-facing heartbeat. Omission does not imply readiness. */
     laya?: "ready" | "degraded" | "down";
+    /** Independent sidecar heartbeat selected by Practice and Explore. */
+    layaPractice?: "ready" | "degraded" | "down";
   } = {},
 ): void {
   const expectedCalls = options.expectedCalls ?? OPERATOR_PROBE_CALLS;
@@ -743,9 +844,11 @@ export function registerOperatorStatusProbes(
       assertReadOnlyProbe(request);
       expect(request.headers()["authorization"]).toBeUndefined();
       return {
-        json: options.laya === undefined
-          ? { status: "ok" }
-          : { status: "ok", laya: options.laya },
+        json: {
+          status: "ok",
+          ...(options.laya === undefined ? {} : { laya: options.laya }),
+          ...(options.layaPractice === undefined ? {} : { laya_practice: options.layaPractice }),
+        },
       };
     },
   });

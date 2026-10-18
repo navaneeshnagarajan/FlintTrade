@@ -312,7 +312,7 @@ vi.mock("@/hooks/useChartTheme", () => ({
       ensureEdgeTickMarksVisible: true,
       entireTextOnly: true,
       minimumWidth: 72,
-      scaleMargins: { bottom: 0.14, top: 0.08 },
+      scaleMargins: { bottom: 0.2, top: 0.08 },
       textColor: "#fff",
       tickMarkDensity: 2.5,
       ticksVisible: true,
@@ -341,6 +341,8 @@ vi.mock("@/hooks/useChartTheme", () => ({
       color: "#64748b",
       priceFormat: { type: "volume" },
       priceScaleId: "vol",
+      lastValueVisible: false,
+      priceLineVisible: false,
     },
   }),
 }));

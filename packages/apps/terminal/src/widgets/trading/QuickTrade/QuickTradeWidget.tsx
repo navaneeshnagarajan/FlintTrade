@@ -269,7 +269,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (quantity == null) {
         setStatus({
           type: "error",
-          message: `Lot size for ${symbol} is unverified — order not sent`,
+          message: `Not placed. The lot size for ${symbol} isn't verified.`,
         });
         return;
       }
@@ -349,7 +349,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (resolveQuantity() == null) {
         setStatus({
           type: "error",
-          message: `Lot size for ${symbol} is unverified — order not sent`,
+          message: `Not placed. The lot size for ${symbol} isn't verified.`,
         });
         return;
       }

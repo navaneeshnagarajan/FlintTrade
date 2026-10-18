@@ -137,6 +137,43 @@ describe("PageTabs", () => {
 });
 
 describe("PageBody", () => {
+  it("can scroll the complete page without shrinking its body beneath the header", () => {
+    render(
+      <Page scroll="page" role="region" aria-label="Strategy Lab" tabIndex={0}>
+        <PageHeader title="Strategy Lab" description="Complete safety copy stays in the scroll flow." />
+        <PageBody role="tabpanel" aria-label="Protection review" width="wide">
+          <p>Review the exact bounded policy before approval.</p>
+        </PageBody>
+      </Page>,
+    );
+    const page = screen.getByRole("region", { name: "Strategy Lab" });
+    const body = screen.getByRole("tabpanel", { name: "Protection review" });
+    expect(page).toHaveClass("overflow-y-auto");
+    expect(page).not.toHaveClass("overflow-hidden");
+    expect(page).toHaveAttribute("tabindex", "0");
+    expect(page).toContainElement(screen.getByRole("heading", { name: "Strategy Lab" }));
+    expect(body).toHaveClass("shrink-0");
+    expect(body).not.toHaveClass("flex-1", "overflow-y-auto");
+    expect(body.firstElementChild).toHaveClass("max-w-[var(--ft-page-width-wide)]", "pb-16", "pt-6");
+    expect(screen.getByText("Complete safety copy stays in the scroll flow.")).toBeInTheDocument();
+  });
+
+  it("keeps default and nested pages on their original body scroll contract", () => {
+    render(
+      <Page scroll="page" data-testid="outer-page">
+        <PageBody data-testid="outer-body">
+          <Page data-testid="nested-page">
+            <PageHeader title="Independent page" />
+            <PageBody data-testid="nested-body">Content</PageBody>
+          </Page>
+        </PageBody>
+      </Page>,
+    );
+    expect(screen.getByTestId("outer-body")).toHaveClass("shrink-0");
+    expect(screen.getByTestId("nested-page")).toHaveClass("overflow-hidden");
+    expect(screen.getByTestId("nested-body")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+  });
+
   it("is the scroll container and constrains content to the chosen width", () => {
     render(
       <Page data-testid="page">

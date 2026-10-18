@@ -1,0 +1,668 @@
+{
+  "captured_on": "2026-10-14",
+  "sources": {
+    "node_schedule": {
+      "url": "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json",
+      "raw_sha256": "1cf0432ceb9dfde7f1fd4cce43206519942cfdfad5a26039c2f4bb20fde8549c"
+    },
+    "node_releases": {
+      "url": "https://nodejs.org/dist/index.json",
+      "raw_sha256": "c7005c9dd6c35ded6bab489597ab51094dc3e923e19b6236014e652b7cf5a7cb"
+    },
+    "python_versions": {
+      "url": "https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json",
+      "raw_sha256": "3bffef7a0fddc945a17a5bb7b924462746844f4a39f7fdd57a318add7df13b21"
+    }
+  },
+  "node_schedule": {
+    "v20": {
+      "start": "2023-04-18",
+      "lts": "2023-10-24",
+      "maintenance": "2024-10-22",
+      "end": "2026-04-30",
+      "codename": "Iron"
+    },
+    "v21": {
+      "start": "2023-10-17",
+      "maintenance": "2024-04-01",
+      "end": "2024-06-01"
+    },
+    "v22": {
+      "start": "2024-04-24",
+      "lts": "2024-10-29",
+      "maintenance": "2025-10-21",
+      "end": "2027-04-30",
+      "codename": "Jod"
+    },
+    "v23": {
+      "start": "2024-10-16",
+      "maintenance": "2025-04-01",
+      "end": "2025-06-01"
+    },
+    "v24": {
+      "start": "2025-05-06",
+      "lts": "2025-10-28",
+      "maintenance": "2026-10-20",
+      "end": "2028-04-30",
+      "codename": "Krypton"
+    },
+    "v25": {
+      "start": "2025-10-15",
+      "maintenance": "2026-04-01",
+      "end": "2026-06-01"
+    },
+    "v26": {
+      "start": "2026-05-05",
+      "lts": "2026-10-28",
+      "maintenance": "2027-10-20",
+      "end": "2029-04-30",
+      "codename": ""
+    },
+    "v27": {
+      "alpha": "2026-10-28",
+      "start": "2027-04-22",
+      "maintenance": "2027-10-20",
+      "end": "2030-04-30",
+      "codename": ""
+    }
+  },
+  "node_releases": [
+    {
+      "version": "v20.20.2",
+      "date": "2026-03-24",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-armv7l",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip",
+        "win-x86-7z",
+        "win-x86-exe",
+        "win-x86-msi",
+        "win-x86-zip"
+      ],
+      "npm": "10.8.2",
+      "v8": "11.3.244.8",
+      "uv": "1.46.0",
+      "zlib": "1.3.1",
+      "openssl": "3.0.19",
+      "modules": "115",
+      "lts": "Iron",
+      "security": true
+    },
+    {
+      "version": "v20.20.1",
+      "date": "2026-03-04",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-armv7l",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip",
+        "win-x86-7z",
+        "win-x86-exe",
+        "win-x86-msi",
+        "win-x86-zip"
+      ],
+      "npm": "10.8.2",
+      "v8": "11.3.244.8",
+      "uv": "1.46.0",
+      "zlib": "1.3.1",
+      "openssl": "3.0.19",
+      "modules": "115",
+      "lts": "Iron",
+      "security": false
+    },
+    {
+      "version": "v22.23.3",
+      "date": "2026-09-23",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-armv7l",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "linux-x64-musl",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip",
+        "win-x86-7z",
+        "win-x86-exe",
+        "win-x86-msi",
+        "win-x86-zip"
+      ],
+      "npm": "10.9.9",
+      "v8": "12.4.254.21",
+      "uv": "1.51.0",
+      "zlib": "1.3.1",
+      "openssl": "3.5.8",
+      "modules": "127",
+      "lts": "Jod",
+      "security": false
+    },
+    {
+      "version": "v22.23.2",
+      "date": "2026-07-28",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-armv7l",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip",
+        "win-x86-7z",
+        "win-x86-exe",
+        "win-x86-msi",
+        "win-x86-zip"
+      ],
+      "npm": "10.9.8",
+      "v8": "12.4.254.21",
+      "uv": "1.51.0",
+      "zlib": "1.3.1",
+      "openssl": "3.5.7",
+      "modules": "127",
+      "lts": "Jod",
+      "security": true
+    },
+    {
+      "version": "v24.21.0",
+      "date": "2026-09-07",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "linux-x64-musl",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.19.0",
+      "v8": "13.6.233.17",
+      "uv": "1.52.1",
+      "zlib": "1.3.2.1-motley",
+      "openssl": "3.5.8",
+      "modules": "137",
+      "lts": "Krypton",
+      "security": false
+    },
+    {
+      "version": "v24.20.0",
+      "date": "2026-08-26",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "linux-x64-musl",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.19.0",
+      "v8": "13.6.233.17",
+      "uv": "1.52.1",
+      "zlib": "1.3.2.1-motley",
+      "openssl": "3.5.7",
+      "modules": "137",
+      "lts": "Krypton",
+      "security": false
+    },
+    {
+      "version": "v25.9.0",
+      "date": "2026-03-31",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.12.1",
+      "v8": "14.1.146.11",
+      "uv": "1.51.0",
+      "zlib": "1.3.1",
+      "openssl": "3.5.5",
+      "modules": "141",
+      "lts": false,
+      "security": false
+    },
+    {
+      "version": "v25.8.2",
+      "date": "2026-03-24",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.11.1",
+      "v8": "14.1.146.11",
+      "uv": "1.51.0",
+      "zlib": "1.3.1",
+      "openssl": "3.5.5",
+      "modules": "141",
+      "lts": false,
+      "security": true
+    },
+    {
+      "version": "v26.11.1",
+      "date": "2026-10-07",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "linux-x64-musl",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.20.0",
+      "v8": "14.6.202.34",
+      "uv": "1.52.1",
+      "zlib": "1.3.2.1-motley",
+      "openssl": "3.5.9",
+      "modules": "147",
+      "lts": false,
+      "security": false
+    },
+    {
+      "version": "v26.11.0",
+      "date": "2026-10-07",
+      "files": [
+        "aix-ppc64",
+        "headers",
+        "linux-arm64",
+        "linux-ppc64le",
+        "linux-s390x",
+        "linux-x64",
+        "linux-x64-musl",
+        "osx-arm64-tar",
+        "osx-x64-pkg",
+        "osx-x64-tar",
+        "src",
+        "win-arm64-7z",
+        "win-arm64-zip",
+        "win-x64-7z",
+        "win-x64-exe",
+        "win-x64-msi",
+        "win-x64-zip"
+      ],
+      "npm": "11.20.0",
+      "v8": "14.6.202.34",
+      "uv": "1.52.1",
+      "zlib": "1.3.2.1-motley",
+      "openssl": "3.5.9",
+      "modules": "147",
+      "lts": false,
+      "security": false
+    }
+  ],
+  "python_versions": [
+    {
+      "version": "3.12.14",
+      "stable": true,
+      "release_url": "https://github.com/actions/python-versions/releases/tag/3.12.14-31661455385",
+      "files": [
+        {
+          "filename": "python-3.12.14-linux-22.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-22.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-linux-22.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-22.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-linux-24.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-24.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-linux-24.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-24.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-linux-26.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "26.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-26.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-linux-26.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "26.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-linux-26.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-rhel-10-x64.tar.gz",
+          "arch": "x64",
+          "platform": "rhel",
+          "platform_version": "10",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-rhel-10-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.14-rhel-9-x64.tar.gz",
+          "arch": "x64",
+          "platform": "rhel",
+          "platform_version": "9",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.14-31661455385/python-3.12.14-rhel-9-x64.tar.gz"
+        }
+      ]
+    },
+    {
+      "version": "3.12.8",
+      "stable": true,
+      "release_url": "https://github.com/actions/python-versions/releases/tag/3.12.8-12154062663",
+      "files": [
+        {
+          "filename": "python-3.12.8-darwin-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "darwin",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-darwin-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-darwin-x64.tar.gz",
+          "arch": "x64",
+          "platform": "darwin",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-darwin-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-linux-20.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "20.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-linux-20.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-linux-22.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-linux-22.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-linux-22.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-linux-22.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-linux-24.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-linux-24.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-linux-24.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-linux-24.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.8-win32-arm64.zip",
+          "arch": "arm64",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-win32-arm64.zip"
+        },
+        {
+          "filename": "python-3.12.8-win32-x64.zip",
+          "arch": "x64",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-win32-x64.zip"
+        },
+        {
+          "filename": "python-3.12.8-win32-x86.zip",
+          "arch": "x86",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.8-12154062663/python-3.12.8-win32-x86.zip"
+        }
+      ]
+    },
+    {
+      "version": "3.12.10",
+      "stable": true,
+      "release_url": "https://github.com/actions/python-versions/releases/tag/3.12.10-14343898437",
+      "files": [
+        {
+          "filename": "python-3.12.10-darwin-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "darwin",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-darwin-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-darwin-x64.tar.gz",
+          "arch": "x64",
+          "platform": "darwin",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-darwin-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-linux-20.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "20.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-linux-20.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-linux-22.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-linux-22.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-linux-22.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-linux-22.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-linux-24.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-linux-24.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-linux-24.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-linux-24.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.10-win32-arm64.zip",
+          "arch": "arm64",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-win32-arm64.zip"
+        },
+        {
+          "filename": "python-3.12.10-win32-x64.zip",
+          "arch": "x64",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-win32-x64.zip"
+        },
+        {
+          "filename": "python-3.12.10-win32-x86.zip",
+          "arch": "x86",
+          "platform": "win32",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-win32-x86.zip"
+        }
+      ]
+    },
+    {
+      "version": "3.12.15",
+      "stable": true,
+      "release_url": "https://github.com/actions/python-versions/releases/tag/3.12.15-36805895057",
+      "files": [
+        {
+          "filename": "python-3.12.15-linux-22.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-22.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-linux-22.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "22.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-22.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-linux-24.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-24.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-linux-24.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "24.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-24.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-linux-26.04-arm64.tar.gz",
+          "arch": "arm64",
+          "platform": "linux",
+          "platform_version": "26.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-26.04-arm64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-linux-26.04-x64.tar.gz",
+          "arch": "x64",
+          "platform": "linux",
+          "platform_version": "26.04",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-26.04-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-rhel-10-x64.tar.gz",
+          "arch": "x64",
+          "platform": "rhel",
+          "platform_version": "10",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-rhel-10-x64.tar.gz"
+        },
+        {
+          "filename": "python-3.12.15-rhel-9-x64.tar.gz",
+          "arch": "x64",
+          "platform": "rhel",
+          "platform_version": "9",
+          "download_url": "https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-rhel-9-x64.tar.gz"
+        }
+      ]
+    }
+  ]
+}

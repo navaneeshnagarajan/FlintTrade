@@ -1,0 +1,41 @@
+{
+  "version": "12.11.2",
+  "packageManager": "pnpm@12.11.2+sha512.25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9",
+  "assets": {
+    "darwin-arm64": {
+      "archive": "tar.gz",
+      "executable": "package/pnpm",
+      "sha256": "72464a94a7bcf1ec2c3330aa4f190d2ea77503188f2cd8416eb098b2b5fc8fa0",
+      "url": "https://registry.npmjs.org/@pnpm/exe.darwin-arm64/-/exe.darwin-arm64-12.11.2.tgz",
+      "integrity": "sha512-n9M4On66y8FDxUAKgMO1FXt0qihyG4e+56p3/F0uo8Bx9KplW8BwKVnXigzCJ8aNM6sVVPkOE6M9XXbeVIxnZA=="
+    },
+    "darwin-x64": {
+      "archive": "tar.gz",
+      "executable": "package/pnpm",
+      "sha256": "d70eb9999e447933b77fdd5e18b0aa933f091ea5e687011f36281209a180cc7f",
+      "url": "https://registry.npmjs.org/@pnpm/exe.darwin-x64/-/exe.darwin-x64-12.11.2.tgz",
+      "integrity": "sha512-oSW7n3sBT0c0cyk4kj10T2Y6Mpm+OFEiCAWozgX039tdoI6yqJF1uaFD3sw7ugLdu6VV3+uY0pa1TUZIPdxDWA=="
+    },
+    "linux-arm64": {
+      "archive": "tar.gz",
+      "executable": "package/pnpm",
+      "sha256": "c9b5d1a2a254f4593a6fbd878bbbbc81dce4fb36b1c850cc8f31031dbb08ffdb",
+      "url": "https://registry.npmjs.org/@pnpm/exe.linux-arm64/-/exe.linux-arm64-12.11.2.tgz",
+      "integrity": "sha512-6e8ZAQUwFXAWHHHv5FesWqf/kEK04wuitBv5f/gxzkC0DiBfaixr+f+6JQede8SF4Ji5LcMwVFJbzAtffpWxEg=="
+    },
+    "linux-x64": {
+      "archive": "tar.gz",
+      "executable": "package/pnpm",
+      "sha256": "79008d3130845ee8a0fe4381e6b81815e80e1bd411702f34721b1cc63e6e20bf",
+      "url": "https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.11.2.tgz",
+      "integrity": "sha512-FK7QKe24AYgppJwO3mpooYptduuvIGqKJPi5ac7MdnWkjUy46JBfYhCW0grnkWKC8YOf0x+vGviuQqJEj3SpQQ=="
+    },
+    "win32-x64": {
+      "archive": "tar.gz",
+      "executable": "package/pnpm.exe",
+      "sha256": "ebe73d47d28a28f12df5856bb4657176358e4bc0af3213fc6139fa35edffdd0a",
+      "url": "https://registry.npmjs.org/@pnpm/exe.win32-x64/-/exe.win32-x64-12.11.2.tgz",
+      "integrity": "sha512-8sgX86OvRjJ3yZs/TvGR2L31wH9ScPZ+f+geKI3ikuB0RRiK3i4LlTRO8OXN6pdRqj8epMde4312MCjj7JsJdA=="
+    }
+  }
+}

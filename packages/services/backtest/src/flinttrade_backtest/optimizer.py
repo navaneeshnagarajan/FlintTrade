@@ -128,7 +128,7 @@ def walk_forward_splits(
 
 @dataclass
 class OptimizationEntry:
-    """Result of a single parameter combination."""
+    """Completed, successfully scored in-sample parameter combination."""
 
     params: dict[str, Any]
     sharpe: float = 0.0
@@ -138,13 +138,35 @@ class OptimizationEntry:
 
 
 @dataclass
+class FailedTrial:
+    """Unscored trial evidence, kept separate from eligible ranking entries.
+
+    ``stage`` is ``in_sample`` or ``out_sample``; ``error`` retains the
+    simulation failure or the type and message of a raised exception.
+    """
+
+    params: dict[str, Any]
+    stage: str
+    error: str
+
+
+@dataclass
 class WalkForwardResult:
-    """Result from walk-forward optimization."""
+    """Walk-forward result with explicit failure evidence.
+
+    ``optimize`` publishes best parameters only after completed held-out
+    scoring. On failure, ``error`` is non-empty, ``best_params`` is empty,
+    and the held-out report and robustness score are unavailable. Eligible
+    in-sample results remain diagnostic evidence, not a qualified result.
+    Individual failed trials can coexist with a successful optimisation.
+    """
 
     best_params: dict[str, Any] = field(default_factory=dict)
     in_sample_results: list[OptimizationEntry] = field(default_factory=list)
     out_sample_report: PerformanceReport | None = None
-    robustness_score: float = 0.0  # 0-100, higher = more robust
+    robustness_score: float | None = None  # 0-100 on success; unavailable on failure
+    failed_trials: list[FailedTrial] = field(default_factory=list)
+    error: str = ""
 
 
 @dataclass
@@ -184,7 +206,10 @@ class WalkForwardOptimizer:
             config=BacktestConfig(...),
             grid=grid,
         )
-        print(f"Best params: {result.best_params}")
+        if result.error:
+            print(f"Optimisation failed: {result.error}")
+        else:
+            print(f"Best params: {result.best_params}")
     """
 
     def optimize(
@@ -207,6 +232,11 @@ class WalkForwardOptimizer:
             in_sample_pct: fraction of data for in-sample.
             num_windows: number of walk-forward windows.
             rank_by: "sharpe" or "return" to rank parameter sets.
+
+        Returns:
+            Eligible ranking entries and separate failed-trial reasons. Check
+            ``error`` before consuming best parameters or held-out scores;
+            an empty parameter dictionary is valid for a parameter-free strategy.
         """
         if num_windows <= 1:
             # Simple split
@@ -216,7 +246,7 @@ class WalkForwardOptimizer:
         else:
             windows = walk_forward_splits(len(bars), in_sample_pct, num_windows)
             if not windows:
-                return WalkForwardResult()
+                return WalkForwardResult(error="No walk-forward windows available")
             # Use last window
             w = windows[-1]
             in_bars = bars[w.in_sample_start: w.in_sample_end + 1]
@@ -227,11 +257,16 @@ class WalkForwardOptimizer:
 
         # Run all combinations on in-sample
         in_sample_results: list[OptimizationEntry] = []
+        failed_trials: list[FailedTrial] = []
         for params in combos:
             try:
                 strategy = strategy_factory(params)
                 sim = BacktestSimulator(config)
                 result = sim.run(strategy, in_bars)
+                if result.error:
+                    logger.warning("Params %s failed: %s", params, result.error)
+                    failed_trials.append(FailedTrial(params=params, stage="in_sample", error=result.error))
+                    continue
                 report = PerformanceMetrics.compute(result)
 
                 in_sample_results.append(OptimizationEntry(
@@ -243,7 +278,12 @@ class WalkForwardOptimizer:
                 ))
             except Exception as exc:
                 logger.warning("Params %s failed: %s", params, exc)
-                in_sample_results.append(OptimizationEntry(params=params))
+                failed_trials.append(FailedTrial(
+                    params=params, stage="in_sample", error=f"{type(exc).__name__}: {exc}",
+                ))
+
+        if not in_sample_results:
+            return WalkForwardResult(error="No eligible in-sample candidates", failed_trials=failed_trials)
 
         # Rank by chosen metric
         if rank_by == "return":
@@ -256,26 +296,41 @@ class WalkForwardOptimizer:
         # Validate best params on out-of-sample
         out_report: PerformanceReport | None = None
         robustness = 0.0
-        if out_bars and best_params:
-            try:
-                strategy = strategy_factory(best_params)
-                sim = BacktestSimulator(config)
-                out_result = sim.run(strategy, out_bars)
-                out_report = PerformanceMetrics.compute(out_result)
+        try:
+            strategy = strategy_factory(best_params)
+            sim = BacktestSimulator(config)
+            out_result = sim.run(strategy, out_bars)
+            if out_result.error:
+                logger.error("Out-of-sample validation failed: %s", out_result.error)
+                failed_trials.append(FailedTrial(params=best_params, stage="out_sample", error=out_result.error))
+                return WalkForwardResult(
+                    in_sample_results=in_sample_results,
+                    failed_trials=failed_trials,
+                    error=f"Out-of-sample validation failed: {out_result.error}",
+                )
+            out_report = PerformanceMetrics.compute(out_result)
 
-                # Robustness: how well does out-of-sample compare to in-sample
-                in_sharpe = in_sample_results[0].sharpe if in_sample_results else 0
-                out_sharpe = out_report.sharpe_ratio
-                if in_sharpe > 0:
-                    robustness = min(100, max(0, (out_sharpe / in_sharpe) * 100))
-            except Exception as exc:
-                logger.error("Out-of-sample validation failed: %s", exc)
+            # Robustness: how well does out-of-sample compare to in-sample
+            in_sharpe = in_sample_results[0].sharpe if in_sample_results else 0
+            out_sharpe = out_report.sharpe_ratio
+            if in_sharpe > 0:
+                robustness = min(100, max(0, (out_sharpe / in_sharpe) * 100))
+        except Exception as exc:
+            logger.error("Out-of-sample validation failed: %s", exc)
+            error = f"{type(exc).__name__}: {exc}"
+            failed_trials.append(FailedTrial(params=best_params, stage="out_sample", error=error))
+            return WalkForwardResult(
+                in_sample_results=in_sample_results,
+                failed_trials=failed_trials,
+                error=f"Out-of-sample validation failed: {error}",
+            )
 
         return WalkForwardResult(
             best_params=best_params,
             in_sample_results=in_sample_results,
             out_sample_report=out_report,
             robustness_score=robustness,
+            failed_trials=failed_trials,
         )
 
     # ------------------------------------------------------------------

@@ -30,14 +30,11 @@ import { useShallow } from "zustand/react/shallow";
 import { useSkillStore } from "@/stores/skillStore";
 import type { SkillLevel, Domain } from "@/types/skill";
 import { SectionTitle, SelectInput, Toggle, FieldRow } from "./shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import {
-  approveSkillDraft,
-  listSkillDrafts,
-  readSkillDraft,
-  rejectSkillDraft,
-} from "@/services/ftApi.skillDrafts";
+import { intakeKnowledgeDraft, listKnowledgeDrafts, readKnowledgeDraft } from "@/services/knowledgeApi";
+import { knowledgeScopeKey, useKnowledgeScope } from "@/services/knowledgeScope";
+import { useAuthStore } from "@/stores/authStore";
 import { useState } from "react";
 
 // ---------------------------------------------------------------------------
@@ -84,123 +81,61 @@ const DOMAINS: DomainDef[] = [
 // ---------------------------------------------------------------------------
 
 
-function SkillDraftReviewSection() {
-  const queryClient = useQueryClient();
-  const [openDraft, setOpenDraft] = useState<string | null>(null);
-  const [draftContent, setDraftContent] = useState("");
-  const [actionError, setActionError] = useState("");
-
-  const draftsQuery = useQuery({
-    queryKey: ["skillDrafts"],
-    queryFn: listSkillDrafts,
-    staleTime: 30_000,
+export function SkillDraftReviewSection() {
+  const scope = useKnowledgeScope();
+  return <ScopedSkillDrafts key={scope} scope={scope} />;
+}
+function ScopedSkillDrafts({ scope }: { scope: string }) {
+  const client = useQueryClient();
+  const authenticated = useAuthStore(state => state.status === "logged-in" && !!state.token);
+  const [source, setSource] = useState<{ name: string; content: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const current = () => scope === knowledgeScopeKey(client);
+  const drafts = useQuery({
+    queryKey: ["knowledge", "drafts", scope],
+    queryFn: async () => {
+      const rows = await listKnowledgeDrafts();
+      if (!current()) throw new Error("Retained draft scope changed");
+      return rows;
+    },
+    enabled: authenticated, retry: false, staleTime: 30_000,
   });
-
-  const refresh = () => {
-    setOpenDraft(null);
-    setDraftContent("");
-    void queryClient.invalidateQueries({ queryKey: ["skillDrafts"] });
-  };
-
-  const approveMutation = useMutation({
-    mutationFn: approveSkillDraft,
-    onSuccess: refresh,
-    onError: (err) =>
-      setActionError(err instanceof Error ? err.message : "Approve failed"),
-  });
-  const rejectMutation = useMutation({
-    mutationFn: rejectSkillDraft,
-    onSuccess: refresh,
-    onError: (err) =>
-      setActionError(err instanceof Error ? err.message : "Reject failed"),
-  });
-
-  const viewDraft = async (name: string) => {
-    try {
-      const draft = await readSkillDraft(name);
-      setOpenDraft(name);
-      setDraftContent(draft.content);
-      setActionError("");
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not load the draft");
-    }
-  };
-
-  const drafts = draftsQuery.data ?? [];
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-        Skill drafts awaiting review
-      </h3>
-      <p className="text-xxs text-text-muted">
-        After each trading session the agent drafts its lessons as a skill
-        document. Drafts influence nothing until you approve them here —
-        approval makes the skill visible to the agent&apos;s future decisions.
-      </p>
-      {actionError && (
-        <p role="alert" className="text-xs text-loss">
-          {actionError}
-        </p>
-      )}
-      {drafts.length === 0 ? (
-        <p className="text-xxs text-text-muted">
-          {draftsQuery.isLoading ? "Loading drafts…" : "No drafts pending."}
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {drafts.map((draft) => (
-            <li
-              key={draft.name}
-              className="rounded border border-border-default bg-surface-card p-2 space-y-2"
-            >
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-text-primary truncate">
-                    {draft.name}
-                  </div>
-                  <div className="text-xxs text-text-muted truncate">
-                    {draft.description}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-xxs"
-                  onClick={() => void viewDraft(draft.name)}
-                >
-                  {openDraft === draft.name ? "Reload" : "View"}
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="h-6 px-2 text-xxs"
-                  disabled={approveMutation.isPending}
-                  onClick={() => approveMutation.mutate(draft.name)}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xxs text-text-muted hover:text-loss"
-                  disabled={rejectMutation.isPending}
-                  onClick={() => rejectMutation.mutate(draft.name)}
-                >
-                  Reject
-                </Button>
-              </div>
-              {openDraft === draft.name && draftContent && (
-                <pre className="max-h-64 overflow-auto rounded bg-surface-base p-2 text-xxs whitespace-pre-wrap text-text-secondary">
-                  {draftContent}
-                </pre>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+  async function run(action: () => Promise<void>) {
+    if (!current()) return;
+    setBusy(true); setError(""); setNotice("");
+    try { await action(); }
+    catch (error) { if (current()) setError(error instanceof Error ? error.message : "Retained input unavailable"); }
+    finally { if (current()) setBusy(false); }
+  }
+  return <section className="space-y-3" aria-label="Retained skill inputs">
+    <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Retained skill inputs</h3>
+    <p className="text-xxs text-text-muted">Candidate intake is not activation. Source files remain intact. Current rights and independent validation are required before a procedure can become a default or influence a run. This optional intake is not an approval queue.</p>
+    <Button size="sm" variant="outline" disabled={busy || drafts.isFetching || !authenticated} onClick={() => void drafts.refetch()}>Refresh retained inputs</Button>
+    {drafts.isError && <p role="alert" className="text-xs text-loss">Retained inputs unavailable: {drafts.error.message}</p>}
+    {error && <p role="alert" className="text-xs text-loss">{error}</p>}
+    {notice && <p role="status" className="break-all text-xs">{notice}</p>}
+    {drafts.isPending && <p className="text-xxs text-text-muted">Loading retained inputs…</p>}
+    {drafts.isSuccess && drafts.data.length === 0 && <p className="text-xxs text-text-muted">No retained drafts.</p>}
+    <ul className="space-y-2">{drafts.data?.map(draft => <li key={draft.state === "unavailable" ? draft.name : draft.version_id} className="space-y-2 rounded border border-border-default bg-surface-card p-2">
+      <p className="break-all text-xs font-medium">{draft.name}</p>
+      <p className="text-xxs text-text-muted">{draft.description}</p>
+      <p className="break-all text-xs">{draft.state}{draft.state !== "unavailable" ? ` · ${draft.version_id}` : " · Canonical identity unavailable"}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => {
+          const result = await readKnowledgeDraft(draft.name, current);
+          if (current()) setSource(result);
+        })}>View source</Button>
+        {draft.state !== "unavailable" && <Button size="sm" disabled={busy || drafts.isStale || drafts.isFetching || draft.state !== "candidate"} onClick={() => void run(async () => {
+          const result = await intakeKnowledgeDraft(draft, current);
+          if (current()) setNotice(`Candidate intake verified: ${result.version_id}. Source preserved; not activated.`);
+        })}>Retain candidate</Button>}
+      </div>
+      {source?.name === draft.name && <pre aria-label="Retained draft source" className="max-h-64 overflow-auto rounded bg-surface-base p-2 text-xxs whitespace-pre-wrap text-text-secondary">{source.content}</pre>}
+    </li>)}</ul>
+    <p className="text-xxs text-text-muted">Canonical export and retirement are available in the knowledge library when core authorises the exact version. Retiring a version does not delete retained source files.</p>
+  </section>;
 }
 
 function MetricCard({ domain, icon: Icon, label }: DomainDef) {

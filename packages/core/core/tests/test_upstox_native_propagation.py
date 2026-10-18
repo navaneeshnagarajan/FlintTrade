@@ -94,10 +94,17 @@ def native_stack(backend_lease_factory, monkeypatch):
     app.config["BROKER_ROUTER"] = router
     app.config["NATIVE_ADAPTERS"] = {"upstox": _Books()}
     app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda b, a: session_for(None, b, a))
-    yield SimpleNamespace(app=app, router=router, adapter=adapter, facade=facade, wire=wire,
-                          audit=audit_events, ack=native_ack, session=session, gate=gate, proof=proof)
-    router.revoke_and_drain(timeout=0)
-    reset_reduce_only_for_tests()
+    try:
+        yield SimpleNamespace(app=app, router=router, adapter=adapter, facade=facade, wire=wire,
+                              audit=audit_events, ack=native_ack, session=session, gate=gate, proof=proof)
+    finally:
+        from time import monotonic
+        from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
+        try:
+            router.revoke_and_drain(timeout=0)
+        finally:
+            _DesktopShutdownRecoveryOwner(app).release(deadline=monotonic() + 10)
+            reset_reduce_only_for_tests()
 
 
 def _headers(**claims):

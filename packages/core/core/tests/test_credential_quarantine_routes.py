@@ -5,11 +5,14 @@ from uuid import UUID
 
 import jwt
 import pytest
+
 from flask import Config, Request
 
 from flinttrade_core import auth_routes
 from flinttrade_core.broker_identity import QuarantineRef
 from flinttrade_gateway.credentials import QuarantinedCredentialMetadata
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 @pytest.fixture
@@ -88,7 +91,7 @@ def test_recovery_family_denials_precede_body_storage_and_provider(recovery_app,
                 return forbidden()
             return super().__getitem__(key)
 
-    app.config = CheckedConfig(app.root_path, defaults=app.config)
+    monkeypatch.setattr(app, "config", CheckedConfig(app.root_path, defaults=app.config))
     for name in ("get_data", "get_json", "_load_form_data"):
         monkeypatch.setattr(Request, name, forbidden)
     monkeypatch.setattr("flinttrade_gateway.brokers.native_factory.build_native_adapters", forbidden)
@@ -136,7 +139,7 @@ def test_recovery_list_projects_only_metadata_and_fails_closed(recovery_app, mon
             return (entry,)
 
     store = ReadStore()
-    app.config["CREDENTIAL_STORE"] = store
+    monkeypatch.setitem(app.config, "CREDENTIAL_STORE", store)
     headers = {"X-FlintTrade-Token": token}
     response = app.test_client().get("/ft-api/v1/accounts/quarantine", headers=headers)
     assert response.status_code == 200
@@ -276,7 +279,7 @@ def test_pre_password_change_session_has_no_recovery_access(recovery_app, monkey
         ("GET", "/ft-api/v1/accounts/quarantine/PRIVATE-path/missing", 404),
     ],
 )
-def test_recovery_heartbeat_failure_keeps_private_diagnostics_out_of_logs(recovery_app, caplog, method, path, status):
+def test_recovery_heartbeat_failure_keeps_private_diagnostics_out_of_logs(recovery_app, caplog, method, path, status, monkeypatch):
     app, token = recovery_app
     calls = []
     private_error = "PRIVATE-heartbeat-diagnostic: " + token
@@ -286,7 +289,7 @@ def test_recovery_heartbeat_failure_keeps_private_diagnostics_out_of_logs(recove
             calls.append(selected_token)
             raise RuntimeError(private_error)
 
-    app.config["SESSION_TRACKER"] = FailingTracker()
+    monkeypatch.setitem(app.config, "SESSION_TRACKER", FailingTracker())
     caplog.clear()
     with caplog.at_level(logging.DEBUG):
         response = app.test_client().open(path, method=method, headers={"Authorization": "Bearer " + token})
@@ -296,7 +299,7 @@ def test_recovery_heartbeat_failure_keeps_private_diagnostics_out_of_logs(recove
     assert "PRIVATE" not in caplog.text and token not in caplog.text and private_error not in caplog.text
 
 
-def test_unclassified_heartbeat_failure_retains_ordinary_diagnostic(recovery_app, caplog):
+def test_unclassified_heartbeat_failure_retains_ordinary_diagnostic(recovery_app, caplog, monkeypatch):
     app, token = recovery_app
     calls = []
     diagnostic = "synthetic ordinary heartbeat diagnostic"
@@ -306,7 +309,7 @@ def test_unclassified_heartbeat_failure_retains_ordinary_diagnostic(recovery_app
             calls.append(selected_token)
             raise RuntimeError(diagnostic)
 
-    app.config["SESSION_TRACKER"] = FailingTracker()
+    monkeypatch.setitem(app.config, "SESSION_TRACKER", FailingTracker())
     caplog.clear()
     with caplog.at_level(logging.DEBUG):
         response = app.test_client().get("/v1/brokers", headers={"Authorization": "Bearer " + token})

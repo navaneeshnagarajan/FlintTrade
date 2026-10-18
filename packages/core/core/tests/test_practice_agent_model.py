@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from flask import Flask
 
 from flinttrade_ai.llm_client import LLMClient, LLMConfig, LLMMessage, LLMResponse
 from flinttrade_ai.run_store import AgentRunStore
@@ -72,7 +73,9 @@ def _observed(tmp_path, *, limit=3, output=64, client=None):
     )
     row = store.create_run(run_id="model-run", mode="practice", config=config)
     run = runtime._Run(row["run_id"], "operator", config, row["created_at"])
-    supervisor = SimpleNamespace(store=store)
+    # The legacy bounded-client path still has an app and an explicit absence
+    # of a managed execution binding; missing owner fields are not defaults.
+    supervisor = SimpleNamespace(store=store, app=Flask(__name__), execution_binding=None)
     # Isolate accounting from admission here; runtime integration tests exercise
     # the real safety, session, ownership and calendar checks at this boundary.
     supervisor._model_brake = lambda run, operation: None
@@ -313,15 +316,50 @@ def test_frozen_model_override_is_refused_without_transport_io_or_source_mutatio
 async def test_malformed_reflection_content_is_not_written_to_logs(tmp_path, caplog, content):
     from flinttrade_ai.trade_reflection import ReflectionConfig, TradeReflector
 
-    observed, run, store = _observed(
-        tmp_path, client=SimpleNamespace(chat=lambda _messages: LLMResponse(content=content))
-    )
-    run.learning_active = True
+    # Reflection now sends through the dedicated consent/usage owner, not the
+    # ordinary analysis client. Reuse the explicit synthetic-only grant fixture.
+    from datetime import timedelta
+    import hashlib
+    from flinttrade_ai.learning_dispatch import LearningBinding
+    from flinttrade_core.learning_consent import DatasetRecord
+    from flinttrade_core.service_usage_contracts import TariffSnapshot, UsageAmounts, USAGE_DIMENSIONS
+    from packages.core.core.tests.test_learning_consent import setup_gate, grant, rights, NOW, CONNECTION
+
+    gate, usage, scope, recipient = setup_gate(tmp_path)
+    grant_id = grant(gate, scope, recipient)
+    trades = [{"symbol": "RELIANCE", "pnl": 1}]
+    records = (DatasetRecord("reflection-row", "paper:fixture", "paper", "run-a", "journal",
+                             NOW, "train", trades[0], rights()),)
+    sent = []
+
+    def transport(request):
+        sent.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]})
+
+    def current_rights(manifest):
+        return ([member["record_id"] for member in manifest["members"]] == ["reflection-row"]
+                and all(member["rights_hash"] == rights().digest for member in manifest["members"]))
+
+    binding = LearningBinding(gate, grant_id, scope, recipient, lambda: recipient, current_rights,
+        lambda wire: UsageAmounts(requests=1, concurrency=1, bytes=len(wire), input_tokens=2000, output_tokens=100),
+        TariffSnapshot(CONNECTION.provider_id, "model", "1", "operator", "fixture", "USD", NOW,
+                       NOW + timedelta(days=1), {}),
+        {key: "hard-local" for key in USAGE_DIMENSIONS}, "fixture:qualified", "run-a", "trial-a")
     try:
-        reflector = TradeReflector(config=ReflectionConfig(min_trades_for_reflection=1), llm_client=observed)
-        result = await reflector.reflect_batch([{"symbol": "RELIANCE", "pnl": 1, "pnl_pct": 1}])
-        assert result is not None
-        assert "PRIVATE_REFLECTION_VALUE" not in caplog.text
-        assert run.model_budget.snapshot()["model_calls_used"] == 1
+        with LLMClient(LLMConfig(provider="custom", host="https://example.invalid", model="model", max_tokens=100),
+                       learning_binding=binding, http_transport=httpx.MockTransport(transport)) as llm:
+            reflector = TradeReflector(config=ReflectionConfig(min_trades_for_reflection=1),
+                                       llm_client=llm, learning_records=records)
+            result = await reflector.reflect_batch(trades)
+            assert result is not None
+            assert "PRIVATE_REFLECTION_VALUE" not in caplog.text
+            assert len(sent) == len(usage.list_attempts()) == 1
+            receipt = gate.receipt(usage.list_attempts()[0].attempt_id)
+            assert receipt["payload_hash"] == hashlib.sha256(sent[0].content).hexdigest()
+            assert result.generation == "local-rule-candidate"
+            gate.revoke(grant_id, actor="operator-fixture")
+            assert await reflector.reflect_batch(trades) is not None
+            assert len(sent) == len(usage.list_attempts()) == 1
     finally:
-        store.close()
+        gate.close()
+        usage.close()

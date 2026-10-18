@@ -9,16 +9,16 @@ dependencies = [
     "flinttrade-engine",
     "flinttrade-historical",
     "flinttrade-indicators",
-    "numpy>=2.5.3",
-    "pandas>=2.0.0",
-    "pydantic>=2.13.5",
-    "flask>=3.0",
-    "scipy>=1.18.1",
-    "quantstats>=0.0.86",
+    "numpy==2.5.4",
+    "pandas==2.3.3",
+    "pydantic==2.14.1",
+    "flask==3.1.3",
+    "scipy==1.18.1",
+    "quantstats==0.0.86",
 ]
 
 [project.optional-dependencies]
-vectorbt = ["vectorbt>=0.26"]
+vectorbt = ["vectorbt==1.0.0"]
 
 [build-system]
 requires = ["hatchling"]

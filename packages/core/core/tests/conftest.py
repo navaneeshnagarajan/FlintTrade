@@ -1,12 +1,12 @@
 """Shared fixtures for packages/core tests.
 
-The ``AuthState`` singleton persists a DuckDB file under the active workspace
+The ``AuthState`` singleton persists a SQLite file under the active workspace
 by default. We still bind it per test because OTP request counts and JWT
 revocations are process-wide singleton state; sharing one store across tests
 would flip rate-limit assertions non-deterministically.
 
 The autouse fixture below rebinds the singleton to a throw-away
-DuckDB under the pytest ``tmp_path`` so every test starts with an
+SQLite database under the pytest ``tmp_path`` so every test starts with an
 empty state store and finishes without side effects. Tests that want
 a custom binding can still call ``reset_singleton_for_tests()`` and
 ``get_auth_state(db_path=...)`` themselves.
@@ -46,12 +46,13 @@ _SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
 
 
 @pytest.fixture
-def backend_lease_factory(monkeypatch):
+def backend_lease_factory(monkeypatch, request):
     """Acquire explicit proof after a test has selected its scratch workspace."""
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
     from flinttrade_core.workspace import workspace_dir
 
     leases = {}
+    apps = request.getfixturevalue("owned_flask_apps") if "owned_flask_apps" in request.fixturenames else None
 
     def acquire():
         path = workspace_dir().resolve()
@@ -63,18 +64,21 @@ def backend_lease_factory(monkeypatch):
         yield acquire
     finally:
         monkeypatch.undo()
+        if apps is not None:
+            apps.close()
         for lease in leases.values():
             lease.release()
 
 
 @pytest.fixture
-def backend_lease_proof(monkeypatch):
+def backend_lease_proof(monkeypatch, request):
     """Explicit real ownership for tests constructing a broker runtime.
 
     Proofless factory tests deliberately do not request this fixture.
     """
     from flinttrade_core.backend_instance import acquire_backend_instance_lease
 
+    apps = request.getfixturevalue("owned_flask_apps") if "owned_flask_apps" in request.fixturenames else None
     lease = acquire_backend_instance_lease()
     try:
         yield lease.proof
@@ -82,6 +86,8 @@ def backend_lease_proof(monkeypatch):
         # Some ownership tests deliberately replace os.getpid. Restore that
         # process view before asking the real kernel owner to release.
         monkeypatch.undo()
+        if apps is not None:
+            apps.close()
         lease.release()
 
 
@@ -125,6 +131,22 @@ _TEST_MASTER_PASSWORD = "pytest-master-password"
 # FLINTTRADE_WORKSPACE_DIR at it.
 _scratch_workspace().acquire_workspace()
 
+# Load by a private name: per-package tests may shadow the root tests package.
+def _factory_lifecycle_fixture():
+    import importlib.util
+
+    name = "_flinttrade_test_factory_lifecycle"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, _REPO_ROOT / "tests/flask_app_lifecycle.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].owned_flask_apps
+
+
+owned_flask_apps = _factory_lifecycle_fixture()
+
+
 
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
     """Release the scratch workspaces this run created.
@@ -149,12 +171,12 @@ def _laya_starts_down() -> None:
 
 @pytest.fixture(autouse=True)
 def _isolated_auth_state(tmp_path_factory):
-    """Point AuthState at a per-test DuckDB so OTP/JWT state is fresh."""
+    """Point AuthState at per-test SQLite so OTP/JWT state is fresh."""
     from flinttrade_core import auth_state as auth_state_mod
 
     auth_state_mod.reset_singleton_for_tests()
     db_dir = tmp_path_factory.mktemp("auth_state")
-    auth_state_mod.get_auth_state(db_path=db_dir / "auth_state.duckdb")
+    auth_state_mod.get_auth_state(db_path=db_dir / "auth_state.sqlite")
     yield
     auth_state_mod.reset_singleton_for_tests()
 

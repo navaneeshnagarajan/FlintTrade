@@ -633,6 +633,7 @@ assert neo.place_order(
 # disposable contract workspace, including 3.0.8's on-disk holdings cache.
 read_calls = {"holdings": 0, "positions": 0, "quotes": 0}
 position_has_ltp = True
+position_ltp = "120.00"
 
 
 class FakePortfolio:
@@ -660,7 +661,7 @@ class FakePositions:
         read_calls["positions"] += 1
         position = {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2"}
         if position_has_ltp:
-            position["ltp"] = "120.00"
+            position["ltp"] = position_ltp
         return {"data": [position]}
 
 
@@ -676,7 +677,27 @@ neo_module.PositionsAPI = FakePositions
 neo.quotes = synthetic_quotes
 assert neo.holdings()["data"][0]["averagePrice"] == 100.0
 position = neo.positions()["data"][0]
-if md.version("kotakneoapi") == "3.0.8":
+if md.version("kotakneoapi") == "3.0.9":
+    # positions() returns the broker row. Enrichment (netQty/positionPnl) stays
+    # unwired because a missing or zero LTP used to be treated as a price.
+    raw = {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2", "ltp": "120.00"}
+    assert position == raw
+    assert "netQty" not in position
+    assert "positionPnl" not in position
+    assert read_calls == {"holdings": 1, "positions": 1, "quotes": 0}
+    position_has_ltp = False
+    missing_ltp = neo.positions()["data"][0]
+    assert missing_ltp == {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2"}
+    assert "netQty" not in missing_ltp
+    assert "positionPnl" not in missing_ltp
+    position_has_ltp = True
+    position_ltp = 0
+    zero_ltp = neo.positions()["data"][0]
+    assert zero_ltp == {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2", "ltp": 0}
+    assert "netQty" not in zero_ltp
+    assert "positionPnl" not in zero_ltp
+    assert read_calls == {"holdings": 1, "positions": 3, "quotes": 0}
+elif md.version("kotakneoapi") == "3.0.8":
     assert position["netQty"] == 2.0
     assert position["averagePrice"] == 100.0
     assert position["positionPnl"] == 40.0
@@ -724,8 +745,10 @@ for service, method, failure in (
     finally:
         service.failure = None
 
-if md.version("kotakneoapi") == "3.0.8":
-    # Exercise the actual new disk-cache reader, not a stubbed exception.
+if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
+    # 3.0.8 positions() reads this on-disk holdings cache. 3.0.9 positions()
+    # does not; holdings() still writes it, so a failed write must stay a
+    # redacted read failure rather than an empty holdings result.
     from neo_api_client.utils import holdings_cache
 
     cache_path = holdings_cache._cache_path(neo.configuration.ucc, date.today())
@@ -733,7 +756,12 @@ if md.version("kotakneoapi") == "3.0.8":
     cache_path.write_text("[]", encoding="utf-8")
     neo._holdings_cache = None
     neo._holdings_cache_date = None
-    require_canonical_read_failure("positions")
+    if md.version("kotakneoapi") == "3.0.8":
+        require_canonical_read_failure("positions")
+    else:
+        ignored_cache = neo.positions()["data"][0]
+        assert "netQty" not in ignored_cache
+        assert "positionPnl" not in ignored_cache
 
     # A successful synthetic portfolio response must not become empty/zero
     # holdings when the real SDK's cache write fails. Preserve every other
@@ -804,7 +832,7 @@ async def require_callback_cancellation_and_cleanup():
     feed_module.decode_packet = failed_decode
     try:
         market_feed.on_error = failed_callback
-        if md.version("kotakneoapi") == "3.0.8":
+        if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
             assert market_feed._decode_packet(b"synthetic") is None
         else:
             try:

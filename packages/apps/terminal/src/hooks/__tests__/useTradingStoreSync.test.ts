@@ -1,180 +1,109 @@
-/**
- * Tests for useTradingStoreSync.
- *
- * The hook mirrors the TanStack Query cache for funds + positions into
- * the Zustand tradingStore. Two contracts must hold:
- *   1. When useFunds / usePositions emit data, the corresponding
- *      updateFromFunds / updateFromPositions setters fire exactly once
- *      per data change.
- *   2. When data is undefined (loading state), no setter fires.
- *
- * The hook is called exactly once at the app root — its correctness is
- * the only thing that prevents the tradingStore mirror from drifting
- * from the TanStack cache.
+/** App-root mirror contract through real queries/stores; only API I/O is inert.
+ * Fetch decoding and actual consumer coverage live in tradingStoreScope.transport.integration.
  */
-
-import { renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Funds, Position } from "@/types/api";
-
-const mockUseFunds = vi.fn();
-const mockUsePositions = vi.fn();
-const mockUseBrokerConnected = vi.fn();
-let currentMode: "explore" | "practice" | "live" = "live";
-const mockUpdateFromFunds = vi.fn();
-const mockUpdateFromPositions = vi.fn();
-
-vi.mock("@/hooks/useFunds", () => ({
-  useFunds: (...args: unknown[]) => mockUseFunds(...args),
-}));
-
-vi.mock("@/hooks/usePositions", () => ({
-  usePositions: (...args: unknown[]) => mockUsePositions(...args),
-}));
-
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => mockUseBrokerConnected(),
-}));
-
-vi.mock("@/hooks/useAccountReadsEnabled", () => ({
-  useAccountReadsEnabled: () =>
-    currentMode === "practice" || (currentMode === "live" && mockUseBrokerConnected()),
-}));
-
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (state: { mode: typeof currentMode }) => unknown) => selector({ mode: currentMode }),
-}));
-
-vi.mock("@/stores/tradingStore", () => ({
-  useTradingStore: {
-    getState: () => ({
-      updateFromFunds: mockUpdateFromFunds,
-      updateFromPositions: mockUpdateFromPositions,
-    }),
-  },
-}));
-
-// Imported after vi.mock so the mocks are in place when the hook pulls them.
 import { useTradingStoreSync } from "@/hooks/useTradingStoreSync";
+import { useTradingStore } from "@/stores/tradingStore";
+import { PRIMARY_SCOPE, setAccountRuntime, resetAccountRuntime } from "@/test-utils/accountQueryHarness";
 
-const FUNDS: Funds = {
-  availableCash: 100000,
-  usedMargin: 20000,
-  totalBalance: 120000,
-};
+const mockGetFunds = vi.hoisted(() => vi.fn());
+const mockGetPositions = vi.hoisted(() => vi.fn());
+vi.mock("@/services/api", () => ({
+  getFunds: (...args: unknown[]) => mockGetFunds(...args),
+  getPositionbook: (...args: unknown[]) => mockGetPositions(...args),
+}));
 
-const POSITIONS: Position[] = [
-  {
-    symbol: "NIFTY25APRFUT",
-    exchange: "NFO",
-    product: "MIS",
-    quantity: 50,
-    averagePrice: 22000,
-    ltp: 22100,
-    pnl: 5000,
-    pnlPercent: 0.45,
-  },
-];
+const FUNDS: Funds = { availableCash: 100000, usedMargin: 20000, totalBalance: 120000 };
+const POSITIONS: Position[] = [{ symbol: "NIFTY", exchange: "NFO", product: "MIS", quantity: 50, averagePrice: 22000, ltp: 22100, pnl: 5000, pnlPercent: 0.45 }];
+const clients: QueryClient[] = [];
+function mount(enabled = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  clients.push(client);
+  const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+  return renderHook(() => { useTradingStoreSync(enabled); return useTradingStore(); }, { wrapper });
+}
+beforeEach(() => {
+  mockGetFunds.mockReset().mockImplementation(() => new Promise(() => {}));
+  mockGetPositions.mockReset().mockImplementation(() => new Promise(() => {}));
+  useTradingStore.getState().resetSessionState();
+  setAccountRuntime();
+});
+afterEach(() => {
+  cleanup();
+  for (const client of clients.splice(0)) client.clear();
+  resetAccountRuntime();
+  useTradingStore.getState().resetSessionState();
+});
 
 describe("useTradingStoreSync", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    currentMode = "live";
-    mockUseBrokerConnected.mockReturnValue(true);
+  it("publishes loading rather than real zero while both queries are pending", () => {
+    const { result } = mount();
+    expect(result.current).toMatchObject({ scopeKey: PRIMARY_SCOPE, fundsStatus: "loading", positionsStatus: "loading" });
   });
 
-  it("does not fire setters while both queries are loading", () => {
-    mockUseFunds.mockReturnValue({ data: undefined });
-    mockUsePositions.mockReturnValue({ data: undefined });
-    renderHook(() => useTradingStoreSync());
-    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: true });
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
-    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
-    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  it("does not read a disconnected Live account", () => {
+    setAccountRuntime({ accounts: [] });
+    const { result } = mount();
+    expect(result.current).toMatchObject({ fundsStatus: "unavailable", positionsStatus: "unavailable" });
+    expect(mockGetFunds).not.toHaveBeenCalled();
+    expect(mockGetPositions).not.toHaveBeenCalled();
   });
 
-  it("disables live account sync when no broker is connected", () => {
-    mockUseBrokerConnected.mockReturnValue(false);
-    mockUseFunds.mockReturnValue({ data: undefined });
-    mockUsePositions.mockReturnValue({ data: undefined });
-
-    renderHook(() => useTradingStoreSync());
-
-    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
-    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
-    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  it("reads the sandbox in Practice without a Live connection", () => {
+    setAccountRuntime({ accounts: [], mode: "practice" });
+    const { result } = mount();
+    expect(result.current.scopeKey).toBe("practice:sandbox:default");
+    expect(mockGetFunds.mock.calls[0][0].identity).toMatchObject({ mode: "practice", brokerType: "sandbox", accountId: "default" });
   });
 
-  it("reads the sandbox in practice mode without a live broker connection", () => {
-    currentMode = "practice";
-    mockUseBrokerConnected.mockReturnValue(false);
-    mockUseFunds.mockReturnValue({ data: undefined });
-    mockUsePositions.mockReturnValue({ data: undefined });
-
-    renderHook(() => useTradingStoreSync());
-
-    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: true });
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+  it("keeps Explore on local sample data without account reads", () => {
+    setAccountRuntime({ mode: "explore" });
+    const { result } = mount();
+    expect(result.current).toMatchObject({ fundsStatus: "unavailable", positionsStatus: "unavailable" });
+    expect(mockGetFunds).not.toHaveBeenCalled();
+    expect(mockGetPositions).not.toHaveBeenCalled();
   });
 
-  it("keeps explore mode on its local sample data", () => {
-    currentMode = "explore";
-    mockUseFunds.mockReturnValue({ data: undefined });
-    mockUsePositions.mockReturnValue({ data: undefined });
-
-    renderHook(() => useTradingStoreSync());
-
-    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+  it("never reads or publishes when the auth session is inactive", () => {
+    const { result } = mount(false);
+    expect(result.current).toMatchObject({ scopeKey: null, fundsStatus: "unavailable", positionsStatus: "unavailable" });
+    expect(mockGetFunds).not.toHaveBeenCalled();
+    expect(mockGetPositions).not.toHaveBeenCalled();
   });
 
-  it("does not read or publish cached account data when the auth session is inactive", () => {
-    mockUseFunds.mockReturnValue({ data: FUNDS });
-    mockUsePositions.mockReturnValue({ data: POSITIONS });
-
-    renderHook(() => useTradingStoreSync(false));
-
-    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
-    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
-    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  it("funds become ready without turning pending positions into real zero", async () => {
+    mockGetFunds.mockResolvedValue(FUNDS);
+    const { result } = mount();
+    await waitFor(() => expect(result.current).toMatchObject({ availableMargin: 100000, usedMargin: 20000, fundsStatus: "ready", positionsStatus: "loading" }));
   });
 
-  it("fires updateFromFunds exactly once per funds payload", () => {
-    mockUseFunds.mockReturnValue({ data: FUNDS });
-    mockUsePositions.mockReturnValue({ data: undefined });
-    renderHook(() => useTradingStoreSync());
-    expect(mockUpdateFromFunds).toHaveBeenCalledTimes(1);
-    expect(mockUpdateFromFunds).toHaveBeenCalledWith(FUNDS);
-    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  it("positions become ready without turning pending funds into real zero", async () => {
+    mockGetPositions.mockResolvedValue(POSITIONS);
+    const { result } = mount();
+    await waitFor(() => expect(result.current).toMatchObject({ totalPnl: 5000, positionCount: 1, positionsStatus: "ready", fundsStatus: "loading" }));
   });
 
-  it("fires updateFromPositions exactly once per positions payload", () => {
-    mockUseFunds.mockReturnValue({ data: undefined });
-    mockUsePositions.mockReturnValue({ data: POSITIONS });
-    renderHook(() => useTradingStoreSync());
-    expect(mockUpdateFromPositions).toHaveBeenCalledTimes(1);
-    expect(mockUpdateFromPositions).toHaveBeenCalledWith(POSITIONS);
-    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
+  it("binds both resources to the same immutable captured account context", async () => {
+    mockGetFunds.mockResolvedValue(FUNDS);
+    mockGetPositions.mockResolvedValue(POSITIONS);
+    const { result } = mount();
+    await waitFor(() => expect(result.current).toMatchObject({ totalPnl: 5000, availableMargin: 100000, fundsStatus: "ready", positionsStatus: "ready" }));
+    expect(mockGetFunds.mock.calls[0][0]).toBe(mockGetPositions.mock.calls[0][0]);
+    expect(Object.isFrozen(mockGetFunds.mock.calls[0][0])).toBe(true);
   });
 
-  it("fires both setters when both queries have data", () => {
-    mockUseFunds.mockReturnValue({ data: FUNDS });
-    mockUsePositions.mockReturnValue({ data: POSITIONS });
-    renderHook(() => useTradingStoreSync());
-    expect(mockUpdateFromFunds).toHaveBeenCalledWith(FUNDS);
-    expect(mockUpdateFromPositions).toHaveBeenCalledWith(POSITIONS);
-  });
-
-  it("does not re-fire setters on re-render when data reference is unchanged", () => {
-    mockUseFunds.mockReturnValue({ data: FUNDS });
-    mockUsePositions.mockReturnValue({ data: POSITIONS });
-    const { rerender } = renderHook(() => useTradingStoreSync());
-    rerender();
-    rerender();
-    expect(mockUpdateFromFunds).toHaveBeenCalledTimes(1);
-    expect(mockUpdateFromPositions).toHaveBeenCalledTimes(1);
+  it("does not reacquire unchanged data when the root re-renders", async () => {
+    mockGetFunds.mockResolvedValue(FUNDS);
+    mockGetPositions.mockResolvedValue(POSITIONS);
+    const { result, rerender } = mount();
+    await waitFor(() => expect(result.current.positionsStatus).toBe("ready"));
+    rerender(); rerender();
+    expect(mockGetFunds).toHaveBeenCalledTimes(1);
+    expect(mockGetPositions).toHaveBeenCalledTimes(1);
+    expect(result.current).toMatchObject({ totalPnl: 5000, availableMargin: 100000 });
   });
 });

@@ -12,6 +12,8 @@ import {
   type BenignConsoleError,
   type HttpMethod,
   type SyntheticFixtureRegistry,
+  type SyntheticHandlerRegistration,
+  type SyntheticResponse,
   type SyntheticPhasedFixtureRegistry,
 } from "./fixture-registry";
 
@@ -921,6 +923,39 @@ baseTest.describe("exact completed read phases", () => {
     await expect(registry.dispose()).rejects.toThrow(/unexpected request.*GET \/ft-api\/synthetic-book/is);
   });
 
+  baseTest("read retirement preserves an unfinished test-wide console obligation", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "phase versus test obligations", frontendOrigin: FRONTEND_ORIGIN,
+      benignConsoleErrors: [{ text: "two exact lifecycle notices", url: "", expectedCalls: 2 }] });
+    registry.register({ name: "initial book", method: "GET", path, expectedCalls: 1, readPhase: "required", handler: () => ({ json: {} }) });
+    await fetchJson(page, "GET", path);
+    await page.evaluate(() => console.error("two exact lifecycle notices"));
+    expect(await registry.retireRead(path)).toEqual(completed);
+    await expect(registry.dispose()).rejects.toThrow(/unused console error allowance.*expected 2 occurrence\(s\), observed 1/);
+  });
+
+  baseTest("read retirement preserves exact test-wide console completion", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "completed test-wide notices", frontendOrigin: FRONTEND_ORIGIN,
+      benignConsoleErrors: [{ text: "two exact notices", url: "", expectedCalls: 2 }] });
+    for (const phase of [1, 2]) {
+      registry.register({ name: `book ${phase}`, method: "GET", path, expectedCalls: 1, readPhase: "required", handler: () => ({ json: {} }) });
+      await fetchJson(page, "GET", path);
+      await page.evaluate(() => console.error("two exact notices"));
+      expect(await registry.retireRead(path)).toEqual({ ...completed, calls: phase, completed: phase });
+    }
+    expect(() => registry.assertSatisfied()).not.toThrow();
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("read retirement still rejects test-wide console overuse immediately", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "overused test-wide notices", frontendOrigin: FRONTEND_ORIGIN,
+      benignConsoleErrors: [{ text: "one exact notice", url: "", expectedCalls: 1 }] });
+    registry.register({ name: "book", method: "GET", path, expectedCalls: 1, readPhase: "required", handler: () => ({ json: {} }) });
+    await fetchJson(page, "GET", path);
+    await page.evaluate(() => { console.error("one exact notice"); console.error("one exact notice"); });
+    await expect(registry.retireRead(path)).rejects.toThrow(/console error allowance overuse/);
+    await expect(registry.dispose()).rejects.toThrow(/console error allowance overuse/);
+  });
+
   baseTest("completed-read phases reject writes and arbitrary call ranges", async ({ page }) => {
     const registry = await createSyntheticFixtureRegistry(page, { name: "read phase registration guard", frontendOrigin: FRONTEND_ORIGIN });
     for (const method of ["POST", "PUT", "DELETE", "PATCH"] as const) {
@@ -929,6 +964,346 @@ baseTest.describe("exact completed read phases", () => {
     expect(() => registry.register({ name: "invalid range", method: "GET", path, expectedCalls: { minimum: 0, maximum: 2 }, readPhase: "startup", handler: () => ({ json: {} }) })).toThrow(/readPhase requires a GET with exact positive expectedCalls/);
     expect(() => registry.register({ name: "invalid zero", method: "GET", path, expectedCalls: 0, readPhase: "startup", handler: () => ({ json: {} }) })).toThrow(/positive integer/);
     await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+});
+
+baseTest.describe("handler-scoped required 404 reads", () => {
+  const path = "/api/leases/returned-exact-id?scope=synthetic";
+  const text = "Failed to load resource: the server responded with a status of 404 (Not Found)";
+  const declaration: SyntheticHandlerRegistration = {
+    name: "released lease absence", method: "GET", path, expectedCalls: 1,
+    readPhase: "required", expectedNotFound: true,
+    handler: () => ({ status: 404, json: { code: "dataset_or_lease_retired" } }),
+  };
+  for (const [name, changes] of [
+    ["POST", { method: "POST" }], ["HEAD", { method: "HEAD" }],
+    ["startup", { readPhase: "startup" }], ["no phase", { readPhase: undefined }],
+    ["range", { expectedCalls: { minimum: 1, maximum: 2 } }],
+    ["optional range", { expectedCalls: { minimum: 0, maximum: 1 } }],
+    ["zero", { expectedCalls: 0 }], ["negative", { expectedCalls: -1 }],
+    ["fraction", { expectedCalls: 1.5 }], ["infinity", { expectedCalls: Infinity }],
+    ["NaN", { expectedCalls: NaN }], ["false", { expectedNotFound: false }],
+    ["transport fault", { expectedFailure: "connectionreset" }],
+  ] as const) {
+    baseTest(`404 declaration rejects ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      expect(() => registry.register({ ...declaration, ...changes } as unknown as SyntheticHandlerRegistration))
+        .toThrow(/expectedNotFound requires/);
+      await expect(registry.dispose()).resolves.toBeUndefined();
+    });
+  }
+  for (const [name, method, target] of [
+    ["wrong method", "POST", path], ["wrong path", "GET", "/api/leases/other-id?scope=synthetic"],
+    ["wrong query", "GET", path.replace("synthetic", "other")],
+  ] as const) {
+    baseTest(`404 contract rejects ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register(declaration);
+      await expectFetchToFail(page, method, target);
+      expect(registry.callCount("GET", path)).toBe(0);
+      await expect(registry.dispose()).rejects.toThrow(/method mismatch|path mismatch/);
+    });
+  }
+  for (const [name, response] of [
+    ["200", { status: 200, json: { code: "dataset_or_lease_retired", status: 404 } }],
+    ["403", { status: 403, json: {} }], ["500", { status: 500, json: {} }],
+    ["implicit 200", { json: { code: "dataset_or_lease_retired" } }],
+    ["transport failure", { failure: "connectionreset" }],
+  ] as const) {
+    baseTest(`404 contract rejects ${name} instead of native HTTP absence`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register({ ...declaration, handler: () => response });
+      await expectFetchToFail(page, "GET", path);
+      await expect(registry.dispose()).rejects.toThrow(/handler error.*declared HTTP 404|undeclared, mismatched or mixed transport failure/);
+    });
+  }
+  for (const calls of [0, 1, 3]) {
+    baseTest(`404 exact two obligation rejects ${calls} calls`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: "404 count", frontendOrigin: FRONTEND_ORIGIN });
+      let invoked = 0;
+      registry.register({ ...declaration, expectedCalls: 2, handler: () => { invoked++; return { status: 404, json: {} }; } });
+      for (let index = 0; index < calls; index++) {
+        if (index < 2) await fetchJson(page, "GET", path);
+        else await expectFetchToFail(page, "GET", path);
+      }
+      expect(invoked).toBe(Math.min(calls, 2));
+      await expect(registry.retireRead(path)).rejects.toThrow(/404 response\/console usage mismatch|handler overuse/);
+      await expect(registry.dispose()).rejects.toThrow(/404 response\/console usage mismatch|handler overuse/);
+    });
+  }
+  baseTest("404 exact two completed responses pair with two native diagnostics", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "two genuine absences", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ ...declaration, expectedCalls: 2 });
+    for (let index = 0; index < 2; index++) await fetchJson(page, "GET", path);
+    expect(await registry.retireRead(path)).toEqual({ calls: 2, completed: 2, cancelled: 0, failed: 0, pending: 0 });
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+  baseTest("404 contract rejects the same path on a different origin", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "wrong origin", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register(declaration);
+    await expect(page.evaluate(url => fetch(url), `https://other.flinttrade.invalid${path}`)).rejects.toThrow();
+    await expect(registry.dispose()).rejects.toThrow(/exact frontend URL/);
+  });
+  baseTest("404 cancellation alone cannot satisfy a completed absence", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "cancelled absence", frontendOrigin: FRONTEND_ORIGIN });
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    registry.register({ ...declaration, handler: async () => { entered(); await gate; return { status: 404, json: {} }; } });
+    const failed = page.waitForEvent("requestfailed");
+    const outcome = page.evaluate(async url => {
+      const controller = new AbortController();
+      const target = window as Window & { __cancel404?: () => void };
+      target.__cancel404 = () => controller.abort();
+      try { await fetch(url, { signal: controller.signal }); return "completed"; }
+      catch (error: unknown) { return error instanceof Error ? error.name : "unknown"; }
+    }, `${FRONTEND_ORIGIN}${path}`);
+    try {
+      await started;
+      await page.evaluate(() => { const target = window as Window & { __cancel404?: () => void }; target.__cancel404?.(); delete target.__cancel404; });
+      expect(await outcome).toBe("AbortError");
+      expect((await failed).failure()?.errorText).toBe("net::ERR_ABORTED");
+    } finally { release(); }
+    await expect(registry.retireRead(path)).rejects.toThrow(/404 response\/console usage mismatch/);
+    await expect(registry.dispose()).rejects.toThrow(/0 completed, 1 cancelled/);
+  });
+  for (const [name, consoleText, url] of [
+    ["extra exact console", text, `${FRONTEND_ORIGIN}${path}`],
+    ["different URL", text, `${FRONTEND_ORIGIN}/api/leases/other`],
+    ["different query", text, `${FRONTEND_ORIGIN}${path}&extra=1`],
+    ["different status", text.replace("404 (Not Found)", "403 (Forbidden)"), `${FRONTEND_ORIGIN}${path}`],
+    ["substring", text + " extra", `${FRONTEND_ORIGIN}${path}`],
+  ] as const) {
+    baseTest(`404 console scope rejects ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register(declaration);
+      await fetchJson(page, "GET", path);
+      await page.evaluate(`console.error(${JSON.stringify(consoleText)});\n//# sourceURL=${url}`);
+      await expect(registry.dispose()).rejects.toThrow(/console error/);
+    });
+  }
+  for (const phase of ["before request", "during handler", "after retirement"]) {
+    baseTest(`404 diagnostic ${phase} cannot be donated to an active phase`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: phase, frontendOrigin: FRONTEND_ORIGIN });
+      const emit = () => page.evaluate(`console.error(${JSON.stringify(text)});\n//# sourceURL=${FRONTEND_ORIGIN}${path}`);
+      if (phase === "after retirement") {
+        registry.register(declaration); await fetchJson(page, "GET", path); await registry.retireRead(path);
+      }
+      registry.register({ ...declaration, name: "next absence", handler: async () => {
+        if (phase === "during handler") await emit();
+        return { status: 404, json: {} };
+      } });
+      if (phase !== "during handler") await emit();
+      await fetchJson(page, "GET", path);
+      await expect(registry.dispose()).rejects.toThrow(/console error/);
+    });
+  }
+  baseTest("retired 404 evidence cannot satisfy an unused successor", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "retired absence", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register(declaration); await fetchJson(page, "GET", path); await registry.retireRead(path);
+    registry.register({ ...declaration, name: "required next absence" });
+    await expect(registry.dispose()).rejects.toThrow(/required next absence.*observed 0/);
+  });
+  baseTest("retired 404 endpoint remains forbidden with no successor", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "retired endpoint", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register(declaration); await fetchJson(page, "GET", path); await registry.retireRead(path);
+    await expectFetchToFail(page, "GET", path);
+    await expect(registry.dispose()).rejects.toThrow(/unexpected request/);
+  });
+  baseTest("404 phases retain both exact completed ledgers", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "separate required absences", frontendOrigin: FRONTEND_ORIGIN });
+    for (const phase of [1, 2]) {
+      registry.register({ ...declaration, name: "phase " + phase });
+      await fetchJson(page, "GET", path);
+      expect(await registry.retireRead(path)).toEqual({ calls: phase, completed: phase, cancelled: 0, pending: 0, failed: 0 });
+    }
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+  baseTest("accepts the completed exact returned lease GET and its native diagnostic", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "required released lease", frontendOrigin: FRONTEND_ORIGIN });
+    const path = "/api/leases/returned-exact-id?scope=synthetic";
+    const declaration = {
+      name: "released lease absence", method: "GET" as const, path, expectedCalls: 1,
+      readPhase: "required" as const, expectedNotFound: true as const,
+      handler: () => ({ status: 404, json: { code: "dataset_or_lease_retired" } }),
+    };
+    registry.register(declaration);
+    await expect(fetchJson(page, "GET", path)).resolves.toEqual({ code: "dataset_or_lease_retired" });
+    expect(await registry.retireRead(path)).toEqual({ calls: 1, completed: 1, cancelled: 0, failed: 0, pending: 0 });
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+});
+
+baseTest.describe("explicit non-cancellation GET faults", () => {
+  const path = "/ft-api/fault-book?account_id=SYNTHETIC-A";
+  const fault = { failure: "connectionreset" } as const;
+  const consoleText = "Failed to load resource: net::ERR_CONNECTION_RESET";
+  const declaration: SyntheticHandlerRegistration = {
+    name: "declared reset", method: "GET", path, expectedCalls: 1, readPhase: "required",
+    expectedFailure: "connectionreset", handler: () => fault,
+  };
+
+  for (const [name, changes] of [
+    ["write", { method: "POST" }], ["range", { expectedCalls: { minimum: 1, maximum: 2 } }],
+    ["no phase", { readPhase: undefined }], ["wrong kind", { expectedFailure: "connectionrefused" }],
+    ["cancellation", { expectedFailure: "aborted" }], ["zero", { expectedCalls: 0 }],
+  ] as const) {
+    baseTest(`rejects a fault declaration with ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      // Deliberately challenge the runtime boundary with malformed fixture input.
+      expect(() => registry.register({ ...declaration, ...changes } as unknown as SyntheticHandlerRegistration))
+        .toThrow(/expectedFailure requires|positive integer/);
+      await expect(registry.dispose()).resolves.toBeUndefined();
+    });
+  }
+
+  for (const [name, method, target] of [
+    ["wrong method", "POST", path], ["wrong path", "GET", "/ft-api/not-the-fault"],
+    ["wrong account query", "GET", path.replace("SYNTHETIC-A", "SYNTHETIC-B")],
+  ] as const) {
+    baseTest(`never grants a declared fault to a ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register(declaration);
+      await expectFetchToFail(page, method, target);
+      expect(registry.callCount("GET", path)).toBe(0);
+      await expect(registry.dispose()).rejects.toThrow(/method mismatch|path mismatch/);
+    });
+  }
+
+  for (const phased of [false, true]) {
+    baseTest(`an undeclared fault stays fatal on a ${phased ? "phased" : "plain"} GET`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: "undeclared fault", frontendOrigin: FRONTEND_ORIGIN });
+      registry.register({ ...declaration, expectedFailure: undefined, readPhase: phased ? "required" : undefined });
+      await expectFetchToFail(page, "GET", path);
+      await expect(registry.dispose()).rejects.toThrow(/handler error.*undeclared, mismatched or mixed transport failure/);
+    });
+  }
+
+  for (const [name, response] of [
+    ["wrong failure kind", { failure: "connectionrefused" }], ["cancellation kind", { failure: "aborted" }],
+    ["mixed JSON", { ...fault, json: {} }], ["mixed body", { ...fault, body: "" }],
+    ["mixed status", { ...fault, status: 200 }],
+  ] as const) {
+    baseTest(`rejects ${name} from a fault handler`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register({ ...declaration, handler: () => response as unknown as SyntheticResponse });
+      await expectFetchToFail(page, "GET", path);
+      await expect(registry.dispose()).rejects.toThrow(/handler error.*undeclared, mismatched or mixed transport failure/);
+    });
+  }
+
+  for (const malformed of [false, true]) {
+    baseTest(`${malformed ? "raw JSON decoding failure" : "unexpected success"} cannot satisfy a failed-fetch declaration`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: "not a transport failure", frontendOrigin: FRONTEND_ORIGIN });
+      registry.register({ ...declaration, handler: () => malformed ? { contentType: "application/json", body: '{"data":' } : { json: { rows: [] } } });
+      if (malformed) await expect(fetchJson(page, "GET", path)).rejects.toThrow(/JSON/);
+      else await expect(fetchJson(page, "GET", path)).resolves.toEqual({ rows: [] });
+      await expect.poll(() => registry.readCounts(path).completed).toBe(1);
+      expect(registry.readCounts(path).failed).toBe(0);
+      await expect(registry.retireRead(path)).rejects.toThrow(/fault phase usage mismatch.*0 matching failures, 1 completed/);
+      await expect(registry.dispose()).rejects.toThrow(/fault phase usage mismatch/);
+    });
+  }
+
+  for (const calls of [0, 2, 3]) {
+    baseTest(`rejects ${calls} actual resets when exactly one startup failure is declared`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: "fault count", frontendOrigin: FRONTEND_ORIGIN });
+      let invoked = 0;
+      registry.register({ ...declaration, readPhase: "startup", handler: () => { invoked++; return fault; } });
+      for (let index = 0; index < calls; index++) await expectFetchToFail(page, "GET", path);
+      expect(invoked).toBe(Math.min(calls, 2));
+      await expect(registry.retireRead(path)).rejects.toThrow(/fault phase usage mismatch|handler overuse/);
+      await expect(registry.dispose()).rejects.toThrow(/fault phase usage mismatch|handler overuse/);
+    });
+  }
+
+  for (const survive of [false, true]) {
+    baseTest(`startup cancellation ${survive ? "plus one reset meets" : "alone cannot meet"} the fault obligation`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name: "cancel versus reset", frontendOrigin: FRONTEND_ORIGIN });
+      let release!: () => void; let entered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const started = new Promise<void>((resolve) => { entered = resolve; });
+      registry.register({ ...declaration, readPhase: "startup", handler: async () => { entered(); await gate; return fault; } });
+      const failed = page.waitForEvent("requestfailed");
+      const request = page.evaluate(async (url) => {
+        const controller = new AbortController();
+        const target = window as Window & { __cancelFaultRead?: () => void };
+        target.__cancelFaultRead = () => controller.abort();
+        try { await fetch(url, { signal: controller.signal }); return "fulfilled"; }
+        catch (error: unknown) { return error instanceof Error ? error.name : "unknown"; }
+      }, `${FRONTEND_ORIGIN}${path}`);
+      try {
+        await started;
+        await page.evaluate(() => {
+          const target = window as Window & { __cancelFaultRead?: () => void };
+          target.__cancelFaultRead?.(); delete target.__cancelFaultRead;
+        });
+        expect(await request).toBe("AbortError");
+        expect((await failed).failure()?.errorText).toBe("net::ERR_ABORTED");
+      } finally { release(); }
+      if (survive) {
+        await expectFetchToFail(page, "GET", path);
+        expect(await registry.retireRead(path)).toEqual({ calls: 2, completed: 0, cancelled: 1, pending: 0, failed: 1 });
+        await expect(registry.dispose()).resolves.toBeUndefined();
+      } else {
+        await expect(registry.retireRead(path)).rejects.toThrow(/0 matching failures, 0 completed, 1 cancelled/);
+        await expect(registry.dispose()).rejects.toThrow(/fault console usage mismatch/);
+      }
+    });
+  }
+
+  baseTest("retiring a fault preserves its evidence without donating allowance to the next phase", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "fault phases", frontendOrigin: FRONTEND_ORIGIN });
+    for (const phase of ["Log", "Session"]) {
+      registry.register({ ...declaration, name: phase });
+      await expectFetchToFail(page, "GET", path);
+      const count = phase === "Log" ? 1 : 2;
+      expect(await registry.retireRead(path)).toEqual({ calls: count, completed: 0, cancelled: 0, pending: 0, failed: count });
+    }
+    registry.register({ ...declaration, name: "missing next phase" });
+    await expect(registry.dispose()).rejects.toThrow(/missing next phase.*0 matching failures/);
+  });
+
+  for (const [name, text, url] of [
+    ["different URL", consoleText, `${FRONTEND_ORIGIN}/ft-api/other`],
+    ["substring", `${consoleText} extra`, `${FRONTEND_ORIGIN}${path}`],
+    ["wrong kind", "Failed to load resource: net::ERR_FAILED", `${FRONTEND_ORIGIN}${path}`],
+    ["extra exact diagnostic", consoleText, `${FRONTEND_ORIGIN}${path}`],
+  ] as const) {
+    baseTest(`fault console scope rejects ${name}`, async ({ page }) => {
+      const registry = await createSyntheticFixtureRegistry(page, { name, frontendOrigin: FRONTEND_ORIGIN });
+      registry.register(declaration);
+      await expectFetchToFail(page, "GET", path);
+      await page.evaluate(`console.error(${JSON.stringify(text)});\n//# sourceURL=${url}`);
+      await expect(registry.dispose()).rejects.toThrow(/console error|fault console overuse/);
+    });
+  }
+
+  baseTest("a matching console diagnostic alone is not native failed-fetch evidence", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "console is not transport", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({ ...declaration, handler: () => ({ json: {} }) });
+    await fetchJson(page, "GET", path);
+    await page.evaluate(`console.error(${JSON.stringify(consoleText)});\n//# sourceURL=${FRONTEND_ORIGIN}${path}`);
+    await expect(registry.dispose()).rejects.toThrow(/fault phase usage mismatch.*0 matching failures, 1 completed/);
+  });
+
+  baseTest("requires a real failed fetch rather than a fulfilled decoding error", async ({ page }) => {
+    const registry = await createSyntheticFixtureRegistry(page, { name: "declared connection reset", frontendOrigin: FRONTEND_ORIGIN });
+    registry.register({
+      name: "one reset", method: "GET", path, expectedCalls: 1, readPhase: "required",
+      expectedFailure: "connectionreset", handler: () => ({ failure: "connectionreset" }),
+    });
+    const failures: string[] = [];
+    page.on("requestfailed", (request) => failures.push(request.failure()?.errorText ?? "missing failure"));
+    try {
+      const outcome = await page.evaluate(async (url) => {
+        try { const response = await fetch(url); await response.text(); return "fulfilled"; }
+        catch (error: unknown) { return error instanceof Error ? `${error.name}:${error.message}` : "unknown"; }
+      }, `${FRONTEND_ORIGIN}${path}`);
+      expect(outcome).toBe("TypeError:Failed to fetch");
+      expect(failures).toEqual(["net::ERR_CONNECTION_RESET"]);
+      expect(await registry.retireRead(path)).toEqual({ calls: 1, completed: 0, cancelled: 0, pending: 0, failed: 1 });
+    } finally { await registry.dispose(); }
   });
 });
 
@@ -971,3 +1346,113 @@ journeyTest("the client-error guard is automatic even when syntheticApi is not r
   await page.evaluate(() => console.error("automatic guard evidence"));
   await consoleError;
 });
+
+// R161: producer-contract tracer bullets. Registrations run through the native
+// registry, then only the named endpoint is isolated for this contract seam.
+import { LIVE_TOKEN as DIAGNOSTIC_TOKEN, registerDeskReads as registerDiagnosticDeskReads } from "./order-flow-fixtures";
+import { registerExampleDeskReads as registerDiagnosticExampleReads, registerSystemDiagnosticsRead } from "./visual/desk-mocks";
+import normalFactoryDiagnostics from "./visual/system-diagnostics.normal-factory.json" with { type: "json" };
+
+const DIAGNOSTIC_PATH = "/ft-api/api/v1/system/diagnostics";
+
+async function isolatedRegistration(page: Page, install: (registry: SyntheticFixtureRegistry) => void, path: string) {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "producer contract", frontendOrigin: FRONTEND_ORIGIN });
+  const declarations: SyntheticHandlerRegistration[] = [];
+  install({
+    name: "declaration observer", register: registration => declarations.push(registration),
+    callCount: (method, target) => registry.callCount(method, target),
+    assertSatisfied: () => registry.assertSatisfied(), dispose: () => registry.dispose(),
+  });
+  const selected = declarations.filter(registration => registration.path === path);
+  expect(selected, `exact producer declaration for ${path}`).toHaveLength(1);
+  registry.register(selected[0]!);
+  return registry;
+}
+
+async function fetchDiagnostic(page: Page, options: { method?: string; suffix?: string; token?: string; apiKey?: string } = {}) {
+  return page.evaluate(async ({ url, options }) => {
+    const headers: Record<string, string> = { authorization: `Bearer ${options.token}` };
+    if (options.apiKey) headers["x-api-key"] = options.apiKey;
+    const response = await fetch(url, { method: options.method ?? "GET", headers, ...(options.method === "POST" ? { body: "{}" } : {}) });
+    return response.json();
+  }, { url: `${FRONTEND_ORIGIN}${DIAGNOSTIC_PATH}${options.suffix ?? ""}`, options: { ...options, token: options.token ?? DIAGNOSTIC_TOKEN } });
+}
+
+baseTest("R161 owning authenticated desk registers current exact diagnostics", async ({ page }) => {
+  const registry = await isolatedRegistration(page, registry => registerDiagnosticDeskReads(registry), DIAGNOSTIC_PATH);
+  try {
+    expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+    expect(await registry.retireRead(DIAGNOSTIC_PATH)).toEqual({ calls: 1, completed: 1, cancelled: 0, pending: 0, failed: 0 });
+  } finally { await registry.dispose(); }
+});
+
+baseTest("R161 Example heartbeat targets Practice without granting Live readiness", async ({ page }) => {
+  const registry = await isolatedRegistration(page, registry => registerDiagnosticExampleReads(registry, { laya: "ready" }), "/ft-api/api/v1/ping");
+  try {
+    expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: "down", laya_practice: "ready" });
+  } finally { await registry.dispose(); }
+});
+
+baseTest("R161 diagnostics rejects unused registration", async ({ page }) => {
+  const registry = await createRegistry(page, "unused current diagnostic");
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  await expect(registry.dispose()).rejects.toThrow(/read phase usage mismatch|unused|usage mismatch/);
+});
+
+baseTest("R161 diagnostics missing registration remains fatal", async ({ page }) => {
+  const registry = await createRegistry(page, "missing current diagnostic");
+  await expect(fetchDiagnostic(page)).rejects.toThrow();
+  await expect(registry.dispose()).rejects.toThrow(/unexpected request|path mismatch/);
+});
+
+baseTest("R161 diagnostics rejects a second fulfilled startup GET", async ({ page }) => {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "extra current diagnostic", frontendOrigin: FRONTEND_ORIGIN });
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+  expect(await fetchDiagnostic(page)).toEqual(normalFactoryDiagnostics);
+  await expect(registry.retireRead(DIAGNOSTIC_PATH)).rejects.toThrow(/read phase usage mismatch/);
+  await expect(registry.dispose()).rejects.toThrow(/read phase usage mismatch/);
+});
+
+for (const [name, options] of [
+  ["POST with body", { method: "POST" }],
+  ["query suffix", { suffix: "?account_id=foreign" }],
+  ["wrong Bearer", { token: "synthetic-wrong-authority" }],
+  ["API key", { apiKey: "synthetic-forbidden-key" }],
+] as const) {
+  baseTest(`R161 diagnostics rejects ${name}`, async ({ page }) => {
+    const registry = await createRegistry(page, name);
+    registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+    await expect(fetchDiagnostic(page, options)).rejects.toThrow();
+    await expect(registry.dispose()).rejects.toThrow(/method mismatch|path mismatch|handler error/);
+  });
+}
+
+baseTest("R161 diagnostics retirement grants no recovery allowance", async ({ page }) => {
+  const registry = await createSyntheticFixtureRegistry(page, { name: "retired diagnostic", frontendOrigin: FRONTEND_ORIGIN });
+  registerSystemDiagnosticsRead(registry, DIAGNOSTIC_TOKEN);
+  await fetchDiagnostic(page);
+  await registry.retireRead(DIAGNOSTIC_PATH);
+  await expect(fetchDiagnostic(page)).rejects.toThrow();
+  await expect(registry.dispose()).rejects.toThrow(/unexpected request|path mismatch/);
+});
+
+for (const live of ["ready", "degraded", "down"] as const) {
+  for (const practice of ["ready", "degraded", "down"] as const) {
+    baseTest(`R161 ping keeps Live ${live} independent of Practice ${practice}`, async ({ page }) => {
+      const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, laya: live, layaPractice: practice }), "/ft-api/api/v1/ping");
+      try {
+        expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: live, laya_practice: practice });
+      } finally { await registry.dispose(); }
+    });
+  }
+}
+
+for (const options of [{}, { laya: "ready" as const }, { layaPractice: "degraded" as const }]) {
+  baseTest(`R161 ping does not invent an omitted field ${JSON.stringify(options)}`, async ({ page }) => {
+    const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, ...options }), "/ft-api/api/v1/ping");
+    try {
+      expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", ...(options.laya ? { laya: options.laya } : {}), ...(options.layaPractice ? { laya_practice: options.layaPractice } : {}) });
+    } finally { await registry.dispose(); }
+  });
+}

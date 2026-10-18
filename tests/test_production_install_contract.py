@@ -654,7 +654,14 @@ def test_production_installer_does_not_upgrade_pip_unhashed() -> None:
 
     assert "pip install --upgrade" not in installer
     assert "setuptools wheel" not in installer
-    assert '"$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"' in installer
+    install_commands = [
+        shlex.split(line) for line in installer.splitlines()
+        if line.strip().startswith('sudo "$VENV_DIR/bin/pip" install ')
+    ]
+    assert install_commands == [[
+        "sudo", "$VENV_DIR/bin/pip", "install", "--require-hashes",
+        "--only-binary=growwapi", "-r", "$INSTALL_DIR/requirements.lock",
+    ]]
 
 
 @pytest.mark.unit

@@ -546,7 +546,10 @@ mod tests {
         // not continuous market hours; post-close window runs to 16:00.
         let ts = make_ts_ns(15, 35);
         let state = tracker.update(0, ts, 100.0, 100.5, 99.5, 100.2, None, None);
-        assert!(!state.is_market_hours, "15:35 should not be continuous hours");
+        assert!(
+            !state.is_market_hours,
+            "15:35 should not be continuous hours"
+        );
         assert!(!state.is_pre_market, "15:35 should not be pre-market");
         assert!(state.is_post_market, "15:35 is after the 15:30 book close");
         assert_eq!(nse_cash_phase(15 * 60 + 35), "matching");

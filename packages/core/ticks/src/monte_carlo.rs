@@ -317,11 +317,11 @@ pub fn simulate_correlated(
             let z_indep: Vec<f64> = (0..n_assets).map(|_| rng.next_normal()).collect();
 
             // Correlate using Cholesky: z_corr[i] = Σ_j L[i,j] * z_indep[j]
-            for i in 0..n_assets {
+            for (i, asset_paths) in all_paths.iter_mut().enumerate() {
                 let z_corr: f64 = (0..=i).map(|j| chol[i * n_assets + j] * z_indep[j]).sum();
                 let (drift, sigma) = params[i];
                 prices[i] *= (drift + sigma * z_corr).exp();
-                all_paths[i][path_idx][step] = prices[i];
+                asset_paths[path_idx][step] = prices[i];
             }
         }
     }
@@ -451,6 +451,37 @@ mod tests {
         assert_eq!(result.len(), 2); // 2 assets
         assert_eq!(result[0].len(), 100); // 100 paths
         assert_eq!(result[0][0].len(), 50); // 50 steps
+    }
+
+    #[test]
+    fn test_simulate_correlated_preserves_path_initialisation() {
+        let returns = vec![vec![0.01, 0.01], vec![0.0, 0.0], vec![-0.02, -0.02]];
+        let corr = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let result = simulate_correlated(&returns, &corr, 2, 4).unwrap();
+
+        assert_eq!(result.len(), 3);
+        for (asset_paths, drift) in result.iter().zip([0.01f64, 0.0, -0.02]) {
+            assert_eq!(asset_paths.len(), 2);
+            for path in asset_paths {
+                assert_eq!(path.len(), 4);
+                let mut expected = 1.0f64;
+                for price in path {
+                    expected *= drift.exp();
+                    assert_eq!(price.to_bits(), expected.to_bits());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_simulate_correlated_preserves_zero_dimension_errors() {
+        let returns = vec![sample_returns()];
+        for (n_paths, n_steps) in [(0, 1), (1, 0), (0, 0)] {
+            assert!(matches!(
+                simulate_correlated(&returns, &[1.0], n_paths, n_steps),
+                Err(EngineError::InvalidParameter { .. })
+            ));
+        }
     }
 
     #[test]

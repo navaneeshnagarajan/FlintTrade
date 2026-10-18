@@ -1,0 +1,927 @@
+[
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "the shared journey fixture disposes automatically after exact expected usage",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "the auto fixture fails teardown for an unused expected handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "the client-error guard is automatic even when syntheticApi is not requested",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › manifest probe uses only its escaped closure-bound target",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /api stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered canonical /ft-api stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /api lookalike stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered raw /ft-api lookalike stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /api separator stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator document request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator font request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator image request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator manifest request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator script request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records and aborts an unregistered encoded /ft-api separator stylesheet request",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › allows a same-origin static frontend image to load",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › counts one registered /ft-api image request exactly",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › serves one exact named method-and-path handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › registers the Explore advisor status probe as an expected /ft-api GET",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › registers operator status probes as reads",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › does not accept a POST on the operator ping probe",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › assertSatisfied checks usage without disposing the registry",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › dispose rejects an unused expected handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › dispose waits for an in-flight handler failure",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › dispose aborts and records a second request while an owned handler drains",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records method mismatch evidence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records path mismatch evidence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records an unexpected request when no handler is related",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects duplicate exact handlers at registration",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › records handler overuse and does not invoke it again",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › accepts both inclusive edges of a bounded handler call range",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects bounded handler underuse",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects bounded handler overuse without invoking it past the maximum",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects invalid bounded handler call ranges",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › dispose clears state so a fresh registry can reuse the same exact handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › captures an asynchronous pageerror from a data-page script",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › captures an unhandled rejection from a data-page script",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects a non-allowlisted console error",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › allows only an exact explicitly benign console error",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › does not treat an allowlist substring as benign",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › does not allow matching console text from a different URL",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects an unused console error allowance",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "fail-closed synthetic fixture registry › rejects console error allowance overuse",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › startup permits no cancelled GET but still requires one completed book",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › optional startup cancellation never permits an unused mandatory book",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › startup rejects two fulfilled books rather than accepting a one-to-two range",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › startup accepts exactly one independently aborted GET and its surviving completed book",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › an aborted startup GET cannot stand in for the mandatory completed book",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › required mutation phase grants no startup cancellation allowance",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › retiring startup preserves its exact baseline across a new required phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › a retired read endpoint remains unregistered until its explicit next phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › read retirement preserves an unfinished test-wide console obligation",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › read retirement preserves exact test-wide console completion",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › read retirement still rejects test-wide console overuse immediately",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "exact completed read phases › completed-read phases reject writes and arbitrary call ranges",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects POST",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects HEAD",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects startup",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects no phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects range",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects optional range",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects zero",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects negative",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects fraction",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects infinity",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects NaN",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects false",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 declaration rejects transport fault",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects wrong method",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects wrong path",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects wrong query",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects 200 instead of native HTTP absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects 403 instead of native HTTP absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects 500 instead of native HTTP absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects implicit 200 instead of native HTTP absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects transport failure instead of native HTTP absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 exact two obligation rejects 0 calls",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 exact two obligation rejects 1 calls",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 exact two obligation rejects 3 calls",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 exact two completed responses pair with two native diagnostics",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 contract rejects the same path on a different origin",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 cancellation alone cannot satisfy a completed absence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 console scope rejects extra exact console",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 console scope rejects different URL",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 console scope rejects different query",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 console scope rejects different status",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 console scope rejects substring",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 diagnostic before request cannot be donated to an active phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 diagnostic during handler cannot be donated to an active phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 diagnostic after retirement cannot be donated to an active phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › retired 404 evidence cannot satisfy an unused successor",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › retired 404 endpoint remains forbidden with no successor",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › 404 phases retain both exact completed ledgers",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "handler-scoped required 404 reads › accepts the completed exact returned lease GET and its native diagnostic",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with write",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with range",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with no phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with wrong kind",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with cancellation",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects a fault declaration with zero",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › never grants a declared fault to a wrong method",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › never grants a declared fault to a wrong path",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › never grants a declared fault to a wrong account query",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › an undeclared fault stays fatal on a plain GET",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › an undeclared fault stays fatal on a phased GET",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects wrong failure kind from a fault handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects cancellation kind from a fault handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects mixed JSON from a fault handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects mixed body from a fault handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects mixed status from a fault handler",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › unexpected success cannot satisfy a failed-fetch declaration",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › raw JSON decoding failure cannot satisfy a failed-fetch declaration",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects 0 actual resets when exactly one startup failure is declared",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects 2 actual resets when exactly one startup failure is declared",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › rejects 3 actual resets when exactly one startup failure is declared",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › startup cancellation alone cannot meet the fault obligation",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › startup cancellation plus one reset meets the fault obligation",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › retiring a fault preserves its evidence without donating allowance to the next phase",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › fault console scope rejects different URL",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › fault console scope rejects substring",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › fault console scope rejects wrong kind",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › fault console scope rejects extra exact diagnostic",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › a matching console diagnostic alone is not native failed-fetch evidence",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "explicit non-cancellation GET faults › requires a real failed fetch rather than a fulfilled decoding error",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal wrong-method",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal wrong-path",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal wrong-query",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal wrong-status",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal missing-scope",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal invalid-json",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal unused",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal overuse",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "exact ACK corruption refusal invalid-registration",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "native decoded scheduling qualification › unchanged native decoded body held after complete HTTP then delivered once",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "native decoded scheduling qualification › wrong URL stays native and duplicate installation refuses",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "native decoded scheduling qualification › second matching decode refuses and latches overuse",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "native decoded scheduling qualification › native cancelled body never counts as decoded delivery",
+    "project": "chromium"
+  },
+  {
+    "file": "run-policy-negative-seams.spec.ts",
+    "title": "native decoded scheduling qualification › non-success body is not admitted by the decoded seam",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 owning authenticated desk registers current exact diagnostics",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 Example heartbeat targets Practice without granting Live readiness",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects unused registration",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics missing registration remains fatal",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects a second fulfilled startup GET",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects POST with body",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects query suffix",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects wrong Bearer",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics rejects API key",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 diagnostics retirement grants no recovery allowance",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live ready independent of Practice ready",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live ready independent of Practice degraded",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live ready independent of Practice down",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live degraded independent of Practice ready",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live degraded independent of Practice degraded",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live degraded independent of Practice down",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live down independent of Practice ready",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live down independent of Practice degraded",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping keeps Live down independent of Practice down",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping does not invent an omitted field {}",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping does not invent an omitted field {\"laya\":\"ready\"}",
+    "project": "chromium"
+  },
+  {
+    "file": "infra-self-tests.spec.ts",
+    "title": "R161 ping does not invent an omitted field {\"layaPractice\":\"degraded\"}",
+    "project": "chromium"
+  }
+]

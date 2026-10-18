@@ -234,7 +234,7 @@ for (const viewport of [
     await page.getByRole("button", { name: /^Notifications —/ }).click(); await page.clock.runFor(700);
     const centre = page.getByRole("dialog", { name: "Notification Centre" }); await expect(centre).toBeVisible();
     const article = centre.getByRole("article").filter({ hasText: expected }); await expect(article).toHaveCount(1);
-    const heading = article.getByText(title, { exact: true }); const paragraph = article.locator("p");
+    const heading = article.getByText(title, { exact: true }); const paragraph = article.getByText(expected, { exact: true });
     await expect(heading).toHaveText(title); await expect(paragraph).toHaveText(expected);
     await expect(centre.getByText("Back to terminal", { exact: true })).toHaveCount(0);
     await assertPainted(article, info, "captured-central-box");

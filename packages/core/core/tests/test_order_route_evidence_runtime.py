@@ -86,7 +86,7 @@ class _DhanSDK:
 
 
 @pytest.fixture
-def route_stack(backend_lease_factory):
+def route_stack(backend_lease_factory, owned_flask_apps):
     reset_reduce_only_for_tests()
     safety = SafetySystem(SafetyConfig(check_market_hours=False))
     app = create_flask_app(safety=safety, safety_config_ready=True, backend_lease_proof=backend_lease_factory())
@@ -109,9 +109,14 @@ def route_stack(backend_lease_factory):
     app.config["BROKER_ROUTER"] = router
     app.config["NATIVE_ADAPTERS"] = {"dhan": source}
     app.config["REGISTRY"] = SimpleNamespace(get_session_for=lambda broker, account: session_for(None, broker, account))
-    yield app, source, sdk, router
-    router.revoke_and_drain(timeout=0.0)
-    reset_reduce_only_for_tests()
+    try:
+        yield app, source, sdk, router
+    finally:
+        try:
+            router.revoke_and_drain(timeout=0.0)
+        finally:
+            owned_flask_apps.close()
+            reset_reduce_only_for_tests()
 
 
 def _place(app, quantity: int = 6):

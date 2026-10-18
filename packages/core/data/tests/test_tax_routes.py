@@ -11,6 +11,8 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 def _current_fy() -> str:
     """Return the current Indian fiscal-year string (e.g. ``"2025-26"``).
@@ -41,7 +43,7 @@ def monkeypatch_module():
     mp.undo()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def app_client(monkeypatch_module):
     """Return a Flask test client with the tax blueprint registered."""
     from flinttrade_core.app import create_flask_app

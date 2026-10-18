@@ -5,7 +5,10 @@ from __future__ import annotations
 from flask import Config
 import pytest
 
+
 from flinttrade_core.app import create_flask_app
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 class AuthorityPoison(Config):
@@ -29,7 +32,7 @@ def composed_app(monkeypatch):
     app = create_flask_app()
     app.config["TESTING"] = True
     poisoned = AuthorityPoison(app.config)
-    app.config = poisoned
+    monkeypatch.setattr(app, "config", poisoned)
     return app, poisoned
 
 

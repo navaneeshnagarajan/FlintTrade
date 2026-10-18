@@ -19,6 +19,8 @@ from flinttrade_ai.skill_drafts import (
     skills_dir,
 )
 from flinttrade_ai.skill_system import SkillRegistry
+from flinttrade_ai.knowledge_runtime import KnowledgeRuntime
+from packages.services.ai.tests.test_knowledge_store import rights
 from flinttrade_ai.trade_reflection import ReflectionResult
 
 pytestmark = pytest.mark.unit
@@ -58,16 +60,17 @@ def test_draft_renders_frontmatter_and_sections(tmp_path: Path) -> None:
     assert "Choppy expiry-day session." in text
 
 
-def test_redrafting_the_same_date_overwrites(tmp_path: Path) -> None:
+def test_redrafting_the_same_date_preserves_previous_bytes(tmp_path: Path) -> None:
     draft_skill_from_reflection(tmp_path, _result(), session_date="2026-07-19", symbols=["X"])
-    draft_skill_from_reflection(
+    second = draft_skill_from_reflection(
         tmp_path,
         _result(recommendations=["Second pass"]),
         session_date="2026-07-19",
         symbols=["X"],
     )
-    assert len(list(drafts_dir(tmp_path).glob("*.md"))) == 1
-    assert "Second pass" in read_draft(tmp_path, "session-lessons-2026-07-19")
+    assert len(list(drafts_dir(tmp_path).glob("*.md"))) == 2
+    assert "Second pass" not in read_draft(tmp_path, "session-lessons-2026-07-19")
+    assert "Second pass" in second.read_text()
 
 
 def test_empty_reflection_produces_no_draft(tmp_path: Path) -> None:
@@ -106,7 +109,7 @@ def test_slug_validation_rejects_a_trailing_newline(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_approve_moves_flips_status_and_registry_sees_only_approved(tmp_path: Path) -> None:
+def test_approve_requires_shared_runtime_and_keeps_source_inert(tmp_path: Path) -> None:
     draft_skill_from_reflection(tmp_path, _result(), session_date="2026-07-19", symbols=["X"])
 
     registry = SkillRegistry(skills_dir(tmp_path))
@@ -116,21 +119,31 @@ def test_approve_moves_flips_status_and_registry_sees_only_approved(tmp_path: Pa
         registry.get_system_prompt_section()
     )
 
-    approve_draft(tmp_path, "session-lessons-2026-07-19")
-    assert not (drafts_dir(tmp_path) / "session-lessons-2026-07-19.md").exists()
-    approved = (skills_dir(tmp_path) / "session-lessons-2026-07-19.md").read_text(encoding="utf-8")
-    assert "status: approved" in approved
-    assert "status: draft" not in approved
-
+    original = read_draft(tmp_path, "session-lessons-2026-07-19")
+    with pytest.raises(RuntimeError, match="KnowledgeRuntime"):
+        approve_draft(tmp_path, "session-lessons-2026-07-19")
+    runtime = KnowledgeRuntime(tmp_path, stock_rights=rights())
+    try:
+        version = approve_draft(tmp_path, "session-lessons-2026-07-19", runtime=runtime)
+        assert runtime.store.version(version)["files"]["session-lessons-2026-07-19.md"] == original
+    finally:
+        runtime.close()
+    assert read_draft(tmp_path, "session-lessons-2026-07-19") == original
     registry.reload()
-    assert "session-lessons-2026-07-19" in registry
-    assert "session-lessons-2026-07-19" in registry.get_system_prompt_section()
+    assert "session-lessons-2026-07-19" not in registry
+    assert "session-lessons-2026-07-19" not in registry.get_system_prompt_section()
 
 
-def test_reject_deletes(tmp_path: Path) -> None:
+def test_reject_retires_without_deletion(tmp_path: Path) -> None:
     draft_skill_from_reflection(tmp_path, _result(), session_date="2026-07-19", symbols=["X"])
-    assert reject_draft(tmp_path, "session-lessons-2026-07-19") is True
-    assert reject_draft(tmp_path, "session-lessons-2026-07-19") is False
+    runtime = KnowledgeRuntime(tmp_path, stock_rights=rights())
+    try:
+        assert reject_draft(tmp_path, "session-lessons-2026-07-19", runtime=runtime) is True
+        assert read_draft(tmp_path, "session-lessons-2026-07-19") is not None
+        row = next(row for row in runtime.registry.catalogue() if row["origin"] == "learned")
+        assert row["state"] == "retired" and row["enabled"] is False
+    finally:
+        runtime.close()
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +157,10 @@ def app(tmp_path: Path) -> Flask:
     flask_app.register_blueprint(skill_draft_bp)
     flask_app.config["WORKSPACE_DIR"] = tmp_path
     draft_skill_from_reflection(tmp_path, _result(), session_date="2026-07-19", symbols=["X"])
-    return flask_app
+    runtime = KnowledgeRuntime(tmp_path, stock_rights=rights())
+    flask_app.config.update(KNOWLEDGE_RUNTIME=runtime, BROKER_MGMT_WRITE_GUARD=lambda: None)
+    yield flask_app
+    runtime.close()
 
 
 def test_routes_list_and_read(app: Flask) -> None:
@@ -172,17 +188,19 @@ def test_routes_approve_and_reject_are_guarded(app: Flask, tmp_path: Path) -> No
     assert client.delete("/api/v1/ai/skill-drafts/session-lessons-2026-07-19").status_code == 401
     assert len(denials) == 2
 
-    # Guard passing: approve moves the file and reloads the registry.
+    # Guard passing only admits a candidate; it is not evaluator evidence.
     app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
     registry = SkillRegistry(skills_dir(tmp_path))
     app.config["SKILL_REGISTRY"] = registry
     resp = client.post("/api/v1/ai/skill-drafts/session-lessons-2026-07-19/approve")
-    assert resp.status_code == 200
-    assert "session-lessons-2026-07-19" in registry
+    assert resp.status_code == 202
+    assert resp.json["data"]["state"] == "candidate"
+    assert "session-lessons-2026-07-19" not in registry
 
-    # Approving again → 404; rejecting a missing draft → 404; bad slug → 400.
-    assert client.post("/api/v1/ai/skill-drafts/session-lessons-2026-07-19/approve").status_code == 404
-    assert client.delete("/api/v1/ai/skill-drafts/session-lessons-2026-07-19").status_code == 404
+    # Intake is idempotent; rejection retains the original bytes.
+    assert client.post("/api/v1/ai/skill-drafts/session-lessons-2026-07-19/approve").status_code == 202
+    assert client.delete("/api/v1/ai/skill-drafts/session-lessons-2026-07-19").status_code == 200
+    assert client.delete("/api/v1/ai/skill-drafts/missing").status_code == 404
     assert client.post("/api/v1/ai/skill-drafts/BAD_NAME/approve").status_code == 400
 
 

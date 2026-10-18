@@ -17,6 +17,10 @@ export interface PlaceOrderParams extends TradeInstruction {
   rationale?: string;
   /** Confirms the supplied price came from a quote, for Practice fills. */
   priceBasis?: "ltp";
+  /** Confirmed contract lot. Admission refuses a quantity that is not a multiple. */
+  lotSize?: number;
+  /** Broker freeze quantity. Admission uses the NSE index circular when this is absent. */
+  freezeQty?: number;
 }
 export interface ModifyOrderParams extends TradeInstruction { orderId: string; strategy?: string; disclosedQuantity?: number }
 export interface OrderStatusParams { orderId: string; strategy?: string }

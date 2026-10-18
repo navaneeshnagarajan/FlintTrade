@@ -1,0 +1,4 @@
+# Exact source requirements extracted unchanged from the resolver export.
+# source export sha256: afa8630061bcc59b82bb6770f237e5ba380128c9a55504ff25970b1a81174281
+kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3
+upstox-python-sdk @ git+https://github.com/upstox/upstox-python.git@d88a12ef5738a4c8d71f3b88eb7b79a359277c9d

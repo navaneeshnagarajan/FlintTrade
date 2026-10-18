@@ -8,6 +8,7 @@
  */
 
 import { get, accountMutation } from "./ftApi.helpers";
+import { discoverNativeAccounts } from "./nativeAccountDiscovery";
 
 export interface NativeAuthField {
   name: string;
@@ -152,9 +153,8 @@ export async function listBrokerRecommendations(): Promise<BrokerRecommendations
   };
 }
 
-export async function listNativeAccounts(signal?: AbortSignal): Promise<NativeAccount[]> {
-  const r = await get<{ accounts: NativeAccount[] }>("native/accounts", signal);
-  return r?.accounts ?? [];
+export function listNativeAccounts(signal?: AbortSignal): Promise<NativeAccount[]> {
+  return discoverNativeAccounts(signal);
 }
 
 export type NativeReadKind =

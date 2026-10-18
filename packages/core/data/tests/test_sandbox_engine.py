@@ -221,6 +221,14 @@ class TestPlaceBuyOrder:
         result = engine.place_order("RELIANCE", "NSE", "BUY", 10, 2800.0)
         assert result["status"] == "COMPLETE"
         assert result["order_id"] != ""
+        assert result["message"] == "Practice order filled: BUY 10 RELIANCE @ 2800.00"
+        assert "Paper" not in result["message"]
+
+    def test_pending_limit_message_says_practice(self, engine: SandboxEngine) -> None:
+        result = engine.place_order("INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT")
+        assert result["status"] == "PENDING"
+        assert result["message"] == "Practice LIMIT order is pending a matching live tick"
+        assert "Paper" not in result["message"]
 
     def test_buy_order_increases_used_margin(self, engine: SandboxEngine) -> None:
         # 10 lots at 450 = ₹4,500 — well within default ₹10,00,000 capital
@@ -631,7 +639,7 @@ class TestPracticeCharges:
             instrument_token="13",
         )
         assert rejected["status"] == "REJECTED"
-        assert rejected["message"] == "Quantity must be a positive multiple of the lot size (75)"
+        assert rejected["message"] == "Quantity must be a multiple of the lot size (75)."
 
         unnamed = engine.place_order(
             "NIFTY 24500 CE",
@@ -643,7 +651,7 @@ class TestPracticeCharges:
         )
         assert unnamed["status"] == "REJECTED"
         assert unnamed["message"] == (
-            "Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized."
+            "Not placed. The lot size for NIFTY 24500 CE isn't verified."
         )
 
         accepted = engine.place_order(

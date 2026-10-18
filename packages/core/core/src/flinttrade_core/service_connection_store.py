@@ -6,7 +6,8 @@ import copy
 import hashlib
 import hmac
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -178,6 +179,7 @@ class ServiceConnectionStore:
     ) -> None:
         self.workspace_dir = Path(workspace_dir)
         self.audit_sink = audit_sink
+        self.oauth = None
 
     def read_snapshot(self) -> ConnectionCollectionSnapshot:
         try:
@@ -193,6 +195,50 @@ class ServiceConnectionStore:
     def recover(self) -> ConnectionCollectionSnapshot:
         """Resume the recovery path shared by all reads and writes."""
         return self.read_snapshot()
+
+    @contextmanager
+    def dispatch_binding(
+        self,
+        connection: ServiceConnectionRef,
+        *,
+        expected_etag: str,
+        oauth_actor: ConnectionActorContext | None = None,
+        authority_check: Callable[[], None] | None = None,
+    ) -> Iterator[tuple[ServiceConnection, str | None]]:
+        """Fence one dispatch admission against metadata and credential changes.
+
+        Trusted core callers commit invocation while this scope is held, then
+        send the immutable request after releasing it. Never expose the yielded
+        credential to a route, receipt or model. No environment-key fallback,
+        refresh, identity rotation or provider I/O occurs here.
+        """
+        expected_etag = parse_single_strong_entity_tag(expected_etag)
+        with TransactionFiles(self.workspace_dir) as files:
+            self._recover(files)
+            snapshot = self._snapshot(files, read_workspace_snapshot(self.workspace_dir))
+            if snapshot.etag != expected_etag:
+                raise ConnectionRevisionConflict("connection_revision_conflict")
+            selected = next((item for item in snapshot.connections if item.ref == connection), None)
+            if selected is None:
+                raise ConnectionMutationRejected("not_found")
+            credential = None
+            if selected.credential_configured and selected.secret_version is not None:
+                envelope = files.live(selected.secret_version)
+                credential = files.cipher.decrypt(envelope["ciphertext"].encode("ascii")).decode("utf-8")
+            managed = selected.auth_mode == "chatgpt_oauth" or (
+                credential and credential.startswith('{"service_oauth":')
+            )
+            if managed:
+                if oauth_actor is None or authority_check is None:
+                    credential = None  # Metadata-only borrowers cannot export a managed token.
+                else:
+                    authority_check()
+                    if self.oauth is None:
+                        from .service_task_contracts import TaskRefused
+
+                        raise TaskRefused("oauth_not_configured", 422)
+                    credential = self.oauth.access(files, selected, credential, oauth_actor)
+            yield selected, credential
 
     def _snapshot(
         self,
@@ -385,6 +431,7 @@ class ServiceConnectionStore:
         expected_etag: str | None,
         idempotency_key: str,
         actor_context: ConnectionActorContext,
+        _files: TransactionFiles | None = None,
     ) -> ConnectionMutationResult:
         if expected_etag is None:
             raise ConnectionRevisionRequired("connection_revision_required")
@@ -441,7 +488,7 @@ class ServiceConnectionStore:
         if operation == "delete" and payload:
             raise ConnectionMutationRejected("invalid_request")
         try:
-            with TransactionFiles(self.workspace_dir) as files:
+            with nullcontext(_files) if _files is not None else TransactionFiles(self.workspace_dir) as files:
                 # Completed receipt replay is independent of a later collection
                 # revision, including an explicitly blocked foreign-first race.
                 if files.bootstrap is not None and files.operation_keys.exists(f"{idempotency_key}.json"):
@@ -608,7 +655,8 @@ class ServiceConnectionStore:
                     self._journal(files, journal)
                     _checkpoint("committed")
                     self._finish(files, journal, receipt, result, "succeeded")
-            self._flush()
+            if _files is None:
+                self._flush()
             return result
         except (
             ConnectionRevisionConflict,
@@ -843,6 +891,13 @@ class ServiceConnectionStore:
                 files.verify(files.read(files.candidates, actual), binding)
         self._save_anchor(files, read_workspace_snapshot(self.workspace_dir))
         _checkpoint("workspace_anchor")
+        from .service_oauth import retire_obsolete_oauth_payloads
+
+        retire_obsolete_oauth_payloads(
+            files,
+            self._snapshot(files, read_workspace_snapshot(self.workspace_dir)),
+            publishing_grant=journal["key"] if outcome == "succeeded" else None,
+        )
         self._audit(files, journal, receipt, outcome, journal["after_epoch"])
         _checkpoint("terminal_audit")
         receipt["result"] = result.to_dict()

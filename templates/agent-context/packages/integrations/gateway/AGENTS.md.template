@@ -1,7 +1,7 @@
 # FlintTrade — gateway
 
-The gateway contains five native broker adapters: Dhan, Upstox, Kotak Neo,
-INDmoney and Groww. Catalogue membership is not activation evidence. Keep
+The gateway contains six native broker adapters: Dhan, Upstox, Kotak Neo,
+INDmoney, Groww, and Delta Exchange. Catalogue membership is not activation evidence. Delta Exchange stays disabled until Live order safety and unattended deadman flattening are proven. Keep
 connectability blockers, native HTTP freezes and funded Live proof gates intact.
 
 Resolve accounts by exact native adapter/account identity. Reads use the

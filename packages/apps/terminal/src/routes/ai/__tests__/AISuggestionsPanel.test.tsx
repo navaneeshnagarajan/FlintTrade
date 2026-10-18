@@ -2,11 +2,11 @@
  * AISuggestionsPanel.test.tsx
  *
  * Tests for the AI Strategy Suggestions panel.
- * Verifies mood selector, strategy cards, risk filtering, and deploy navigation.
+ * Verifies mood selector, strategy cards, persona-independent discovery, and deploy navigation.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -34,13 +34,7 @@ vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-// Mock settingsStore — default: trader + pro experience = high risk
-let mockPersona = "trader";
-let mockExperience = "pro";
-vi.mock("@/stores/settingsStore", () => ({
-  useSettingsStore: (selector: (state: Record<string, string>) => string) =>
-    selector({ persona: mockPersona, experience: mockExperience }),
-}));
+import { useSettingsStore } from "@/stores/settingsStore";
 
 // Mock motion config
 vi.mock("@/lib/motion", () => ({
@@ -63,8 +57,7 @@ import AISuggestionsPanel from "../AISuggestionsPanel";
 describe("AISuggestionsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockPersona = "trader";
-    mockExperience = "pro";
+    useSettingsStore.setState({ persona: "trader", experience: "pro" });
   });
 
   it("renders the panel title", () => {
@@ -177,18 +170,23 @@ describe("AISuggestionsPanel", () => {
     expect(maxDDLabels.length).toBeGreaterThan(0);
   });
 
-  it("shows risk profile badge", () => {
+  it("disclaims inferred personal risk and requires independent execution checks", () => {
     render(<AISuggestionsPanel />);
-    expect(screen.getByText("Your risk profile:")).toBeInTheDocument();
+    expect(screen.queryByText("Your risk profile:")).not.toBeInTheDocument();
+    expect(screen.getByText("All risk categories are visible; none is a personal recommendation.")).toBeInTheDocument();
+    expect(screen.getByText("Execution still requires independent risk checks")).toBeInTheDocument();
+    expect(screen.getByText(/not an assumed personal risk profile/)).toBeInTheDocument();
   });
 
-  it("filters strategies by risk for beginner persona", () => {
-    mockPersona = "beginner";
-    mockExperience = "beginner";
-    render(<AISuggestionsPanel />);
-    // Beginner = low risk: should only show low-risk strategies
-    const highRiskBadges = screen.queryAllByText("high risk");
-    expect(highRiskBadges.length).toBe(0);
+  it("keeps the same volatile strategies and risk labels when persona becomes beginner", () => {
+    const view = render(<AISuggestionsPanel />);
+    const before = screen.getAllByRole("article").map(card => card.getAttribute("aria-label"));
+    act(() => { useSettingsStore.setState({ persona: "beginner", experience: "beginner" }); });
+    view.rerender(<AISuggestionsPanel />);
+    expect(screen.getAllByRole("article").map(card => card.getAttribute("aria-label"))).toEqual(before);
+    expect(screen.getAllByText("high risk")).toHaveLength(3);
+    expect(screen.getAllByText("medium risk")).toHaveLength(2);
+    expect(screen.getByRole("article", { name: "ATR Breakout" })).toBeInTheDocument();
   });
 
   it("Next mood immediately refreshes chips and cards from the same mood state", () => {
@@ -206,30 +204,47 @@ describe("AISuggestionsPanel", () => {
     expect(screen.queryByText("Iron Condor Strategy")).toBeNull();
   });
 
-  it("shows an honest empty state with Try another mood when mood and risk match nothing", () => {
-    mockPersona = "beginner";
-    mockExperience = "beginner";
+  // Persona-induced emptiness was explicitly retired. Every public mood has
+  // real shipped entries; the internal empty fallback is not reachable here.
+  it("keeps every shipped mood reachable and honestly labelled for a beginner", () => {
+    useSettingsStore.setState({ persona: "beginner", experience: "beginner" });
     render(<AISuggestionsPanel />);
-
-    expect(
-      screen.getByText("No strategies match this mood + risk combination."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try another mood" })).toBeInTheDocument();
-    expect(screen.queryByText("ATR Breakout")).toBeNull();
-    expect(screen.queryByText("Iron Condor Strategy")).toBeNull();
-    expect(screen.queryByText("Deploy to Strategy Lab")).toBeNull();
+    for (const [mood, first] of [["Volatile", "ATR Breakout"], ["Trending", "Trend EMA Crossover"], ["Sideways", "Iron Condor Strategy"]]) {
+      fireEvent.click(screen.getByRole("button", { name: mood }));
+      expect(screen.getByRole("button", { name: mood })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getAllByRole("article")).toHaveLength(5);
+      expect(screen.getByRole("article", { name: first })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Deploy to Strategy Lab" })).toHaveLength(5);
+      expect(screen.queryByText("No strategies match this mood + risk combination.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Try another mood" })).not.toBeInTheDocument();
+      expect(screen.getByText(/not a live AI fetch/)).toBeInTheDocument();
+      expect(screen.getByText(/not actual backtest results/)).toBeInTheDocument();
+      expect(screen.getByText(/none is a personal recommendation/)).toBeInTheDocument();
+    }
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it("Try another mood advances the filter and replaces the empty state", () => {
-    mockPersona = "beginner";
-    mockExperience = "beginner";
+  it("Next mood cycles all moods for a beginner, retires selection and retains exact deploy navigation", () => {
+    useSettingsStore.setState({ persona: "beginner", experience: "beginner" });
     render(<AISuggestionsPanel />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Try another mood" }));
-
+    fireEvent.click(screen.getByRole("article", { name: "ATR Breakout" }));
+    expect(screen.getByRole("article", { name: "ATR Breakout" })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Next mood" }));
     expect(screen.getByRole("button", { name: "Trending" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Portfolio Momentum Rotation")).toBeInTheDocument();
-    expect(screen.queryByText("No strategies match this mood + risk combination.")).toBeNull();
-    expect(screen.queryByText("ATR Breakout")).toBeNull();
+    expect(screen.queryByRole("article", { current: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("ATR Breakout")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("article", { name: "Portfolio Momentum Rotation" })).getByRole("button", { name: "Deploy to Strategy Lab" }));
+    expect(mockNavigate).toHaveBeenCalledExactlyOnceWith("/lab?strategy=PortfolioMomentumRotation");
+    fireEvent.click(screen.getByRole("button", { name: "Next mood" }));
+    expect(screen.getByRole("button", { name: "Sideways" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("article", { name: "Iron Condor Strategy" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next mood" }));
+    expect(screen.getByRole("button", { name: "Volatile" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("article", { name: "ATR Breakout" })).toBeInTheDocument();
+    expect(screen.queryByText("Iron Condor Strategy")).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { current: true })).not.toBeInTheDocument();
+    expect(screen.getByText(/not actual backtest results/)).toBeInTheDocument();
   });
+
 });

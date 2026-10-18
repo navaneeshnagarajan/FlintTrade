@@ -6,20 +6,20 @@ requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
     "flinttrade-indicators",
-    "numpy>=2.5.3",
-    "pydantic>=2.13.5",
-    "httpx>=0.27.0",
-    "flask>=3.0",
-    "duckdb~=1.5",
+    "numpy==2.5.4",
+    "pydantic==2.14.1",
+    "httpx==0.28.1",
+    "flask==3.1.3",
+    "duckdb==1.5.6",
 ]
 
 [project.optional-dependencies]
 greeks = [
-    "py-vollib-vectorized>=0.1",
-    "mibian>=0.1",
+    "py-vollib-vectorized==0.1.1",
+    "mibian==0.1.3",
 ]
 nse = [
-    "nsepython>=0.1",
+    "nsepython==2.101",
 ]
 
 [build-system]

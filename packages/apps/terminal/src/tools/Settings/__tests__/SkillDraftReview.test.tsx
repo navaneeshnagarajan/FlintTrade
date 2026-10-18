@@ -1,114 +1,74 @@
-/**
- * SkillDraftReview.test.tsx — the AI1 draft-review card inside SkillSection
- * (real TanStack Query; the draft client mocked).
- */
-
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import "@testing-library/jest-dom";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { SkillDraftReviewSection } from "../SkillSection";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { BODY, NAME, VERSION, deferred, knowledgeTransport, response, row, seedKnowledgeSession } from "@/services/__tests__/knowledgeTestUtils";
 
-const mockList = vi.fn();
-const mockRead = vi.fn();
-const mockApprove = vi.fn();
-const mockReject = vi.fn();
-vi.mock("@/services/ftApi.skillDrafts", () => ({
-  listSkillDrafts: () => mockList() as Promise<unknown>,
-  readSkillDraft: (name: string) => mockRead(name) as Promise<unknown>,
-  approveSkillDraft: (name: string) => mockApprove(name) as Promise<unknown>,
-  rejectSkillDraft: (name: string) => mockReject(name) as Promise<unknown>,
-}));
-
-// SkillSection's other dependencies (store + tour) — minimal stubs.
-vi.mock("@/stores/skillStore", () => {
-  const state = {
-    globalLevel: "intermediate",
-    routeOverrides: {},
-    helpPrefs: {},
-    metrics: {
-      trade: { ordersPlaced: 0, widgetsUsed: 0, daysActive: 0, lastActiveDate: "" },
-      invest: { holdingsViewed: 0, sipsCreated: 0, goalsSet: 0 },
-      learn: { lessonsCompleted: 0, quizzesPassed: 0, articlesRead: 0 },
-      lab: { backtestsRun: 0, strategiesCreated: 0, optimizationsRun: 0 },
-      automate: { alertsSet: 0, strategiesUploaded: 0 },
-      ai: { queriesRun: 0, agentsDeployed: 0 },
-    },
-    getEffectiveLevel: () => "intermediate",
-    setGlobalLevel: vi.fn(),
-    setRouteOverride: vi.fn(),
-    clearRouteOverride: vi.fn(),
-    setHelpPref: vi.fn(),
-    resetToDefaults: vi.fn(),
-  };
-  return {
-    useSkillStore: (selector?: (s: typeof state) => unknown) =>
-      typeof selector === "function" ? selector(state) : state,
-  };
-});
-
-import { SkillSection } from "../SkillSection";
-
-function Providers({ children }: { children: ReactNode }) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+const draftPath = "/ft-api/api/v1/ai/skill-drafts";
+const candidate = () => row({ state: "candidate", default: false, validated: false, enabled: false, unavailable_reason: "skill rights unresolved" });
+beforeEach(seedKnowledgeSession);
+afterEach(() => vi.unstubAllGlobals());
+function mount() {
+  render(<QueryClientProvider client={new QueryClient()}><SkillDraftReviewSection /></QueryClientProvider>);
 }
 
-describe("SkillDraftReviewSection", () => {
-  beforeEach(() => {
-    mockList.mockReset();
-    mockRead.mockReset();
-    mockApprove.mockReset();
-    mockReject.mockReset();
-    mockList.mockResolvedValue([
-      {
-        name: "session-lessons-2026-07-19",
-        description: "Session lessons from 2026-07-19 (4 trades, 50% win rate)",
-        modified_at: 1789000000,
-      },
-    ]);
+it("retains full source text and verifies 202 intake without claiming activation", async () => {
+  const io = knowledgeTransport();
+  io.routes.set(`GET ${draftPath}`, () => response({ status: "success", data: [candidate()] }));
+  io.routes.set(`GET ${draftPath}/${NAME}`, () => response({ status: "success", data: { name: NAME, content: BODY } }));
+  io.routes.set(`POST ${draftPath}/${NAME}/candidate`, init => {
+    expect(JSON.parse(String(init.body))).toEqual({});
+    return response({ status: "accepted", data: candidate() }, 202);
   });
+  mount();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "View source" }));
+  expect((await screen.findByLabelText("Retained draft source")).textContent).toBe(BODY);
+  expect(screen.queryByRole("button", { name: /^Approve$/i })).not.toBeInTheDocument();
+  expect(screen.getByText(/not activation/i)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Retain candidate" }));
+  expect(await screen.findByRole("status")).toHaveTextContent(`Candidate intake verified: ${VERSION}`);
+  expect(screen.getByRole("status")).toHaveTextContent(/source preserved/i);
+  expect(io.requests.map(r => `${r.init.method} ${r.path}`)).toEqual([
+    `GET ${draftPath}`, `GET ${draftPath}/${NAME}`, `POST ${draftPath}/${NAME}/candidate`, `GET ${draftPath}`,
+  ]);
+  io.assertClean();
+});
 
-  it("lists pending drafts with the approval explainer", async () => {
-    render(<SkillSection />, { wrapper: Providers });
-    expect(
-      await screen.findByText("session-lessons-2026-07-19"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Drafts influence nothing until you approve them/i),
-    ).toBeInTheDocument();
+it.each(["wrong-name", "wrong-version", "enabled", "wrong-status", "bad-readback", "denied"])("does not claim candidate intake on %s", async fault => {
+  const io = knowledgeTransport();
+  let wrote = false;
+  io.routes.set(`GET ${draftPath}`, () => response({ status: "success", data: [candidate(), ...(wrote && fault === "bad-readback" ? [candidate()] : [])] }));
+  io.routes.set(`POST ${draftPath}/${NAME}/candidate`, () => {
+    wrote = true;
+    const data = { ...candidate(), ...(fault === "wrong-name" ? { name: "different" } : {}),
+      ...(fault === "wrong-version" ? { version_id: "different" } : {}), ...(fault === "enabled" ? { enabled: true } : {}) };
+    if (fault === "denied") return response({ message: "operator session required" }, 403);
+    return response({ status: "accepted", data }, fault === "wrong-status" ? 200 : 202);
   });
+  mount();
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Retain candidate" }));
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  expect(screen.queryByText(/Candidate intake verified:/)).not.toBeInTheDocument();
+  io.assertClean();
+});
 
-  it("views a draft's markdown inline", async () => {
-    mockRead.mockResolvedValue({
-      name: "session-lessons-2026-07-19",
-      content: "---\nstatus: draft\n---\n## Recommendations\n- Wait for the range",
-    });
-    render(<SkillSection />, { wrapper: Providers });
-    await screen.findByText("session-lessons-2026-07-19");
-    fireEvent.click(screen.getByRole("button", { name: /^view$/i }));
-    expect(await screen.findByText(/Wait for the range/)).toBeInTheDocument();
-  });
-
-  it("approves and rejects through the guarded client", async () => {
-    mockApprove.mockResolvedValue(undefined);
-    mockReject.mockResolvedValue(undefined);
-    render(<SkillSection />, { wrapper: Providers });
-    await screen.findByText("session-lessons-2026-07-19");
-
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
-    await waitFor(() =>
-      expect(mockApprove).toHaveBeenCalledWith("session-lessons-2026-07-19"),
-    );
-  });
-
-  it("surfaces a guard denial honestly", async () => {
-    mockApprove.mockRejectedValue(new Error("operator session required"));
-    render(<SkillSection />, { wrapper: Providers });
-    await screen.findByText("session-lessons-2026-07-19");
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
-    expect(
-      await screen.findByText(/operator session required/i),
-    ).toBeInTheDocument();
-  });
+it("does not report a held A intake in B or read B as A's confirmation", async () => {
+  const io = knowledgeTransport();
+  const held = deferred<Response>();
+  let entered = false;
+  io.routes.set(`GET ${draftPath}`, () => response({ status: "success", data: [candidate()] }));
+  io.routes.set(`POST ${draftPath}/${NAME}/candidate`, () => { entered = true; return held.promise; });
+  mount();
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Retain candidate" }));
+  expect(entered).toBe(true);
+  act(() => useBrokerStore.getState().setActiveAccount("native:dhan:account-b"));
+  await waitFor(() => expect(io.requests.filter(r => r.init.method === "GET")).toHaveLength(2));
+  await act(async () => held.resolve(response({ status: "accepted", data: candidate() }, 202)));
+  expect(screen.queryByText(/Candidate intake verified:/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(io.requests.filter(r => r.init.method === "GET")).toHaveLength(2);
+  io.assertClean();
 });

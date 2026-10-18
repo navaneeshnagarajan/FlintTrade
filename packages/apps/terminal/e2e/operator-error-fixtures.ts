@@ -233,10 +233,10 @@ export async function mountErrorPad(page: Page, mode: "live" | "practice" = "liv
   await page.clock.install({ time: FIXED_TIME }); await page.clock.pauseAt(FIXED_TIME);
   await page.addInitScript(({ narrow }) => {
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true"); localStorage.setItem("flinttrade:tourComplete", "true");
-    localStorage.setItem("flinttrade:layouts", JSON.stringify({ state: { tabs: [{ id: "operator-error", name: "Synthetic operator errors", serializedLayout: { global: { tabEnableRename: false, tabSetEnableSingleTabStretch: true, tabSetMinWidth: 100, tabSetMinHeight: 80 }, borders: [], layout: { type: "row", weight: 100, children: [
+    localStorage.setItem("flinttrade:app-layouts:v1:terminal", JSON.stringify({ Current: { global: { tabEnableRename: false, tabSetEnableSingleTabStretch: true, tabSetMinWidth: 100, tabSetMinHeight: 80 }, borders: [], layout: { type: "row", weight: 100, children: [
       { type: "tabset", weight: narrow ? 45 : 65, children: [{ type: "tab", id: "error-pad", component: "orderpad", name: "Order Pad", config: { symbol: "INFY", exchange: "NSE" } }] },
       { type: "tabset", weight: narrow ? 55 : 35, children: [{ type: "tab", id: "error-book", component: "positions", name: "Positions" }] },
-    ] } } }], activeTabId: "operator-error" }, version: 0 }));
+    ] } } }));
     const observed = window as Window & { __presentationNotifications?: unknown[] }; observed.__presentationNotifications = [];
     window.addEventListener("flinttrade:notify", (event) => observed.__presentationNotifications?.push((event as CustomEvent<unknown>).detail));
   }, { narrow });
@@ -248,10 +248,10 @@ export async function mountErrorPad(page: Page, mode: "live" | "practice" = "liv
     const modes = await importModule("/src/stores/modeStore.ts") as { useModeStore: { getState: () => { setMode: (mode: "live" | "practice") => void } } };
     const brokers = await importModule("/src/stores/brokerStore.ts") as { useBrokerStore: { getState: () => { setActiveAccount: (selector: string) => void } } };
     auth.useAuthStore.getState().setLoggedIn(token, "synthetic-order-flow-operator", ""); modes.useModeStore.getState().setMode(mode); brokers.useBrokerStore.getState().setActiveAccount(`native:kotakneo:${account}`);
-    await Promise.all([importModule("/src/routes/TerminalRoute.tsx"), importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"), importModule("/src/widgets/trading/Positions/PositionsWidget.tsx")]);
+    await Promise.all([importModule("/src/routes/UnifiedAppRoute.tsx"), importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"), importModule("/src/widgets/trading/Positions/PositionsWidget.tsx")]);
     window.history.pushState(null, "", "/trade"); window.dispatchEvent(new PopStateEvent("popstate"));
   }, { token: LIVE_TOKEN, mode, account: ERROR_A });
-  await expect(page).toHaveURL(/\/trade$/); await tickUntil(page, errorPad(page).getByText("Lot: 1", { exact: true }));
+  await expect(page).toHaveURL(/\/terminal$/); await tickUntil(page, errorPad(page).getByText("Lot: 1", { exact: true }));
 }
 
 export async function assertPainted(locator: Locator, info: TestInfo, label: string): Promise<void> {

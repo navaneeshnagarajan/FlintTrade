@@ -25,7 +25,6 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -245,22 +244,6 @@ const SUGGESTION_POOL: StrategySuggestion[] = [
 // Risk-based filtering
 // ---------------------------------------------------------------------------
 
-function riskFromPersona(persona: string, experience: string): "low" | "medium" | "high" {
-  if (persona === "beginner" || experience === "beginner") return "low";
-  if (persona === "investor") return "medium";
-  return "high";
-}
-
-function filterByRisk(
-  suggestions: StrategySuggestion[],
-  userRisk: "low" | "medium" | "high",
-): StrategySuggestion[] {
-  const riskOrder = { low: 0, medium: 1, high: 2 };
-  const userLevel = riskOrder[userRisk];
-  // Include strategies at or below the user's risk tolerance
-  return suggestions.filter((s) => riskOrder[s.riskLevel] <= userLevel);
-}
-
 // ---------------------------------------------------------------------------
 // Strategy card
 // ---------------------------------------------------------------------------
@@ -384,20 +367,19 @@ function StrategyCard({ suggestion, index, selected, onSelect, onDeploy }: Strat
 
 export default function AISuggestionsPanel() {
   const navigate = useNavigate();
-  const persona = useSettingsStore((s) => s.persona);
-  const experience = useSettingsStore((s) => s.experience);
+
 
   const [mood, setMood] = useState<MarketMood>("volatile");
   const [selectedStrategyKey, setSelectedStrategyKey] = useState<string | null>(null);
 
-  const userRisk = useMemo(() => riskFromPersona(persona, experience), [persona, experience]);
+
 
   const suggestions = useMemo(() => {
     const moodFiltered = SUGGESTION_POOL.filter((s) => s.moods.includes(mood));
-    const riskFiltered = filterByRisk(moodFiltered, userRisk);
+    const riskFiltered = moodFiltered;
     // Return up to 5 suggestions
     return riskFiltered.slice(0, 5);
-  }, [mood, userRisk]);
+  }, [mood]);
 
   function applyMood(next: MarketMood) {
     setMood(next);
@@ -446,8 +428,7 @@ export default function AISuggestionsPanel() {
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
           Illustrative local filter over a curated strategy list — not a live AI fetch
-          and not live alpha. Filtered by market mood and your risk profile
-          ({userRisk} risk).
+          and not live alpha. Filtered by market mood, not an assumed personal risk profile.
         </p>
       </Card>
 
@@ -487,13 +468,10 @@ export default function AISuggestionsPanel() {
         <div className="flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 text-text-muted" />
           <span className="text-xs text-text-secondary">
-            Your risk profile:{" "}
-            <Badge className={`text-xxs ${riskBadgeClass(userRisk)}`}>
-              {userRisk}
-            </Badge>
+            All risk categories are visible; none is a personal recommendation.
           </span>
           <span className="text-xxs text-text-muted ml-auto">
-            Based on persona &amp; experience
+            Execution still requires independent risk checks
           </span>
         </div>
       </Card>

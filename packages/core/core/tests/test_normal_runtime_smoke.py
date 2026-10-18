@@ -376,6 +376,35 @@ async def test_normal_factory_runtime_with_an_existing_descriptor_owner(
 
     high_descriptors = hasattr(select, "poll")
     normal_factory = app_module.create_flask_app
+    listener_sockets: list[socket.socket] = []
+    if high_descriptors:
+        import fcntl
+        from waitress.server import TcpWSGIServer
+
+        create_socket = TcpWSGIServer.create_socket
+
+        def high_listener_socket(server: Any, *args: Any, **kwargs: Any) -> None:
+            create_socket(server, *args, **kwargs)
+            original = server.socket
+            # Unrelated owners can free a low slot after factory construction.
+            # Duplicate the actual unbound listener, never close or overwrite a
+            # foreign descriptor, and transfer its exact open-file description.
+            descriptor = fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 1024)
+            try:
+                replacement = socket.socket(original.family, original.type, original.proto, fileno=descriptor)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            replacement.setblocking(False)
+            server.del_channel()
+            server.set_socket(replacement)
+            original.close()
+            listener_sockets.extend((original, replacement))
+            assert replacement.fileno() >= 1024
+            assert server._map[replacement.fileno()] is server
+            _emit("high-listener-owned", listener_fd=replacement.fileno())
+
+        monkeypatch.setattr(TcpWSGIServer, "create_socket", high_listener_socket)
     descriptors = []
     owned_fds: list[int] = []
     with ExitStack() as prior_owner:
@@ -389,9 +418,9 @@ async def test_normal_factory_runtime_with_an_existing_descriptor_owner(
 
         def observe_factory(*args: Any, **kwargs: Any) -> Any:
             flask_app = normal_factory(*args, **kwargs)
-            # Real factory construction can collect earlier apps and free low
-            # descriptor slots. Fill them at this public return boundary so the
-            # forthcoming real listener must actually use a high descriptor.
+            # Keep a real competing descriptor owner across startup and stop.
+            # The listener duplication below remains robust to unrelated owners
+            # freeing lower slots after this factory boundary.
             descriptor = hold_descriptor()
             if high_descriptors:
                 while descriptor.fileno() < 1024:
@@ -412,6 +441,7 @@ async def test_normal_factory_runtime_with_an_existing_descriptor_owner(
         assert [item.fileno() for item in descriptors] == owned_fds
         assert all(item.read(1) == b"" for item in descriptors)
     assert all(item.closed for item in descriptors)
+    assert all(item.fileno() == -1 for item in listener_sockets)
 
 
 @pytest.mark.asyncio

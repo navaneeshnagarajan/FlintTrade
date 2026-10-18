@@ -44,6 +44,11 @@ class BacktestResultStore:
         self._dir = Path(base_dir).expanduser()
         self._clock = clock or (lambda: datetime.now(tz=UTC))
 
+    @property
+    def evidence_path(self) -> Path:
+        """Core-owned immutable evidence lives beside the compatibility index."""
+        return self._dir / "experiments.sqlite3"
+
     @staticmethod
     def _safe_name(strategy: str) -> str:
         """Turn a strategy name into a filesystem-safe file stem.

@@ -187,7 +187,12 @@ function IndexStripWidget(_props: WidgetProps) {
       </div>
 
       {/* Card strip — horizontal scroll on narrow panels */}
-      <div className="flex-1 min-h-0 flex items-start gap-2 p-2 overflow-x-auto overflow-y-auto">
+      <div
+        className="flex-1 min-h-0 flex items-start gap-2 p-2 overflow-x-auto overflow-y-auto"
+        role="region"
+        aria-label="Index cards"
+        tabIndex={0}
+      >
         {INDEX_STRIP_INDICES.map((idx) => (
           <IndexCard key={idx.symbol} {...idx} example={example} />
         ))}

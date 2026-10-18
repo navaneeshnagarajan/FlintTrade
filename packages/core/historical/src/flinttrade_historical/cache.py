@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from typing import Any
 
 from .pipeline import (
@@ -118,6 +119,14 @@ class CacheResult:
 # ---------------------------------------------------------------------------
 
 
+def _serialised_metadata(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self.pipeline.borrow_connection():
+            return method(self, *args, **kwargs)
+    return call
+
+
 class OHLCVCache:
     """DuckDB-backed OHLCV cache for historical data.
 
@@ -169,6 +178,8 @@ class OHLCVCache:
         self._ttl_intraday = ttl_intraday
         self._ttl_daily = ttl_daily
         self._pipeline: DataPipeline | None = None
+        self._borrowed_pipeline = False
+        self._use_app_pipeline = db_path is None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -178,9 +189,14 @@ class OHLCVCache:
     def pipeline(self) -> DataPipeline:
         """Lazy-initialised DataPipeline."""
         if self._pipeline is None:
-            self._pipeline = DataPipeline(self._db_path)
+            from .pipeline import app_history_pipeline
+            self._pipeline = app_history_pipeline() if self._use_app_pipeline else None
+            self._borrowed_pipeline = self._pipeline is not None
+            if self._pipeline is None:
+                self._pipeline = DataPipeline(self._db_path)
         return self._pipeline
 
+    @_serialised_metadata
     def initialise(self) -> None:
         """Create OHLCV tables, indexes, and the _cache_meta table."""
         self.pipeline.initialise()
@@ -190,8 +206,9 @@ class OHLCVCache:
     def close(self) -> None:
         """Close the underlying DuckDB connection."""
         if self._pipeline is not None:
-            self._pipeline.close()
-            self._pipeline = None
+            if not self._borrowed_pipeline:
+                self._pipeline.close()
+                self._pipeline = None
 
     def __enter__(self) -> OHLCVCache:
         return self
@@ -234,6 +251,7 @@ class OHLCVCache:
     # Meta table operations
     # ------------------------------------------------------------------
 
+    @_serialised_metadata
     def get_entry(self, symbol: str, exchange: str, interval: str) -> CacheEntry | None:
         """Read cache metadata for a series.
 
@@ -271,6 +289,7 @@ class OHLCVCache:
             provider=row[5] or "",
         )
 
+    @_serialised_metadata
     def _upsert_entry(
         self,
         symbol: str,
@@ -305,6 +324,7 @@ class OHLCVCache:
                 [now_utc, head_ts, provider, symbol, exchange, interval],
             )
 
+    @_serialised_metadata
     def _get_head_bar_ts(self, table: str, symbol: str, exchange: str) -> datetime | None:
         """Find the timestamp of the newest bar in the OHLCV table.
 
@@ -332,6 +352,7 @@ class OHLCVCache:
     # Cache invalidation
     # ------------------------------------------------------------------
 
+    @_serialised_metadata
     def invalidate(self, symbol: str, exchange: str, interval: str) -> None:
         """Force a re-fetch on the next get() call by clearing last_fetch.
 
@@ -346,6 +367,7 @@ class OHLCVCache:
         )
         logger.info("Invalidated cache for %s %s %s", symbol, exchange, interval)
 
+    @_serialised_metadata
     def invalidate_all(self) -> None:
         """Invalidate all entries — next get() calls will re-fetch everything."""
         self.pipeline.connection.execute("UPDATE _cache_meta SET last_fetch = NULL")
@@ -604,6 +626,7 @@ class OHLCVCache:
     # Statistics / inspection
     # ------------------------------------------------------------------
 
+    @_serialised_metadata
     def list_entries(self) -> list[CacheEntry]:
         """Return all entries in _cache_meta.
 
@@ -633,6 +656,7 @@ class OHLCVCache:
             )
         return entries
 
+    @_serialised_metadata
     def bar_counts(self) -> dict[str, int]:
         """Return bar count per OHLCV table.
 

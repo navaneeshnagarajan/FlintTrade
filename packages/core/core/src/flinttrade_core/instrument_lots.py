@@ -392,7 +392,7 @@ def _listed_symbol(
 
 def missing_lot_refusal(contract: str) -> str:
     """Refusal when the instrument master has no lot for this contract."""
-    return f"Not placed. The lot size for {contract} isn't in the instrument master, so this order can't be sized."
+    return f"Not placed. The lot size for {contract} isn't verified."
 
 
 def contract_quantity_message(
@@ -415,7 +415,7 @@ def contract_quantity_message(
             name = security_id.strip()
         return missing_lot_refusal(name)
     if quantity <= 0 or quantity % lot != 0:
-        return f"Quantity must be a positive multiple of the lot size ({lot})"
+        return f"Quantity must be a multiple of the lot size ({lot})."
     return None
 
 

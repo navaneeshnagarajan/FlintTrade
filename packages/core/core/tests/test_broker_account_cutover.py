@@ -10,6 +10,7 @@ from copy import deepcopy
 import logging
 
 import pytest
+
 from flask import Config, Flask, Request
 
 from flinttrade_core import auth_routes, native_account_routes, operations_routes
@@ -19,6 +20,8 @@ from flinttrade_gateway.auth import gateway_bp
 from flinttrade_gateway.credentials_rotation import CredentialsRotator
 from flinttrade_gateway.native_login import establish_native_session, establish_native_sessions
 from flinttrade_gateway.registry import BrokerRegistry
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 class Forbidden:
@@ -77,7 +80,7 @@ def guarded_app(monkeypatch):
                 raise AssertionError("authority lookup before admission")
             return super().__getitem__(key)
 
-    app.config = AuthorityConfig(app.root_path, defaults=app.config)
+    monkeypatch.setattr(app, "config", AuthorityConfig(app.root_path, defaults=app.config))
     return app, forbidden
 
 
@@ -346,7 +349,7 @@ def test_real_factory_rejection_precedes_body_validation_and_observability(
                 raise AssertionError("authority lookup before admission")
             return super().__getitem__(key)
 
-    app.config = AuthorityConfig(app.root_path, defaults=app.config)
+    monkeypatch.setattr(app, "config", AuthorityConfig(app.root_path, defaults=app.config))
     monkeypatch.setattr(native_account_routes, "_pop_pending_oauth_callback", forbidden)
     monkeypatch.setattr(operations_routes, "_ditto_manager", forbidden)
     monkeypatch.setattr(operations_routes, "_quiesce_ditto_account_generation", forbidden)

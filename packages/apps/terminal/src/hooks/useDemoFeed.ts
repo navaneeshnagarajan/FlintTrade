@@ -33,7 +33,7 @@ export function useDemoFeed(): void {
     const scope = "explore:mock";
     let active = true;
 
-    const unsubscribe = mockDataEngine.onTick((ticks) => {
+    const apply = (ticks: ReturnType<typeof mockDataEngine.getSnapshot>) => {
       if (!active) return;
       try { requireCurrentMarketDataScope(scope); } catch { return; }
       for (const t of ticks) {
@@ -53,9 +53,13 @@ export function useDemoFeed(): void {
           prevClose: t.close,
         }, scope);
       }
-    });
+    };
+    const unsubscribe = mockDataEngine.onTick(apply);
 
     mockDataEngine.start(1000);
+    // Interval callbacks stay one per tick. Paint the current book now so
+    // Explore is not an empty tape until the first interval.
+    if (mockDataEngine.isRunning) apply(mockDataEngine.getSnapshot());
 
     return () => {
       active = false;

@@ -122,3 +122,19 @@ _install_local_package_paths()
 # its own, so a worker created three and whichever conftest imported last won
 # the env var; acquire_workspace() memoises, so the later callers adopt this one.
 _scratch_workspace().acquire_workspace()
+
+# Load by a private name: per-package tests may shadow the root tests package.
+def _factory_lifecycle_fixture():
+    import importlib.util
+
+    name = "_flinttrade_test_factory_lifecycle"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, _REPO_ROOT / "tests/flask_app_lifecycle.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].owned_flask_apps
+
+
+owned_flask_apps = _factory_lifecycle_fixture()
+owned_auth_state = sys.modules["_flinttrade_test_factory_lifecycle"].owned_auth_state

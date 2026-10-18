@@ -51,7 +51,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "pnpm run dev",
+    command: "pnpm exec vite --configLoader runner --host 127.0.0.1 --port 5173 --strictPort",
     port: 5173,
     reuseExistingServer: !process.env["CI"],
     timeout: 120_000,

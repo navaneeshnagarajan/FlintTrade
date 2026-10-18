@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = path.resolve(packageRoot, "..", "..", "..");
 const packageManager = JSON.parse(readFileSync(path.join(repositoryRoot, "package.json"), "utf8")).packageManager;
-const expected = /^pnpm@(\d+\.\d+\.\d+)\+/.exec(packageManager)?.[1];
+const expected = /^pnpm@(\d+\.\d+\.\d+)\+sha512\.[0-9a-f]{128}$/.exec(packageManager)?.[1];
 if (!expected) throw new Error("The repository packageManager must pin an exact pnpm version and integrity.");
 
 const npmExecPath = process.env.npm_execpath;
@@ -19,7 +19,15 @@ if (!npmExecPath || !path.isAbsolute(npmExecPath)) {
 }
 const pinnedPnpm = realpathSync(npmExecPath);
 if (!lstatSync(pinnedPnpm).isFile()) throw new Error("The invoking pnpm entrypoint is not an ordinary file.");
-const versionProbe = spawnSync(process.execPath, [pinnedPnpm, "--version"], { encoding: "utf8" });
+// pnpm 11+ reports a native executable here, not a Node script. Never
+// reinterpret it as JavaScript or fall back to a different manager on PATH.
+const javascriptEntrypoint = /\.[cm]?js$/i.test(pinnedPnpm);
+if (!javascriptEntrypoint && process.platform === "win32" && !/\.exe$/i.test(pinnedPnpm)) {
+  throw new Error("The invoking pnpm entrypoint must be JavaScript or a native Windows executable.");
+}
+const managerCommand = javascriptEntrypoint ? process.execPath : pinnedPnpm;
+const managerArguments = javascriptEntrypoint ? [pinnedPnpm] : [];
+const versionProbe = spawnSync(managerCommand, [...managerArguments, "--version"], { encoding: "utf8" });
 if (versionProbe.status !== 0 || versionProbe.stdout.trim() !== expected) {
   throw new Error(`Electron packaging requires the invoking pnpm ${expected} entrypoint.`);
 }
@@ -31,7 +39,7 @@ try {
     writeFileSync(
       runner,
       `const { spawnSync } = require("node:child_process");\n` +
-        `const result = spawnSync(process.execPath, [${JSON.stringify(pinnedPnpm)}, ...process.argv.slice(2)], { stdio: "inherit" });\n` +
+        `const result = spawnSync(${JSON.stringify(managerCommand)}, [...${JSON.stringify(managerArguments)}, ...process.argv.slice(2)], { stdio: "inherit" });\n` +
         `process.exit(result.status ?? 1);\n`,
       { mode: 0o700 },
     );

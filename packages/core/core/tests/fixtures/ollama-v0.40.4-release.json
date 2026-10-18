@@ -1,0 +1,114 @@
+{
+  "tag_name": "v0.40.4",
+  "published_at": "2026-10-12T19:00:12Z",
+  "draft": false,
+  "prerelease": false,
+  "html_url": "https://github.com/ollama/ollama/releases/tag/v0.40.4",
+  "metadata_url": "https://api.github.com/repos/ollama/ollama/releases/tags/v0.40.4",
+  "checksums_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/sha256sum.txt",
+  "checksums_sha256": "216d306cbce4a048ccbb61d808394696e17e23913bff3663c61c7167c15731e9",
+  "assets": [
+    {
+      "name": "install.ps1",
+      "size": 22627,
+      "digest": "sha256:009e74d96f3055c9b8ca59ccec348fcd94d75b5ce8a709cde4abac27f2e00615",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/install.ps1"
+    },
+    {
+      "name": "install.sh",
+      "size": 15902,
+      "digest": "sha256:25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/install.sh"
+    },
+    {
+      "name": "ollama-darwin.tgz",
+      "size": 167884528,
+      "digest": "sha256:a4ceae4b2aaf18df37ebcbfb56ba3a37a87838631112d66c2be07268693c8d58",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-darwin.tgz"
+    },
+    {
+      "name": "Ollama-darwin.zip",
+      "size": 206664588,
+      "digest": "sha256:a80be41441764333321db8ff41155b3ab5f53fcea0a4057408e602ba2b02a203",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/Ollama-darwin.zip"
+    },
+    {
+      "name": "ollama-linux-amd64-mlx.tar.zst",
+      "size": 1293458103,
+      "digest": "sha256:95e9253dd457687f82682b891dc4d454263c29f714310c4735da8245e02b6187",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-amd64-mlx.tar.zst"
+    },
+    {
+      "name": "ollama-linux-amd64-rocm.tar.zst",
+      "size": 1052269421,
+      "digest": "sha256:8551a05ee3fc3793da6c3ec8e5a6f265e3ca8a17436cc9a01bf5db67ca2e7973",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-amd64-rocm.tar.zst"
+    },
+    {
+      "name": "ollama-linux-amd64.tar.zst",
+      "size": 1436408810,
+      "digest": "sha256:15f31e9576d15a481e099b4145dba6e9f8c1f295927d6b8895300ae30ed3740a",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-amd64.tar.zst"
+    },
+    {
+      "name": "ollama-linux-arm64-jetpack5.tar.zst",
+      "size": 298494829,
+      "digest": "sha256:6b5376c82b16ea2a0e755079bb58b7229fe8ca246c37401c4fcf1064aaaff9b4",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-arm64-jetpack5.tar.zst"
+    },
+    {
+      "name": "ollama-linux-arm64-jetpack6.tar.zst",
+      "size": 270205626,
+      "digest": "sha256:554a573ac283815673efa329ecf4a9c1b6e3f0566b4ae4d98d41d1903e4f6864",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-arm64-jetpack6.tar.zst"
+    },
+    {
+      "name": "ollama-linux-arm64.tar.zst",
+      "size": 1555988008,
+      "digest": "sha256:1a314ac530d2c23bf6d2aaaf4a4aba8cc0b2a4ee8bc8fae3f3aa88bff7f7177b",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-linux-arm64.tar.zst"
+    },
+    {
+      "name": "ollama-windows-amd64-mlx.zip",
+      "size": 1403149762,
+      "digest": "sha256:f593024df3dabb10fe73d1761bd6f6280200862f24ced7c7b3d1bd0ca467d8a0",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-amd64-mlx.zip"
+    },
+    {
+      "name": "ollama-windows-amd64-rocm.zip",
+      "size": 256162326,
+      "digest": "sha256:3098b22bf167767ed7967f8621ba958dda862e88f4c894b9e561bf5b44cfb556",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-amd64-rocm.zip"
+    },
+    {
+      "name": "ollama-windows-amd64.zip",
+      "size": 1469916992,
+      "digest": "sha256:7485a1172f8527db4342a63521b9342fc466185ff0855da378cc864ecf6354cf",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-amd64.zip"
+    },
+    {
+      "name": "ollama-windows-arm64.zip",
+      "size": 210017261,
+      "digest": "sha256:1fe50fb62ddcfc5fe102322e4a35043ccbf4e821adfa4ef41eee21af0aa158a7",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-arm64.zip"
+    },
+    {
+      "name": "Ollama.dmg",
+      "size": 207403041,
+      "digest": "sha256:48705bf4f0e63cea188255445eaf2a262dab41682048c0b397bcc8a45efad131",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/Ollama.dmg"
+    },
+    {
+      "name": "OllamaSetup.exe",
+      "size": 1581967176,
+      "digest": "sha256:45fcd47d70dd047ab95736802e71a7497ef1a473a50470471fc2fb0eb90badde",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/OllamaSetup.exe"
+    },
+    {
+      "name": "sha256sum.txt",
+      "size": 1472,
+      "digest": "sha256:216d306cbce4a048ccbb61d808394696e17e23913bff3663c61c7167c15731e9",
+      "browser_download_url": "https://github.com/ollama/ollama/releases/download/v0.40.4/sha256sum.txt"
+    }
+  ]
+}

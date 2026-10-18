@@ -11,10 +11,12 @@
 # unless -Purge is explicitly confirmed. The platform-default lineage root is
 # removed last and only after all earlier data targets were removed. Ambient
 # state-root overrides are never recursive-deletion authority.
+# Destructive purge is currently refused until a verified protection-preserving
+# maintenance controller is available; -DryRun still lists the proposed scope.
 
 param(
-    [switch]$Purge = ($env:FLINTTRADE_UNINSTALL_PURGE -eq "1"),
-    [switch]$Yes = ($env:FLINTTRADE_UNINSTALL_YES -eq "1"),
+    [switch]$Purge,
+    [switch]$Yes,
     [switch]$DryRun = ($env:FLINTTRADE_UNINSTALL_DRY_RUN -eq "1")
 )
 
@@ -115,6 +117,26 @@ $WorkspaceDir = if ($env:FLINTTRADE_WORKSPACE_DIR) {
     $DefaultWorkspace
 }
 $InstallationStateRoot = $DefaultInstallationState
+
+# One installed helper owns the complete transaction and exclusion. Never
+# continue into a PowerShell deletion loop, even after a zero helper exit.
+if ($Purge -and -not $DryRun) {
+    if (-not $Yes) {
+        Warn "Purge refused: explicit -Purge -Yes confirmation required; data and receipts retained."
+        exit 1
+    }
+    foreach ($candidate in @(
+        (Join-Path $SourceRoot "FlintTrade\.venv\Scripts\python.exe"),
+        (Join-Path $SourceBuildRoot "FlintTrade\.venv\Scripts\python.exe")
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            & $candidate -m flinttrade_core.workspace_maintenance purge --workspace $WorkspaceDir --yes
+            exit $LASTEXITCODE
+        }
+    }
+    Warn "Purge refused: installed maintenance helper and safe policy unavailable; all data, shell and receipts retained."
+    exit 1
+}
 
 # A relative override otherwise resolves against the uninstaller's own working
 # directory at every later use, so the path that gets printed is not necessarily
@@ -515,29 +537,17 @@ function Stop-ProvenShellProcesses($Record) {
     foreach ($process in @(Get-Process -Name "FlintTrade" -ErrorAction SilentlyContinue)) {
         try {
             $processPath = (Resolve-Path -LiteralPath ([string]$process.Path) -ErrorAction Stop).Path
-            $processIdentity = $process.StartTime.ToFileTimeUtc()
         } catch {
-            continue
+            throw "Uninstall refused: shell identity is uncertain; processes and receipts retained."
         }
         if (-not $expectedPath.Equals($processPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($DryRun) {
-            Say "[dry-run] would stop identity-proven FlintTrade shell process $($process.Id) at $processPath"
+            Say "[dry-run] running shell requires verified safe-maintenance before uninstall"
             continue
         }
-        try {
-            $current = Get-Process -Id $process.Id -ErrorAction Stop
-            $currentPath = (Resolve-Path -LiteralPath ([string]$current.Path) -ErrorAction Stop).Path
-            $currentIdentity = $current.StartTime.ToFileTimeUtc()
-            if ($currentIdentity -ne $processIdentity -or
-                -not $expectedPath.Equals($currentPath, [StringComparison]::OrdinalIgnoreCase)) {
-                continue
-            }
-            Say "Stopping identity-proven FlintTrade shell process $($process.Id) at $processPath"
-            Stop-Process -Id $process.Id -Force -ErrorAction Stop
-        } catch {
-            Warn "Could not stop the identity-proven FlintTrade shell process $($process.Id): $($_.Exception.Message)"
-            $script:FailedAny = $true
-        }
+        # A path/start-time snapshot does not retain the Windows process handle
+        # or authorise abandoning protection. Never signal a reusable PID here.
+        throw "Uninstall refused: running shell requires verified safe-maintenance; processes and receipts retained."
     }
 }
 
@@ -1075,61 +1085,7 @@ if ($Purge) {
     } elseif ($DryRun) {
         $purgeTargets | ForEach-Object { Say "[dry-run] would DELETE FlintTrade data at $_" }
     } else {
-        # Always print the exact resolved paths before anything is deleted —
-        # including under -Yes. For an upgraded install the pre-workspace
-        # directories below are real trading state, not a cache.
-        Say "About to DELETE the FlintTrade workspace, Electron profile, managed source/tools,"
-        Say "source-build checkout, pre-workspace storage, the whole .flinttrade managed root"
-        Say "and legacy desktop data listed below:"
-        $purgeTargets | ForEach-Object { Say "  $_" }
-        Say ".flinttrade itself also holds files written directly at its top level - the TOTP"
-        Say "secret store and install key, shortcuts, the trade journal and its screenshots,"
-        Say "quantity-freeze and action-centre stores, the watchlist, saved presets, and your own"
-        Say "flows\, models\ and strategies\ - so purging it is real trading state, not just the"
-        Say "subdirectories named above."
-        Say "Any .flinttrade\data, .flinttrade\archive or .flinttrade\sandbox path above is"
-        Say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
-        Say "audit chain and the encrypted broker-credential vault live there."
-        Say "The installation identity and consumed migration tombstones are listed last and"
-        Say "are retained by ordinary uninstall; confirmed purge removes that lineage last."
-        $proceed = $Yes
-        if (-not $proceed) {
-            try {
-                $answer = Read-Host "This is irreversible. Type 'purge' to continue"
-            } catch {
-                $answer = ""
-            }
-            $proceed = ($answer -eq "purge")
-        }
-        if ($proceed) {
-            Say "Purging explicitly confirmed FlintTrade data:"
-            $earlierPurgeTargets = @()
-            foreach ($target in $purgeTargets) {
-                Say "  $target"
-                $isLineage = Test-SameResolvedPath $target $InstallationStateRoot
-                if ($isLineage) {
-                    if ($script:FailedAny -or -not (Test-EarlierPurgeTargetsAbsent $earlierPurgeTargets)) {
-                        Say "Keeping installation lineage at $target because an earlier data target could not be removed."
-                        $script:DataRetainedAny = $true
-                        continue
-                    }
-                }
-                Remove-IfExists $target
-                if (Test-PurgeTargetPresent $target) {
-                    Warn "Could not verify removal of $target; retaining installation lineage."
-                    $script:FailedAny = $true
-                    $script:DataRetainedAny = $true
-                }
-                if (-not $isLineage) { $earlierPurgeTargets += $target }
-            }
-            if (-not $script:FailedAny) {
-                $script:PurgeCompleted = $true
-                $script:PurgedDataAny = $true
-            }
-        } else {
-            Say "Purge cancelled; FlintTrade data kept."
-            $script:DataRetainedAny = $true
-        }
+        throw "Purge requires the installed held-exclusion maintenance helper; PowerShell deletion is disabled."
     }
 } elseif ($dataTargets) {
     $script:DataRetainedAny = $true

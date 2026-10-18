@@ -28,6 +28,8 @@ from .service_connection_store import (
     ServiceConnectionStore,
 )
 from .service_connection_transactions import MAX_MUTATION_BYTES, uuid_text
+from .service_oauth_routes import install_oauth_routes
+from .service_task_routes import install_task_routes
 
 SERVICE_CONNECTION_COLLECTION_PATH = "/v1/services/connections"
 SERVICE_CONNECTION_COLLECTION_TEMPLATE = "/ft-api/v1/services/connections"
@@ -46,6 +48,8 @@ service_connection_bp = Blueprint(
     url_prefix=SERVICE_CONNECTION_COLLECTION_PATH,
 )
 logger = logging.getLogger("flinttrade.service_connections")
+install_task_routes(service_connection_bp)
+install_oauth_routes(service_connection_bp)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +214,15 @@ def guard_service_connection_family() -> tuple[Response, int] | None:
         proof = _ConnectionProof("invalid" if has_carrier else "anonymous")
         _record_attempt("rejected", proof)
         return _response("forbidden", 403)
+    if (
+        request.path
+        in {
+            SERVICE_CONNECTION_COLLECTION_PATH + "/oauth/callback",
+            SERVICE_CONNECTION_COLLECTION_PATH + "/oauth/launch",
+        }
+        and request.method == "GET"
+    ):
+        return None  # PKCE/state + HttpOnly browser binding; cannot install credentials.
     proof, denial = _authenticate_connection_request()
     g.service_connection_proof = proof
     if denial is not None:
@@ -346,7 +359,13 @@ def list_service_connections() -> tuple[Response, int] | Response:
         snapshot = _store().read_snapshot()
     except Exception:
         return _response("service_connection_store_unavailable", 503)
-    response = jsonify({"connections": [connection.to_public_dict() for connection in snapshot.connections]})
+    body = {"connections": [connection.to_public_dict() for connection in snapshot.connections]}
+    oauth = getattr(current_app.config.get("SERVICE_CONNECTION_STORE"), "oauth", None)
+    if oauth is not None:
+        capabilities = oauth.capabilities()
+        if capabilities["configured"] or capabilities.get("desktop_activation"):
+            body["oauth"] = capabilities
+    response = jsonify(body)
     response.headers["ETag"] = snapshot.etag
     return response
 

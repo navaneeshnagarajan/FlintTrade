@@ -58,8 +58,8 @@ export function instrumentContext(instrument: WsInstrument): FlintInstrumentCont
  * Recover the FlintTrade instrument from a context, or null when the
  * context is not an instrument (or carries no usable identifier).
  * Contexts without the `exchange` extension (from a future external FDC3
- * source) fall back to NSE — the venue an Indian ticker most plausibly
- * means — rather than being dropped.
+ * source) are refused: a ticker or MIC alone cannot determine a segment.
+ * Selection linking must not manufacture execution identity.
  */
 export function instrumentFromContext(context: Context | null): WsInstrument | null {
   if (!context || context.type !== INSTRUMENT_CONTEXT_TYPE) return null;
@@ -67,8 +67,6 @@ export function instrumentFromContext(context: Context | null): WsInstrument | n
   const ticker = typeof id?.ticker === "string" ? id.ticker.trim() : "";
   if (!ticker) return null;
   const exchange = (context as FlintInstrumentContext).exchange;
-  return {
-    symbol: ticker,
-    exchange: typeof exchange === "string" && exchange ? exchange : "NSE",
-  };
+  if (typeof exchange !== "string" || !exchange.trim() || exchange !== exchange.trim()) return null;
+  return { symbol: ticker, exchange };
 }

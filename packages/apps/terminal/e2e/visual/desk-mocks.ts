@@ -1,5 +1,24 @@
 import type { SyntheticFixtureRegistry } from "../fixture-registry";
 import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes } from "../fixture-registry";
+import systemDiagnostics from "./system-diagnostics.normal-factory.json" with { type: "json" };
+
+/** SystemStatusBar's shared query: one completed initial body, with only the
+ * existing StrictMode aborted-start allowance. No poll or failed-fetch budget.
+ * Captured from create_flask_app's real diagnostics route with unavailable host
+ * collectors; unknown capacity and partial coverage are not healthy zeros. */
+export function registerSystemDiagnosticsRead(registry: SyntheticFixtureRegistry, token: string): void {
+  registry.register({
+    name: "global status normal-factory diagnostic snapshot",
+    method: "GET", path: "/ft-api/api/v1/system/diagnostics",
+    readPhase: "startup", expectedCalls: 1,
+    handler: (request) => {
+      expect(request.headers()["authorization"]).toBe(`Bearer ${token}`);
+      expect(request.headers()["x-api-key"]).toBeUndefined();
+      expect(request.postData()).toBeNull();
+      return { json: systemDiagnostics };
+    },
+  });
+}
 
 const LOOSE = { minimum: 0, maximum: 32 } as const;
 
@@ -60,7 +79,9 @@ export function registerExampleDeskReads(
 ): void {
   registerOperatorStatusProbes(registry, {
     expectedCalls: { minimum: 1, maximum: 16 },
-    laya: options.laya,
+    // Example is Explore: paint its Practice sidecar, never grant Live readiness.
+    laya: options.laya === undefined ? undefined : "down",
+    layaPractice: options.laya,
   });
   registerExploreAdvisorStatusProbe(registry, { expectedCalls: { minimum: 1, maximum: 16 } });
   registerAuthStatus(registry, { ...AUTH_READY }, "Mode menu Live-arm status");

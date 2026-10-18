@@ -73,14 +73,15 @@ vi.mock("@/hooks/useOrders", () => ({
   useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false }),
 }));
 
-const mockMode = vi.hoisted(() => ({ current: "practice" }));
+// Setup imports the real account/incident scope readers. Keep their mode and
+// the widget's mode on the same production store; a module mock splits them.
+import { useModeStore, type AppMode } from "@/stores/modeStore";
 
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: Object.assign(
-    (selector: (s: { mode: string }) => unknown) => selector({ mode: mockMode.current }),
-    { getState: () => ({ mode: mockMode.current }) },
-  ),
-}));
+const selectedMode = {
+  set current(mode: AppMode) {
+    act(() => useModeStore.setState({ mode }));
+  },
+};
 
 vi.mock("@/lib/market", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/market")>()),
@@ -102,6 +103,7 @@ vi.mock("jotai", async () => {
 
 import OrderPadWidget from "../OrderPadWidget";
 import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
+import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
@@ -129,10 +131,10 @@ async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell
 describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     mockOpenPositions.rows = [];
     mockOpenOrders.rows = [];
-    useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
@@ -276,6 +278,7 @@ describe("OrderPadWidget", () => {
     await waitFor(() => expect(screen.getByDisplayValue("INFY")).toBeInTheDocument());
     expect(mockPlaceOrder).not.toHaveBeenCalled();
     expect(screen.queryByText(/No match for INFY/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
   });
 
   it("Enter shows no match and does not submit the previous symbol", async () => {
@@ -295,6 +298,54 @@ describe("OrderPadWidget", () => {
     expect(await screen.findByText("No match for ZZZNOT")).toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("ZZZNOT")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+  });
+
+  it("Practice Buy after typing SBIN opens the review and does not place yet", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "SBIN", exchange: "NSE" }]);
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Search symbol…"), { target: { value: "SBIN" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const review = await screen.findByRole("dialog", { name: /review practice order/i });
+    expect(within(review).getByText(/SBIN/)).toBeInTheDocument();
+    expect(screen.queryByText(/No match for SBIN/)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(within(review).getByRole("button", { name: /confirm simulated practice order/i }));
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "SBIN", exchange: "NSE", action: "BUY" }),
+      expect.objectContaining({ mode: "practice" }),
+    ));
+  });
+
+  it("refuses a quantity above the NSE ceiling before opening a review", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    const qty = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: "9999999" } });
+    expect(screen.queryByText(/exceeds NSE limit/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quantity 9999999 exceeds NSE limit of 50000",
+    );
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the Laya Down notice on the Practice pad without blocking the review", async () => {
+    useOperatorSignalStore.setState({ layaPracticeStatus: "down" });
+    render(<OrderPadWidget {...defaultProps} />);
+
+    expect(screen.getByTestId("laya-down-notice")).toHaveTextContent(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.getByTestId("laya-down-notice")).toBeInTheDocument();
   });
 
   it("has order type pills (MARKET, LIMIT, SL, SL-M)", () => {
@@ -430,7 +481,7 @@ describe("OrderPadWidget", () => {
     );
   });
 
-  it("shows Laya denied under the confirm control and leaves it off", async () => {
+  it("closes the review and shows a Laya denial on the pad", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
       reason: "Example cannot place orders.",
@@ -440,15 +491,16 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const confirm = await screen.findByRole("button", {
+    fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|example) order/i,
-    });
-    fireEvent.click(confirm);
+    }));
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
     expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
-    expect(confirm).toBeDisabled();
+    expect(denied.closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
     expect(denied.textContent).not.toMatch(/llm/i);
   });
@@ -473,14 +525,17 @@ describe("OrderPadWidget", () => {
     expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
     expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
-    expect(confirm).toBeDisabled();
+    expect(screen.getByTestId("laya-denied").closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
 
     act(() => {
-      useOperatorSignalStore.setState({ decisionStatus: "ready" });
+      useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     });
 
     expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|example) order/i })).toBeEnabled();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
   });
 
   it("shows a clamp and does not place until Place N is clicked", async () => {
@@ -572,7 +627,7 @@ describe("OrderPadWidget", () => {
   });
 
   it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     useOperatorSignalStore.setState({ decisionStatus: "down" });
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
@@ -619,13 +674,44 @@ describe("OrderPadWidget", () => {
     );
     const acknowledgement = await screen.findByRole("alert");
     expect(acknowledgement).toHaveTextContent(
-      "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+    );
+    expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
+  });
+
+  it("uses the shared requested exit line on Practice while Laya is Down", async () => {
+    selectedMode.current = "practice";
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE-PRACTICE" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
+
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 4 }),
+      { mode: "practice" },
+      { exit: true },
+    );
+    const acknowledgement = await screen.findByRole("alert");
+    expect(acknowledgement).toHaveTextContent(
+      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
     );
     expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
   });
 
   it("keeps Close reduce-only on a new explicit request, never offering Retry after a lost response", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
       exchange: "NSE",
@@ -795,7 +881,7 @@ describe("OrderPadWidget", () => {
 describe("OrderPadWidget options premium prefill", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   function renderOptionsPad(): void {
@@ -821,16 +907,16 @@ describe("OrderPadWidget options premium prefill", () => {
   });
 
   it("shows the sandbox premium hint on options exchanges in Practice", () => {
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
     expect(screen.getByText("Option Premium")).toBeInTheDocument();
-    expect(screen.getByText(/Sandbox premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Practice premium ₹623.45/)).toBeInTheDocument();
   });
 
   it("labels Explore option premium as sample, not Live", () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
@@ -866,7 +952,7 @@ describe("OrderPadWidget options premium prefill", () => {
 describe("OrderPadWidget F&O lot-size validation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -899,7 +985,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const messages = await screen.findAllByText(/positive multiple of the lot size \(75\)/i);
+    const messages = await screen.findAllByText("Quantity must be a multiple of the lot size (75).");
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -910,7 +996,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     const messages = await screen.findAllByText(refusal);
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
@@ -965,7 +1051,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(qtyInput).toHaveValue(65);
     fireEvent.change(qtyInput, { target: { value: "75" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    expect((await screen.findAllByText(/positive multiple of the lot size \(65\)/i)).length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("Quantity must be a multiple of the lot size (65).")).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -976,7 +1062,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockGetSymbol.mockRejectedValue(new Error("selected contract unavailable"));
     renderNfoPad();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -993,9 +1079,148 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     renderNfoPad();
     await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't in the instrument master, so this order can't be sized.";
+    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Lot: 75")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a NIFTY lot-multiple refusal when quantity changes, then opens the review", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const lotMessage = "Quantity must be a multiple of the lot size (65).";
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+    fireEvent.change(qtyInput, { target: { value: "130" } });
+    await waitFor(() => expect(screen.queryByText(lotMessage)).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a freeze refusal when quantity returns to the freeze maximum", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const freezeMessage = "Max 3510 per order for NIFTY-OCT2026-FUT. Place smaller orders.";
+    fireEvent.change(qtyInput, { target: { value: "3575" } });
+    expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(freezeMessage);
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+
+    fireEvent.change(qtyInput, { target: { value: "3510" } });
+    await waitFor(() => expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("clears a quantity-check refusal when the instrument changes", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05, freezeQty: 3510,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 65");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const lotMessage = "Quantity must be a multiple of the lot size (65).";
+    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "test-panel",
+          nonce: "instrument-change",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    await waitFor(() => expect(screen.queryByText(lotMessage)).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the freeze-quantity refusal on the pad and does not open a review", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot: 75");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("uses the selected contract freeze quantity ahead of the index table", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "BANKNIFTY-OCT2026-FUT", name: "BANKNIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 30, tick_size: 0.05, freezeQty: 90,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "BANKNIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot: 30");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "120" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Max 90 per order for BANKNIFTY-OCT2026-FUT. Place smaller orders.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the same freeze refusal under Quantity in Live", async () => {
+    selectedMode.current = "live";
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot: 75");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    expect(screen.queryByText(/Max 3510 per order/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+    );
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -1047,11 +1272,11 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
       symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
     }));
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   it("opens the sample review from Explore Sample Buy without requiring a broker", async () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
     expect(screen.getByRole("button", { name: /example buy/i })).toBeInTheDocument();
@@ -1064,7 +1289,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
   });
 
   it("confirms an Explore Sample Buy on the paper path, never as a live order", async () => {
-    mockMode.current = "explore";
+    selectedMode.current = "explore";
     mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
     render(<OrderPadWidget {...defaultProps} />);
 
@@ -1127,14 +1352,14 @@ describe("OrderPadWidget shared pre-trade guards", () => {
 // ---------------------------------------------------------------------------
 describe("OrderPadWidget Practice review/confirm stage", () => {
   beforeEach(() => {
-    useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "PRAC001" });
     mockGetSymbol.mockReset();
     mockGetSymbol.mockImplementation(async (symbol, exchange) => ({
       symbol, name: symbol, exchange, instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
     }));
-    mockMode.current = "practice";
+    selectedMode.current = "practice";
   });
 
   it("renders distinct Practice review stage with exact details and simulated/no-broker copy before any placement", async () => {
@@ -1221,7 +1446,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     await screen.findByRole("dialog", { name: /review practice order/i });
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
 
     await vi.waitFor(() => {
@@ -1236,11 +1461,36 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
 
-    mockMode.current = "live";
-    fireEvent.click(confirm);
+    act(() => {
+      useModeStore.setState({ mode: "live" });
+      // The review is still committed: confirm must read the store before
+      // React renders the subscription update and removes this button.
+      expect(confirm).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /review practice order/i })).toBeVisible();
+      fireEvent.click(confirm);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/mode changed/i);
+    expect(screen.getByRole("alert").closest("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("closes the review and shows a placement mode mismatch on the pad", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderPreflightRefusal(
+      "Order blocked: mode changed from Practice to Live before submission.",
+    ));
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /confirm simulated practice order/i }));
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Order blocked: mode changed from Practice to Live before submission.");
+    expect(alert.closest("[role='dialog']")).toBeNull();
   });
 
   it("pins Practice authority into placeOrder so a mid-flight mode flip cannot retarget Live", async () => {
@@ -1259,7 +1509,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
       { mode: "practice" },
     );
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     await act(async () => {
       resolveOrder({ orderId: "PRAC-PIN" });
       await Promise.resolve();
@@ -1273,7 +1523,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     await screen.findByRole("dialog", { name: /review practice order/i });
 
-    mockMode.current = "live";
+    selectedMode.current = "live";
     view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
     await vi.waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
@@ -1306,7 +1556,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
   });
 
   it("leaves the existing Live placement behaviour untouched and never opens Practice review", async () => {
-    mockMode.current = "live";
+    selectedMode.current = "live";
     render(<OrderPadWidget {...defaultProps} />);
 
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));

@@ -83,13 +83,51 @@ class ManagedOllamaAdmission:
     digest: str
 
 
-_OLLAMA_VERSION = "v0.35.0"
+_OLLAMA_VERSION = "v0.40.4"
 _OLLAMA_SERVER_VERSION = _OLLAMA_VERSION.removeprefix("v")
-# v0.32.0 stays so an install of the previous pin can roll back one release.
-# v0.31.2 remains the older rollback.
-_OLLAMA_ROLLBACK_VERSIONS = ("v0.32.0", "v0.31.2")
+# Keep every previously trusted release for existing active/rollback state.
+# An explicit update still retains only its one previous installed release.
+_OLLAMA_ROLLBACK_VERSIONS = ("v0.35.0", "v0.32.0", "v0.31.2")
 _LIFECYCLE_LOCK_NAME = ".ollama-lifecycle.lock"
 _ASSETS_BY_VERSION: dict[str, dict[tuple[str, str], tuple[str, str, int, int]]] = {
+    "v0.40.4": {
+        ("darwin", "arm64"): (
+            "ollama-darwin.tgz",
+            "a4ceae4b2aaf18df37ebcbfb56ba3a37a87838631112d66c2be07268693c8d58",
+            167_884_528,
+            1024 * 1024 * 1024,
+        ),
+        ("darwin", "x86_64"): (
+            "ollama-darwin.tgz",
+            "a4ceae4b2aaf18df37ebcbfb56ba3a37a87838631112d66c2be07268693c8d58",
+            167_884_528,
+            1024 * 1024 * 1024,
+        ),
+        ("linux", "x86_64"): (
+            "ollama-linux-amd64.tar.zst",
+            "15f31e9576d15a481e099b4145dba6e9f8c1f295927d6b8895300ae30ed3740a",
+            1_436_408_810,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64"): (
+            "ollama-linux-arm64.tar.zst",
+            "1a314ac530d2c23bf6d2aaaf4a4aba8cc0b2a4ee8bc8fae3f3aa88bff7f7177b",
+            1_555_988_008,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "x86_64"): (
+            "ollama-windows-amd64.zip",
+            "7485a1172f8527db4342a63521b9342fc466185ff0855da378cc864ecf6354cf",
+            1_469_916_992,
+            6 * 1024 * 1024 * 1024,
+        ),
+        ("windows", "arm64"): (
+            "ollama-windows-arm64.zip",
+            "1fe50fb62ddcfc5fe102322e4a35043ccbf4e821adfa4ef41eee21af0aa158a7",
+            210_017_261,
+            512 * 1024 * 1024,
+        ),
+    },
     "v0.35.0": {
         ("darwin", "arm64"): (
             "ollama-darwin.tgz",
@@ -209,6 +247,26 @@ _ACCELERATOR_ASSETS_BY_VERSION: dict[
     str,
     dict[tuple[str, str, str], tuple[str, str, int, int]],
 ] = {
+    "v0.40.4": {
+        ("linux", "x86_64", "rocm"): (
+            "ollama-linux-amd64-rocm.tar.zst",
+            "8551a05ee3fc3793da6c3ec8e5a6f265e3ca8a17436cc9a01bf5db67ca2e7973",
+            1_052_269_421,
+            5 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack5"): (
+            "ollama-linux-arm64-jetpack5.tar.zst",
+            "6b5376c82b16ea2a0e755079bb58b7229fe8ca246c37401c4fcf1064aaaff9b4",
+            298_494_829,
+            2 * 1024 * 1024 * 1024,
+        ),
+        ("linux", "arm64", "jetpack6"): (
+            "ollama-linux-arm64-jetpack6.tar.zst",
+            "554a573ac283815673efa329ecf4a9c1b6e3f0566b4ae4d98d41d1903e4f6864",
+            270_205_626,
+            2 * 1024 * 1024 * 1024,
+        ),
+    },
     "v0.35.0": {
         ("linux", "x86_64", "rocm"): (
             "ollama-linux-amd64-rocm.tar.zst",

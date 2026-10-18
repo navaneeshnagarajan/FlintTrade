@@ -11,11 +11,11 @@ from flinttrade_data.sandbox_engine import RESTORED_FROM_BACKUP, SandboxEngine
 from flinttrade_engine.laya import reset_process_laya_for_tests
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.usefixtures("owned_flask_apps"), pytest.mark.unit]
 
 
 @pytest.fixture()
-def restore_app(tmp_path, monkeypatch):
+def restore_app(tmp_path, monkeypatch, owned_auth_state):
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     with patch("flinttrade_core.auth_routes._get_auth_service") as mock:
@@ -31,7 +31,7 @@ def restore_app(tmp_path, monkeypatch):
         if limiter is not None:
             limiter.enabled = False
         engine = SandboxEngine(db_path=":memory:")
-        app.config["DATA_SANDBOX_ENGINE"] = engine
+        monkeypatch.setitem(app.config, "DATA_SANDBOX_ENGINE", engine)
         with app.test_client() as client:
             yield client, svc, engine
         engine.close()

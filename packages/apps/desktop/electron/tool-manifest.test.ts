@@ -13,14 +13,14 @@ const nodeChecksums = path.join(
   "resources",
   "bootstrap",
   "checksums",
-  "node-v22.23.2-SHASUMS256.txt",
+  "node-v26.11.1-SHASUMS256.txt",
 );
 const uvChecksums = path.join(
   desktopRoot,
   "resources",
   "bootstrap",
   "checksums",
-  "uv-0.11.16-sha256.sum",
+  "uv-0.13.1-sha256.sum",
 );
 
 interface ManifestAsset {
@@ -38,9 +38,10 @@ interface ToolManifest {
       url: string;
     };
     uv: { sha256: string; url: string };
+    pnpm: { sha256: string; snapshot: string; sources: string[] };
   };
   node: { assets: Record<string, ManifestAsset>; version: string };
-  pnpm: { integrity: string; packageManager: string; version: string };
+  pnpm: { assets: Record<string, ManifestAsset>; integrity: string; packageManager: string; version: string };
   schemaVersion: number;
   uv: { assets: Record<string, ManifestAsset>; version: string };
 }
@@ -51,35 +52,60 @@ describe("bootstrap tool manifest", () => {
     const targets = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"];
 
     expect(manifest.schemaVersion).toBe(1);
-    expect(manifest.node.version).toBe("22.23.2");
-    expect(manifest.uv.version).toBe("0.11.16");
+    expect(manifest.node.version).toBe("26.11.1");
+    expect(manifest.uv.version).toBe("0.13.1");
     expect(Object.keys(manifest.node.assets).sort()).toEqual(targets);
     expect(Object.keys(manifest.uv.assets).sort()).toEqual(targets);
-    expect(manifest.pnpm).toEqual({
-      integrity: "sha512-a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-      packageManager: "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-      version: "10.34.5",
+    expect(Object.keys(manifest.pnpm.assets).sort()).toEqual(targets);
+    expect(manifest.pnpm).toMatchObject({
+      integrity: "sha512-25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9",
+      packageManager: "pnpm@12.11.2+sha512.25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9",
+      version: "12.11.2",
     });
     expect(manifest.generatedFrom).toMatchObject({
       node: {
-        sha256: "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39",
+        sha256: "75ff0c104acddb008964dd5feb88f58844b652820cb1cb01696f95031372b293",
         signature: {
-          fingerprint: "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
-          keySha256: "9c51e903b0da945fc21947fd6fce8fb4d72bc20ddf82e8f0aada694e9688447d",
-          sha256: "169f1452c14cd653247408352f1534b9f31e3d13f9c6399c3977368095e11eda",
+          fingerprint: "5BE8A3F6C8A5C01D106C0AD820B1A390B168D356",
+          keySha256: "5115095e2f8010c75da052ecb1cfb3af630e084f0f8daa93a863557b01b0f90a",
+          sha256: "671e48de01184d7b0aa3df79c7aaa373ede2374231099973643a20311ed372f9",
         },
       },
-      uv: { sha256: "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a" },
+      uv: { sha256: "8804e68a18189ed9750e6330db95c49310f320adb89e66dd429c92058f25e1e1" },
+      pnpm: { sha256: "5e7a55df966ff3301e84eccfbd3bd6fe939d07415c1f4e96eed96dfc888fae1d" },
     });
-    for (const asset of [...Object.values(manifest.node.assets), ...Object.values(manifest.uv.assets)]) {
+    for (const asset of [...Object.values(manifest.node.assets), ...Object.values(manifest.uv.assets), ...Object.values(manifest.pnpm.assets)]) {
       expect(asset.sha256).toMatch(/^[0-9a-f]{64}$/);
-      expect(asset.url).toMatch(/^https:\/\/(nodejs\.org|github\.com)\//);
+      expect(asset.url).toMatch(/^https:\/\/(nodejs\.org|github\.com|registry\.npmjs\.org)\//);
       expect(asset.executable).not.toContain("..");
     }
   });
 
+  it("labels the pnpm archive table as an app-owned derived snapshot", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(manifest.generatedFrom.pnpm.snapshot).toBe("checksums/pnpm-12.11.2-assets.json");
+    expect(manifest.generatedFrom.pnpm.sources).toEqual([
+      "https://registry.npmjs.org/pnpm/12.11.2",
+      ...["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"].map(
+        (target) => `https://registry.npmjs.org/@pnpm/exe.${target}/12.11.2`,
+      ),
+    ]);
+    expect(manifest.generatedFrom.pnpm.url).toBeUndefined();
+  });
+
   it("is reproducible from the checked-in authoritative checksum snapshots", () => {
     expect(() => execFileSync(process.execPath, [generatorPath, "--check"], { cwd: desktopRoot })).not.toThrow();
+  });
+
+  it("packages the matching checksum, signature and native manager snapshots", () => {
+    const verifier = readFileSync(path.join(desktopRoot, "scripts/verify-electron-package.mjs"), "utf8");
+    for (const resource of [
+      "checksums/node-release-key.asc",
+      "checksums/node-v26.11.1-SHASUMS256.txt",
+      "checksums/node-v26.11.1-SHASUMS256.txt.sig",
+      "checksums/uv-0.13.1-sha256.sum",
+      "checksums/pnpm-12.11.2-assets.json",
+    ]) expect(verifier).toContain(JSON.stringify(resource));
   });
 
   it.runIf(Boolean(spawnSync("gpg", ["--version"]).status === 0))(
@@ -121,6 +147,20 @@ describe("bootstrap tool manifest", () => {
     }
   });
 
+  it("rejects altered native pnpm asset provenance before generation", () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), "flinttrade-pnpm-manifest-"));
+    try {
+      const snapshot = path.join(scratch, "pnpm-assets.json");
+      const original = readFileSync(path.join(desktopRoot, "resources/bootstrap/checksums/pnpm-12.11.2-assets.json"), "utf8");
+      writeFileSync(snapshot, original.replace("package/pnpm", "outside/pnpm"));
+      const result = spawnSync(process.execPath, [generatorPath, "--check", "--pnpm-assets", snapshot], { encoding: "utf8" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("pnpm asset snapshot does not match");
+    } finally {
+      rmSync(scratch, { force: true, recursive: true });
+    }
+  });
+
   it("records each tool's real in-archive layout, which differs between uv and Node", () => {
     // A wrong `executable` path is invisible to every other gate: the download
     // still matches its pinned SHA-256, and the failure only appears after
@@ -138,6 +178,12 @@ describe("bootstrap tool manifest", () => {
       expect(asset.executable, `node/${target} must nest under the archive basename`).toMatch(
         /^node-v[\d.]+-[a-z0-9-]+\//,
       );
+    }
+
+    for (const [target, asset] of Object.entries(manifest.pnpm.assets)) {
+      expect(asset.archive).toBe("tar.gz");
+      expect(asset.executable).toBe(target === "win32-x64" ? "package/pnpm.exe" : "package/pnpm");
+      expect(asset.url).toBe(`https://registry.npmjs.org/@pnpm/exe.${target}/-/exe.${target}-12.11.2.tgz`);
     }
 
     for (const [target, asset] of Object.entries(manifest.uv.assets)) {

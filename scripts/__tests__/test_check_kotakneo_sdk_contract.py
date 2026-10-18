@@ -332,6 +332,30 @@ def test_subprocess_environment_scrubs_credentials_and_isolates_home(tmp_path: P
         assert forbidden not in environment
 
 
+def test_probe_supports_authoritative_installed_main_read_contract(tmp_path: Path) -> None:
+    """Execute the real no-network probe against the lock-selected SDK.
+
+    The probe installs its network/process audit guard before third-party
+    imports; its only transports and account values are synthetic.
+    """
+    python = checker.host_python(checker.REPO)
+    work = tmp_path / "probe"
+    work.mkdir()
+    environment = checker.build_subprocess_environment(tmp_path / "process")
+    environment.update({
+        "KOTAK_CONTRACT_ENV": str(checker.REPO / ".venv"),
+        "NEO_LOG_FILE_ENABLED": "false",
+        "NEO_LOG_LEVEL": "CRITICAL",
+    })
+    result = subprocess.run(
+        [str(python), "-I", "-c", checker._PROBE_SCRIPT],
+        cwd=work, env=environment, capture_output=True, text=True, check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    checker.validate_probe_result(checker.parse_probe_output(result.stdout), checker.TRACKS[0])
+
+
 def test_probe_keeps_sdk_cache_outside_its_no_file_working_directory(tmp_path: Path) -> None:
     track = checker.TRACKS[0]
     target = tmp_path / "sdk-env"
@@ -382,7 +406,7 @@ def test_release_contract_preserves_source_with_exact_release_dependency(tmp_pat
             gateway = Path(command[-1])
             metadata = (gateway / "pyproject.toml").read_text()
             assert '"kotakneoapi==3.0.7"' in metadata
-            assert metadata.replace('"kotakneoapi==3.0.7"', '"kotakneoapi==3.0.8"') == original_metadata
+            assert metadata.replace('"kotakneoapi==3.0.7"', f'"kotakneoapi=={checker.KOTAK_VERSION}"') == original_metadata
             assert gateway.is_relative_to(tmp_path)
             assert {path.relative_to(gateway) for path in gateway.rglob("*") if path.is_file()} == tracked
             for relative in tracked - {Path("pyproject.toml")}:
@@ -427,7 +451,7 @@ def test_release_copy_excludes_untracked_local_data_and_preserves_source(tmp_pat
     source = repo / "packages/integrations/gateway"
     (source / "src/example").mkdir(parents=True)
     _write_brokers_lock(repo)
-    metadata = '[project]\ndependencies = ["kotakneoapi==3.0.8", "flinttrade-engine"]\n'
+    metadata = f'[project]\ndependencies = ["kotakneoapi=={checker.KOTAK_VERSION}", "flinttrade-engine"]\n'
     (source / "pyproject.toml").write_text(metadata)
     code = b"VALUE = 1\n"
     (source / "src/example/__init__.py").write_bytes(code)
@@ -446,7 +470,7 @@ def test_release_copy_excludes_untracked_local_data_and_preserves_source(tmp_pat
         Path("pyproject.toml"),
         Path("src/example/__init__.py"),
     }
-    assert (target / "pyproject.toml").read_text().replace("3.0.7", "3.0.8") == metadata
+    assert (target / "pyproject.toml").read_text().replace("3.0.7", checker.KOTAK_VERSION) == metadata
     assert (target / "src/example/__init__.py").read_bytes() == code
     assert (source / "pyproject.toml").read_text() == metadata
     assert (source / "src/example/__init__.py").read_bytes() == code

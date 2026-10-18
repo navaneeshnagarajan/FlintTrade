@@ -730,7 +730,12 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
     for runner in (blocked, healthy):
         runner.scheduler = _open_time_scheduler()
         runner.client.quotes = AsyncMock(return_value=None)
-        runner.lifecycle_timeout = 0.01
+    # Only the wedged hook needs a short deadline, so the quarantine is
+    # observed promptly. The later start is a real hook on the shared
+    # executor; a 10 ms budget fails when that worker is busy even though
+    # the hook then completes.
+    blocked.lifecycle_timeout = 0.01
+    healthy.lifecycle_timeout = _LIFECYCLE_SETTLE_TIMEOUT
 
     hook_entered = threading.Event()
     release_hook = threading.Event()

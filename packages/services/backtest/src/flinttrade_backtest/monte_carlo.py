@@ -36,6 +36,15 @@ class MonteCarloConfig:
     n_simulations: int = 1000
     seed: int | None = 42
     initial_capital: float = 100_000.0
+    sampling_method: str = "permutation"
+
+    def __post_init__(self):
+        if type(self.n_simulations) is not int or self.n_simulations < 1:
+            raise ValueError("n_simulations must be a positive integer")
+        if not math.isfinite(self.initial_capital) or self.initial_capital <= 0:
+            raise ValueError("initial_capital must be finite and positive")
+        if self.sampling_method not in {"permutation", "bootstrap"}:
+            raise ValueError("Unknown sampling method")
 
 
 @dataclass
@@ -75,6 +84,8 @@ class MonteCarloResult:
     max_drawdown_p50: float = 0.0
     max_drawdown_p95: float = 0.0
     n_simulations: int = 0
+    sampling_method: str = "permutation"
+    terminal_distribution_estimated: bool = False
 
     def as_dict(self) -> dict[str, float | int]:
         """Flat dict for JSON serialisation."""
@@ -92,6 +103,8 @@ class MonteCarloResult:
             "max_drawdown_p50": self.max_drawdown_p50,
             "max_drawdown_p95": self.max_drawdown_p95,
             "n_simulations": self.n_simulations,
+            "sampling_method": self.sampling_method,
+            "terminal_distribution_estimated": self.terminal_distribution_estimated,
         }
 
 
@@ -156,9 +169,9 @@ def _simulate_path(
 class MonteCarloSimulator:
     """Run N random permutations of a trade sequence to estimate confidence intervals.
 
-    This answers the core question: "How sensitive is my strategy's performance
-    to the *order* in which trades occurred?" A strategy with consistent edge
-    will show tight percentile bands; a lucky streak will show wide bands.
+    Permutation stresses path/drawdown only: fixed trade P&L has an invariant
+    terminal sum. Terminal uncertainty is estimated only with explicit bootstrap
+    sampling (IID empirical trades; not a forecast or profitability guarantee).
 
     Adapted from raptorbt's portfolio-level Monte Carlo (marketcalls/raptorbt),
     simplified to the single-strategy trade-sequence model used in FlintTrade
@@ -190,6 +203,8 @@ class MonteCarloSimulator:
             raise ValueError("trades must be non-empty")
 
         self.trades = list(trades)
+        if not all(math.isfinite(v) for v in self.trades):
+            raise ValueError("Trade P&L must be finite")
         self.config = config or MonteCarloConfig()
         self._rng = random.Random(self.config.seed)
 
@@ -204,9 +219,11 @@ class MonteCarloSimulator:
         max_drawdowns: list[float] = []
 
         for _ in range(self.config.n_simulations):
-            final_eq, max_dd = _simulate_path(
-                self.trades, self.config.initial_capital, self._rng
-            )
+            sample = (self._rng.choices(self.trades, k=len(self.trades))
+                      if self.config.sampling_method == "bootstrap" else self.trades)
+            final_eq, max_dd = _simulate_path(sample, self.config.initial_capital, self._rng)
+            # Fixed-P&L shuffles cannot estimate terminal-profit uncertainty.
+            final_eq = self.config.initial_capital + math.fsum(sample)
             final_equities.append(final_eq)
             max_drawdowns.append(max_dd)
 
@@ -258,4 +275,6 @@ class MonteCarloSimulator:
             max_drawdown_p50=_percentile(max_drawdowns, 50.0),
             max_drawdown_p95=_percentile(max_drawdowns, 95.0),
             n_simulations=self.config.n_simulations,
+            sampling_method=self.config.sampling_method,
+            terminal_distribution_estimated=self.config.sampling_method == "bootstrap",
         )

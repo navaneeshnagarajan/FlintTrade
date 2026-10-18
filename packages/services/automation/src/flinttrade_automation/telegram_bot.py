@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -32,6 +33,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 logger = logging.getLogger("flinttrade.automation.telegram")
+
+
+class _TelegramURLRedactor(logging.Filter):
+    """Redact at HTTPX's source logger, before *any* handler sees the URL.
+
+    Permanent, stateless filtering preserves concurrent diagnostics; temporarily
+    disabling a process-wide logger around a send would race unrelated requests.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = re.sub(r"(https://api\.telegram\.org/bot)[^/\s\"']+", r"\1[redacted]", message)
+        if redacted != message:
+            record.msg, record.args = redacted, ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_TelegramURLRedactor())
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -738,6 +757,34 @@ class TelegramBot:
             logger.error("Telegram send failed: %s", type(exc).__name__)
             return False
 
+    def incident_binding(self, provider: str, recipient: str) -> str:
+        from flinttrade_core.incident_delivery import binding_digest
+        if provider != "telegram" or not self.config.enabled or not self.config.token or recipient != self.config.chat_id:
+            raise ValueError("Telegram incident destination is not configured")
+        return binding_digest(("telegram", "https://api.telegram.org", self.config.token, recipient))
+
+    def send_incident(self, provider: str, recipient: str, expected: str, title: str, body: str) -> str:
+        """One bounded send to the exact opt-in binding; API ACK is not delivery."""
+        import httpx
+
+        from flinttrade_core.incident_delivery import binding_digest
+        token, chat, enabled = self.config.token, self.config.chat_id, self.config.enabled
+        if (provider != "telegram" or not enabled or recipient != chat
+                or binding_digest(("telegram", "https://api.telegram.org", token, chat)) != expected):
+            return "revoked"
+        try:
+            response = httpx.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                 json={"chat_id": chat, "text": f"{title}. {body}"},
+                                 timeout=10, follow_redirects=False, trust_env=False)
+            data = response.json()
+            if response.status_code == 200 and data.get("ok") is True:
+                return "submitted_unobserved"
+            if data.get("ok") is False and response.status_code in (400, 401, 403, 429):
+                return "failed"
+        except Exception:
+            pass  # Never log a bot-token URL or private response body.
+        return "unknown"
+
     # ------------------------------------------------------------------
     # Proactive alert dispatcher
     # ------------------------------------------------------------------
@@ -866,6 +913,10 @@ class TelegramBot:
             logger.error("Telegram token not set — cannot start polling")
             return
         client = client or TelegramClient(self.config.token)
+        # Telegram timestamps have one-second resolution. Commands in the
+        # startup second are ambiguous and must be resent, not replayed. This
+        # fence applies to every page, even when the best-effort drain fails.
+        started_second = int(time.time())
         # A webhook would starve getUpdates; register the command menu best-effort.
         for setup, label in (
             (client.delete_webhook, "delete_webhook"),
@@ -908,6 +959,12 @@ class TelegramBot:
                 text = message.get("text")
                 if not isinstance(text, str) or not text:
                     continue
+                command, _ = parse_command(text)
+                if command in {"kill", "pause", "resume"}:
+                    sent_at = message.get("date")
+                    if type(sent_at) is not int or sent_at <= started_second:
+                        logger.warning("Telegram stale or undated state-changing command refused")
+                        continue
                 chat_id = (message.get("chat") or {}).get("id", "")
                 username = (message.get("from") or {}).get("username", "")
                 result = self.handle_command(text, chat_id, username=username)

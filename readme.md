@@ -314,7 +314,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
 | `packages/core/indicators` | Python | Pure-NumPy batch indicators (110 exports), streaming classes, Pine conversion |
 | `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
-| `packages/integrations/gateway` | Python | Five native broker adapters, safety-gated router, credential vault and local TickDispatcher; native HTTP and network capture unavailable |
+| `packages/integrations/gateway` | Python | Six native broker adapters, safety-gated router, credential vault and local TickDispatcher; native HTTP and network capture unavailable |
 | `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
 | `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis |

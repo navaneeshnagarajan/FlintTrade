@@ -9,11 +9,231 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
+
+from .backtest_scope import BacktestScopeUnavailable, backtest_run_fence, select_backtest_run
+from .model_control_auth import ModelControlDenied
 
 logger = logging.getLogger("flinttrade")
 
 backtest_bp = Blueprint("backtest", __name__, url_prefix="/api/v1")
+
+
+def _evaluation_store():
+    from flinttrade_backtest.result_store import BacktestResultStore
+
+    from .evaluation import EvaluationStore
+
+    store = current_app.config.get("EVALUATION_STORE")
+    if store is not None:
+        return store
+    results = current_app.config.get("BACKTEST_RESULT_STORE")
+    if isinstance(results, BacktestResultStore):
+        store = EvaluationStore(results.evidence_path)
+        current_app.config["EVALUATION_STORE"] = store
+    return store
+
+
+def _begin_evaluation(name, strategy, config, data):
+    import hashlib
+    import inspect
+    from dataclasses import asdict
+    from pathlib import Path
+
+    from .evaluation import digest
+
+    selection = getattr(g, "backtest_run_selection", None)
+    store = selection.evidence_store if selection is not None else _evaluation_store()
+    if selection is not None and current_app.config.get("EVALUATION_STORE") is not store:
+        raise BacktestScopeUnavailable
+    if store is None:
+        return  # Legacy embedding without storage: never a qualification receipt.
+    from flinttrade_backtest import engine, metrics, simulator
+    files = [Path(inspect.getfile(module)) for module in (engine, simulator, metrics)]
+    source = inspect.getsource(strategy)
+    data_evidence = {"digest": digest(data.bars), "source": data.source,
+                     "provenance_status": getattr(data, "provenance_status", "unqualified_legacy")}
+    snapshot = getattr(data, "manifest", None)
+    if isinstance(snapshot, dict):
+        data_evidence.update(manifest_id=snapshot["snapshot_id"], identity=snapshot["identity"],
+                             scope=snapshot["scope"], coverage=snapshot["coverage"],
+                             rights=snapshot["rights"], policy_revision=snapshot["policy"]["revision"])
+    manifest = {"schema_version": 1, "producer": "backtest", "role": "trading",
+                "data": data_evidence,
+                "strategy": {"name": name, "source_digest": hashlib.sha256(source.encode()).hexdigest()},
+                "config": asdict(config), "model": "none", "skill": "none",
+                "training_job": None,
+                "evaluator": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}}
+    with backtest_run_fence(selection) as control_scope:
+        _require_history_scope(snapshot)
+        if control_scope is not None:
+            manifest["control_scope"] = control_scope
+        g.evaluation_experiment = store.create(manifest)
+        g.evaluation_trial = store.begin(g.evaluation_experiment)
+        g.evaluation_store = store
+
+
+def _finish_evaluation(status, evidence):
+    trial = getattr(g, "evaluation_trial", None)
+    if trial and not getattr(g, "evaluation_finished", False):
+        import math
+        if "metrics" in evidence:
+            evidence = dict(evidence)
+            evidence["nonfinite_metrics"] = [key for key, value in evidence["metrics"].items() if not math.isfinite(value)]
+            evidence["metrics"] = {key: value if math.isfinite(value) else None for key, value in evidence["metrics"].items()}
+        g.evaluation_store.finish(trial, status=status, evidence=evidence)
+        g.evaluation_finished = True
+
+
+@backtest_bp.after_request
+def _evaluation_headers(response):
+    if getattr(g, "evaluation_trial", None):
+        response.headers["X-Trial-Id"] = g.evaluation_trial
+        response.headers["X-Experiment-Id"] = g.evaluation_experiment
+    return response
+
+
+@backtest_bp.get("/backtest/trials/<identity>")
+def read_evaluation_trial(identity):
+    return _read_evaluation("trial", identity)
+
+
+@backtest_bp.get("/backtest/experiments/<identity>")
+def read_evaluation_experiment(identity):
+    return _read_evaluation("experiment", identity)
+
+
+def _history_scope() -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Resolve current server authority, never a scope supplied in task JSON."""
+    from .data_contracts import validate_scope
+
+    resolver = current_app.config.get("DATA_SCOPE_RESOLVER")
+    if not callable(resolver):
+        return None, (jsonify({"status": "unavailable", "message": "Trusted data scope unavailable"}), 503)
+    try:
+        value = resolver()
+        if not isinstance(value, dict):
+            raise ValueError("Current data scope unavailable")
+        return validate_scope(value), None
+    except PermissionError:
+        return None, (jsonify({"status": "refused", "message": "Data scope not authorised"}), 403)
+    except Exception:
+        return None, (jsonify({"status": "unavailable", "message": "Trusted data scope unavailable"}), 503)
+
+
+def _require_history_scope(snapshot: Any) -> None:
+    """Retired data authority cannot publish or receive an in-flight result."""
+    if not isinstance(snapshot, dict):
+        return
+    current_scope, error = _history_scope()
+    if error is not None and error[1] == 503:
+        raise BacktestScopeUnavailable
+    if error is not None or current_scope != snapshot["scope"]:
+        raise ModelControlDenied("backtest_history_scope_changed")
+
+
+def _read_evaluation(kind, identity):
+    store = _evaluation_store()
+    if store is None:
+        return jsonify({"status": "unavailable", "message": "Evaluation store unavailable"}), 503
+    try:
+        record = getattr(store, kind)(identity)
+        experiment = record if kind == "experiment" else store.experiment(record["experiment_id"])
+        data = experiment["manifest"]["data"]
+        if isinstance(data, dict) and "manifest_id" in data:
+            scope, error = _history_scope()
+            if error is not None:
+                return error
+            if scope != data["scope"]:
+                return jsonify({"status": "refused", "message": "Data scope not authorised"}), 403
+        return jsonify({"status": "success", "data": record}), 200
+    except KeyError:
+        return jsonify({"status": "error", "message": "Unknown evidence identity"}), 404
+
+
+@backtest_bp.post("/backtest/evaluation/suites/<identity>/score")
+def score_evaluation_suite(identity):
+    store = _evaluation_store()
+    prospective = current_app.config.get("EVALUATION_PROSPECTIVE_RESOLVER")
+    if store is None or prospective is None:
+        return jsonify({"status": "unavailable", "message": "Independent prospective evidence resolver required"}), 503
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"trial_id"} or not isinstance(body["trial_id"], str):
+        return jsonify({"status": "error", "message": "Only an exact trial_id may be submitted"}), 400
+    try:
+        result = store.score_final(identity, body["trial_id"], prospective=prospective(body["trial_id"]))
+        return jsonify({"status": result["status"], "data": result}), (200 if result["status"] == "completed" else 422)
+    except (ValueError, KeyError):
+        return jsonify({"status": "refused", "message": "Frozen qualification prerequisites not satisfied"}), 422
+    except Exception:
+        logger.exception("Independent evaluation unavailable")
+        return jsonify({"status": "unknown", "message": "Read trial evidence before retrying"}), 503
+
+
+@backtest_bp.route("/backtest/training/jobs", methods=["POST"])
+def start_training_job():
+    return _version_job_command("TRAINING_JOBS", "start")
+
+
+@backtest_bp.route("/backtest/training/jobs/<identity>", methods=["GET"])
+def read_training_job(identity):
+    return _version_job_command("TRAINING_JOBS", "get", identity)
+
+
+@backtest_bp.route("/backtest/training/jobs/<identity>/cancel", methods=["POST"])
+def cancel_training_job(identity):
+    return _version_job_command("TRAINING_JOBS", "cancel", identity)
+
+
+@backtest_bp.route("/backtest/training/jobs/<identity>/reconcile", methods=["POST"])
+def reconcile_training_job(identity):
+    return _version_job_command("TRAINING_JOBS", "reconcile", identity)
+
+
+@backtest_bp.route("/backtest/adoptions", methods=["POST"])
+def adopt_artifact():
+    return _version_job_command("ARTIFACT_ACTIVATION", "adopt")
+
+
+@backtest_bp.route("/backtest/adoptions/<identity>", methods=["GET"])
+def read_adoption(identity):
+    return _version_job_command("ARTIFACT_ACTIVATION", "get", identity)
+
+
+@backtest_bp.route("/backtest/adoptions/<identity>/reconcile", methods=["POST"])
+def reconcile_adoption(identity):
+    return _version_job_command("ARTIFACT_ACTIVATION", "reconcile", identity)
+
+
+def _version_job_command(key, operation, identity=None):
+    owner = current_app.config.get(key)
+    if owner is None:
+        return jsonify({"status": "unavailable", "message": "Core authority/qualified adapter not configured"}), 503
+    body = request.get_json(silent=True) if request.method == "POST" else {}
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "JSON object required"}), 400
+    try:
+        if operation == "start":
+            if set(body) != {"request_id", "payload", "lineage"} or not isinstance(body["lineage"], dict):
+                raise ValueError("Exact request/payload/lineage required")
+            result = owner.start(body["request_id"], body["payload"], lineage=body["lineage"])
+        elif operation == "adopt":
+            if set(body) - {"request_id", "run_id", "role", "candidate", "expected_generation", "kind"}:
+                raise ValueError("Authority cannot be supplied in request")
+            result = owner.adopt(body["request_id"], run_id=body["run_id"], role=body["role"],
+                candidate=body["candidate"], expected_generation=body["expected_generation"], kind=body.get("kind", "adopt"))
+        else:
+            if body:
+                raise ValueError("No replacement scope permitted")
+            result = getattr(owner, operation)(identity)
+    except KeyError:
+        return jsonify({"status": "error", "message": "Missing or unknown identity"}), 404
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid or unsupported command"}), 400
+    except Exception:
+        logger.exception("Version/job owner failed")
+        return jsonify({"status": "error", "message": "Outcome unavailable; reconcile before retry"}), 503
+    return jsonify({"status": "success", "data": result}), (200 if operation == "get" else 202)
 
 
 def _load_backtest_engine() -> tuple[Any, Any, Any, Any]:
@@ -133,6 +353,52 @@ def _run_registry_backtest(strategy_cls: Any, config: Any, bars: list[dict[str, 
     )
 
 
+def _validate_manifest_request(body: dict[str, Any]) -> None:
+    """Require an exact snapshot token and explicit, non-authoritative selectors."""
+    import re
+
+    allowed = {"data_manifest_id", "symbol", "exchange", "interval", "start_date", "end_date",
+               "strategy", "initial_capital", "position_size_pct", "run_id"}
+    if set(body) - allowed:
+        raise ValueError("Unsupported manifest request fields")
+    identity = body.get("data_manifest_id")
+    if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
+        raise ValueError("Canonical history manifest identity required")
+    for key in ("symbol", "exchange", "interval", "strategy"):
+        value = body.get(key)
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError("Explicit canonical manifest selectors required")
+    for key in ("start_date", "end_date"):
+        if key in body and not isinstance(body[key], str):
+            raise ValueError("Manifest dates must be strings")
+
+
+def _manifest_date_range(body: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str]:
+    """Match the whole immutable input; never relabel or silently slice its bars.
+
+    Optional date selectors describe the first/last observed UTC date. The
+    manifest's versioned session calendar remains the coverage authority.
+    """
+    from .data_contracts import timestamp
+
+    identity = snapshot["identity"]
+    if body["symbol"] != identity["instrument_id"] or body["exchange"] != identity["venue"]:
+        raise ValueError("Manifest instrument or venue does not match request")
+    interval = body["interval"]
+    unit = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(interval[-1:])
+    seconds = identity["interval_seconds"]
+    # Compare to the canonical server-owned magnitude, never regex-match or
+    # convert an arbitrarily long client digit string to an integer.
+    if unit is None or seconds % unit or interval[:-1] != str(seconds // unit):
+        raise ValueError("Manifest interval does not match request")
+    dates = (timestamp(snapshot["bars"][0]["timestamp"]).date().isoformat(),
+             timestamp(snapshot["bars"][-1]["timestamp"]).date().isoformat())
+    for key, observed in zip(("start_date", "end_date"), dates):
+        if body.get(key, "") not in ("", observed):
+            raise ValueError("Manifest date selection must describe the complete snapshot")
+    return dates
+
+
 @backtest_bp.route("/backtest/run", methods=["POST"])
 def backtest_run() -> tuple[Any, int]:
     """Run a backtest for a given symbol and strategy.
@@ -146,6 +412,13 @@ def backtest_run() -> tuple[Any, int]:
         strategy (str): Strategy name — must be a key in BUILTIN_STRATEGIES.
         initial_capital (float, optional): Starting capital (default 1 000 000).
         position_size_pct (float, optional): Position size as % of capital (default 10).
+        data_manifest_id (str, optional): Exact canonical history snapshot. This
+            requires explicit matching instrument/venue/interval and server-owned
+            data scope. Supplied dates must match its full observed UTC date range;
+            omitting dates uses the whole snapshot. No legacy or remote fallback.
+        run_id (str, optional): Exact existing run selector. A current full session
+            and explicit evaluation-read access are required; the server derives
+            immutable control scope. This grants no sealed scoring or activation.
 
     Returns:
         JSON with ``status`` and ``data`` containing ``trades``,
@@ -162,7 +435,30 @@ def backtest_run() -> tuple[Any, int]:
         logger.exception("Backtest engine load error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "JSON object required"}), 400
+    try:
+        g.backtest_run_selection = select_backtest_run(body)
+    except ModelControlDenied:
+        return jsonify(status="refused", code="backtest_run_scope_refused"), 403
+    except (ValueError, KeyError, TypeError):
+        return jsonify(status="error", code="backtest_run_scope_invalid"), 400
+    except Exception:
+        return jsonify(status="unavailable", code="backtest_run_scope_unavailable"), 503
+    if "data_manifest_id" in body:
+        try:
+            _validate_manifest_request(body)
+        except ValueError as exc:
+            message = "Invalid manifest request"
+            for public_message in (
+                "Unsupported manifest request fields", "Canonical history manifest identity required",
+                "Explicit canonical manifest selectors required", "Manifest dates must be strings",
+            ):
+                if exc.args == (public_message,):
+                    message = public_message
+                    break
+            return jsonify({"status": "error", "message": message}), 400
     symbol: str = body.get("symbol", "").strip()
     exchange: str = body.get("exchange", "NSE").strip()
     interval: str = body.get("interval", "5m").strip()
@@ -197,8 +493,24 @@ def backtest_run() -> tuple[Any, int]:
         ), 400
 
     try:
-        dc = DataConnector()
-        data_result = dc.load(symbol, exchange, interval, start_date, end_date)
+        connector_factory = current_app.config.get("BACKTEST_DATA_CONNECTOR_FACTORY", DataConnector)
+        dc = connector_factory()
+        if "data_manifest_id" in body:
+            scope, error = _history_scope()
+            if error is not None:
+                return error
+            data_result = dc.load_manifest(body["data_manifest_id"], scope=scope)
+            if data_result.success:
+                try:
+                    snapshot = data_result.manifest
+                    if (not isinstance(snapshot, dict) or snapshot.get("snapshot_id") != body["data_manifest_id"]
+                            or snapshot.get("scope") != scope):
+                        raise ValueError("History owner returned another input identity")
+                    start_date, end_date = _manifest_date_range(body, snapshot)
+                except (ValueError, TypeError, KeyError, IndexError):
+                    return jsonify({"status": "error", "message": "Manifest does not match the requested input"}), 400
+        else:
+            data_result = dc.load(symbol, exchange, interval, start_date, end_date)
     except Exception:
         logger.exception("Backtest data load error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -221,6 +533,16 @@ def backtest_run() -> tuple[Any, int]:
             initial_capital=initial_capital,
             position_size_pct=position_size_pct,
         )
+        _begin_evaluation(strategy_name, strategy_cls or registry_cls, config, data_result)
+    except ModelControlDenied:
+        return jsonify(status="refused", code="backtest_run_scope_refused"), 403
+    except BacktestScopeUnavailable:
+        return jsonify(status="unavailable", code="backtest_run_scope_unavailable"), 503
+    except Exception:
+        logger.exception("Backtest evidence preparation error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+    try:
         if registry_cls is not None:
             result = _run_registry_backtest(registry_cls, config, data_result.bars)
         else:
@@ -231,7 +553,13 @@ def backtest_run() -> tuple[Any, int]:
                 symbol=symbol,
             )
             result = sim.run(strategy_instance, data_result.bars)
+        if result.error:
+            _finish_evaluation("failed", {"stage": "simulation", "reason": result.error,
+                              "completed_bars": result.total_bars, "reached_trades": len(result.trades)})
+            logger.warning("Backtest did not complete: %s", result.error)
+            return jsonify({"status": "error", "message": "Backtest did not complete"}), 500
     except Exception:
+        _finish_evaluation("failed", {"stage": "simulation", "reason": "Simulation raised"})
         logger.exception("Backtest simulation error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
@@ -253,20 +581,25 @@ def backtest_run() -> tuple[Any, int]:
             "expectancy": report.trade_stats.expectancy,
         }
     except Exception as exc:
+        _finish_evaluation("failed", {"stage": "metrics", "reason": "Metrics computation failed"})
         logger.warning("Metrics computation error: %s", exc)
-        # Emit every key the frontend reads (zeroed) so the metrics card still
-        # renders instead of crashing on undefined when computation fails.
-        metrics = {
-            "total_return": result.total_return_pct,
-            "cagr": 0.0,
-            "sharpe_ratio": 0.0,
-            "sortino_ratio": 0.0,
-            "max_drawdown": 0.0,
-            "win_rate": 0.0,
-            "profit_factor": 0.0,
-            "total_trades": 0,
-            "expectancy": 0.0,
-        }
+        return jsonify({"status": "error", "message": "Backtest metrics computation failed"}), 500
+
+    try:
+        _finish_evaluation("completed", {"stage": "metrics", "metrics": metrics, "qualified": False})
+    except Exception:
+        logger.exception("Immutable evaluation evidence write failed")
+        return jsonify({"status": "error", "message": "Evaluation evidence unavailable"}), 503
+
+    # Record what actually completed, but never deliver its private result to a
+    # retired run/data permission or follow a replacement persistence owner.
+    try:
+        with backtest_run_fence(getattr(g, "backtest_run_selection", None)):
+            _require_history_scope(getattr(data_result, "manifest", None))
+    except ModelControlDenied:
+        return jsonify(status="refused", code="backtest_run_scope_refused"), 403
+    except Exception:
+        return jsonify(status="unavailable", code="backtest_run_scope_unavailable"), 503
 
     # Persist this run's metrics keyed by strategy so the overnight optimiser can
     # refine on real performance instead of an empty dict. Best-effort:
@@ -316,18 +649,27 @@ def backtest_run() -> tuple[Any, int]:
         for pt in result.equity_curve
     ]
 
-    return jsonify(
-        {
-            "status": "success",
-            "data": {
-                "trades": trades,
-                "equity_curve": equity_curve,
-                "metrics": metrics,
-                "total_bars": result.total_bars,
-                "final_equity": result.final_equity,
-            },
-        }
-    ), 200
+    # The compatibility write can block or fail after changing authority. Check
+    # again at materialisation, not merely before that I/O. Keep immutable truth.
+    try:
+        with backtest_run_fence(getattr(g, "backtest_run_selection", None)):
+            _require_history_scope(getattr(data_result, "manifest", None))
+            return jsonify(
+                {
+                    "status": "success",
+                    "data": {
+                        "trades": trades,
+                        "equity_curve": equity_curve,
+                        "metrics": metrics,
+                        "total_bars": result.total_bars,
+                        "final_equity": result.final_equity,
+                    },
+                }
+            ), 200
+    except ModelControlDenied:
+        return jsonify(status="refused", code="backtest_run_scope_refused"), 403
+    except Exception:
+        return jsonify(status="unavailable", code="backtest_run_scope_unavailable"), 503
 
 
 @backtest_bp.route("/backtest/portfolio", methods=["POST"])

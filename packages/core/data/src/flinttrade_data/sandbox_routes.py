@@ -24,6 +24,7 @@ Endpoint summary::
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import asdict
 from typing import Any
 
@@ -147,24 +148,30 @@ def get_status() -> Response:
     if err:
         return err
 
-    capital = engine.get_capital()
-    pnl = engine.get_pnl()
     try:
-        trades_count = len(engine.get_trades())
-    except Exception:  # pragma: no cover - defensive
-        trades_count = 0
+        capital = engine.get_capital()
+        pnl = engine.get_pnl()
+        trades = engine.get_trades()
+        data = {
+            "capital": capital["current"],
+            "initial_capital": capital["initial"],
+            "pnl": pnl["net"],
+            "gross_pnl": pnl["gross"],
+            "charges": pnl["charges"],
+        }
+        if not isinstance(trades, list) or any(
+            type(value) not in (int, float) or not math.isfinite(value) for value in data.values()
+        ):
+            raise ValueError("Incomplete Sandbox status")
+        data["trades_count"] = len(trades)
+    except Exception:
+        logger.warning("Sandbox status unavailable")
+        return jsonify({"status": "error", "message": "Practice status unavailable; no balance was inferred."}), 503
 
     return jsonify(
         {
             "status": "success",
-            "data": {
-                "capital": capital.get("current", 0.0),
-                "initial_capital": capital.get("initial", 0.0),
-                "pnl": pnl.get("net", pnl.get("total", 0.0)),
-                "gross_pnl": pnl.get("gross", pnl.get("total", 0.0)),
-                "charges": pnl.get("charges", 0.0),
-                "trades_count": trades_count,
-            },
+            "data": data,
         }
     )
 
@@ -373,7 +380,7 @@ def reset_sandbox() -> Response:
         {
             "status": "success",
             "data": {
-                "message": "Sandbox reset — all paper trades cleared",
+                "message": "Practice reset — all Practice trades cleared",
                 "backup": backup,
             },
         }

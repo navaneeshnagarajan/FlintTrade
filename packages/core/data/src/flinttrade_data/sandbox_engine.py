@@ -268,6 +268,8 @@ class SandboxEngine:
         db_path: str | None = None,
         initial_capital: float = _DEFAULT_CAPITAL,
         config: SandboxConfig | None = None,
+        *,
+        strict_existing: bool = False,
     ) -> None:
         use_workspace_default = (
             db_path is None and not os.getenv("SANDBOX_STATE_PATH") and not os.getenv("SANDBOX_DB_PATH")
@@ -281,12 +283,33 @@ class SandboxEngine:
         if use_workspace_default:
             self._migrate_retired_default_account()
 
-        self._conn = open_sqlite(self._db_path, durability="normal")
+        self._conn = open_sqlite(self._db_path, durability="normal", strict_existing=strict_existing)
         self._lock = threading.RLock()
         self._requested_config = _normalise_config(config or SandboxConfig(starting_capital=initial_capital))
         self._initial_capital = self._requested_config.starting_capital
         self.config = self._requested_config
-        self._init_db()
+        if strict_existing:
+            try:
+                self.verify_existing_book()
+                self.config = self._load_config()
+                self._initial_capital = self.config.starting_capital
+            except BaseException:
+                self._conn.close()
+                raise
+        else:
+            self._init_db()
+
+    def verify_existing_book(self) -> None:
+        """Refuse lost established run history; never seed or migrate it here."""
+        with self._lock:
+            tables = {row[0] for row in self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not _VALID_TABLES <= tables:
+                raise ValueError("Established sandbox schema unavailable")
+            if self._conn.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                raise ValueError("Established sandbox integrity unavailable")
+            for table in ("capital", "sandbox_config"):
+                if self._conn.execute(f"SELECT COUNT(*) FROM {table} WHERE id='default'").fetchone()[0] != 1:
+                    raise ValueError("Established sandbox identity unavailable")
 
     def _migrate_retired_default_account(self) -> None:
         """Best-effort one-shot migration of the retired DuckDB ledger."""
@@ -732,9 +755,9 @@ class SandboxEngine:
             status,
         )
         message = (
-            f"Paper order executed: {action} {quantity} {symbol} @ {price:.2f}"
+            f"Practice order filled: {action} {quantity} {symbol} @ {price:.2f}"
             if status == "COMPLETE"
-            else f"Paper {order_type} order is pending a matching live tick"
+            else f"Practice {order_type} order is pending a matching live tick"
         )
         if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
             from flinttrade_data.practice_price import last_close_fill_label
@@ -1432,7 +1455,7 @@ class SandboxEngine:
         if config_data is not None and not isinstance(config_data, dict):
             raise ValueError("'config' must be a JSON object")
         if any(not isinstance(row, dict) for row in positions_data + orders_data + trades_data + pnl_data):
-            raise ValueError("Sandbox import rows must be JSON objects")
+            raise ValueError("Practice import rows must be JSON objects")
 
         now = time.time()
         initial = float(capital_data.get("initial", self._initial_capital))

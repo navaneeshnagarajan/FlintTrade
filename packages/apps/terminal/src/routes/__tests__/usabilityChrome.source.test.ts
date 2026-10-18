@@ -14,10 +14,11 @@ function read(rel: string): string {
 
 describe("terminal usability chrome", () => {
   it("keeps loading copy on a readable text token, not shadcn muted-surface", () => {
-    const main = read("main.tsx");
+    const application = read("Application.tsx");
+    expect(read("main.tsx")).toContain('import("./Application")');
     const gate = read("routes/ProtectedRoute.tsx");
-    expect(main).toContain("text-text-muted");
-    expect(main).not.toMatch(/(?<![-\w])text-muted(?![-\w])/);
+    expect(application).toContain("text-text-muted");
+    expect(application).not.toMatch(/(?<![-\w])text-muted(?![-\w])/);
     expect(gate).toContain("text-text-muted");
     expect(gate).not.toMatch(/(?<![-\w])text-muted(?![-\w])/);
     expect(gate).toContain("bg-surface-base");

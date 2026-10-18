@@ -140,6 +140,23 @@ def _redacted_operational(entry: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _MAX_BUFFER = 500  # Keep the last 500 entries in memory
+_CONTEXT_FIELDS = ("request_id", "operation", "component", "scope", "actor_type", "measurement",
+                   "duration_ms", "status_code", "outcome", "source_id", "generation", "run_id")
+_CAPTURE_LOCK = threading.Lock()
+
+
+def _safe_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Bound and redact before retention, not only before serialisation."""
+    import math
+
+    result = {}
+    for key in ("timestamp", "level", "message", *_CONTEXT_FIELDS):
+        value = entry.get(key)
+        if type(value) is str:
+            result[key] = (redact_identity(value[:4096]) or "")[:2048]
+        elif type(value) in (int, float) and math.isfinite(value):
+            result[key] = value
+    return result
 
 
 class LogBuffer:
@@ -170,22 +187,24 @@ class LogBuffer:
                 cls._instance._seq = 0
                 cls._instance._subscribers: list[threading.Event] = []
                 cls._instance._sub_lock = threading.Lock()
+                cls._instance._data_lock = threading.RLock()
             return cls._instance
 
     # -- public API --
 
     def push(self, entry: dict[str, Any]) -> None:
         """Append a log entry and notify all SSE subscribers."""
-        self._seq += 1
-        self._buffer.append((self._seq, entry))
+        entry = _safe_entry(entry)
+        with self._data_lock:
+            self._seq += 1
+            self._buffer.append((self._seq, entry))
         with self._sub_lock:
             for event in self._subscribers:
                 event.set()
 
     def recent(self, n: int = 100) -> list[dict[str, Any]]:
         """Return the last *n* entries (oldest first, without sequence numbers)."""
-        items = list(self._buffer)
-        return [entry for _, entry in items[-n:]]
+        return self.snapshot(n)[1]
 
     def since(self, after_seq: int) -> tuple[int, list[dict[str, Any]]]:
         """Return entries with sequence > *after_seq*.
@@ -195,16 +214,21 @@ class LogBuffer:
             sequence number of the most recent entry (or *after_seq* if no
             new entries exist).
         """
-        items = [(s, e) for s, e in self._buffer if s > after_seq]
-        latest = items[-1][0] if items else after_seq
-        return latest, [e for _, e in items]
+        with self._data_lock:
+            items = [(s, e) for s, e in self._buffer if s > after_seq]
+            latest = items[-1][0] if items else after_seq
+            return latest, [dict(e) for _, e in items]
 
     @property
     def latest_seq(self) -> int:
         """The sequence number of the most recent entry, or 0 if empty."""
-        if self._buffer:
-            return self._buffer[-1][0]
-        return 0
+        with self._data_lock:
+            return self._seq
+
+    def snapshot(self, n: int = 100) -> tuple[int, list[dict[str, Any]]]:
+        """Read one atomic snapshot/cursor; subsequent updates cannot be lost."""
+        with self._data_lock:
+            return self._seq, [dict(entry) for _, entry in list(self._buffer)[-max(0, n):]]
 
     def subscribe(self) -> threading.Event:
         """Register an SSE subscriber and return its wake-up Event."""
@@ -258,7 +282,10 @@ class _BufferHandler(logging.Handler):
             msg = self.format(record)
             try:
                 parsed = json.loads(msg)
+                if not isinstance(parsed, dict):
+                    raise TypeError("not a structured log object")
                 entry: dict[str, Any] = {
+                    **{key: parsed[key] for key in _CONTEXT_FIELDS if key in parsed},
                     "timestamp": parsed.get("timestamp", _dt.now(_IST).isoformat()),
                     "level": parsed.get("level", record.levelname).upper(),
                     "message": parsed.get("event", parsed.get("message", msg)),
@@ -271,6 +298,10 @@ class _BufferHandler(logging.Handler):
                     "message": msg,
                     "request_id": "",
                 }
+            for key in _CONTEXT_FIELDS:
+                if hasattr(record, key):
+                    entry[key] = getattr(record, key)
+            entry.setdefault("component", record.name)
             self._buffer.push(entry)
         except Exception:
             # Never let log handling break the application
@@ -286,15 +317,23 @@ def install_log_capture(level: int = logging.INFO) -> LogBuffer:
     Returns:
         The singleton :class:`LogBuffer` instance.
     """
-    buf = LogBuffer()
-    handler = _BufferHandler(buf)
-    handler.setLevel(level)
-    # Minimal formatter — structlog already formats; this is a fallback
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logging.getLogger().addHandler(handler)
-    # Also capture the flinttrade logger specifically
-    logging.getLogger("flinttrade").addHandler(handler)
-    return buf
+    with _CAPTURE_LOCK:
+        buf = LogBuffer()
+        root = logging.getLogger()
+        existing = [handler for handler in root.handlers if isinstance(handler, _BufferHandler)]
+        handler = existing[0] if existing else _BufferHandler(buf)
+        handler._buffer = buf
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        if not existing:
+            root.addHandler(handler)
+        # Child logs already propagate. A second child handler duplicates them.
+        for child_handler in tuple(logging.getLogger("flinttrade").handlers):
+            if isinstance(child_handler, _BufferHandler):
+                logging.getLogger("flinttrade").removeHandler(child_handler)
+        for duplicate in existing[1:]:
+            root.removeHandler(duplicate)
+        return buf
 
 
 # ---------------------------------------------------------------------------
@@ -325,12 +364,12 @@ def stream_logs() -> Response:
 
     def generate() -> Generator[str, None, None]:
         wake = buf.subscribe()
-        # Send recent entries as a burst so the client has context
-        for entry in buf.recent(50):
-            if _operational_visible(entry):
-                yield f"data: {json.dumps(_redacted_operational(entry))}\n\n"
-        cursor = buf.latest_seq
         try:
+            # Snapshot/cursor are atomic, including close during the first burst.
+            cursor, entries = buf.snapshot(50)
+            for entry in entries:
+                if _operational_visible(entry):
+                    yield f"data: {json.dumps(_redacted_operational(entry))}\n\n"
             while not shutdown_event.is_set():
                 # Wait for new entries (with timeout for keepalive)
                 triggered = wake.wait(timeout=15.0)

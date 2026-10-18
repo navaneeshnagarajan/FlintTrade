@@ -1,21 +1,13 @@
-"""Skill drafts — the operator-approved skill write path (reference-map AI1).
+"""Retained candidate inputs, not an operator-approval activation bypass.
 
-After a trading session, the learning loop's :class:`ReflectionResult` is
-rendered into a DRAFT skill markdown file under
-``<workspace_dir>/skill_drafts/``. Drafts influence nothing: only after an
-explicit operator approval (which moves the file into
-``<workspace_dir>/skills/`` and flips its frontmatter status) does a skill
-become loadable by the app's :class:`~flinttrade_ai.skill_system.SkillRegistry`
-and therefore visible to any prompt.
-
-No LLM call happens here — the draft renders material the reflection step
-already produced. Rendering is deterministic per session date, so re-running
-a session's reflection overwrites its own draft rather than accumulating
-near-duplicates.
+No model call happens here. Changed reflections get new filenames; existing
+bytes remain intact. The shared KnowledgeRuntime snapshots candidates, and
+only trusted independent evaluation plus current rights can publish them.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -64,7 +56,7 @@ def _existing_draft(workspace: Path, name: str) -> Path | None:
     if not is_valid_slug(name):
         return None
     directory = drafts_dir(workspace)
-    if not directory.is_dir():
+    if directory.is_symlink() or not directory.is_dir():
         return None
     filename = f"{name}.md"
     match = next((path for path in directory.glob("*.md") if path.name == filename), None)
@@ -72,7 +64,7 @@ def _existing_draft(workspace: Path, name: str) -> Path | None:
     # otherwise be returned as a draft: read_text() then raises IsADirectoryError
     # on POSIX and PermissionError on Windows, and the routes catch neither, so a
     # documented 404 becomes an unhandled 500.
-    return match if match is not None and match.is_file() else None
+    return match if match is not None and not match.is_symlink() and match.is_file() else None
 
 
 def _render_list(title: str, items: list[str]) -> str:
@@ -136,7 +128,7 @@ def draft_skill_from_reflection(
         f"# Session lessons — {session_date}",
         "",
         "Drafted automatically from the post-session reflection. This file",
-        "influences nothing until an operator approves it.",
+        "influences nothing until independently validated with current rights.",
         "",
     ]
     if recommendations:
@@ -149,9 +141,25 @@ def draft_skill_from_reflection(
         body_parts += ["## Market insights", "", insights, ""]
 
     target_dir = drafts_dir(workspace)
+    if target_dir.is_symlink():
+        raise ValueError("draft directory must not be a symlink")
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
-    path.write_text("\n".join(body_parts), encoding="utf-8")
+    if path.is_symlink():
+        raise ValueError("draft must not be a symlink")
+    content = "\n".join(body_parts)
+    if path.exists() and path.read_bytes() != content.encode():
+        revision = name + "-" + hashlib.sha256(content.encode()).hexdigest()[:16]
+        content = content.replace(f"name: {name}\n", f"name: {revision}\n", 1)
+        path = target_dir / f"{revision}.md"
+    if path.is_symlink():
+        raise ValueError("draft must not be a symlink")
+    try:
+        with path.open("xb") as stream:
+            stream.write(content.encode())
+    except FileExistsError:
+        if path.read_bytes() != content.encode():
+            raise ValueError("draft identity conflict; existing bytes preserved") from None
     logger.info("Skill draft written: %s", path.name)
     return path
 
@@ -159,13 +167,13 @@ def draft_skill_from_reflection(
 def list_drafts(workspace: Path) -> list[dict[str, Any]]:
     """Draft summaries (name, description, modified time), newest first."""
     directory = drafts_dir(workspace)
-    if not directory.is_dir():
+    if directory.is_symlink() or not directory.is_dir():
         return []
     from .skill_system import _load_skill_file  # noqa: PLC0415 - same-package helper
 
     rows: list[dict[str, Any]] = []
     for path in sorted(directory.glob("*.md")):
-        if not is_valid_slug(path.stem):
+        if not is_valid_slug(path.stem) or path.is_symlink() or not path.is_file():
             continue
         config = _load_skill_file(path)
         rows.append(
@@ -184,39 +192,26 @@ def read_draft(workspace: Path, name: str) -> str | None:
     path = _existing_draft(workspace, name)
     if path is None:
         return None
-    return path.read_text(encoding="utf-8")
+    return path.read_bytes().decode("utf-8")
 
 
-def approve_draft(workspace: Path, name: str) -> Path:
-    """Move a draft into the operator skills directory as approved.
-
-    The frontmatter ``status: draft`` line becomes ``status: approved`` so
-    provenance survives. Raises ``FileNotFoundError``/``ValueError`` on a
-    missing draft or invalid name.
-    """
+def approve_draft(workspace: Path, name: str, *, runtime: Any = None) -> str:
+    """Compatibility alias for immutable intake, never approval or a file move."""
     if not is_valid_slug(name):
         raise ValueError("invalid skill name")
     source = _existing_draft(workspace, name)
     if source is None:
         raise FileNotFoundError(name)
-    content = source.read_text(encoding="utf-8")
-    content = content.replace("status: draft", "status: approved", 1)
-    target_dir = skills_dir(workspace)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    # Named after the draft file itself, so the approved copy can only ever
-    # land beside the other skills under the name the drafts directory listed.
-    target = target_dir / source.name
-    target.write_text(content, encoding="utf-8")
-    source.unlink()
-    logger.info("Skill draft approved: %s", name)
-    return target
+    if runtime is None or runtime.workspace != workspace:
+        raise RuntimeError("shared KnowledgeRuntime required; use ingest_skill; draft preserved")
+    return runtime.ingest_skill(name)
 
 
-def reject_draft(workspace: Path, name: str) -> bool:
-    """Delete a draft. Returns True when it existed."""
+def reject_draft(workspace: Path, name: str, *, runtime: Any = None) -> bool:
+    """Retire a retained input without deleting its file or ledger lineage."""
     path = _existing_draft(workspace, name)
     if path is None:
         return False
-    path.unlink()
-    logger.info("Skill draft rejected: %s", name)
+    candidate = approve_draft(workspace, name, runtime=runtime)
+    runtime.store.retire(candidate, reason="legacy draft rejection")
     return True

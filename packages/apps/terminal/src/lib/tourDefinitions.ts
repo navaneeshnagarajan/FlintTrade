@@ -53,7 +53,7 @@ export const TOUR_DEFINITIONS: Record<string, TourStep[]> = {
       target: "order-pad",
       title: "Place Orders",
       description:
-        "Buy or sell from here. Start with paper trading to practice!",
+        "Buy or sell from here. Start in Practice.",
       position: "left",
     },
   ],

@@ -24,8 +24,11 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -103,9 +106,13 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     if not match:
         return {}, text.strip()
     try:
-        meta: dict[str, Any] = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError:
+        meta = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as error:
+        raise ValueError("invalid skill frontmatter") from error
+    if meta is None:
         meta = {}
+    if not isinstance(meta, dict):
+        raise ValueError("skill frontmatter must be a mapping")
     return meta, match.group(2).strip()
 
 
@@ -124,7 +131,10 @@ def _load_skill_file(path: Path) -> SkillConfig | None:
         logger.warning("Cannot read skill file: %s", path)
         return None
 
-    meta, body = _parse_frontmatter(text)
+    try:
+        meta, body = _parse_frontmatter(text)
+    except ValueError:
+        return None
 
     name = str(meta.get("name", path.stem))
     category = str(meta.get("category", "other"))
@@ -167,7 +177,8 @@ class SkillRegistry:
         skills_dir: Directory containing the skill markdown files.
     """
 
-    def __init__(self, skills_dir: Path | None = None) -> None:
+    def __init__(self, skills_dir: Path | None = None, *, knowledge_store: Any | None = None,
+                 stock_rights: Any | None = None, run_id: str | None = None) -> None:
         """Initialise the registry and scan the skill directory.
 
         Args:
@@ -178,7 +189,16 @@ class SkillRegistry:
             skills_dir = _default_skills_dir()
         self.skills_dir: Path = skills_dir
         self._skills: dict[str, SkillConfig] = {}
+        self._packages: dict[str, dict[str, str]] = {}
+        self.knowledge_store, self.stock_rights, self.run_id = knowledge_store, stock_rights, run_id
+        self.knowledge_scope: Any | None = None
         self._scan()
+        if self.knowledge_store is not None:
+            if stock_rights is None:
+                raise ValueError("stock package rights required")
+            for name, package in self._packages.items():
+                version = hashlib.sha256(json.dumps(package, sort_keys=True).encode()).hexdigest()
+                self.knowledge_store.stock(name, version, package, stock_rights)
 
     # ------------------------------------------------------------------
     # Private
@@ -195,8 +215,18 @@ class SkillRegistry:
 
         loaded = 0
         for path in sorted(self.skills_dir.glob("*.md")):
+            if path.is_symlink():
+                raise ValueError("skill document must not be a symlink")
             skill = _load_skill_file(path)
             if skill is not None:
+                package = {path.name: path.read_text(encoding="utf-8")}
+                for key in ("references", "scripts"):
+                    for relative in skill.metadata.get(key, []):
+                        member = self.skills_dir / relative
+                        if member.is_symlink() or not member.resolve().is_relative_to(self.skills_dir.resolve()):
+                            raise ValueError("skill member escapes package")
+                        package[relative] = member.read_text(encoding="utf-8")
+                self._packages[skill.name] = package
                 self._skills[skill.name] = skill
                 loaded += 1
 
@@ -219,11 +249,41 @@ class SkillRegistry:
                 cat_idx = len(_CATEGORY_ORDER)
             return (cat_idx, s.name)
 
-        summaries = [
-            SkillSummary(name=s.name, category=s.category, description=s.description)
-            for s in self._skills.values()
-        ]
+        summaries = [SkillSummary(name=item["name"], category=item["category"], description=item["description"])
+                     for item in self.catalogue() if item["enabled"]]
         return sorted(summaries, key=_sort_key)
+
+    @staticmethod
+    def _package_skill(name: str, package: dict[str, str]) -> SkillConfig:
+        main = name + ".md" if name + ".md" in package else "SKILL.md"
+        metadata, body = _parse_frontmatter(package[main])
+        return SkillConfig(name=name, category=str(metadata.get("category", "other")),
+                           description=str(metadata.get("description", "")), content=body,
+                           metadata={key: value for key, value in metadata.items()
+                                     if key not in {"name", "category", "description"}})
+
+    def catalogue(self) -> list[dict[str, Any]]:
+        """Curation view; inactive candidates are never advertised to model selection."""
+        if self.knowledge_store is None:
+            return [{"name": skill.name, "category": skill.category, "description": skill.description,
+                     "state": "local", "enabled": True} for skill in self._skills.values()]
+        rows = self.knowledge_store.catalogue(scope=self.knowledge_scope, run_id=self.run_id)
+        for row in rows:
+            package = self.knowledge_store.version(row["version_id"])["files"]
+            skill = self._package_skill(row["name"], package)
+            row.update(category=skill.category, description=skill.description)
+        return rows
+
+    def _selected_package(self, name: str, *, pin: bool = False) -> tuple[SkillConfig, dict[str, str], str | None]:
+        if self.knowledge_store is not None:
+            version_id = (self.knowledge_store.pin(self.run_id, name, scope=self.knowledge_scope)
+                          if pin and self.run_id else
+                          self.knowledge_store.resolve(name, run_id=self.run_id, scope=self.knowledge_scope))
+            package = self.knowledge_store.version(version_id)["files"]
+            return self._package_skill(name, package), package, version_id
+        if name not in self._skills:
+            raise KeyError(f"Unknown skill '{name}'. Available skills: {', '.join(sorted(self._skills))}")
+        return self._skills[name].model_copy(deep=True), self._packages[name], None
 
     def load_skill(self, name: str) -> SkillConfig:
         """Load the full skill document on demand.
@@ -237,12 +297,37 @@ class SkillRegistry:
         Raises:
             KeyError: If no skill with the given name is registered.
         """
-        if name not in self._skills:
-            available = ", ".join(sorted(self._skills))
-            raise KeyError(
-                f"Unknown skill '{name}'. Available skills: {available}"
-            )
-        return self._skills[name]
+        return self._selected_package(name)[0]
+
+    def context(self, names: list[str], *, max_bytes: int = 32768) -> tuple[str, dict[str, Any]]:
+        """Return selected whole procedures/references and exact supplied-byte receipts.
+
+        Scripts are hashed as package members, never executed. Selection is explicit;
+        a too-large selection refuses rather than silently dropping procedure steps.
+        """
+        blocks, receipts = [], []
+        for name in dict.fromkeys(names):
+            skill, package, version_id = self._selected_package(name, pin=True)
+            if self.knowledge_store is None and skill.metadata.get("source") == "autonomous-agent-reflection":
+                raise ValueError("learned skills require independent ledger validation")
+            hashes = {key: hashlib.sha256(value.encode()).hexdigest() for key, value in sorted(package.items())}
+            package_hash = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            text = f"## Procedure: {name}\n{skill.content}"
+            references = list(skill.metadata.get("references", []))
+            for reference in references:
+                text += f"\n### Reference: {reference}\n{package[reference]}"
+            blocks.append(text)
+            receipts.append({"name": name, "package_hash": package_hash, "files": hashes,
+                             "references": references, "version_id": version_id,
+                             "supplied_hash": hashlib.sha256(text.encode()).hexdigest()})
+        text = "\n\n".join(blocks)
+        if len(text.encode()) > max_bytes:
+            raise ValueError("selected skill context exceeds byte budget")
+        receipt = {"skills": receipts, "context_hash": hashlib.sha256(text.encode()).hexdigest(),
+                   "run_id": self.run_id, "scope": asdict(self.knowledge_scope) if self.knowledge_scope else None}
+        if self.knowledge_store is not None:
+            receipt["receipt_id"] = self.knowledge_store.record_context(receipt)
+        return text, receipt
 
     def search_skills(self, query: str) -> list[SkillSummary]:
         """Fuzzy keyword search across skill names and descriptions.
@@ -262,7 +347,7 @@ class SkillRegistry:
             return self.list_skills()
 
         results: list[SkillSummary] = []
-        for skill in self._skills.values():
+        for skill in self.list_skills():
             haystack = f"{skill.name} {skill.description}".lower()
             if all(tok in haystack for tok in tokens):
                 results.append(
@@ -308,12 +393,21 @@ class SkillRegistry:
         Useful for hot-reload scenarios during development.
         """
         self._skills.clear()
+        self._packages.clear()
         self._scan()
+        if self.knowledge_store is not None:
+            for name, package in self._packages.items():
+                version = hashlib.sha256(json.dumps(package, sort_keys=True).encode()).hexdigest()
+                self.knowledge_store.stock(name, version, package, self.stock_rights)
 
     def __len__(self) -> int:
         """Return the number of registered skills."""
-        return len(self._skills)
+        return len(self.list_skills())
 
     def __contains__(self, name: str) -> bool:
         """Check if a skill name is registered."""
-        return name in self._skills
+        try:
+            self._selected_package(name)
+        except (KeyError, ValueError):
+            return False
+        return True

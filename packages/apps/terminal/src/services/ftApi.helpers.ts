@@ -1,5 +1,7 @@
-﻿import { useAuthStore } from "@/stores/authStore";
+﻿import { isPublicDemoBuild } from "@/lib/demoSession";
+import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { captureOperatorIncidentScope, type OperatorIncidentScope } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
 import type { AppMode } from "@/stores/modeStore";
 
@@ -22,7 +24,7 @@ export function getBase(): string {
 
 export function isDemoAuthSession(): boolean {
   const token = useAuthStore.getState().token;
-  return token === "demo-user" || token === "dev-bypass";
+  return isPublicDemoBuild() || token === "demo-user" || token === "dev-bypass";
 }
 
 export function isDemoUserSession(): boolean {
@@ -73,7 +75,7 @@ export function buildHeaders(includeJson: boolean, mode?: AppMode): Record<strin
  * helpers previously did — left every error surface generic, so the message
  * is extracted here and the status code kept as a fallback only.
  */
-async function throwHttpError(resp: Response, endpoint: string): Promise<never> {
+async function throwHttpError(resp: Response, endpoint: string, scope: OperatorIncidentScope): Promise<never> {
   let message: string | null = null;
   let data: unknown;
   try {
@@ -100,7 +102,7 @@ async function throwHttpError(resp: Response, endpoint: string): Promise<never> 
   // General helpers have no broker or order provenance. Host and backend
   // faults may still latch; broker classes must not, or Chat and backtests
   // would mute Live.
-  noteObservedFailure({ message: resolved, httpStatus: resp.status, provenance: "general" });
+  noteObservedFailure({ message: resolved, httpStatus: resp.status, provenance: "general", scope });
   throw new FtApiError(resolved, resp.status, data);
 }
 
@@ -150,13 +152,14 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
 }
 
 export async function post<T>(endpoint: string, body: object = {}, signal?: AbortSignal): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -172,12 +175,13 @@ export async function accountMutation<T>(
     || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(idempotencyKey)) {
     throw new Error("A canonical account action Idempotency-Key is required");
   }
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/${family}/${endpoint}`, {
     method,
     headers: { ...buildHeaders(body !== undefined), "Idempotency-Key": idempotencyKey },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -188,22 +192,24 @@ export async function postWithMode<T>(
   mode: AppMode,
   signal?: AbortSignal,
 ): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true, mode),
     body: JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
 export async function get<T>(endpoint: string, signal?: AbortSignal): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     headers: buildHeaders(false),
     ...(signal ? { signal } : {}),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -221,13 +227,14 @@ export async function postV1<T>(
   body: object = {},
   signal?: AbortSignal,
 ): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -240,40 +247,44 @@ export async function postV1<T>(
  * (``/ft-api/v1/...`` → stripped to ``/v1/...``) and prod (``/v1/...``).
  */
 export async function getV1<T>(endpoint: string, signal?: AbortSignal): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     headers: buildHeaders(false),
     ...(signal ? { signal } : {}),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
 export async function putV1<T>(endpoint: string, body: object = {}): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     method: "PUT",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
 export async function delV1<T>(endpoint: string): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     method: "DELETE",
     headers: buildHeaders(false),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
 export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PUT",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
@@ -284,20 +295,22 @@ export async function put<T>(endpoint: string, body: object = {}): Promise<T> {
  * headers and ``{status, data}`` unwrapping.
  */
 export async function patch<T>(endpoint: string, body: object = {}): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "PATCH",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }
 
 export async function del<T>(endpoint: string): Promise<T> {
+  const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "DELETE",
     headers: buildHeaders(false),
   });
-  if (!resp.ok) await throwHttpError(resp, endpoint);
+  if (!resp.ok) await throwHttpError(resp, endpoint, incidentScope);
   return parseResponse<T>(resp, endpoint);
 }

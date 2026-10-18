@@ -78,13 +78,15 @@ class PermutationResult(BaseModel):
     """
 
     original_metric: float
-    permutation_mean: float
-    permutation_std: float
+    permutation_mean: float | None
+    permutation_std: float | None
     p_value: float
     is_significant: bool
     confidence_level: float
     n_permutations: int
     percentile_rank: float
+    null_model: str = "independent_sign_symmetry"
+    assumptions: str = "Independent, sign-symmetric observations under the null; not a data-snooping correction"
 
     def as_dict(self) -> dict[str, float | bool | int]:
         """Flat dict for JSON serialisation."""
@@ -176,11 +178,11 @@ def _build_return_null_distribution(
     n_permutations: int,
     rng: random.Random,
 ) -> list[float]:
-    """Shuffle returns N times; compute metric each time.
+    """Independently randomise return signs under a sign-symmetric null.
 
-    This tests whether the *ordering* of returns matters, i.e. whether the
-    strategy's entry/exit timing adds value.  The total P&L is preserved across
-    shuffles; only sequence-dependent metrics (Sharpe, Sortino) vary.
+    Sharpe, Sortino, total return and profit factor are order invariant: an
+    ordering shuffle cannot test them. This null assumes independent symmetric
+    observations. It is not a serial-dependence or adaptive-search correction.
 
     Args:
         returns:       Daily strategy return series.
@@ -192,10 +194,10 @@ def _build_return_null_distribution(
         List of metric values, one per permutation.
     """
     null: list[float] = []
-    buf = list(returns)
     for _ in range(n_permutations):
-        rng.shuffle(buf)
-        null.append(_compute_metric(buf, metric))
+        # Randomise signs, not ordering: all advertised metrics are order invariant.
+        sample = [value * rng.choice((-1, 1)) for value in returns]
+        null.append(_compute_metric(sample, metric))
     return null
 
 
@@ -271,10 +273,13 @@ def _build_result(
     mean = sum(null) / n
     variance = sum((v - mean) ** 2 for v in null) / max(1, n - 1)
     std = math.sqrt(variance) if variance > 0 else 0.0
+    if not all(math.isfinite(v) for v in null):
+        mean = None
+        std = None
 
     # p-value: proportion of permutations >= original (one-sided, upper tail)
     n_exceeds = sum(1 for v in null if v >= original)
-    p_value = n_exceeds / n
+    p_value = (n_exceeds + 1) / (n + 1)
 
     # Percentile rank: fraction of permutations BELOW the original
     n_below = sum(1 for v in null if v < original)
@@ -381,9 +386,9 @@ class PermutationTester:
     ) -> PermutationResult:
         """Test if strategy returns are statistically significant.
 
-        Shuffles the daily return series N times and recomputes the chosen
-        metric each time.  The original metric is then compared to this null
-        distribution to derive a p-value.
+        Randomises independent daily return signs under a sign-symmetric null.
+        The finite Monte Carlo p-value includes the observed assignment. These
+        assumptions must be qualified for the workload before interpretation.
 
         If ``benchmark_returns`` is provided, the metric is computed on the
         *excess* return series (strategy − benchmark) so that a neutral
@@ -418,6 +423,8 @@ class PermutationTester:
         else:
             test_series = list(strategy_returns)
 
+        if not all(math.isfinite(v) and abs(v) < 1 for v in test_series):
+            raise ValueError("Sign randomisation requires finite return fractions with magnitude < 1")
         original = _compute_metric(test_series, self.config.metric)
         null = _build_return_null_distribution(
             test_series,
@@ -465,6 +472,8 @@ class PermutationTester:
         if not all_returns:
             raise ValueError("all_returns must be non-empty")
 
+        if len(trades) > len(all_returns) or not all(math.isfinite(v) and v > -1 for v in all_returns):
+            raise ValueError("Return pool must be finite and cover every trade without replacement")
         # Extract per-trade return series
         trade_returns = _extract_trade_returns(trades)
         original = _compute_metric(trade_returns, self.config.metric)
@@ -481,7 +490,10 @@ class PermutationTester:
             "test_trades: metric=%s n_trades=%d original=%.4f",
             self.config.metric, len(trades), original,
         )
-        return _build_result(original, null, self.config)
+        result = _build_result(original, null, self.config)
+        result.null_model = "random_trade_selection"
+        result.assumptions = "Exchangeable same-horizon return fractions, sampled without replacement"
+        return result
 
     def monte_carlo_confidence(
         self,
@@ -566,9 +578,8 @@ class PermutationTester:
 def _extract_trade_returns(trades: list[dict]) -> list[float]:
     """Extract a return series from a list of trade dicts.
 
-    Tries ``"return_pct"`` first, then ``"net_pnl"`` as a fallback proxy.
-    ``net_pnl`` is not normalised — it is treated directly as the return
-    value in the metric computation.
+    Requires return fractions, or net_pnl divided by an explicit positive
+    capital_at_risk. Currency P&L cannot be compared to fractional return pools.
 
     Args:
         trades: List of trade dicts.
@@ -583,10 +594,12 @@ def _extract_trade_returns(trades: list[dict]) -> list[float]:
     for i, trade in enumerate(trades):
         if "return_pct" in trade:
             result.append(float(trade["return_pct"]))
-        elif "net_pnl" in trade:
-            result.append(float(trade["net_pnl"]))
+        elif "net_pnl" in trade and "capital_at_risk" in trade and float(trade["capital_at_risk"]) > 0:
+            result.append(float(trade["net_pnl"]) / float(trade["capital_at_risk"]))
         else:
             raise ValueError(
-                f"Trade at index {i} must contain 'return_pct' or 'net_pnl' key"
+                f"Trade at index {i} requires return_pct or net_pnl with capital_at_risk"
             )
+    if not all(math.isfinite(v) and v > -1 for v in result):
+        raise ValueError("Trade returns must be finite fractions greater than -1")
     return result

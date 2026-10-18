@@ -10,6 +10,8 @@ import math
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -540,7 +542,7 @@ class TestValidation:
 _TEST_API_KEY = "test-pivot-route-key"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def pivot_client(tmp_path_factory):
     """Flask test client for pivot routes."""
     import os

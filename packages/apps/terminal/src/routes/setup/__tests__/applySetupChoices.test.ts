@@ -81,7 +81,7 @@ describe("persistSetupChoices", () => {
       interests: ["investing"],
     });
 
-    expect(destination).toBe("/home");
+    expect(destination).toBe("/trade");
     // ConnectionStep has already committed the connection transaction before
     // this final profile/layout projection runs.
     expect(fetch).not.toHaveBeenCalled();

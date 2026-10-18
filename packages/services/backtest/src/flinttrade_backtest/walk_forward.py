@@ -121,12 +121,16 @@ class WalkForwardResult(BaseModel):
     """
 
     splits: list[SplitDetail]
-    avg_train_metric: float
-    avg_test_metric: float
-    degradation_pct: float
+    avg_train_metric: float | None
+    avg_test_metric: float | None
+    degradation_pct: float | None
     is_robust: bool
     n_splits_run: int
     wfe_ratio: float = 0.0
+    status: str = "completed"
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+    candidate: str = ""
+    qualification: str = "unqualified"
 
     def as_dict(self) -> dict[str, Any]:
         """Flat dict for JSON serialisation (splits serialised as list of dicts)."""
@@ -277,52 +281,52 @@ def _run_strategy_on_bars(
     strategy_kwargs: dict[str, Any],
     bars: list[dict[str, Any]],
 ) -> list[float]:
-    """Instantiate and run a strategy on a bar slice; return daily returns.
+    """Run the selected class with its actual engine; never substitute a baseline.
 
-    The strategy class must expose an ``on_bar(bar)`` method and a
-    ``daily_returns`` attribute (list[float]) after running, OR a
-    ``get_equity_curve()`` method returning a list of equity values.
-
-    If neither interface is available we fall back to extracting ``"close"``
-    prices and computing simple bar-to-bar returns so the walk-forward can
-    still produce *something* meaningful for testing.
-
-    Args:
-        strategy_class:   Class (not instance) of the strategy.
-        strategy_kwargs:  Keyword arguments passed to the constructor.
-        bars:             Historical bar dicts for this split window.
-
-    Returns:
-        List of daily return fractions.
+    Plain return-producing research strategies remain supported. Registered
+    strategies use the simulator/Decimal engine, including fees and callbacks.
+    A failed or unsupported adapter is not a successful zero-return candidate.
     """
+    from flinttrade_engine.strategy import BaseStrategy
+
+    from .base_strategy import BaseBacktestStrategy
+    from .engine import BacktestEngine, EngineConfig
+    from .simulator import BacktestConfig, BacktestSimulator
+
     if not bars:
-        return []
-
-    try:
-        strategy = strategy_class(**strategy_kwargs)
-
-        # Try running through on_bar
-        if hasattr(strategy, "on_bar"):
-            for bar in bars:
-                strategy.on_bar(bar)
-
-            # Prefer a daily_returns attribute
-            if hasattr(strategy, "daily_returns") and isinstance(
-                strategy.daily_returns, list
-            ):
-                return list(strategy.daily_returns)
-
-            # Try equity curve
-            if hasattr(strategy, "get_equity_curve"):
-                equity = strategy.get_equity_curve()
-                if equity and len(equity) >= 2:
-                    return _equity_to_returns(equity)
-
-    except Exception as exc:
-        logger.warning("Strategy execution failed: %s", exc)
-
-    # Fallback: bar-to-bar close returns
-    return _bars_to_returns(bars)
+        raise ValueError("No observations for candidate")
+    kwargs = dict(strategy_kwargs)
+    if issubclass(strategy_class, BaseBacktestStrategy):
+        symbol = kwargs.get("symbol", "")
+        strategy = strategy_class(**kwargs)
+        engine = BacktestEngine(EngineConfig(symbol=symbol))
+        engine.set_strategy(strategy)
+        result = engine.run(bars)
+        initial = float(engine.config.initial_capital)
+    elif issubclass(strategy_class, BaseStrategy):
+        kwargs.setdefault("name", strategy_class.__name__)
+        kwargs.setdefault("exchange", "NSE")
+        config = BacktestConfig(symbol=kwargs.get("symbol", ""), exchange=kwargs["exchange"])
+        result = BacktestSimulator(config).run(strategy_class(**kwargs), bars)
+        initial = config.initial_capital
+    else:
+        strategy = strategy_class(**kwargs)
+        for bar in bars:
+            strategy.on_bar(bar)
+        if isinstance(getattr(strategy, "daily_returns", None), list):
+            values = list(strategy.daily_returns)
+        elif hasattr(strategy, "get_equity_curve"):
+            values = _equity_to_returns(strategy.get_equity_curve())
+        else:
+            raise ValueError("Candidate has no supported return interface")
+        if not values or not all(math.isfinite(v) for v in values):
+            raise ValueError("Candidate returns unavailable or non-finite")
+        return values
+    if result.error:
+        raise ValueError(result.error)
+    if result.total_bars != len(bars):
+        raise ValueError("Candidate evaluation incomplete")
+    return _equity_to_returns([initial, *[float(p.equity) for p in result.equity_curve]])
 
 
 def _equity_to_returns(equity: list[float]) -> list[float]:
@@ -392,8 +396,10 @@ def _generate_splits(
         )
 
     # Each test window gets an equal share of bars
-    test_window_size = max(2, n_bars // (n_splits + int(train_ratio * n_splits)))
+    test_window_size = max(2, int(n_bars / (n_splits + train_ratio / (1 - train_ratio))))
     train_window_size = max(5, int(test_window_size * train_ratio / (1 - train_ratio)))
+    if train_window_size + n_splits * test_window_size > n_bars:
+        raise ValueError("Insufficient data for every requested train/test window")
 
     splits: list[tuple[int, int, int, int]] = []
 
@@ -523,7 +529,7 @@ class WalkForwardAnalyser:
         splits_indices = _generate_splits(n_bars, self.config)
 
         split_details: list[SplitDetail] = []
-        n_errors = 0
+        failures: list[dict[str, Any]] = []
 
         for idx, (train_start, train_end, test_start, test_end) in enumerate(
             splits_indices
@@ -569,22 +575,23 @@ class WalkForwardAnalyser:
 
             except Exception as exc:
                 logger.warning("Split %d failed: %s", idx, exc)
-                n_errors += 1
+                failures.append({"split_index": idx, "reason": str(exc)})
 
         if not split_details:
             return WalkForwardResult(
                 splits=[],
-                avg_train_metric=0.0,
-                avg_test_metric=0.0,
-                degradation_pct=0.0,
+                avg_train_metric=None,
+                avg_test_metric=None,
+                degradation_pct=None,
                 is_robust=False,
                 n_splits_run=0,
+                status="failed", failures=failures, candidate=strategy_class.__name__,
             )
 
         avg_train = _safe_mean([s.train_metric for s in split_details])
         avg_test = _safe_mean([s.test_metric for s in split_details])
         avg_deg = _degradation(avg_train, avg_test)
-        is_robust = abs(avg_deg) < _ROBUST_DEGRADATION_THRESHOLD
+        is_robust = not failures and abs(avg_deg) < _ROBUST_DEGRADATION_THRESHOLD
         wfe_ratio = _wfe(avg_train, avg_test)
 
         logger.info(
@@ -601,4 +608,6 @@ class WalkForwardAnalyser:
             is_robust=is_robust,
             n_splits_run=len(split_details),
             wfe_ratio=wfe_ratio,
+            status="partial" if failures else "completed",
+            failures=failures, candidate=strategy_class.__name__,
         )

@@ -10,6 +10,7 @@ import pytest
 from flask import Flask
 
 from flinttrade_core.support_routes import support_bp, support_diagnostics
+from flinttrade_core.auth_routes import _create_token
 
 
 class _FakeErrorLog:
@@ -38,7 +39,14 @@ def app() -> Flask:
     return app
 
 
-def test_diagnostics_aggregate_safe_error_metadata_without_raw_payloads(app: Flask) -> None:
+@pytest.fixture
+def headers(app):
+    with app.app_context():
+        token = _create_token("synthetic-diagnostics", scopes=("admin.errors.read",))
+    return {"Authorization": "Bearer " + token}
+
+
+def test_diagnostics_aggregate_safe_error_metadata_without_raw_payloads(app: Flask, headers) -> None:
     now = datetime(2026, 7, 14, 9, 30, tzinfo=timezone.utc)
     secret = "credential-value-that-must-never-leave"
     app.config["ERROR_LOG"] = _FakeErrorLog(
@@ -66,7 +74,7 @@ def test_diagnostics_aggregate_safe_error_metadata_without_raw_payloads(app: Fla
         total=8,
     )
 
-    response = app.test_client().get("/v1/support/diagnostics")
+    response = app.test_client().get("/v1/support/diagnostics", headers=headers)
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
@@ -95,15 +103,15 @@ def test_diagnostics_aggregate_safe_error_metadata_without_raw_payloads(app: Fla
         assert excluded not in encoded
 
 
-def test_diagnostics_degrade_honestly_when_error_log_is_unavailable(app: Flask) -> None:
-    response = app.test_client().get("/v1/support/diagnostics")
+def test_diagnostics_degrade_honestly_when_error_log_is_unavailable(app: Flask, headers) -> None:
+    response = app.test_client().get("/v1/support/diagnostics", headers=headers)
 
     assert response.status_code == 200
     errors = response.get_json()["data"]["errors"]
     assert errors == {"available": False, "total": 0, "sampled": 0, "groups": []}
 
 
-def test_diagnostics_degrade_honestly_when_error_log_read_fails(app: Flask) -> None:
+def test_diagnostics_degrade_honestly_when_error_log_read_fails(app: Flask, headers) -> None:
     class _BrokenErrorLog:
         def recent_metadata(self, limit: int = 100) -> list[dict[str, Any]]:
             del limit
@@ -111,7 +119,7 @@ def test_diagnostics_degrade_honestly_when_error_log_read_fails(app: Flask) -> N
 
     app.config["ERROR_LOG"] = _BrokenErrorLog()
 
-    response = app.test_client().get("/v1/support/diagnostics")
+    response = app.test_client().get("/v1/support/diagnostics", headers=headers)
 
     assert response.status_code == 200
     encoded = json.dumps(response.get_json())
@@ -124,7 +132,7 @@ def test_diagnostics_degrade_honestly_when_error_log_read_fails(app: Flask) -> N
     }
 
 
-def test_diagnostics_replace_dynamic_backend_identifiers_with_route_template(app: Flask) -> None:
+def test_diagnostics_replace_dynamic_backend_identifiers_with_route_template(app: Flask, headers) -> None:
     account_id = "private-account-123"
     order_id = "private-order-456"
     app.config["ERROR_LOG"] = _FakeErrorLog(
@@ -139,7 +147,7 @@ def test_diagnostics_replace_dynamic_backend_identifiers_with_route_template(app
         ]
     )
 
-    response = app.test_client().get("/v1/support/diagnostics")
+    response = app.test_client().get("/v1/support/diagnostics", headers=headers)
 
     encoded = json.dumps(response.get_json())
     group = response.get_json()["data"]["errors"]["groups"][0]
@@ -148,7 +156,7 @@ def test_diagnostics_replace_dynamic_backend_identifiers_with_route_template(app
     assert order_id not in encoded
 
 
-def test_diagnostics_bound_recent_rows_and_aggregate_groups(app: Flask) -> None:
+def test_diagnostics_bound_recent_rows_and_aggregate_groups(app: Flask, headers) -> None:
     rows = [
         {
             "timestamp": f"2026-07-14T09:{index % 60:02d}:00+00:00",
@@ -162,7 +170,7 @@ def test_diagnostics_bound_recent_rows_and_aggregate_groups(app: Flask) -> None:
     error_log = _FakeErrorLog(rows, total=140)
     app.config["ERROR_LOG"] = error_log
 
-    response = app.test_client().get("/v1/support/diagnostics")
+    response = app.test_client().get("/v1/support/diagnostics", headers=headers)
 
     errors = response.get_json()["data"]["errors"]
     assert error_log.metadata_limits == [100]
@@ -172,3 +180,18 @@ def test_diagnostics_bound_recent_rows_and_aggregate_groups(app: Flask) -> None:
 
 def test_diagnostics_require_the_error_read_scope() -> None:
     assert getattr(support_diagnostics, "__required_scope__", None) == "admin.errors.read"
+
+@pytest.mark.parametrize("credential", ["missing", "narrowed", "invalid"])
+def test_diagnostics_rejects_untrusted_authority_before_reading(app, credential):
+    errors = _FakeErrorLog([])
+    app.config["ERROR_LOG"] = errors
+    headers = {}
+    if credential == "narrowed":
+        with app.app_context():
+            token = _create_token("synthetic-diagnostics", scopes=())
+        headers = {"Authorization": "Bearer " + token}
+    elif credential == "invalid":
+        headers = {"Authorization": "Bearer not-a-session"}
+    result = app.test_client().get("/v1/support/diagnostics", headers=headers)
+    assert result.status_code == (403 if credential == "narrowed" else 401)
+    assert errors.metadata_limits == []

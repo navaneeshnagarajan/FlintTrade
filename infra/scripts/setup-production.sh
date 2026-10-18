@@ -66,7 +66,7 @@ fi
 # Python dependencies — SC-07: hash-verified install only, into the unit venv
 # (not the system interpreter).
 echo "Installing Python dependencies into $VENV_DIR..."
-sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"
+sudo "$VENV_DIR/bin/pip" install --require-hashes --only-binary=growwapi -r "$INSTALL_DIR/requirements.lock"
 
 # A frozen uv sync is useful when uv is already on PATH. The shared repair
 # helper below is unconditional, so the exact Git-pinned SDK is also installed
@@ -75,7 +75,7 @@ sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.
 if command -v uv >/dev/null 2>&1; then
     UV_BIN="$(command -v uv)"
     echo "Syncing uv workspace (broker-SDK pins)..."
-    (cd "$INSTALL_DIR" && sudo "$UV_BIN" sync --frozen --all-packages --no-dev)
+    (cd "$INSTALL_DIR" && sudo "$UV_BIN" sync --frozen --all-packages --no-dev --no-build-package growwapi)
 fi
 echo "Installing and attesting pinned broker SDKs..."
 sudo "$VENV_DIR/bin/python" "$INSTALL_DIR/scripts/broker_sdk_environment.py" repair

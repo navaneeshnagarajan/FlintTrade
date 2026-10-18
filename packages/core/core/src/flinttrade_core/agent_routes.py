@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 logger = logging.getLogger("flinttrade.core.agent_routes")
 
@@ -298,46 +298,43 @@ def _build_vault() -> Any | None:
         return None
 
 
-# Process-lifetime fallback learning memory (see _build_learning_memory).
-_FALLBACK_LEARNING_MEMORY: Any | None = None
+def _build_learning_memory() -> Any:
+    """Use the exact admitted run's durable owner; never fall back to raw memory."""
+    from flinttrade_ai.knowledge_store import KnowledgeScope
+    from flinttrade_core.knowledge_integration import KnowledgeUnavailable, require_knowledge_runtime
+    from flinttrade_core.service_providers import RightsResolution
+
+    scope = getattr(g, "agent_knowledge_scope", None)
+    if type(scope) is not KnowledgeScope:
+        raise KnowledgeUnavailable("authoritative execution scope required")
+    # No history rights or training permission were supplied by the user. Existing
+    # independently validated records keep their own rights; new writes get none.
+    return require_knowledge_runtime(current_app).memory(scope, rights=RightsResolution())
 
 
-def _build_learning_memory() -> Any | None:
-    """Construct the agent's learning-memory backend (best-effort).
-
-    Persistent local vector memory under ``<workspace_dir>/agent_memory`` is
-    the default. If that store cannot be constructed, an in-process
-    hierarchical fallback is used for the process lifetime — the loop still
-    runs, it just does not survive a restart (logged honestly). Disabled
-    entirely via workspace ``ai.autonomous_agent.learning.enabled`` (default
-    true). Never order-critical: any failure returns ``None`` and the agent
-    trades exactly as before, with no learning tier.
-    """
-    try:
-        from .workspace import Workspace, workspace_dir  # noqa: PLC0415
-
-        if not bool(Workspace().get("ai.autonomous_agent.learning.enabled", True)):
+def authorised_knowledge_scope(app: Any, actor: str) -> Any | None:
+    """Return only this principal's active backend run, never UI account globals."""
+    with _RUNNER_LOCK:
+        if (_RUNNER.get("app") is not app or _RUNNER.get("knowledge_actor") != actor
+            or not _RUNNER.get("thread") or not _RUNNER["thread"].is_alive()):
             return None
-        from flinttrade_ai.memory import MemoryBackendConfig, create_memory_backend  # noqa: PLC0415
+        check = _RUNNER.get("knowledge_authority_check")
+        if not callable(check) or check() is not None:
+            return None
+        return _RUNNER.get("knowledge_scope")
 
-        try:
-            return create_memory_backend(MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory")))
-        except Exception:
-            logger.warning(
-                "Persistent agent memory unavailable — lessons persist only for this "
-                "backend process (in-process memory), not across restarts",
-                exc_info=True,
-            )
-            # Module-level singleton: a per-session instance would make the
-            # fallback write-only — lessons stored at session end would die with
-            # the trader before the next session could ever read them.
-            global _FALLBACK_LEARNING_MEMORY
-            if _FALLBACK_LEARNING_MEMORY is None:
-                _FALLBACK_LEARNING_MEMORY = create_memory_backend(MemoryBackendConfig(backend="hierarchical"))
-            return _FALLBACK_LEARNING_MEMORY
-    except Exception:  # pragma: no cover — learning is never order-critical
-        logger.warning("Agent learning memory unavailable", exc_info=True)
+
+def _starting_knowledge_actor() -> str | None:
+    from flinttrade_core.auth_routes import verify_operator_session_token
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = token or request.headers.get("X-FlintTrade-Token", "").strip()
+    try:
+        return verify_operator_session_token(token).actor_ref
+    except Exception:
+        # This does not relax start authorisation above; it refuses private
+        # advisory recall when the stronger full-session principal is absent.
         return None
+
 
 
 def _build_skills_workspace() -> Any | None:
@@ -951,7 +948,13 @@ def start_agent() -> tuple[Any, int]:
             }
 
         from flinttrade_ai.autonomous_agent import AgentConfig  # noqa: PLC0415
+        from flinttrade_ai.knowledge_store import KnowledgeScope
+        from flinttrade_core.knowledge_integration import require_knowledge_runtime
 
+        knowledge_scope = KnowledgeScope(f"native:{adapter_id}:{account_id}", "live", producer_ref)
+        g.agent_knowledge_scope = knowledge_scope
+        knowledge_runtime = require_knowledge_runtime(app_obj)
+        knowledge_actor = _starting_knowledge_actor()
         config = AgentConfig(
             symbols=symbols,
             exchange=exchange,
@@ -975,6 +978,11 @@ def start_agent() -> tuple[Any, int]:
                 symbol=provider_symbol,
             )
 
+        from types import SimpleNamespace
+
+        from .run_learning import LocalRunLearning
+        learning_producer = SimpleNamespace(trader=None)
+        learning = LocalRunLearning(knowledge_runtime, knowledge_scope, learning_producer)
         trader = _trader_factory(
             llm_client=llm,
             broker_client=client,
@@ -985,11 +993,18 @@ def start_agent() -> tuple[Any, int]:
             market_session_provider=_market_session_provider,
             clock=market_clock,
             memory=_build_learning_memory(),
-            skill_registry=app_obj.config.get("SKILL_REGISTRY"),
-            skills_workspace=_build_skills_workspace(),
+            skill_registry=knowledge_runtime.skills(knowledge_scope),
+            skills_workspace=None,
+            learning_records=learning,
+            learning_client=learning,
+            automatic_learning=True,  # local evidence only; no native remote binding is inferred
         )
-    except Exception:
+        learning_producer.trader = trader
+    except Exception as error:
         _release_slot()
+        from flinttrade_core.knowledge_integration import KnowledgeUnavailable
+        if isinstance(error, KnowledgeUnavailable):
+            return jsonify(status="error", error="knowledge_unavailable"), 503
         logger.exception("Agent session construction failed")
         return jsonify(
             {
@@ -1051,6 +1066,10 @@ def start_agent() -> tuple[Any, int]:
                 "trader": trader,
                 "thread": session_thread,
                 "producer_ref": producer_ref,
+                "app": app_obj,
+                "knowledge_scope": knowledge_scope,
+                "knowledge_actor": knowledge_actor,
+                "knowledge_authority_check": _pre_dispatch_check,
                 "started_at": datetime.now(UTC).isoformat(),
                 "params": {
                     "symbols": symbols,

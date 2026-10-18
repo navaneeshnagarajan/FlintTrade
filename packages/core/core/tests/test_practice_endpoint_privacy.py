@@ -178,8 +178,8 @@ def test_invalid_config_retains_actionable_local_message(endpoint, body, message
         (
             "/runs/example/resolve",
             "resolve",
-            RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving"),
-            "Practice positions or pending orders remain; inspect the sandbox before resolving",
+            RuntimeError("Practice positions or pending orders remain; inspect the Practice book before resolving"),
+            "Practice positions or pending orders remain; inspect the Practice book before resolving",
         ),
     ],
 )

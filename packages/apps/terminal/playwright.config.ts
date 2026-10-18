@@ -10,8 +10,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
-  // This journey requires the isolated /demo-app/ server configuration.
-  testIgnore: 'public-demo-presets.spec.ts',
+  snapshotPathTemplate: '{testDir}/visual/baselines/{arg}-{projectName}-{platform}.png',
+  // These cases run in their required server lanes through the e2e aggregate.
+  testIgnore: ['public-demo-presets.spec.ts', '**/incidents/**', 'shared-core-integrated.spec.ts', 'run-policy-integrated.spec.ts', 'run-policy-remaining.spec.ts'],
   timeout: 30_000,
   forbidOnly: Boolean(process.env['CI']),
   // Each test gets a fresh context (no shared cookies / localStorage)
@@ -41,7 +42,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'pnpm run dev',
+    command: 'pnpm exec vite --configLoader runner --host 127.0.0.1 --port 5173 --strictPort',
     port: 5173,
     reuseExistingServer: !process.env['CI'],
     timeout: 60_000,

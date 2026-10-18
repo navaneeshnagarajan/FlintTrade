@@ -2614,6 +2614,10 @@ class KillSwitchResetAuthorisationError(SafetyBypassError):
     """Raised when a reset principal cannot manage every affected selector."""
 
 
+class KillSwitchActiveError(SafetyBypassError):
+    """Normal-write refusal observed under the active L5 admission latch."""
+
+
 class KillSwitch:
     """Layer 5: Emergency kill — cancel all orders + close all positions.
 
@@ -2691,7 +2695,7 @@ class KillSwitch:
                     if not self._reason:
                         self._reason = "restored durable emergency episode"
             if self._active:
-                raise SafetyBypassError("kill switch is active; broker write refused")
+                raise KillSwitchActiveError("kill switch is active; broker write refused")
             self._normal_writes_in_progress += 1
         try:
             yield

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { version as reactVersion } from "react";
+import { BUILD_VERSIONS } from "@/lib/versionInventory";
 import { useAuthStore } from "@/stores/authStore";
 import { VersionInventory } from "../VersionInventory";
 
@@ -29,7 +30,15 @@ afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); delete window.flint
 describe("About version inventory", () => {
   it("separates running, installed, configured and declared versions", async () => {
     render(<VersionInventory />);
-    expect(within(screen.getByRole("row", { name: /^React / })).getByText(reactVersion)).toBeInTheDocument();
+    const frontend = within(screen.getByRole("table", { name: "Frontend libraries" }));
+    expect(frontend.getAllByRole("columnheader").map(cell => cell.textContent)).toEqual([
+      "Component", "Running / build-resolved", "Declared range",
+    ]);
+    const reactCells = within(frontend.getByRole("row", { name: /^React / })).getAllByRole("cell");
+    expect(reactCells).toHaveLength(2);
+    // An exact declared pin can equal the runtime; assert their separate columns.
+    expect(reactCells[0].textContent).toBe(reactVersion);
+    expect(reactCells[1].textContent).toBe(BUILD_VERSIONS.libraries.find(row => row.name === "react")?.declared ?? "Unavailable");
     expect(await screen.findByText("3.12.9")).toBeInTheDocument();
     expect(screen.getByText("3.1.2")).toBeInTheDocument();
     expect(screen.getByText("3.1.1")).toBeInTheDocument();

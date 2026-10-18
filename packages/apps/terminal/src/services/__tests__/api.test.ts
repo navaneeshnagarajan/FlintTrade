@@ -1,66 +1,41 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
-const mockConnectionState = vi.hoisted(() => ({
-  host: "http://localhost:5000",
-  apiKey: "test-key-123",
-  status: "connected",
-}));
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import type { BrokerAccount } from "@/types/broker";
+import type { ConnectionStatus } from "@/types/stores";
 
-const mockModeState = vi.hoisted(() => ({
-  mode: "live",
-}));
+const initialConnection = useConnectionStore.getState();
+const initialMode = useModeStore.getState();
+const initialBroker = useBrokerStore.getState();
+type BrokerFixture = Pick<BrokerAccount, "account_id" | "broker"> & Partial<BrokerAccount>;
 
-const mockBrokerState = vi.hoisted(() => ({
-  accounts: [] as Array<{ account_id: string; broker: string; source?: string; status?: string; is_primary?: boolean; read_only?: boolean }>,
-  activeAccountId: null as string | null,
-}));
-
-// ---------------------------------------------------------------------------
-// Mock Zustand stores and rate limiters BEFORE importing the module under test.
-// vi.mock is hoisted by Vitest, so the factories run before any import.
-// ---------------------------------------------------------------------------
-
-vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: {
-    getState: () => mockConnectionState,
+// Preserve the existing scenarios, but drive the real stores. Test setup also
+// imports market-data authority: module mocks split its owner from the client.
+const mockConnectionState = {
+  get apiKey() { return useConnectionStore.getState().apiKey; },
+  set apiKey(apiKey: string) { useConnectionStore.setState({ apiKey }); },
+  get status() { return useConnectionStore.getState().status; },
+  set status(status: ConnectionStatus) { useConnectionStore.getState().setStatus(status); },
+};
+const mockModeState = {
+  get mode() { return useModeStore.getState().mode; },
+  set mode(mode: AppMode) { useModeStore.getState().setMode(mode); },
+};
+const mockBrokerState = {
+  get accounts() { return useBrokerStore.getState().accounts; },
+  set accounts(accounts: BrokerFixture[]) {
+    useBrokerStore.setState({ accounts: accounts.map(account => ({
+      label: "Synthetic fixture", status: "disconnected", connected_at: null,
+      error_message: null, is_primary: false, ...account,
+    })) });
   },
-}));
+  get activeAccountId() { return useBrokerStore.getState().activeAccountId; },
+  set activeAccountId(activeAccountId: string | null) { useBrokerStore.setState({ activeAccountId }); },
+};
 
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: {
-    getState: () => mockModeState,
-  },
-}));
-
-vi.mock("@/stores/brokerStore", () => {
-  const brokerAccountKey = (account: { account_id: string; broker: string; source?: string }) => [
-    account.source ?? "gateway",
-    account.broker,
-    account.account_id,
-  ].map(encodeURIComponent).join(":");
-  const findBrokerAccountMatch = <T extends { account_id: string; broker: string; source?: string }>(
-    accounts: T[],
-    selector: string | null,
-  ): T | undefined => {
-    if (!selector) return undefined;
-    const exact = accounts.find((account) => brokerAccountKey(account) === selector);
-    if (exact) return exact;
-    const legacy = accounts.filter((account) => account.account_id === selector);
-    return legacy.length === 1 ? legacy[0] : undefined;
-  };
-  return {
-    brokerAccountKey,
-    findBrokerAccountMatch,
-    isBrokerAccountMatch: (
-      account: { account_id: string; broker: string; source?: string },
-      selector: string | null,
-    ) => findBrokerAccountMatch([account], selector) === account,
-    useBrokerStore: {
-      getState: () => mockBrokerState,
-    },
-  };
-});
-
+// Rate admission remains an explicit unit-test input; no authority is mocked.
 vi.mock("@/services/rateLimiter", () => ({
   orderLimiter: { tryConsume: vi.fn(() => true) },
   smartOrderLimiter: { tryConsume: vi.fn(() => true) },
@@ -168,7 +143,6 @@ describe("Native FlintTrade API client (api.ts)", () => {
     // Reset rate limiter mocks to allow requests by default
     vi.mocked(orderLimiter.tryConsume).mockReturnValue(true);
     vi.mocked(generalLimiter.tryConsume).mockReturnValue(true);
-    mockConnectionState.host = "http://localhost:5000";
     mockConnectionState.apiKey = "";
     mockConnectionState.status = "connected";
     mockModeState.mode = "live";
@@ -188,6 +162,9 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    useConnectionStore.setState(initialConnection);
+    useModeStore.setState(initialMode);
+    useBrokerStore.setState(initialBroker);
   });
 
   it.each([
@@ -723,7 +700,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
     await expect(
       getMargin(PRACTICE_READ_CONTEXT, "INFY", "NSE", 10, "MIS", "BUY", controller.signal),
-    ).rejects.toThrow("margin is not available from the Practice sandbox");
+    ).rejects.toThrow("margin is not available in Practice");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -1072,9 +1049,17 @@ describe("Native FlintTrade API client (api.ts)", () => {
     );
   });
 
-  it.each(["", "   ", [], [""], ["  "]])(
-    "rejects malformed native Greek values instead of coercing %j to zero",
-    async (delta) => {
+  it.each([
+    { name: "empty string", delta: "" },
+    { name: "blank string", delta: "   " },
+    { name: "two-space string", delta: "  " },
+    { name: "missing field", delta: undefined },
+    { name: "empty array", delta: [] },
+    { name: "empty-string array", delta: [""] },
+    { name: "blank-string array", delta: ["  "] },
+  ])(
+    "rejects malformed native Greek values ($name) instead of coercing to zero",
+    async ({ delta }) => {
       mockConnectionState.apiKey = "";
       fetchSpy
         .mockResolvedValueOnce(
@@ -2399,6 +2384,10 @@ describe("Native FlintTrade API client (api.ts)", () => {
     expect(results.some((row) => row.symbol === "NIFTY")).toBe(true);
     expect(results.every((row) => row.symbol.toUpperCase().includes("NIFTY"))).toBe(true);
     expect(results.find((row) => row.symbol === "NIFTY")?.exchange).toBe("NSE_INDEX");
+    expect(results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" }),
+      expect.objectContaining({ symbol: "NIFTY 24500 CE", exchange: "NFO" }),
+    ]));
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -2431,6 +2420,57 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
     await expect(searchSymbol("NIFTY", "MCX")).resolves.toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("resolves Example and Practice F&O contracts with offline lot sizes", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+    const explored = await getSymbol("NIFTY-OCT2026-FUT", "NFO");
+    expect(explored).toEqual(expect.objectContaining({
+      symbol: "NIFTY-OCT2026-FUT",
+      exchange: "NFO",
+      instrumenttype: "FUTIDX",
+      lotsize: 65,
+      freezeQty: 3510,
+      freeze_qty: 3510,
+    }));
+
+    mockModeState.mode = "practice";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+    const practised = await getSymbol("BANKNIFTY 52000 CE", "NFO");
+    expect(practised).toEqual(expect.objectContaining({
+      symbol: "BANKNIFTY 52000 CE",
+      exchange: "NFO",
+      instrumenttype: "OPTIDX",
+      lotsize: 30,
+      freezeQty: 1440,
+      freeze_qty: 1440,
+    }));
+    const searched = await searchSymbol("BANKNIFTY", "NFO");
+    expect(searched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "BANKNIFTY-OCT2026-FUT", exchange: "NFO" }),
+    ]));
+    expect(searched.every((row) => row.exchange === "NFO")).toBe(true);
+  });
+
+  it("resolves Practice symbol search from the Example catalogue when native search is unavailable", async () => {
+    mockModeState.mode = "practice";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+
+    const results = await searchSymbol("SBIN");
+    expect(results).toEqual([
+      expect.objectContaining({ symbol: "SBIN", exchange: "NSE" }),
+    ]);
+  });
+
+  it("does not replace a Live search failure with Example symbols", async () => {
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [];
+    mockBrokerState.activeAccountId = null;
+
+    await expect(searchSymbol("SBIN")).rejects.toThrow();
   });
 
   it("reads Practice funds from the order-execution sandbox, never a real account", async () => {

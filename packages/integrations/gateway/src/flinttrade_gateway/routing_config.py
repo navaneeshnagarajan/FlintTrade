@@ -115,6 +115,20 @@ class RoutingConfig:
     # Shape: {adapter_id: {account_id: [actor_id, ...]}}. Consumed by
     # AuthenticatingSessionProvider, which raises SafetyBypassError on a miss.
     account_acls: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    data_policies: tuple[str, ...] = ()
+
+    def resolve_data(self, dataset: str, *, market: str, venue: str, start: str, end: str) -> dict[str, Any]:
+        """Select explicit historical contributors without execution fallback.
+
+        The existing read owner still decides entitlement and authority; a
+        configured policy cannot open frozen native operations.
+        """
+        from flinttrade_gateway.data_source_policy import resolve_data_policy
+
+        try:
+            return resolve_data_policy(self.data_policies, dataset, market=market, venue=venue, start=start, end=end)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise RoutingConfigError(str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Resolution (contract §13.2)
@@ -226,6 +240,16 @@ class RoutingConfig:
                     "{account_id: [actor_id, ...]}"
                 )
 
+        from flinttrade_gateway.data_source_policy import parse_data_policies
+
+        try:
+            connections = brokers.get("data_connections", [])
+            if type(connections) is not list or any(type(item) is not str or not item for item in connections):
+                raise ValueError("data_connections must be explicit identifiers")
+            data_policies = parse_data_policies(brokers.get("data_policies", []), set(registered) | set(connections))
+        except (ValueError, TypeError, KeyError) as exc:
+            raise RoutingConfigError(str(exc)) from exc
+
         cfg = cls(
             registered=registered,
             execution=execution,
@@ -233,6 +257,7 @@ class RoutingConfig:
             failover=failover,
             cost_aware=cost_aware,
             account_acls=account_acls,
+            data_policies=data_policies,
         )
         cfg._validate()
         return cfg

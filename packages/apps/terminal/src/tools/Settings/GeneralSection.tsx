@@ -6,6 +6,8 @@
  */
 
 import { FieldRow, SegmentControl, SectionTitle } from "./shared";
+import { HelpPreferences } from "@/components/help/HelpPreferences";
+import { DeveloperPreference } from "@/chrome/DeveloperPreference";
 
 interface GeneralSettings {
   fontSize: "small" | "normal" | "large";
@@ -20,6 +22,8 @@ export function GeneralSection({ settings, onChange }: GeneralSectionProps) {
   return (
     <div className="space-y-5">
       <SectionTitle>General</SectionTitle>
+      <DeveloperPreference />
+      <HelpPreferences />
 
       <FieldRow
         label="Font Size"

@@ -13,34 +13,47 @@ test.beforeEach(async ({ page, syntheticApi }) => {
   registerExampleDeskReads(syntheticApi);
 });
 
-test("Learn teaches built-in Practice and its Trade link preserves the selected mode", async ({ page }) => {
+test("Learn teaches built-in Practice and its Trade link preserves the selected mode", async ({ page }, info) => {
   await page.goto("/learn");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Learn");
+  await expect(page.getByRole("region", { name: "Learn app", exact: true }).getByRole("heading", { level: 1, name: "Learn", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Practice Trading" }).click();
   const practice = page.getByTestId("practice-trading");
   await expect(practice).toContainText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.");
   await expect(practice).not.toContainText(/sandbox|Kotak|funded unlock/i);
   await expect(practice.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
-  await page.screenshot({ path: "test-results/learn-practice.png", fullPage: true });
+  await page.screenshot({ path: info.outputPath("learn-practice.png"), fullPage: true });
   await practice.getByRole("link", { name: "Open Trade desk" }).click();
-  await expect(page).toHaveURL(/\/trade$/);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Trade");
+  await expect(page).toHaveURL(/\/terminal$/);
+  const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
+  await expect(terminal.getByRole("heading", { level: 1, name: "Terminal", exact: true })).toBeVisible();
   const mode = await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:mode") ?? "{}").state.mode);
   expect(mode).toBe("explore");
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Trade Review", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "Trade Review" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Trade");
-  await page.getByRole("button", { name: "Close trade review" }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "Trade Review" })).toHaveCount(0);
+  // Review is the Reports app's docked widget, not a Terminal modal.
+  await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Reports", exact: true }).click();
+  await expect(page).toHaveURL(/\/reports$/);
+  const reports = page.getByRole("region", { name: "Reports app", exact: true });
+  await expect(reports.getByRole("tab", { name: "Log", exact: true })).toBeVisible();
+  await reports.getByRole("button", { name: "Close trade review", exact: true }).click();
+  await expect(page).toHaveURL(/\/terminal$/);
+  await expect(terminal).toBeVisible();
+  // The Reports owner is retained under Activity; Close retires its visible
+  // effects rather than deleting the app's composition or another app's state.
+  await expect(reports).not.toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:mode") ?? "{}").state.mode)).toBe("explore");
 
+  // Close is now navigation, so its history entry returns through Reports and
+  // Terminal before reaching the original Learn entry.
   await page.goBack();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Learn");
+  await expect(reports).toBeVisible();
+  await page.goBack();
+  await expect(terminal).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("region", { name: "Learn app", exact: true }).getByRole("heading", { level: 1, name: "Learn", exact: true })).toBeVisible();
 });
 
-test("Schedules uses human names and keeps Explore controls disabled", async ({ page }) => {
+test("Schedules uses human names and keeps Explore controls disabled", async ({ page }, info) => {
   await page.goto("/automate#schedules");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Automate");
+  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 1, name: "Automate", exact: true })).toBeVisible();
   await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
   await expect(page.getByText("End-of-day position snapshot", { exact: true })).toBeVisible();
   await page.getByRole("checkbox", { name: "Show system jobs" }).check();
@@ -48,7 +61,7 @@ test("Schedules uses human names and keeps Explore controls disabled", async ({ 
     await expect(pause).toBeDisabled();
   }
   await page.getByRole("checkbox", { name: "Show system jobs" }).uncheck();
-  await page.screenshot({ path: "test-results/schedules.png", fullPage: true });
+  await page.screenshot({ path: info.outputPath("schedules.png"), fullPage: true });
 });
 
 test("a retired automation deep link preserves schedules and monitors without flow traffic", async ({ page, syntheticApi }) => {
@@ -58,7 +71,7 @@ test("a retired automation deep link preserves schedules and monitors without fl
     handler: () => { throw new Error("Retired flow APIs must never be requested"); },
   });
   await page.goto("/automate#flows");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Automate");
+  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 1, name: "Automate", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Schedules", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Flows", exact: true })).toHaveCount(0);

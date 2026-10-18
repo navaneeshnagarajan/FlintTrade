@@ -98,7 +98,7 @@ export function checkLotSizeVerified(
 ): string | null {
   if (!isDerivativeExchange(exchange)) return null;
   if (!verified || lotSize == null || lotSize <= 0) {
-    return `Lot size for ${symbol} is unverified — order not sent`;
+    return `Not placed. The lot size for ${symbol} isn't verified.`;
   }
   return null;
 }
@@ -120,7 +120,7 @@ export function checkLotMultiple(
   if (!isDerivativeExchange(exchange)) return null;
   const lotSize = state.lotSize as number;
   if (!Number.isFinite(quantity) || quantity <= 0 || quantity % lotSize !== 0) {
-    return `Quantity must be a positive multiple of the lot size (${lotSize}) for ${exchange}.`;
+    return lotMultipleRefusal(lotSize);
   }
   return null;
 }
@@ -188,6 +188,125 @@ export function checkPriceForOrderType(
     }
   }
   return null;
+}
+
+/**
+ * Single-order quantity ceilings.
+ *
+ * These match SafetySystem L1 `_DEFAULT_QTY_LIMITS`. An unknown exchange uses
+ * the same 50,000 fallback as the server. The refusal sentence matches L1 so
+ * the pad and the gate tell the operator the same thing.
+ */
+export const ORDER_QUANTITY_LIMITS: Readonly<Record<string, number>> = {
+  NSE: 50_000,
+  BSE: 50_000,
+  NFO: 5_000,
+  BFO: 5_000,
+  MCX: 1_000,
+  CDS: 10_000,
+  BCD: 10_000,
+  NCDEX: 5_000,
+  NCO: 5_000,
+};
+
+const DEFAULT_ORDER_QUANTITY_LIMIT = 50_000;
+
+/** Exchange ceiling, or the L1 default when the segment is not listed. */
+export function orderQuantityLimit(exchange: string): number {
+  return ORDER_QUANTITY_LIMITS[exchange.trim().toUpperCase()] ?? DEFAULT_ORDER_QUANTITY_LIMIT;
+}
+
+/**
+ * Refuse a quantity above the exchange ceiling.
+ *
+ * Returns null for non-positive values so the existing minimum check owns
+ * that sentence. The visible message is the L1 sentence.
+ */
+export function checkOrderQuantityLimit(exchange: string, quantity: number): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const limit = orderQuantityLimit(exchange);
+  if (quantity <= limit) return null;
+  const label = exchange.trim().toUpperCase() || exchange;
+  return `Quantity ${quantity} exceeds ${label} limit of ${limit}`;
+}
+
+/**
+ * NSE index quantity freeze limits.
+ *
+ * NSE/FAOP/76693 (1 October 2026, effective 5 October 2026). These apply
+ * when the broker does not send `freeze_qty`. An order above the limit is
+ * refused whole. It is not split.
+ */
+export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  NIFTY: 3510,
+  BANKNIFTY: 1440,
+  FINNIFTY: 3240,
+  MIDCPNIFTY: 5760,
+  NIFTYNXT50: 1125,
+  NIFTYFPI: 53900,
+};
+
+const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
+  (left, right) => right.length - left.length,
+);
+
+/** Index name inside a contract symbol. Longer names win over `NIFTY`. */
+export function indexUnderlying(symbol: string): string | null {
+  const compact = symbol.toUpperCase().replace(/\s+/g, "");
+  if (!compact) return null;
+  for (const name of INDEX_FREEZE_NAMES) {
+    if (compact === name || compact.startsWith(name)) return name;
+  }
+  return null;
+}
+
+/** Symbol named in the freeze refusal. */
+export function orderSymbolLabel(symbol: string): string {
+  const text = symbol.trim().replace(/\s+/g, " ");
+  return text || "this contract";
+}
+
+/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
+export function lotMultipleRefusal(lotSize: number): string {
+  return `Quantity must be a multiple of the lot size (${lotSize}).`;
+}
+
+/** Same freeze sentence as order admission. The number is the broker freeze when one was sent. */
+export function freezeQuantityRefusal(symbol: string, freeze: number): string {
+  return `Max ${freeze} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
+}
+
+/**
+ * Broker freeze quantity when it is a positive whole number, otherwise the
+ * NSE/FAOP/76693 index table.
+ */
+export function resolveFreezeQuantity(
+  symbol: string,
+  brokerFreezeQty?: number | null,
+): number | null {
+  if (typeof brokerFreezeQty === "number" && Number.isInteger(brokerFreezeQty) && brokerFreezeQty > 0) {
+    return brokerFreezeQty;
+  }
+  const underlying = indexUnderlying(symbol);
+  if (!underlying) return null;
+  return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
+}
+
+/**
+ * Refuse a quantity above the freeze quantity.
+ *
+ * Returns null for non-positive values so the minimum check owns that
+ * sentence. The visible message matches order admission.
+ */
+export function checkFreezeQuantity(
+  symbol: string,
+  quantity: number,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || quantity <= limit) return null;
+  return freezeQuantityRefusal(symbol, limit);
 }
 
 // ---------------------------------------------------------------------------

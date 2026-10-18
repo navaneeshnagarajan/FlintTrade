@@ -1,7 +1,7 @@
 /**
  * SessionTab tests — ported from the retired SessionStats widget suite
  * (merge 2.12). Every provenance and numeric pin survives:
- *   - the disclosed sample renders only while no real round trip has closed;
+ *   - only explicit Explore renders fixed samples;
  *   - live round trips route through lib/pnl FIFO pairing (75 × ₹10 = ₹750);
  *   - REGRESSION: the trade-log table never shows sample rows under a Live
  *     badge;
@@ -21,7 +21,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-// Live sources: default to empty (→ disclosed sample fallback). The option
+// Account sources: default to a successful empty book. The option
 // objects are captured so the explore-mode gating can be asserted.
 const mockTradebook = vi.fn();
 const mockOrders = vi.fn();
@@ -30,17 +30,18 @@ const ordersOptions: Array<{ enabled?: boolean } | undefined> = [];
 vi.mock("@/hooks/useTradebook", () => ({
   useTradebook: (options?: { enabled?: boolean }) => {
     tradebookOptions.push(options);
-    return mockTradebook() as unknown;
+    return { isSuccess: true, isError: false, isLoading: false, isStale: false, fetchStatus: "idle", ...mockTradebook() };
   },
 }));
 vi.mock("@/hooks/useOrders", () => ({
   useOrders: (options?: { enabled?: boolean }) => {
     ordersOptions.push(options);
-    return mockOrders() as unknown;
+    return { isSuccess: true, isError: false, isLoading: false, isStale: false, fetchStatus: "idle", ...mockOrders() };
   },
 }));
 
 import { useModeStore } from "@/stores/modeStore";
+import { setAccountRuntime } from "@/test-utils/accountQueryHarness";
 import {
   SessionTab,
   SAMPLE_SESSION_TRADES,
@@ -55,7 +56,7 @@ beforeEach(() => {
   ordersOptions.length = 0;
   mockTradebook.mockReturnValue({ data: [] });
   mockOrders.mockReturnValue({ data: [] });
-  useModeStore.setState({ mode: "live" });
+  setAccountRuntime();
 });
 
 beforeAll(() => {
@@ -70,13 +71,14 @@ beforeAll(() => {
 // Render tests
 // ---------------------------------------------------------------------------
 
-describe("SessionTab", () => {
+describe("SessionTab explicit Explore", () => {
+  beforeEach(() => { useModeStore.setState({ mode: "explore" }); });
   it("renders the session heading", () => {
     render(<SessionTab />);
     expect(screen.getByText("Today's Session")).toBeTruthy();
   });
 
-  it("shows the disclosed Sample data badge while no round trip has closed", () => {
+  it("leaves example disclosure to the global mode-honesty bar", () => {
     render(<SessionTab />);
     expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
@@ -293,7 +295,7 @@ describe("SessionTab live mode", () => {
     );
   });
 
-  it("stays on the disclosed sample when fills exist but nothing closed", () => {
+  it("shows no closed round trips when installed fills contain only opens", () => {
     mockTradebook.mockReturnValue({
       data: [
         { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
@@ -301,6 +303,8 @@ describe("SessionTab live mode", () => {
       ],
     });
     render(<SessionTab />);
+    expect(screen.getByText("No round trips closed yet today.")).toBeInTheDocument();
+    expect(screen.queryByText("+₹12,850")).not.toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
@@ -329,7 +333,7 @@ describe("SessionTab live mode", () => {
   // The Orders bar has its own data source, so it needs its own provenance:
   // real closed round trips plus an empty order book used to render the sample
   // 14/12/1/1 counts underneath a green "Live" badge.
-  it("badges the Orders bar when only the order book is unavailable", () => {
+  it("shows zero orders for a successful empty order book", () => {
     mockTradebook.mockReturnValue({
       data: [
         { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",

@@ -78,6 +78,7 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useMarketDataScope } from "@/hooks/useDataScope";
 import type { LogicalRange, Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { applyCandleSpan } from "./spanCandles";
 import {
   Search,
   X,
@@ -624,34 +625,6 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     return () => controller.abort();
   }, [optionLegUnderlying, optionLegType, dataScope]);
 
-  useEffect(() => {
-    const node = workspaceRef.current;
-    if (!node) return;
-
-    const updateWidth = (width?: number) => {
-      const nextWidth = width ?? node.getBoundingClientRect().width;
-      if (Number.isFinite(nextWidth)) {
-        setWorkspaceWidth((current) =>
-          Math.abs(current - nextWidth) < 1 ? current : nextWidth,
-        );
-      }
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver === "undefined") {
-      const handleResize = () => updateWidth();
-      window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
-    }
-
-    const observer = new ResizeObserver(([entry]) => {
-      updateWidth(entry?.contentRect.width);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
   const [initialIndicatorSettings] = useState(() => loadSavedIndicatorSettings(panelId));
   const [chartDisplaySettings, setChartDisplaySettings] = useState(() => loadSavedDisplaySettings(panelId));
   const [indicators, setIndicators] = useState<IndicatorState>(() => ({ ...initialIndicatorSettings.indicators }));
@@ -747,6 +720,37 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     useChartInit(setLegend);
 
   useEffect(() => {
+    const node = workspaceRef.current;
+    if (!node) return;
+
+    const updateWidth = (width?: number) => {
+      const nextWidth = width ?? node.getBoundingClientRect().width;
+      if (Number.isFinite(nextWidth)) {
+        setWorkspaceWidth((current) =>
+          Math.abs(current - nextWidth) < 1 ? current : nextWidth,
+        );
+      }
+      const chart = chartRef.current;
+      const count = barsRef.current.length;
+      if (chart && count > 0) applyCandleSpan(chart.timeScale(), count);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateWidth();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      updateWidth(entry?.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [chartRef]);
+
+  useEffect(() => {
     if (fitNewSeriesRangeRef.current) {
       visibleLogicalRangeRef.current = null;
       return;
@@ -839,6 +843,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       chartTheme,
       createFlintChartDisplaySettingsOptions(chartDisplaySettings),
     );
+    applyCandleSpan(chart.timeScale(), barsRef.current.length);
   }, [chartDisplaySettings, chartTheme, chartRef, candleRef]);
 
   const handleDrawingCreated = useCallback((drawingId: string) => {
@@ -1183,6 +1188,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     const volumeSeries = volume;
     const controller = new AbortController();
     let cancelled = false;
+    const spanFrames: number[] = [];
 
     function applyBars(data: OhlcvBar[]) {
       if (cancelled) return;
@@ -1211,6 +1217,16 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       } else {
         timeScale?.setVisibleLogicalRange(savedRange);
       }
+      // fitContent is queued. A wide plot at the 7px default still shows the
+      // series in a fraction of the width until spacing is set from the plot.
+      if (timeScale) applyCandleSpan(timeScale, data.length);
+      const spanFrame = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        const chart = chartRef.current;
+        if (!chart) return;
+        applyCandleSpan(chart.timeScale(), barsRef.current.length);
+      });
+      spanFrames.push(spanFrame);
       refreshIndicatorsRef.current?.();
       refreshServerIndicatorsRef.current?.();
     }
@@ -1251,6 +1267,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     return () => {
       cancelled = true;
       controller.abort();
+      for (const frame of spanFrames) window.cancelAnimationFrame(frame);
     };
   }, [symbol, exchange, interval, dataScope, intervalDataScope, awaitingOptionLeg, candleRef, volumeRef, chartRef, exitReplay]);
 

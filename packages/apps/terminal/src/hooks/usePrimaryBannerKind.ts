@@ -13,13 +13,13 @@ import type { OperatorIncident } from "@/lib/operatorIncident";
 import { getSafetyConfig } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { useTradingStore } from "@/stores/tradingStore";
+import { useCurrentTradingState } from "@/stores/tradingStore";
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
 export function useLiveRiskActive(): boolean {
   const mode = useModeStore((s) => s.mode);
-  const totalPnl = useTradingStore((s) => s.totalPnl);
+  const { totalPnl, positionsStatus } = useCurrentTradingState();
   const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
   const { data } = useQuery({
     queryKey: SAFETY_CONFIG_QUERY_KEY,
@@ -34,7 +34,8 @@ export function useLiveRiskActive(): boolean {
   const dailyLossHalt =
     data?.daily_loss_hard_stop_active === true || data?.daily_loss_pause_active === true;
   const dailyLossAlert =
-    mtmStoploss > 0 && totalPnl < 0 && Math.abs(totalPnl) >= mtmStoploss * 0.5;
+    (positionsStatus === "ready" || positionsStatus === "stale")
+    && mtmStoploss > 0 && totalPnl < 0 && Math.abs(totalPnl) >= mtmStoploss * 0.5;
   return killActive || dailyLossHalt || dailyLossAlert;
 }
 

@@ -30,10 +30,13 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from typing import Any
 
 import jwt
 from flask import Blueprint, current_app, jsonify, request
+
+from .auth_service import AuthenticatorRecoveryRequired
 
 logger = logging.getLogger("flinttrade.auth")
 
@@ -63,7 +66,7 @@ class _OperatorSessionVerificationError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# JWT revocation blocklist — DuckDB-backed, shared across gunicorn workers.
+# JWT revocation blocklist — SQLite-backed, shared across gunicorn workers.
 # ---------------------------------------------------------------------------
 
 
@@ -94,9 +97,9 @@ def _is_jti_revoked(jti: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Rate limiter fallback — delegates to the persistent AuthState (DuckDB).
-# The in-memory ``defaultdict`` is retained for legacy callers but writes
-# go through the shared store so multi-worker deployments coordinate.
+# Persistent rate admission — delegates to the shared SQLite AuthState.
+# The in-memory dictionary remains for legacy callers that clear it, but
+# cannot grant admission when the durable authority is unavailable.
 # ---------------------------------------------------------------------------
 
 _RATE_LIMIT_STORE: dict[tuple[str, str], list[float]] = defaultdict(list)
@@ -120,10 +123,10 @@ def _parse_limit(limit_string: str) -> tuple[int, int]:
 
 
 def _check_in_memory_rate_limit(endpoint: str, max_requests: int, window_seconds: int) -> bool:
-    """Sliding-window in-memory rate limit check.
+    """Persistent sliding-window rate admission (legacy function name).
 
     Returns ``True`` if the request is within the limit; ``False`` otherwise.
-    Mutates ``_RATE_LIMIT_STORE`` to record the new request timestamp.
+    Atomically checks and records the request in the shared authority.
 
     Args:
         endpoint: Endpoint name used as part of the bucket key.
@@ -131,7 +134,7 @@ def _check_in_memory_rate_limit(endpoint: str, max_requests: int, window_seconds
         window_seconds: Duration of the sliding window in seconds.
 
     Returns:
-        ``True`` if allowed, ``False`` if limit exceeded.
+        ``True`` if allowed; ``False`` if exceeded or authority is unavailable.
     """
     ip = request.remote_addr or "unknown"
     try:
@@ -143,19 +146,9 @@ def _check_in_memory_rate_limit(endpoint: str, max_requests: int, window_seconds
             max_requests=max_requests,
             window_seconds=window_seconds,
         )
-    except Exception as exc:
-        # DuckDB unavailable (e.g. during import-time checks); fall back
-        # to the in-process dict so the limiter keeps enforcing locally.
-        logger.debug("Auth state DB unavailable, falling back in-process: %s", exc)
-        key = (endpoint, ip)
-        now = time.monotonic()
-        cutoff = now - window_seconds
-        timestamps = _RATE_LIMIT_STORE[key]
-        _RATE_LIMIT_STORE[key] = [t for t in timestamps if t > cutoff]
-        if len(_RATE_LIMIT_STORE[key]) >= max_requests:
-            return False
-        _RATE_LIMIT_STORE[key].append(now)
-        return True
+    except Exception:  # noqa: BLE001
+        logger.warning("Persistent auth rate-limit authority unavailable; request refused")
+        return False
 
 
 def _get_limiter():
@@ -166,9 +159,9 @@ def _get_limiter():
 def _rate_limit(limit_string: str):
     """Apply a rate limit to a route function.
 
-    Tries Flask-Limiter first (if configured in ``app.config["LIMITER"]``).
-    Falls back to the in-memory sliding-window limiter when Flask-Limiter is
-    absent.  Either path *enforces* the limit — this is no longer a no-op.
+    Persistent auth admission always applies. Flask-Limiter may additionally
+    provide an HTTP-layer cap, but its per-process memory cannot reset or
+    replace the durable shared budget after worker restart.
 
     Args:
         limit_string: Limit descriptor, e.g. ``"10 per minute"``.
@@ -181,15 +174,9 @@ def _rate_limit(limit_string: str):
     def decorator(f: Any) -> Any:
         @functools.wraps(f)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            limiter = _get_limiter()
-            if limiter is not None:
-                # Flask-Limiter is available — it handles enforcement via the
-                # deferred decorator applied in ``_apply_rate_limits``.
-                return f(*args, **kwargs)
-
-            # Fallback: enforce with the in-memory sliding-window limiter.
+            # The optional HTTP limiter is supplemental, never auth authority.
             if not _check_in_memory_rate_limit(f.__name__, max_requests, window_seconds):
-                logger.warning("Rate limit exceeded for %s from %s", f.__name__, request.remote_addr)
+                logger.warning("Persistent auth rate admission refused")
                 return jsonify(
                     {
                         "status": "error",
@@ -221,15 +208,15 @@ def install_auth_rate_limits(app: Any) -> int:
     the routes were registered (blueprint deferred-function order), so
     ``view_functions`` was empty and it silently wired nothing — leaving
     login/PIN/setup brute-force UNTHROTTLED in tests and production. Each app
-    has its own Limiter + memory storage, so this is naturally per-app-isolated.
+    has its own HTTP Limiter + memory storage. The inner auth wrapper always
+    enforces the shared persistent budget, independently of that local cap.
 
     Returns the number of (view, limit) pairs wired, for logging/verification.
-    If no Flask-Limiter is configured, the ``@_rate_limit`` wrapper's own
-    in-memory sliding-window fallback still enforces the limit.
+    If no Flask-Limiter is configured, persistent auth admission still applies.
     """
     limiter = app.config.get("LIMITER")
     if limiter is None:
-        logger.warning("No LIMITER in app config — auth rate limits enforced by in-memory fallback")
+        logger.warning("No HTTP LIMITER configured — persistent auth rate admission remains enforced")
         return 0
 
     registered = 0
@@ -250,7 +237,8 @@ def install_auth_rate_limits(app: Any) -> int:
 
 
 # JWT config
-_JWT_SECRET_KEY = ""  # Set from env or generated at startup
+_JWT_SECRET_KEY = ""  # Loaded from the workspace or generated on first use.
+_JWT_SECRET_LOCK = Lock()
 _JWT_ALGORITHM = "HS256"
 
 # IST timezone offset
@@ -272,30 +260,33 @@ def _get_jwt_secret() -> str:
     operator's real home.
     """
     global _JWT_SECRET_KEY
-    if _JWT_SECRET_KEY:
+    # First callers must not mint under different keys while persistence
+    # releases the GIL. Publish one signing authority for this process.
+    with _JWT_SECRET_LOCK:
+        if _JWT_SECRET_KEY:
+            return _JWT_SECRET_KEY
+
+        from .secure_file import write_secret_text  # noqa: PLC0415
+        from .workspace import workspace_dir  # noqa: PLC0415
+
+        key_file = workspace_dir() / "jwt_secret"
+        try:
+            if key_file.exists():
+                stored = key_file.read_text().strip()
+                if stored:
+                    _JWT_SECRET_KEY = stored
+                    return _JWT_SECRET_KEY
+        except OSError:
+            pass
+
+        new_secret = secrets.token_urlsafe(64)
+        try:
+            write_secret_text(key_file, new_secret)  # SC-04: icacls/0600 owner-only
+        except OSError as exc:
+            logger.warning("Could not persist JWT key file at %s: %s", key_file, exc)
+
+        _JWT_SECRET_KEY = new_secret
         return _JWT_SECRET_KEY
-
-    from .secure_file import write_secret_text  # noqa: PLC0415
-    from .workspace import workspace_dir  # noqa: PLC0415
-
-    key_file = workspace_dir() / "jwt_secret"
-    try:
-        if key_file.exists():
-            stored = key_file.read_text().strip()
-            if stored:
-                _JWT_SECRET_KEY = stored
-                return _JWT_SECRET_KEY
-    except OSError:
-        pass
-
-    new_secret = secrets.token_urlsafe(64)
-    try:
-        write_secret_text(key_file, new_secret)  # SC-04: icacls/0600 owner-only
-    except OSError as exc:
-        logger.warning("Could not persist JWT key file at %s: %s", key_file, exc)
-
-    _JWT_SECRET_KEY = new_secret
-    return _JWT_SECRET_KEY
 
 
 def _next_8am_ist() -> datetime:
@@ -316,6 +307,7 @@ def _create_token(
     mode: str = "practice",
     setup_session: bool = False,
     setup_bound: str = "",
+    scopes: tuple[str, ...] | None = None,
 ) -> str:
     """Create a JWT that expires at next 8:00 AM IST.
 
@@ -338,6 +330,8 @@ def _create_token(
             JWT. Passwordless ``/setup/reset`` accepts only this claim.
         setup_bound: Account ``created_at`` stamp bound into a setup JWT so
             a stale token cannot wipe a later replacement account.
+        scopes: Verified grants for a replacement session. ``None`` is reserved
+            for a fresh login/setup; an empty tuple remains unprivileged.
     """
     from .auth_scopes import DEFAULT_SESSION_SCOPES  # noqa: PLC0415 — avoid import cycle
 
@@ -352,7 +346,7 @@ def _create_token(
         "mode": mode,
         # OBS-09: additive admin-scope claim. The operator's own session gets read access
         # to every admin/observability surface; require_scope() enforces it per route.
-        "scopes": list(DEFAULT_SESSION_SCOPES),
+        "scopes": list(DEFAULT_SESSION_SCOPES if scopes is None else scopes),
     }
     if setup_session:
         payload["setup_session"] = True
@@ -1356,6 +1350,8 @@ def _issue_pin_token(
     live_mode_unlocked: bool,
 ) -> tuple[Any, int]:
     """Revoke the presented session, then mint its replacement."""
+    from .auth_scopes import resolve_session_scopes
+
     blocked = _revoke_presented_session(session_payload)
     if blocked is not None:
         return blocked
@@ -1367,6 +1363,7 @@ def _issue_pin_token(
         profile.get("username", "user"),
         live_mode_unlocked=live_mode_unlocked,
         mode=mode,
+        scopes=resolve_session_scopes(session_payload),
     )
     return jsonify(
         {
@@ -1697,11 +1694,14 @@ def auth_mode_switch() -> tuple[Any, int]:
         ), 503
 
     # Only AFTER successful revocation do we mint the new downgraded token.
+    from .auth_scopes import resolve_session_scopes
+
     username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
     new_token = _create_token(
         username,
         live_mode_unlocked=False,
         mode=target_mode,
+        scopes=resolve_session_scopes(payload),
     )
 
     return jsonify(
@@ -1719,25 +1719,33 @@ def auth_mode_switch() -> tuple[Any, int]:
 @auth_bp.route("/logout", methods=["POST"])
 @_rate_limit("10 per minute")
 def auth_logout() -> tuple[Any, int]:
-    """Invalidate current session by revoking the JWT on the server side."""
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.removeprefix("Bearer ").strip()
+    """Retire exactly the presented session, without stopping independent protection."""
+    from .auth_scopes import _session_token
+
+    token = _session_token()
     if not token:
-        token = request.headers.get("X-FlintTrade-Token", "").strip()
+        return jsonify({"status": "error", "message": "A full session is required for logout."}), 401
 
     if token:
         try:
             # Decode without blocklist check so we can extract the jti even
             # for tokens that were already revoked (idempotent logout).
             payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+            if payload.get("type") != "session":
+                return jsonify({"status": "error", "message": "A full session is required for logout."}), 401
             jti = payload.get("jti", "")
             exp = float(payload.get("exp", 0))
-            if jti:
+            if type(jti) is not str or not jti:
+                return jsonify({"status": "error", "message": "Token missing jti claim — cannot revoke session."}), 400
+            try:
                 _revoke_jti(jti, exp)
-                logger.info("JWT revoked on logout — jti=%s", jti)
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as exc:
-            # Token already expired or invalid — nothing to revoke.
-            logger.debug("Logout with invalid/expired token: %s", exc)
+            except Exception:
+                logger.error("Session revocation unavailable on logout")
+                return jsonify({"status": "error", "code": "logout_not_confirmed",
+                                "message": "Could not revoke session. Logout is not confirmed; retry."}), 503
+            logger.info("Session revoked on logout")
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            return jsonify({"status": "error", "message": "Session invalid or expired; logout target unavailable."}), 401
 
     logger.info("User logged out")
     return jsonify({"status": "success", "data": {"message": "Logged out."}}), 200
@@ -1861,6 +1869,9 @@ def auth_reset_password() -> tuple[Any, int]:
 
     try:
         result = svc.update_password(username, new_password)
+    except AuthenticatorRecoveryRequired:
+        return jsonify({"status": "error", "code": "authenticator_recovery_required",
+                        "message": "Password unchanged: existing authenticator recovery is required."}), 409
     except ValueError:
         return jsonify({"status": "error", "message": "Password too weak: minimum 8 characters"}), 400
 
@@ -1928,37 +1939,23 @@ def _otp_rate_ok(email: str) -> bool:
     """Check whether ``email`` is within the 3-per-hour OTP request limit.
 
     Delegates to the persistent :class:`AuthState` store so the cap is
-    enforced across gunicorn workers and survives worker restart. Falls
-    back to the in-process ``_OTP_REQUEST_LOG`` dict if the DB is not
-    available (e.g. during unit tests that run without a writable HOME).
+    enforced atomically across workers and survives restart. An unavailable
+    authority refuses admission; the legacy in-memory log grants no allowance.
 
     Args:
         email: The requester's email address used as the rate-limit key.
 
     Returns:
         ``True`` if the request is permitted; ``False`` if the hourly cap
-        has been reached.
+        has been reached or persistent authority is unavailable.
     """
     try:
         from .auth_state import get_auth_state  # lazy import
 
-        state = get_auth_state()
-        count = state.count_recent_otp_requests(email, window_seconds=3600)
-        if count >= _OTP_MAX_REQUESTS_PER_HOUR:
-            return False
-        state.record_otp_request(email)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("OTP rate-limit DB unavailable, falling back in-process: %s", exc)
-        now = time.monotonic()
-        cutoff = now - 3600
-        log = _OTP_REQUEST_LOG.get(email, [])
-        log = [t for t in log if t > cutoff]
-        if len(log) >= _OTP_MAX_REQUESTS_PER_HOUR:
-            return False
-        log.append(now)
-        _OTP_REQUEST_LOG[email] = log
-        return True
+        return get_auth_state().check_otp_request_limit(email, _OTP_MAX_REQUESTS_PER_HOUR, 3600)
+    except Exception:  # noqa: BLE001
+        logger.warning("Persistent OTP request authority unavailable; request refused")
+        return False
 
 
 def _generate_otp() -> str:
@@ -2047,6 +2044,48 @@ class EmailTransport:
         self._smtp_password = os.environ.get("SMTP_PASSWORD", "")
         self._smtp_from = os.environ.get("SMTP_FROM", self._smtp_user)
         self._ses_region = os.environ.get("AWS_SES_REGION", os.environ.get("AWS_DEFAULT_REGION", ""))
+
+    def incident_binding(self, provider: str, recipient: str) -> str:
+        """Bind explicit incident opt-in to this configured SMTP endpoint.
+
+        The OTP fallback policy is deliberately not an incident policy. SES
+        incident delivery remains unsupported until it has an exact configured
+        endpoint owner, rather than deriving recipients/providers from ambient
+        AWS configuration. No credential or recipient is returned.
+        """
+        from .incident_delivery import binding_digest
+        if (provider != "smtp" or not self._smtp_host or not self._smtp_from
+                or type(recipient) is not str or "@" not in recipient
+                or any(char in recipient for char in "\r\n\t")):
+            raise ValueError("explicit configured SMTP destination required")
+        return binding_digest(("smtp", self._smtp_host, self._smtp_port, self._smtp_from,
+                               self._smtp_user, self._smtp_password, recipient))
+
+    def send_incident(self, provider: str, recipient: str, expected: str, title: str, body: str) -> str:
+        """One selected SMTP attempt; submission and actual delivery differ."""
+        if self.incident_binding(provider, recipient) != expected:
+            return "revoked"
+        # Freeze the exact configuration checked above; this does not change
+        # the configured secret owner's OTP transport or fallback behaviour.
+        host, port, sender, user, password = (self._smtp_host, self._smtp_port,
+                                             self._smtp_from, self._smtp_user, self._smtp_password)
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"], msg["From"], msg["To"] = title, sender, recipient
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+            with smtplib.SMTP(host, port, timeout=10) as server:
+                server.ehlo()
+                if port == 587:
+                    server.starttls()
+                    server.ehlo()
+                if user and password:
+                    server.login(user, password)
+                refused = server.sendmail(sender, [recipient], msg.as_string())
+            return "failed" if refused else "submitted_unobserved"
+        except smtplib.SMTPRecipientsRefused:
+            return "failed"
+        except Exception:
+            return "unknown"  # Could have sent; never log raw exceptions/addresses.
 
     def send_otp(self, email: str, otp: str) -> bool:
         """Deliver a 6-digit OTP to ``email``.
@@ -2301,6 +2340,9 @@ def auth_reset_password_otp() -> tuple[Any, int]:
         profile = svc.get_profile()
         username = profile.get("username", "user")
         result = svc.update_password(username, new_password)
+    except AuthenticatorRecoveryRequired:
+        return jsonify({"status": "error", "code": "authenticator_recovery_required",
+                        "message": "Password unchanged: existing authenticator recovery is required."}), 409
     except ValueError:
         return jsonify({"status": "error", "message": "Password too weak: minimum 8 characters"}), 400
 

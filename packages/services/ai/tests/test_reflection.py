@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import fields
 from unittest.mock import MagicMock
+from types import SimpleNamespace
+
 
 import pytest
 
@@ -20,6 +22,11 @@ from flinttrade_ai.trade_reflection import TradeOutcome, TradeReflector
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _canonical_records(rows):
+    """Synthetic canonical-record port; send-gate coverage uses the real HTTP client."""
+    return tuple(SimpleNamespace(values=dict(row), record_id=f"fixture-{i}") for i, row in enumerate(rows))
 
 
 def make_outcome(**overrides) -> TradeOutcome:
@@ -47,12 +54,12 @@ def make_reflector(llm_response_text: str = "LESSON: Hold winners longer."):
     ``llm_response_text``.  The mock memory's add_memory() returns a fixed UUID.
     """
     mock_llm = MagicMock()
-    mock_llm.chat.return_value = LLMResponse(content=llm_response_text)
+    mock_llm.learning_chat.return_value = LLMResponse(content=llm_response_text)
 
     mock_memory = MagicMock()
     mock_memory.add_memory.return_value = "test-uuid-1234"
 
-    reflector = TradeReflector(llm_client=mock_llm, memory=mock_memory)
+    reflector = TradeReflector(llm_client=mock_llm, memory=mock_memory, learning_records=_canonical_records)
     return reflector, mock_llm, mock_memory
 
 
@@ -265,7 +272,7 @@ class TestReflectPromptContent:
 
     def _get_user_message_content(self, mock_llm: MagicMock) -> str:
         """Extract the user-role message content from the chat() call."""
-        messages = mock_llm.chat.call_args[0][0]
+        messages = mock_llm.learning_chat.call_args[0][0]
         user_messages = [m for m in messages if m.role == "user"]
         assert user_messages, "No user message found in LLM call"
         return user_messages[0].content
@@ -358,7 +365,7 @@ class TestReflectPromptContent:
 
         # Act
         reflector.reflect_one(outcome)
-        messages = mock_llm.chat.call_args[0][0]
+        messages = mock_llm.learning_chat.call_args[0][0]
 
         # Assert
         system_messages = [m for m in messages if m.role == "system"]

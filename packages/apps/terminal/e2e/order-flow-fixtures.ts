@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import type { Locator, Page, Request, TestInfo } from "@playwright/test";
+import type { IJsonModel } from "flexlayout-react";
+import type { QueryClient } from "@tanstack/react-query";
 import {
   expect,
   registerExploreAdvisorStatusProbe,
@@ -10,6 +12,7 @@ import {
   type SyntheticHandlerRegistration,
   type SyntheticResponse,
 } from "./fixture-registry";
+import { registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 
 export const ACCOUNT_A = "SYNTHETIC-A";
 export const ACCOUNT_B = "SYNTHETIC-B";
@@ -102,8 +105,10 @@ export function registerRead(
 export function registerDeskReads(
   registry: SyntheticFixtureRegistry,
   accountSwitch = false,
-  options: { broker?: string; accountIds?: string[]; hasSession?: boolean; readOnly?: boolean; nativeAccounts?: boolean; marketScopeVisits?: number } = {},
+  options: { broker?: string; accountIds?: string[]; hasSession?: boolean; readOnly?: boolean; nativeAccounts?: boolean; mode?: "practice" | "explore"; marketScopeVisits?: number } = {},
 ): void {
+  // The shared status query is authenticated but deliberately disabled in Explore.
+  if (options.mode !== "explore") registerSystemDiagnosticsRead(registry, LIVE_TOKEN);
   const broker = options.broker ?? BROKER;
   const accounts = options.accountIds ?? [ACCOUNT_A, ACCOUNT_B];
   // A same-account Live -> Practice -> Live round trip re-arms the production
@@ -214,8 +219,7 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
   await page.addInitScript(({ widget, sibling }) => {
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
-    localStorage.setItem("flinttrade:layouts", JSON.stringify({ state: {
-      tabs: [{ id: "synthetic-order-flow", name: "Synthetic presentation only", serializedLayout: {
+    const initialLayout: IJsonModel = {
         global: { tabEnableRename: false, tabSetEnableSingleTabStretch: true, tabSetMinWidth: 100, tabSetMinHeight: 80 },
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: sibling ? 60 : 100, children: [{
@@ -225,8 +229,19 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
         }, ...(sibling ? [{
           type: "tabset", weight: 40, children: [{ type: "tab", id: "synthetic-narrow-sibling", component: widget, name: "Narrow Positions" }],
         }] : [])] },
-      } }], activeTabId: "synthetic-order-flow",
-    }, version: 0 }));
+    };
+    // The current app owns all books through its docking tree. Make the former
+    // implicit observer explicit, without reviving the legacy route or panel.
+    // Keep the original inner IDs/weights and the historical 72/28 split.
+    if (!sibling) initialLayout.layout = {
+      type: "row", weight: 100, children: [{ type: "row", weight: 100, children: [
+        { ...initialLayout.layout, weight: 72 },
+        { type: "tabset", weight: 28, children: [{
+          type: "tab", id: "desk-positions", component: "positions", name: "Positions",
+        }] },
+      ] }],
+    };
+    localStorage.setItem("flinttrade:app-layouts:v1:terminal", JSON.stringify({ Current: initialLayout }));
     const observedWindow = window as Window & { __presentationNotifications?: unknown[] };
     observedWindow.__presentationNotifications = [];
     window.addEventListener("flinttrade:notify", (event) => {
@@ -253,7 +268,7 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     // The existing poll must establish the synthetic session from its API body.
     brokers.useBrokerStore.getState().setActiveAccount(`native:dhan:${account}`);
     await Promise.all([
-      importModule("/src/routes/TerminalRoute.tsx"),
+      importModule("/src/routes/UnifiedAppRoute.tsx"),
       importModule(widget === "foreverorders"
         ? "/src/widgets/orders/ForeverOrdersWidget.tsx"
         : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
@@ -261,10 +276,51 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: component });
-  await expect(page).toHaveURL(/\/trade$/);
-  await tickUntil(page, page.getByRole("button", {
+  await expect(page).toHaveURL(/\/terminal$/);
+  const initialControl = page.getByRole("button", {
     name: component === "foreverorders" ? "Refresh forever orders" : "Table", exact: true,
-  }).first());
+  }).first();
+  if (component === "foreverorders") {
+    // The explicit companion must finish its first decoded book before the
+    // caller tests unavailable detail. Its generic loading warning is not a
+    // completed error. Preserve the original mount's 2s/15s notification bound;
+    // do not await the GTT query, which a late-account control deliberately holds.
+    let advanced = 0;
+    let queries: unknown[] = [];
+    await expect.poll(async () => {
+      const sample = await page.evaluate(async () => {
+        // Constant module adapter, as in the existing mount; no data enters code.
+        const importModule = new Function("path", "return import(path)") as (path: string) => Promise<{ queryClient: QueryClient }>;
+        const { queryClient } = await importModule("/src/providers/QueryProvider.tsx");
+        return queryClient.getQueryCache().getAll().map(query => ({
+          key: query.queryKey, active: query.isActive(), status: query.state.status,
+          fetchStatus: query.state.fetchStatus, invalidated: query.state.isInvalidated,
+          dataUpdatedAt: query.state.dataUpdatedAt, errorUpdatedAt: query.state.errorUpdatedAt,
+        }));
+      });
+      queries = sample; // Retain every query, including diagnostics; no filtering or suppression.
+      const book = sample.find(query => JSON.stringify(query.key) === JSON.stringify(["orders", "list", `live:native:${BROKER}:${ACCOUNT_A}`]));
+      const settled = book?.active && book.status !== "pending" && book.fetchStatus === "idle";
+      if (advanced < 2_000) { await page.clock.runFor(25); advanced += 25; }
+      return Boolean(settled) && await initialControl.isVisible();
+    }, { timeout: 15_000, intervals: [50] }).toBe(true);
+    await test.info().attach("docked-companion-mount", {
+      body: JSON.stringify({ advanced, queries }), contentType: "application/json",
+    });
+  } else await tickUntil(page, initialControl);
+  if (narrowSibling) {
+    // Establish the original narrow-card condition with the actual public
+    // splitter, preserving the initial 60/40 tree, viewport and product CSS.
+    const splitter = page.getByRole("separator", { name: "Resize", exact: true });
+    const box = await splitter.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) throw new Error("Current docked workspace has no public splitter");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 64, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await page.clock.runFor(50);
+  }
 }
 
 export async function tickUntil(page: Page, locator: Locator): Promise<void> {
@@ -316,6 +372,20 @@ export async function captureNarrow(page: Page, info: TestInfo, name: string, ph
   await page.clock.runFor(50);
   const continueButton = page.getByRole("button", { name: "Continue anyway", exact: true });
   if (await continueButton.isVisible()) await continueButton.click();
+  if (await page.locator("#flexlayout-tab-synthetic-narrow-sibling").count()) {
+    // Restore the original 60/40 proportion at this existing narrow checkpoint:
+    // both the primary and sibling books must become cards, not just the sibling.
+    const splitter = page.getByRole("separator", { name: "Resize", exact: true });
+    const divider = await splitter.boundingBox();
+    const workspace = await page.getByTestId("app-layout").boundingBox();
+    expect(divider).not.toBeNull();
+    expect(workspace).not.toBeNull();
+    if (!divider || !workspace) throw new Error("Current narrow workspace has no public splitter");
+    await page.mouse.move(divider.x + divider.width / 2, divider.y + divider.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(workspace.x + workspace.width * 0.6, divider.y + divider.height / 2, { steps: 4 });
+    await page.mouse.up();
+  }
   await page.clock.runFor(50);
   await captureEvidence(page, info, name);
 }

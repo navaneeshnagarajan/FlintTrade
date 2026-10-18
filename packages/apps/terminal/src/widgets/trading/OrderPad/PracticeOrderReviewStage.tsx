@@ -149,7 +149,7 @@ export function PracticeOrderReviewStage({
             aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}
-            className="flex h-9 flex-1 items-center justify-center gap-2 rounded border border-accent bg-accent px-3 text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-9 flex-1 items-center justify-center gap-2 rounded border border-accent bg-confirmation px-3 text-xs font-semibold text-confirmation-foreground enabled:hover:bg-confirmation-hover enabled:active:bg-confirmation-pressed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {confirming ? <Loader2 aria-hidden="true" className="size-3.5 animate-spin" /> : null}
             {confirming ? "Confirming…" : mode === "explore" ? "Continue" : "Confirm simulation"}

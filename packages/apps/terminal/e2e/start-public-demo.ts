@@ -16,7 +16,7 @@ process.on("exit", () => { rmSync(outputDir, { recursive: true, force: true }); 
 const processOptions = { env: demoEnv, stdio: "inherit", shell: process.platform === "win32" } as const;
 const build = spawnSync(
   "pnpm",
-  ["exec", "vite", "build", "--base=/demo-app/", "--outDir", outputDir, "--emptyOutDir"],
+  ["exec", "vite", "build", "--configLoader", "runner", "--base=/demo-app/", "--outDir", outputDir, "--emptyOutDir"],
   processOptions,
 );
 if (build.error) throw build.error;
@@ -24,7 +24,7 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 
 const server = spawn(
   "pnpm",
-  ["run", "preview", "--base=/demo-app/", "--outDir", outputDir, "--host=127.0.0.1", "--port=5173", "--strictPort"],
+  ["exec", "vite", "preview", "--configLoader", "runner", "--base=/demo-app/", "--outDir", outputDir, "--host=127.0.0.1", "--port=5173", "--strictPort"],
   processOptions,
 );
 server.on("error", (error: Error) => {

@@ -1077,6 +1077,14 @@ class _DesktopStartupRollbackRecoveryOwner:
         self._backend_lease: Any = None
         self._rollback_complete = False
         self._released = False
+        self._shared_recovery = (
+            (flask_app.extensions.get("flinttrade.factory_recovery") or _DesktopShutdownRecoveryOwner(flask_app))
+            if flask_app is not None and (flask_app.extensions.get("flinttrade.factory_recovery") is not None
+                or any(flask_app.config.get(key) is not None for key in (
+                    "EXECUTION_SESSIONS", "PROTECTION_SERVICES", "DATA_RUNTIME", "MODEL_RUN_SERVICES",
+                    "LEARNING_CONSENT_LEDGER", "KNOWLEDGE_RUNTIME", "SERVICE_TASK_DISPATCHER",
+                ))) else None
+        )
 
     def _rollback_once(self) -> bool:
         if self.app is None:
@@ -1091,6 +1099,22 @@ class _DesktopStartupRollbackRecoveryOwner:
     def attempt_rollback(self, *, deadline: float) -> bool:
         """Run or rejoin rollback without exposing the triggering exception."""
         if self._rollback_complete:
+            return True
+        if self._shared_recovery is not None:
+            try:
+                self._shared_recovery.release(deadline=deadline)
+            except DesktopBackendShutdownIncomplete:
+                return False
+            if self._shared_recovery._borrowed_keys:
+                try:
+                    complete = self._rollback_worker.run(
+                        lambda: _close_desktop_build_dependencies(self._client, self._audit), deadline=deadline,
+                    )
+                except BaseException:
+                    return False
+                if not complete:
+                    return False
+            self._rollback_complete = True
             return True
         expired_at_entry = _remaining_shutdown_budget(deadline) <= 0.0
         if not self._local_ai_complete and self.app is not None:
@@ -1260,8 +1284,10 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
             client=client,
             backend_lease_proof=backend_lease_proof,
         )
+        from .app import _install_managed_maintenance  # noqa: PLC0415
         from .local_ai_routes import start_configured_local_ai_runtime  # noqa: PLC0415
 
+        _install_managed_maintenance(flask_app, _thread.interrupt_main)
         local_ai_attempted = True
         start_configured_local_ai_runtime(flask_app)
         safety = flask_app.config.get("SAFETY")
@@ -1296,6 +1322,9 @@ def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
         _configure_tick_capture(flask_app, settings)
         return flask_app
     except BaseException as startup_error:
+        factory_recovery = getattr(startup_error, "recovery_owner", None)
+        if flask_app is None and isinstance(factory_recovery, _DesktopShutdownRecoveryOwner):
+            flask_app = factory_recovery.app
         startup_error_context = _external_exception_context(startup_error)
         startup_signal = startup_error if isinstance(startup_error, (KeyboardInterrupt, SystemExit)) else None
         recovery_owner = _DesktopStartupRollbackRecoveryOwner(
@@ -1369,8 +1398,12 @@ class _DesktopShutdownRecoveryOwner:
         waitress_socket_map: dict[Any, Any] | None = None,
         shutdown_signal: _ShutdownSignal | None = None,
         shutdown_callback: Callable[[], None] | None = None,
+        borrowed_keys: frozenset[str] = frozenset(),
     ) -> None:
         self.app = app
+        self._owner_pid = os.getpid()
+        self._borrowed_keys = borrowed_keys
+        self._scheduler = app.config.get("SCHEDULER") if "SCHEDULER" not in borrowed_keys else None
         self.server = server
         self.waitress_dispatcher = waitress_dispatcher
         self.waitress_socket_map = waitress_socket_map if waitress_socket_map is not None else {}
@@ -1378,9 +1411,12 @@ class _DesktopShutdownRecoveryOwner:
         self.shutdown_callback = shutdown_callback
         self._tracker = app.config.get("RUNTIME_REQUEST_TRACKER")
         self._capture_runtime = app.config.get(_CAPTURE_RUNTIME_CONFIG)
+        self._instrument_master = app.config.get("INSTRUMENT_MASTER_REFRESH_OWNER")
         self._deferred_capture_storage: Callable[..., Any] | None = None
         self._capture_deadline_aware = False
         self._workers: dict[str, _RetainedBoundedWorker] = {}
+        self._shared_owners: dict[str, Any] = {}
+        self._maintenance_control = app.extensions.get("flinttrade.maintenance")
         self._completed: set[str] = set()
         self._attempt_lock = threading.Lock()
         self._lease_lock = threading.Lock()
@@ -1414,6 +1450,7 @@ class _DesktopShutdownRecoveryOwner:
         require_truthy: bool = False,
         start_when_expired: bool = False,
         require_live_deadline_for_success: bool = False,
+        resume_incomplete: bool = False,
         error_context: Callable[[BaseException], str] = _external_exception_context,
     ) -> bool:
         if key in self._completed:
@@ -1423,12 +1460,18 @@ class _DesktopShutdownRecoveryOwner:
             key,
             _RetainedBoundedWorker(f"flinttrade-desktop-shutdown-{key}"),
         )
+        with worker._lock:
+            rejoining = worker._thread is not None and not worker._result_consumed
         try:
             result = worker.run(
                 operation,
                 deadline=deadline,
                 start_when_expired=start_when_expired,
             )
+            if require_truthy and not result and resume_incomplete and rejoining:
+                # Rejoin the prior operation first. Its old bounded False is
+                # not this attempt's deadline; allow one same-owner continuation.
+                result = worker.run(operation, deadline=deadline)
         except TimeoutError:
             logger.warning(timeout_message)
             return False
@@ -1484,11 +1527,63 @@ class _DesktopShutdownRecoveryOwner:
                 pass
         return _external_exception_context(error)
 
+    def _close_shared_owners(self, keys: tuple[str, ...], *, deadline: float) -> bool:
+        """Retain exact timed-out owners and every dependency for explicit retry."""
+        from .factory_lifecycle import FACTORY_STORES  # noqa: PLC0415
+
+        for key in keys:
+            if key in self._borrowed_keys:
+                continue
+            step = f"shared-{key.lower()}"
+            current = self.app.config.get(key)
+            if step in self._completed:
+                if current is not None:
+                    return False
+                continue
+            owner = self._shared_owners.setdefault(key, current)
+            if current is not owner:
+                return False
+            if owner is None:
+                self._completed.add(step)
+                continue
+
+            if key == "EXECUTION_SESSIONS" and not self._run_worker(
+                "execution-drain", lambda owner=owner: owner.shutdown(_remaining_shutdown_budget(deadline)),
+                deadline=deadline, require_truthy=True, resume_incomplete=True,
+                failure_message="Desktop execution drain failed (%s)",
+                timeout_message="Desktop execution drain timed out",
+            ):
+                return False
+
+            def close_owner(owner: Any = owner, key: str = key) -> None:
+                with self.app.app_context():
+                    close = getattr(owner, "close", None)
+                    if not callable(close) and key not in FACTORY_STORES:
+                        raise RuntimeError("shared owner close protocol unavailable")
+                    if callable(close) and close() is False:
+                        raise RuntimeError("shared owner close remains incomplete")
+
+            if not self._run_worker(
+                step + "-close", close_owner, deadline=deadline,
+                failure_message=f"Desktop shared owner {key} close failed (%s)",
+                timeout_message=f"Desktop shared owner {key} close timed out",
+            ):
+                return False
+            if self.app.config.get(key) is not owner:
+                return False
+            self.app.config.pop(key)
+            self._completed.add(step)
+        return True
+
     def _shutdown(self, deadline: float) -> bool:
         if not _stop_backend_lease_watch(self.app, timeout=_remaining_shutdown_budget(deadline)):
             return False
         app = self.app
         app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+
+        def stop_instrument_master() -> bool:
+            owner = self._instrument_master
+            return owner is None or bool(owner.stop(timeout=_remaining_shutdown_budget(deadline)))
 
         def stop_local_ai() -> bool:
             from .local_ai_routes import shutdown_local_ai_runtime  # noqa: PLC0415
@@ -1510,6 +1605,20 @@ class _DesktopShutdownRecoveryOwner:
             start_when_expired=True,
             require_live_deadline_for_success=True,
         )
+
+        master_current = app.config.get("INSTRUMENT_MASTER_REFRESH_OWNER")
+        master_expected = None if "instrument-master-retired" in self._completed else self._instrument_master
+        master_stopped = master_current is master_expected and self._run_worker(
+            "instrument-master", stop_instrument_master, deadline=deadline, require_truthy=True, resume_incomplete=True,
+            failure_message="Desktop instrument master shutdown failed (%s)",
+            timeout_message="Desktop instrument master shutdown timed out",
+        )
+        if master_stopped:
+            if app.config.get("INSTRUMENT_MASTER_REFRESH_OWNER") is not master_expected:
+                master_stopped = False
+            else:
+                app.config.pop("INSTRUMENT_MASTER_REFRESH_OWNER", None)
+                self._completed.add("instrument-master-retired")
 
         close_server = getattr(self.server, "close", None)
         server_closed = (
@@ -1618,6 +1727,24 @@ class _DesktopShutdownRecoveryOwner:
 
             shutdown_strategy_runtime(app)
 
+        def stop_registered_strategies() -> None:
+            scheduler = self._scheduler
+            if "SCHEDULER" in self._borrowed_keys:
+                return  # The calling async runtime still owns this root.
+            if app.config.get("SCHEDULER") is not scheduler:
+                raise RuntimeError("registered strategy owner changed")
+            if scheduler is None:
+                return
+            if getattr(scheduler, "_runtime_loop", None) is not None:
+                scheduler.stop_all_threadsafe()
+            else:
+                asyncio.run(scheduler.stop_all())
+
+        registered_stopped = self._run_worker(
+            "registered-strategies", stop_registered_strategies, deadline=deadline,
+            failure_message="Desktop registered strategy shutdown failed (%s)",
+            timeout_message="Desktop registered strategy shutdown timed out",
+        )
         strategies_stopped = self._run_worker(
             "uploaded-strategies",
             stop_strategies,
@@ -1643,12 +1770,19 @@ class _DesktopShutdownRecoveryOwner:
 
         live_writers_stopped = all(
             (
+                local_ai_stopped,
+                master_stopped,
                 smart_orders_stopped,
                 agent_stopped,
                 strategies_stopped,
+                registered_stopped,
                 rotation_stopped,
                 ditto_stopped,
             )
+        )
+        shared_borrowers_present = any(
+            app.config.get(key) is not None or self._shared_owners.get(key) is not None
+            for key in ("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "DATA_RUNTIME", "MODEL_RUN_SERVICES")
         )
         router_retired = (
             self._run_worker(
@@ -1659,8 +1793,8 @@ class _DesktopShutdownRecoveryOwner:
                 timeout_message="Desktop broker-router retirement timed out",
                 require_truthy=True,
             )
-            if live_writers_stopped
-            else False
+            if live_writers_stopped and not shared_borrowers_present
+            else live_writers_stopped and shared_borrowers_present
         )
 
         runtime = self._capture_runtime
@@ -1760,7 +1894,14 @@ class _DesktopShutdownRecoveryOwner:
                 timeout_message="Desktop post-drain Ditto shutdown timed out",
                 require_truthy=True,
             )
-            if post_strategies_stopped and post_ditto_stopped:
+            post_registered_stopped = self._run_worker(
+                "post-drain-registered-strategies", stop_registered_strategies, deadline=deadline,
+                failure_message="Desktop post-drain registered strategy shutdown failed (%s)",
+                timeout_message="Desktop post-drain registered strategy shutdown timed out",
+            )
+            if post_strategies_stopped and post_ditto_stopped and post_registered_stopped and self._close_shared_owners(
+                ("EXECUTION_SESSIONS", "PROTECTION_SERVICES", "MODEL_RUN_SERVICES", "DATA_RUNTIME"), deadline=deadline,
+            ):
                 post_router_retired = self._run_worker(
                     "post-drain-broker-router",
                     lambda: retire_broker_dependencies(app),
@@ -1795,6 +1936,8 @@ class _DesktopShutdownRecoveryOwner:
         else:
             capture_storage_closed = "tick-storage" in self._completed
 
+        from .factory_lifecycle import FACTORY_STORES  # noqa: PLC0415
+
         dependency_shutdown_ready = all(
             (
                 requests_drained,
@@ -1804,10 +1947,14 @@ class _DesktopShutdownRecoveryOwner:
                 capture_storage_closed,
             )
         )
+        if dependency_shutdown_ready:
+            dependency_shutdown_ready = self._close_shared_owners(
+                ("LEARNING_CONSENT_LEDGER", "KNOWLEDGE_RUNTIME", "SERVICE_TASK_DISPATCHER", *FACTORY_STORES), deadline=deadline,
+            )
         client_closed = False
         audit_closed = False
         if dependency_shutdown_ready:
-            client = app.config.get("CLIENT")
+            client = app.config.get("CLIENT") if "CLIENT" not in self._borrowed_keys else None
             client_closed = (
                 self._run_worker(
                     "broker-read-client",
@@ -1820,7 +1967,7 @@ class _DesktopShutdownRecoveryOwner:
                 else self._complete_without_work("broker-read-client")
             )
 
-            audit = app.config.get("AUDIT")
+            audit = app.config.get("AUDIT") if "AUDIT" not in self._borrowed_keys else None
             close_audit = getattr(audit, "close", None)
             audit_closed = (
                 self._run_worker(
@@ -1847,6 +1994,8 @@ class _DesktopShutdownRecoveryOwner:
 
     def release(self, *, deadline: float) -> None:
         """Finish retained cleanup and release its backend lease by the deadline."""
+        if os.getpid() != self._owner_pid:
+            raise DesktopBackendShutdownIncomplete("inherited cleanup owner cannot release", recovery_owner=self)
         if self._released:
             return
         remaining = _remaining_shutdown_budget(deadline)
@@ -1863,6 +2012,22 @@ class _DesktopShutdownRecoveryOwner:
         try:
             shutdown_complete = self._shutdown(deadline)
             if shutdown_complete:
+                control = self._maintenance_control
+                if self.app.extensions.get("flinttrade.maintenance") is not control:
+                    shutdown_complete = False
+                elif control is not None:
+                    shutdown_complete = self._run_worker(
+                        "maintenance-handoff",
+                        lambda: control.runtime_stopped(timeout=_remaining_shutdown_budget(deadline)),
+                        deadline=deadline,
+                        failure_message="Desktop maintenance handoff failed (%s)",
+                        timeout_message="Desktop maintenance handoff timed out",
+                    ) and self._run_worker(
+                        "maintenance-channel", control.close, deadline=deadline,
+                        failure_message="Desktop maintenance channel close failed (%s)",
+                        timeout_message="Desktop maintenance channel close timed out",
+                    )
+            if shutdown_complete:
                 with self._lease_lock:
                     backend_lease = self._backend_lease
                 lease_released = (
@@ -1878,6 +2043,9 @@ class _DesktopShutdownRecoveryOwner:
                 )
                 if lease_released:
                     self._released = True
+                    from .factory_lifecycle import forget_factory_recovery  # noqa: PLC0415
+
+                    forget_factory_recovery(self)
                     return
         finally:
             self._attempt_lock.release()
@@ -2018,6 +2186,9 @@ def _serve_owned(
         )
         waitress_dispatcher.set_thread_count(8)
         bound_port = server.effective_port
+        from .service_oauth_routes import bind_desktop_oauth_port
+
+        bind_desktop_oauth_port(app, bound_port)
         _BackendLeaseRuntimeWatch(app, backend_lease_proof, _thread.interrupt_main).start()
 
         # Rotation is a process-owned credential lifecycle service. A desktop

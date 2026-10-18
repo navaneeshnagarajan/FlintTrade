@@ -330,17 +330,15 @@ def test_run_strategy_returns_daily_returns_list() -> None:
     assert len(returns) == len(bars) - 1
 
 
-def test_run_strategy_broken_falls_back_to_close_returns() -> None:
+def test_run_strategy_broken_never_substitutes_close_returns() -> None:
     bars = _make_bars(20)
-    # _BrokenStrategy raises → falls back to bar-to-bar close returns
-    returns = _run_strategy_on_bars(_BrokenStrategy, {}, bars)
-    assert isinstance(returns, list)
-    assert len(returns) == len(bars) - 1
+    with pytest.raises(RuntimeError, match="strategy failure"):
+        _run_strategy_on_bars(_BrokenStrategy, {}, bars)
 
 
 def test_run_strategy_empty_bars() -> None:
-    returns = _run_strategy_on_bars(_DailyReturnStrategy, {}, [])
-    assert returns == []
+    with pytest.raises(ValueError, match="No observations"):
+        _run_strategy_on_bars(_DailyReturnStrategy, {}, [])
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +466,7 @@ def test_as_dict_keys() -> None:
     expected_keys = {
         "splits", "avg_train_metric", "avg_test_metric",
         "degradation_pct", "is_robust", "n_splits_run", "wfe_ratio",
+        "candidate", "status", "qualification", "failures",
     }
     assert expected_keys == set(d.keys())
 

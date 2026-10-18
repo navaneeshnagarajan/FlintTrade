@@ -10,6 +10,8 @@ import os
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 # ---------------------------------------------------------------------------
 # ActivityLog unit tests
@@ -216,8 +218,8 @@ def _restore_env():
     os.environ.update(original)
 
 
-@pytest.fixture(scope="module")
-def route_client(_restore_env):
+@pytest.fixture
+def route_client(_restore_env, monkeypatch, request):
     """Flask test client with an in-memory ActivityLog pre-seeded with entries."""
     os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY
     from flinttrade_core.app import create_flask_app
@@ -232,7 +234,8 @@ def route_client(_restore_env):
     mem_log.log("order.cancel", {"orderid": "ORD001"}, user="nav")
     mem_log.log("auth.login", {"method": "password"}, user="admin")
     mem_log.log("mode.switch", {"from": "explore", "to": "live"}, user="nav")
-    app.config["ACTIVITY_LOG"] = mem_log
+    monkeypatch.setitem(app.config, "ACTIVITY_LOG", mem_log)
+    request.addfinalizer(mem_log.close)
 
     with app.test_client() as c:
         yield c

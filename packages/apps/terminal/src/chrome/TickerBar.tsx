@@ -8,17 +8,19 @@ import { isMarketHours, operatorMarketLabel } from "@/lib/market";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
+import { withExampleTickerPrices } from "./exampleTickerPrices";
 import { deriveTickerVenueStrip, type TickerVenueBadge } from "./tickerVenues";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
   return (
     <span
-      className={`text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
+      className={`ticker-venue-chip text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
         badge.open
-          ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
-          : "text-text-disabled border-border-default"
+          ? "border-amber-500/70 bg-amber-500/10"
+          : "border-border-default"
       }`}
+      style={{ color: "var(--color-ticker-venue)" }}
       title={badge.title}
       aria-label={badge.label}
     >
@@ -41,10 +43,13 @@ export interface TickerBarProps {
  * when an F&O symbol feeds). A venue that is not on the tape is omitted.
  */
 export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
-  const indices = useAtomValue(indicesSummaryAtom);
+  const deskMode = useModeStore((s) => s.mode);
+  const indices = withExampleTickerPrices(
+    useAtomValue(indicesSummaryAtom),
+    deskMode === "explore",
+  );
   const reducedMotion = usePrefersReducedMotion();
   const session = useOperatorMarketSession();
-  const deskMode = useModeStore((s) => s.mode);
   const liveFeedConnected = useConnectionStore((s) => s.wsConnected);
   const freshness = useFeedFreshness();
   // A disconnected socket is when the REST fallback can still be fresh.
@@ -88,7 +93,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
           >
             {venueStrip.kind === "unavailable" ? (
               <span
-                className="text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-disabled border-border-default"
+                className="text-[12px] leading-4 font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-primary border-border-default"
                 aria-label="Venues unavailable"
               >
                 Unavailable
@@ -103,7 +108,7 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
 
         {mode === "marquee" && reducedMotion && (
           <span
-            className="text-xxs text-text-muted px-2 shrink-0 select-none"
+            className="text-[12px] leading-4 text-text-primary px-2 shrink-0 select-none"
             data-testid="ticker-reduced-motion"
             title="Scrolling is paused because reduced motion is on"
           >
@@ -135,10 +140,10 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
       {showLastClose ? (
         <p
           data-testid="ticker-last-close"
-          className="px-2 pb-1 text-xs text-text-secondary"
+          className="px-2 pb-1 text-[12px] leading-4 text-text-primary"
         >
           Last close prices ·{" "}
-          <Link to="/settings#brokers" className="text-text-secondary underline-offset-2 hover:underline">
+          <Link to="/settings#brokers" className="text-text-primary underline-offset-2 hover:underline">
             Connect a broker for live prices →
           </Link>
         </p>

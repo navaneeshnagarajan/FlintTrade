@@ -12,7 +12,6 @@
  * Verifies:
  *   - /settings loads and shows the settings sidebar
  *   - Clicking "Appearance" activates that section
- *   - Clicking "Skill & Experience" activates that section
  *   - Deep-link via hash (/settings#brokers) activates the correct section
  */
 
@@ -91,7 +90,7 @@ test.describe('Settings page', () => {
   test('section tabs contain expected sections', async ({ page }) => {
     const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
     // A representative subset — defined in SECTIONS array
-    for (const label of ['General', 'Appearance', 'Broker', 'Skill & Experience', 'Report Bug', 'About']) {
+    for (const label of ['General', 'Appearance', 'Broker', 'Report Bug', 'About']) {
       await expect(sectionTabs.getByText(label, { exact: true })).toBeVisible();
     }
   });
@@ -104,18 +103,10 @@ test.describe('Settings page', () => {
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('clicking "Skill & Experience" section activates it', async ({ page }) => {
-    const sectionTabs = page.getByRole('tablist', { name: 'Settings sections' });
-    await sectionTabs.getByText('Skill & Experience', { exact: true }).click();
-
-    const activeTab = sectionTabs.getByRole('tab', { name: 'Skill & Experience' });
-    await expect(activeTab).toHaveAttribute('aria-selected', 'true');
-  });
-
   test('settings uses the shared page header', async ({ page }) => {
     // Settings is reached from the sidebar like every page, so its header names
     // the page and holds its action instead of a Back button.
-    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByTestId('page-header').getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 
@@ -258,7 +249,7 @@ test.describe('Settings page', () => {
 
     await page.goto('/settings?e2e=ollama-lifecycle#llm');
 
-    await expect(page.getByRole('tab', { name: 'LLM Config' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tablist', { name: 'Settings sections' }).getByRole('tab', { name: 'AI', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByText('Runtime v0.31.2')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Update runtime' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Stop runtime' })).toHaveCount(0);

@@ -1,4 +1,8 @@
 [tool.uv]
+no-build-package = ["growwapi"]
+
+constraint-dependencies = ["plotly==6.9.0"]
+
 # Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
 # retained as separate release-compatibility evidence in brokers.lock.
 build-constraint-dependencies = [
@@ -6,7 +10,7 @@ build-constraint-dependencies = [
     "setuptools==84.0.0",
     "wheel==0.48.0",
 ]
-no-build-isolation-package = ["kotakneoapi"]
+no-build-isolation-package = ["kotakneoapi", "upstox-python-sdk"]
 
 [tool.uv.workspace]
 members = [
@@ -32,19 +36,21 @@ members = [
 # entry points when present (see [tool.pytest.ini_options] note below).
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=0.24",
-    "pytest-xdist>=3.6",
-    "pytest-randomly>=5.0.0",
-    "pytest-timeout>=2.3",    # CI runs `pytest --timeout=60 --timeout-method=thread`
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-xdist==3.8.0",
+    "pytest-randomly==5.0.0",
+    "pytest-timeout==2.4.0",    # CI runs `pytest --timeout=60 --timeout-method=thread`
                              # (test.yml / nightly); the plugin must be in the synced env
-    "pyfakefs>=5.6",          # baselines §4.4 disk-full migration test (HI24)
-    "ruff>=0.16.10",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
+    "pyfakefs==6.2.0",          # baselines §4.4 disk-full migration test (HI24)
+    "ruff==0.17.0",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
                              # must be in the synced env, not merely on PATH
 ]
 
 [tool.uv.sources]
-kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "9a37488d77dc96442ee2a90ef78462e688cf4856" }
+upstox-python-sdk = { git = "https://github.com/upstox/upstox-python.git", rev = "d88a12ef5738a4c8d71f3b88eb7b79a359277c9d" }
+
+kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3" }
 flinttrade-ai = { workspace = true }
 flinttrade-automation = { workspace = true }
 flinttrade-backtest = { workspace = true }

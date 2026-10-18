@@ -1,5 +1,5 @@
 [toolchain]
-channel = "1.83.0"                          # match founder's local rustup; bump in lockstep with CI matrix
+channel = "1.99.0"                          # Exact stable release; keep native CI in lockstep.
 components = ["rustfmt", "clippy"]
 targets = ["x86_64-pc-windows-msvc",
            "x86_64-unknown-linux-gnu",

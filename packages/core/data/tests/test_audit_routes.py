@@ -9,6 +9,9 @@ import pytest
 from flask import Flask
 
 import flinttrade_data.audit_routes as mod
+from flinttrade_core.auth_routes import _create_token
+
+pytestmark = pytest.mark.usefixtures("owned_auth_state")
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +87,16 @@ def app_no_log():
 
 
 @pytest.fixture()
-def client(app):
-    return app.test_client()
+def auth_headers():
+    return {"Authorization": "Bearer " + _create_token(
+        "synthetic-audit", scopes=("admin.audit.read", "admin.audit.verify"))}
+
+
+@pytest.fixture()
+def client(app, auth_headers):
+    client = app.test_client()
+    client.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +115,10 @@ def test_audit_log_ok(client):
     assert "pages" in body["data"]
 
 
-def test_audit_log_no_log(app_no_log):
+def test_audit_log_no_log(app_no_log, auth_headers):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/log")
     assert resp.status_code == 503
 
@@ -135,9 +147,10 @@ def test_audit_export_ok(client):
     assert "text/csv" in resp.content_type
 
 
-def test_audit_export_no_log(app_no_log):
+def test_audit_export_no_log(app_no_log, auth_headers):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/export")
     assert resp.status_code == 503
 
@@ -156,9 +169,10 @@ def test_audit_stats_ok(client):
     assert "total" in body["data"]
 
 
-def test_audit_stats_no_log(app_no_log):
+def test_audit_stats_no_log(app_no_log, auth_headers):
     """503 when ACTIVITY_LOG not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/stats")
     assert resp.status_code == 503
 
@@ -214,9 +228,10 @@ def test_audit_events_pagination(client, app):
     assert body2["logs"][0]["strategy"] == "0"
 
 
-def test_audit_events_no_audit(app_no_log):
+def test_audit_events_no_audit(app_no_log, auth_headers):
     """503 when AUDIT not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/events")
     assert resp.status_code == 503
 
@@ -265,9 +280,10 @@ def test_audit_verify_reports_break(client, app):
     assert body["break"]["seq"] == 1
 
 
-def test_audit_verify_no_log(app_no_log):
+def test_audit_verify_no_log(app_no_log, auth_headers):
     """503 when the audit logger is not initialised."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/verify")
     assert resp.status_code == 503
 
@@ -352,9 +368,10 @@ def test_audit_events_export_bad_format_400(client):
     assert resp.status_code == 400
 
 
-def test_audit_events_export_no_audit_503(app_no_log):
+def test_audit_events_export_no_audit_503(app_no_log, auth_headers):
     """503 when the gated AuditLogger is not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/events/export?format=csv&from=2026-04-19&to=2026-04-19")
     assert resp.status_code == 503
 
@@ -389,9 +406,10 @@ def test_audit_events_summary_inverted_dates_400(client):
     assert resp.status_code == 400
 
 
-def test_audit_events_summary_no_audit_503(app_no_log):
+def test_audit_events_summary_no_audit_503(app_no_log, auth_headers):
     """503 when the gated AuditLogger is not configured."""
     with app_no_log.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = auth_headers["Authorization"]
         resp = c.get("/v1/audit/events/summary?from=2026-04-19&to=2026-04-19")
     assert resp.status_code == 503
 

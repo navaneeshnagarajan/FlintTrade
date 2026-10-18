@@ -29,6 +29,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify
 
+from flinttrade_core.auth_scopes import require_scope
 from flinttrade_core.version_inventory import build_version_inventory
 
 from .health_monitor import HealthMonitor
@@ -37,6 +38,23 @@ from .monitoring import HealthAggregator
 logger = logging.getLogger("flinttrade.health_routes")
 
 health_bp = Blueprint("health_detail", __name__)
+
+
+@health_bp.record_once
+def _install_diagnostic_producers(state: Any) -> None:
+    from flinttrade_core.diagnostics import install_diagnostics
+
+    install_diagnostics(state.app)
+
+
+@health_bp.route("/api/v1/system/diagnostics", methods=["GET"])
+@require_scope("admin.health.read")
+def system_diagnostics() -> tuple[Any, int]:
+    """Return passive observations, including explicit unmeasured capabilities."""
+    from flinttrade_core.diagnostics import diagnostics_snapshot
+    from flinttrade_core.incident_routes import scoped_read
+
+    return scoped_read({"status": "success", "data": diagnostics_snapshot(current_app, get_health_aggregator())})
 
 # IST timezone offset
 _IST = timezone(timedelta(hours=5, minutes=30))

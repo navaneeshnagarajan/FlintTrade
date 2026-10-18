@@ -42,7 +42,7 @@ def _make_llm_response(success: bool = True, content: str = "NIFTY looks bullish
 
 
 @pytest.fixture()
-def app():
+def app(owned_auth_state):
     """Flask test app with advisor_bp registered and LLM configured.
 
     Yields:
@@ -299,7 +299,7 @@ class TestAdvisorPracticeSandboxBook:
     """AI chat can read Practice fills; Live/Explore do not get that book."""
 
     @pytest.fixture()
-    def practice_app(self, tmp_path):
+    def practice_app(self, tmp_path, owned_auth_state):
         """Advisor app with a real SandboxEngine that already has one fill."""
         from flinttrade_ai.advisor_routes import advisor_bp
         from flinttrade_data.sandbox_engine import SandboxEngine

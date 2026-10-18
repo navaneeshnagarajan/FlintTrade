@@ -27,9 +27,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
-def _make_app(tmp_path: Path):
+def _make_app(tmp_path: Path, monkeypatch, request):
     """Create a Flask app with auth service and rate limiter active."""
     os.environ["FLINTTRADE_API_KEY"] = "rate-limit-test-key"
     # master password comes from the seeded hardened file (root conftest), not env
@@ -41,7 +44,8 @@ def _make_app(tmp_path: Path):
     svc = AuthService(db_path=auth_db)
 
     app = create_flask_app()
-    app.config["AUTH_SERVICE"] = svc
+    monkeypatch.setitem(app.config, "AUTH_SERVICE", svc)
+    request.addfinalizer(svc.close)
     app.config["TESTING"] = True
 
     # Ensure the rate limiter is enabled (it is by default, but be explicit).
@@ -71,13 +75,13 @@ class TestLoginRateLimit:
     and marks it as xfail if the limiter is not active.
     """
 
-    def test_login_rate_limit_applied(self, tmp_path: Path) -> None:
+    def test_login_rate_limit_applied(self, tmp_path: Path, monkeypatch, request) -> None:
         """Send 6 rapid login attempts — the 6th should be rate-limited.
 
         The rate limit on /v1/auth/login is ``5 per minute``.  After 5
         requests the 6th should receive HTTP 429 Too Many Requests.
         """
-        app, svc = _make_app(tmp_path)
+        app, svc = _make_app(tmp_path, monkeypatch, request)
 
         with app.test_client() as client:
             responses = []
@@ -108,9 +112,9 @@ class TestLoginRateLimit:
 class TestSetupRateLimit:
     """POST /v1/auth/setup is limited to 3 requests per minute."""
 
-    def test_setup_rate_limit_applied(self, tmp_path: Path) -> None:
+    def test_setup_rate_limit_applied(self, tmp_path: Path, monkeypatch, request) -> None:
         """Send 4 rapid setup attempts — the 4th should be rate-limited."""
-        app, svc = _make_app(tmp_path)
+        app, svc = _make_app(tmp_path, monkeypatch, request)
 
         with app.test_client() as client:
             responses = []
@@ -146,9 +150,9 @@ class TestStatusRateLimit:
     """GET /v1/auth/status has a generous 30/min limit — verify it
     does NOT trigger with normal usage."""
 
-    def test_status_not_rate_limited_within_bounds(self, tmp_path: Path) -> None:
+    def test_status_not_rate_limited_within_bounds(self, tmp_path: Path, monkeypatch, request) -> None:
         """10 rapid status checks should all succeed (well within 30/min)."""
-        app, _svc = _make_app(tmp_path)
+        app, _svc = _make_app(tmp_path, monkeypatch, request)
 
         with app.test_client() as client:
             for _ in range(10):
@@ -164,15 +168,15 @@ class TestStatusRateLimit:
 class TestRateLimiterConfig:
     """Verify the rate limiter is correctly instantiated in the app."""
 
-    def test_limiter_exists_in_app_config(self, tmp_path: Path) -> None:
+    def test_limiter_exists_in_app_config(self, tmp_path: Path, monkeypatch, request) -> None:
         """The Limiter instance should be stored in app.config['LIMITER']."""
-        app, _ = _make_app(tmp_path)
+        app, _ = _make_app(tmp_path, monkeypatch, request)
         limiter = app.config.get("LIMITER")
         assert limiter is not None, "LIMITER not found in app.config"
 
-    def test_limiter_default_limit_is_50_per_second(self, tmp_path: Path) -> None:
+    def test_limiter_default_limit_is_50_per_second(self, tmp_path: Path, monkeypatch, request) -> None:
         """Default rate limit is 50 req/s as configured in create_flask_app."""
-        app, _ = _make_app(tmp_path)
+        app, _ = _make_app(tmp_path, monkeypatch, request)
         limiter = app.config["LIMITER"]
         # flask-limiter stores default limits as a list of LimitGroup objects
         # or strings.  We check that at least one default limit contains "50".

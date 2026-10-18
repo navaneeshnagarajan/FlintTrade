@@ -1355,8 +1355,8 @@ build_from_source() {
   case "$os_name" in Darwin|Linux) ;; *) die "Unsupported OS '$os_name'. On Windows, use install.ps1." ;; esac
   say "Source-build mode packages only the Electron shell. Checking Git, Node, pnpm and the native compiler..."
   validate_source_build_target
-  check_source_prerequisites
   validate_source_origin
+  check_source_prerequisites
   if [ "$DRY_RUN" = "1" ]; then
     say "DRY-RUN: would clone or update the pinned repository at ${REF:-the newest release tag}"
     say "DRY-RUN: would install the frozen JavaScript workspace and package only @flinttrade/desktop with pnpm $PINNED_PNPM_VERSION"

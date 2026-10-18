@@ -8,6 +8,8 @@
 # retained. --purge lists every resolved path and requires explicit confirmation
 # before deleting them; installation lineage is the platform-default path only
 # and is removed last, after every earlier data target was removed successfully.
+# Destructive purge is currently refused: a verified protection-preserving
+# maintenance controller is not yet available. --dry-run can still list scope.
 #
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
@@ -19,8 +21,8 @@
 set -euo pipefail
 
 LEGACY_BUNDLE_ID="com.flinttrade.app"
-PURGE="${FLINTTRADE_UNINSTALL_PURGE:-0}"
-ASSUME_YES="${FLINTTRADE_UNINSTALL_YES:-0}"
+PURGE=0
+ASSUME_YES=0
 DRY_RUN="${FLINTTRADE_UNINSTALL_DRY_RUN:-0}"
 REMOVED_ANY=0
 SHELL_REMOVED_ANY=0
@@ -73,7 +75,8 @@ Flags:
              FlintTrade-managed checkout), the pre-workspace ~/.flinttrade
              data/archive/sandbox directories, the whole ~/.flinttrade managed
              root and legacy desktop storage. Every resolved path is printed
-             first. Irreversible after confirmation.
+             first. Currently refused until safe-maintenance/protection policy
+             is available; confirmation alone does not prove quiescence.
   --yes      Skip the typed --purge confirmation for scripted use. The full
              list of paths is still printed before anything is deleted.
   --dry-run  Print what would be removed without deleting anything.
@@ -209,14 +212,15 @@ canonical_existing_path() {
 }
 
 sha256_file() {
-  local target="$1"
+  local target="$1" output
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$target" | awk '{print $1}'
+    output="$(sha256sum "$target")" || return 1
   elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$target" | awk '{print $1}'
+    output="$(shasum -a 256 "$target")" || return 1
   else
     return 1
   fi
+  printf '%s\n' "${output%% *}"
 }
 
 private_mode() {
@@ -587,40 +591,18 @@ process_still_matches() {
 }
 
 stop_proven_shell_processes() {
-  local pids=("") pid attempt survivors=("")
-  while IFS= read -r pid; do [ -n "$pid" ] && pids+=("$pid"); done < <(matching_shell_processes)
-  [ "${#pids[@]}" -gt 1 ] || return 0
-  if [ "$DRY_RUN" = "1" ]; then
-    for pid in "${pids[@]}"; do [ -n "$pid" ] && say "[dry-run] would stop proved FlintTrade shell process $pid"; done
-    return 0
-  fi
-  for pid in "${pids[@]}"; do
+  local pid
+  while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    process_still_matches "$pid" && kill -TERM "$pid" 2>/dev/null || true
-  done
-  for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    survivors=("")
-    for pid in "${pids[@]}"; do
-      [ -n "$pid" ] && process_still_matches "$pid" && survivors+=("$pid")
-    done
-    [ "${#survivors[@]}" -eq 1 ] && break
-    /bin/sleep 0.1
-  done
-  if [ "${#survivors[@]}" -gt 1 ]; then
-    for pid in "${survivors[@]}"; do
-      [ -n "$pid" ] || continue
-      process_still_matches "$pid" && kill -KILL "$pid" 2>/dev/null || true
-    done
-    /bin/sleep 0.1
-  fi
-  for pid in "${pids[@]}"; do
-    [ -n "$pid" ] || continue
-    if process_still_matches "$pid"; then
-      refuse_unproven_shell "$RECEIPT_TARGET" "proved shell process $pid could not be stopped"
-      return 1
+    if [ "$DRY_RUN" = "1" ]; then
+      say "[dry-run] running shell $pid requires verified safe-maintenance before uninstall"
+      continue
     fi
-  done
-  say "Stopped the proved FlintTrade shell process set"
+    # Discovery is not a pinned process handle, nor proof that backend-owned
+    # protection can be abandoned. Never TERM/KILL a reusable PID here.
+    refuse_unproven_shell "$RECEIPT_TARGET" "running shell requires verified safe-maintenance; process and receipts retained"
+    return 1
+  done < <(matching_shell_processes)
 }
 
 add_data_target() {
@@ -883,57 +865,7 @@ purge_all_data() {
     return 0
   fi
 
-  # Bail out of an unconfirmable session BEFORE announcing the deletion list:
-  # a piped run used to print the full scary "About to DELETE" list and then
-  # keep everything, which read as a deletion that had already happened.
-  if [ "$ASSUME_YES" != "1" ] && { [ ! -t 1 ] || [ ! -r /dev/tty ]; }; then
-    say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
-    DATA_RETAINED_ANY=1
-    return 0
-  fi
-  announce_purge_targets
-  if [ "$ASSUME_YES" != "1" ]; then
-    local answer=""
-    printf '%s' "This is irreversible. Type 'purge' to continue: "
-    read -r answer < /dev/tty || true
-    if [ "$answer" != "purge" ]; then
-      say "Purge cancelled — FlintTrade data kept."
-      DATA_RETAINED_ANY=1
-      return 0
-    fi
-  else
-    say "Purge explicitly confirmed with --yes; deleting every path listed above."
-  fi
-
-  local target is_lineage keep_lineage earlier_targets=()
-  for target in "${DATA_TARGETS[@]}"; do
-    is_lineage=0
-    [ "${target%/}" != "${INSTALLATION_STATE_CANONICAL%/}" ] || is_lineage=1
-    if [ "$is_lineage" = "1" ]; then
-      keep_lineage=0
-      [ "$FAILED_ANY" != "1" ] || keep_lineage=1
-      if [ "$keep_lineage" = "0" ] && [ "${#earlier_targets[@]}" -gt 0 ] \
-        && ! verify_purge_targets_absent "${earlier_targets[@]}"; then
-        keep_lineage=1
-      fi
-      if [ "$keep_lineage" = "1" ]; then
-        say "Keeping installation lineage at $target because an earlier data target could not be removed."
-        DATA_RETAINED_ANY=1
-        continue
-      fi
-    fi
-    remove_path "$target"
-    if path_still_present "$target"; then
-      say "Could not verify removal of $target; retaining installation lineage."
-      FAILED_ANY=1
-      DATA_RETAINED_ANY=1
-    fi
-    if [ "$is_lineage" != "1" ]; then earlier_targets+=("$target"); fi
-  done
-  if [ "$FAILED_ANY" != "1" ]; then
-    PURGE_COMPLETED=1
-    PURGED_DATA_ANY=1
-  fi
+  die "Purge requires the installed held-exclusion maintenance helper; shell deletion is disabled."
 }
 
 announce_purge_targets() {
@@ -1304,6 +1236,23 @@ uninstall_linux() {
   if [ "$PURGE" = "1" ]; then purge_all_data "${legacy[@]}"; else keep_notice "${legacy[@]}"; fi
   remove_retained_web_receipt
 }
+
+# Destructive work stays in ONE real helper process. A success exit never
+# unlocks the legacy shell loop, and public bootstrap cannot invent policy.
+if [ "$PURGE" = "1" ] && [ "$DRY_RUN" != "1" ]; then
+  if [ "$ASSUME_YES" != "1" ]; then
+    say "Purge refused: pass explicit --purge --yes to confirm the complete printed scope; all data and receipts retained."
+    exit 1
+  fi
+  for candidate in "$SOURCE_ROOT/FlintTrade/.venv/bin/python" \
+      "$SOURCE_BUILD_ROOT/FlintTrade/.venv/bin/python"; do
+    if [ -x "$candidate" ]; then
+      exec "$candidate" -m flinttrade_core.workspace_maintenance purge --workspace "$WORKSPACE_DIR" --yes
+    fi
+  done
+  say "Purge refused: installed maintenance helper and safe policy unavailable; all data, shell and receipts retained."
+  exit 1
+fi
 
 case "$OS" in Darwin) uninstall_macos ;; Linux) uninstall_linux ;; esac
 

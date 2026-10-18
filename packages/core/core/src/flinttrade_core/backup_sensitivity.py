@@ -44,6 +44,7 @@ _DATABASES = frozenset(
         "auth.db",
         "totp_auth.duckdb",
         "auth_state.duckdb",
+        "auth_state.sqlite",
         "activity.db",
         "order-lifecycle.sqlite3",
         "order_exposure_reservations.sqlite",
@@ -71,6 +72,10 @@ _SECURITY_MEMBERS = frozenset(
         ".env",
         ".totp-migration.lock",
         ".action-center-migration.lock",
+        ".auth_state.sqlite.authority",
+        ".webhook_secrets.db.authority",
+        ".auth_state.sqlite.migration.json",
+        ".auth_state.sqlite.migration.json.tmp",
     }
 )
 _WORKSPACE_MEMBERS = frozenset(
@@ -92,7 +97,7 @@ class UnclassifiedArchivePath(ValueError):
 
 
 def _sensitive_family(name: str) -> bool:
-    if name in _SENSITIVE_BASES:
+    if name in _SENSITIVE_BASES or re.fullmatch(r"\.migration-[0-9a-f]{32}", name):
         return True
     for base in _SENSITIVE_BASES:
         escaped = re.escape(base)

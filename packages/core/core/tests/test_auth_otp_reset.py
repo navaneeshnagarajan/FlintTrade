@@ -21,13 +21,13 @@ import pytest
 def client(tmp_path):
     """Flask test client backed by a real AuthService in a tmp directory.
 
-    Also rebinds the AuthState singleton to a tmp DuckDB so that OTP
+    Also rebinds the AuthState singleton to temporary SQLite so that OTP
     rate-limit state is not shared across test runs.
     """
     from flinttrade_core import auth_state as auth_state_mod
 
     auth_state_mod.reset_singleton_for_tests()
-    auth_state_mod.get_auth_state(db_path=tmp_path / "auth_state.duckdb")
+    auth_state_mod.get_auth_state(db_path=tmp_path / "auth_state.sqlite")
     with patch("flinttrade_core.auth_routes._get_auth_service") as mock_svc:
         from flinttrade_core.auth_service import AuthService
 
@@ -37,8 +37,12 @@ def client(tmp_path):
 
         app = create_flask_app()
         app.config["TESTING"] = True
-        with app.test_client() as c:
-            yield c, svc
+        try:
+            with app.test_client() as c:
+                yield c, svc
+        finally:
+            from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
+            _DesktopShutdownRecoveryOwner(app).release(deadline=time.monotonic() + 10)
     auth_state_mod.reset_singleton_for_tests()
 
 

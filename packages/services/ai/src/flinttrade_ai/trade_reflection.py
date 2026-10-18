@@ -105,6 +105,8 @@ class ReflectionResult(BaseModel):
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     market_insights: str = ""
     confidence_calibration: str = ""
+    generation: str = "local-rule-candidate"
+    learning_receipt: str | None = None
 
 
 @dataclass
@@ -157,6 +159,7 @@ class TradeReflector:
         config: ReflectionConfig | Any | None = None,
         llm_client: Any | None = None,
         memory: TradedMemory | None = None,
+        learning_records: Any | None = None,
     ) -> None:
         if config is not None and not isinstance(config, ReflectionConfig):
             legacy_llm = config
@@ -167,6 +170,7 @@ class TradeReflector:
         self._config = config or ReflectionConfig()
         self._llm_client = llm_client
         self._memory = memory
+        self._learning_records = learning_records
         self._last_reflected_count: int = 0
         self._reflection_history: list[ReflectionResult] = []
         logger.info(
@@ -248,7 +252,14 @@ class TradeReflector:
         if self._memory is None:
             raise RuntimeError("reflect_one requires a persistent memory backend")
 
-        response = self._llm_client.chat(self._build_single_messages(outcome))
+        from dataclasses import asdict
+
+        from flinttrade_core.learning_consent import LearningRefused
+        records = self._records([asdict(outcome)])
+        if records is None or not callable(getattr(self._llm_client, "learning_chat", None)):
+            raise LearningRefused("single-trade reflection requires a learning grant and canonical records")
+        response = self._llm_client.learning_chat(self._build_single_messages(outcome), purpose="reflection",
+                                                 records=records)
         error = str(getattr(response, "error", "") or "").strip()
         lesson = str(getattr(response, "content", "") or "").strip()
         if error:
@@ -258,11 +269,16 @@ class TradeReflector:
         if not lesson:
             raise RuntimeError("Single-trade reflection failed: empty response")
 
+        from .knowledge_store import KnowledgeMemory
+        if isinstance(self._memory, KnowledgeMemory):
+            self._memory.propose("trading lessons: " + lesson, symbol=outcome.symbol,
+                                 source_ref="reflection:" + records[0].record_id)
+            return lesson
         memory_id = self._memory.add_memory(
             symbol=outcome.symbol,
             text=lesson,
             layer=MemoryLayer.REFLECTION,
-            metadata=self._build_single_metadata(outcome),
+            metadata={**self._build_single_metadata(outcome), "validation_state": "candidate"},
         )
         if contributing_memory_ids:
             self._memory.update_on_outcome(
@@ -278,6 +294,12 @@ class TradeReflector:
             memory_id,
         )
         return lesson
+
+    def _records(self, rows: list[dict[str, Any]]) -> Any:
+        records = self._learning_records(rows) if callable(self._learning_records) else self._learning_records
+        if records is None or [dict(record.values) for record in records] != rows:
+            return None
+        return tuple(records)
 
     def get_reflection_prompt(self, trades: list[dict[str, Any]]) -> str:
         """Build the LLM reflection prompt for a set of trades.
@@ -310,11 +332,19 @@ class TradeReflector:
         """
         return self._reflection_history[-1] if self._reflection_history else None
 
-    def format_for_prompt(self) -> str:
+    def format_for_prompt(self, *, symbol: str = "") -> str:
+        """Return only scoped independently validated recall, never raw reflection."""
+        from .knowledge_store import KnowledgeMemory
+
+        if not symbol or not isinstance(self._memory, KnowledgeMemory):
+            return ""
+        return self._memory.context(symbol, "trading lessons")[0]
+
+    def format_for_review(self) -> str:
         """Format the latest reflection as an LLM-ready context block.
 
         Returns:
-            Formatted string suitable for injection into an LLM system prompt,
+            Diagnostic candidate text, not validated decision context,
             or an empty string if no reflections have been run.
         """
         result = self.latest()
@@ -526,7 +556,13 @@ class TradeReflector:
                 LLMMessage(role="system", content=system_prompt),
                 LLMMessage(role="user", content=user_prompt),
             ]
-            response = await asyncio.to_thread(self._llm_client.chat, messages)
+            from flinttrade_core.learning_consent import LearningRefused
+            records = self._records(trades)
+            if (records is None
+                or not callable(getattr(self._llm_client, "learning_chat", None))):
+                raise LearningRefused("reflection requires matching canonical records and explicit learning consent")
+            response = await asyncio.to_thread(self._llm_client.learning_chat, messages,
+                                               purpose="reflection", records=records)
             raw = response.content.strip()
 
             # Strip markdown code fences if present
@@ -547,6 +583,9 @@ class TradeReflector:
                 confidence=float(data.get("confidence", 0.8)),
                 market_insights=str(data.get("market_insights", "")),
                 confidence_calibration=str(data.get("confidence_calibration", "")),
+                generation="remote-model-candidate",
+                learning_receipt=(response.learning_receipt
+                                  if type(getattr(response, "learning_receipt", None)) is str else None),
             )
 
         except json.JSONDecodeError:

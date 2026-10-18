@@ -6,13 +6,13 @@ import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPane
 export default function DittoRoute() {
   return (
     <Page>
-      <PageHeader title="Ditto" />
+      <PageHeader title="Account roles and copying" />
       <PageBody>
         <div className="space-y-4">
           <div role="status" className="rounded border border-border-default p-4 text-sm text-text-secondary">
-            Position mirroring and account-level Ditto risk controls are unavailable.
+            Position mirroring and account-level copy risk controls are unavailable.
             Native-session mirroring needs a supported transport and execution-safety design.
-            Manage your native broker sessions in Settings → Brokers.
+            Manage your native broker sessions in the Broker connections panel.
           </div>
           <AccountStatusPanel />
           <BrokerRateLimitsPanel />

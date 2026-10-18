@@ -17,7 +17,7 @@ from packages.integrations.gateway.tests.brokers.test_kotakneo_legacy_runtime im
 from packages.core.core.tests.test_indmoney_http_evidence import native_http_stack as native_http_stack
 
 super_stack = _super_stack
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.usefixtures("owned_flask_apps"), pytest.mark.integration]
 
 
 def test_kotak_rejection_reason_survives_actual_gated_http(runtime, backend_lease_factory):

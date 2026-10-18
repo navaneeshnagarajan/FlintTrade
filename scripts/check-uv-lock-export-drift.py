@@ -19,6 +19,8 @@ _EXPORT_ARGS = (
     "requirements-txt",
     "--no-emit-package",
     "kotakneoapi",
+    "--no-emit-package",
+    "upstox-python-sdk",
 )
 
 

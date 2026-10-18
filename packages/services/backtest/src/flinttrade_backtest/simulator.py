@@ -130,7 +130,12 @@ class BacktestConfig:
 
 @dataclass
 class BacktestResult:
-    """Complete backtest result."""
+    """Backtest evidence, including partial runs when ``error`` is non-empty.
+
+    ``total_bars`` counts completed iterations, not input or attempted bars.
+    A failed attempt can retain fills and an equity snapshot without counting
+    as completed. Failure never implies that open exposure was liquidated.
+    """
 
     config: BacktestConfig
     trades: list[SimTrade] = field(default_factory=list)
@@ -192,13 +197,23 @@ class BacktestSimulator:
                 config=self.config, error="No bars provided", final_equity=self._cash,
             )
 
-        strategy.start()
+        error = ""
+        try:
+            strategy.start()
+        except Exception as exc:
+            logger.error("Strategy start error: %s", exc)
+            error = f"Strategy start failed: {exc}"
         logger.info(
             "Backtest start: %s %s, %d bars, capital=%.0f",
             self.config.symbol, self.config.interval, len(bars), self.config.initial_capital,
         )
 
+        completed_bars = 0
+        close = 0.0
+        ts = ""
         for i, bar in enumerate(bars):
+            if error:
+                break
             self._bar_index = i
             ts = str(bar.get("timestamp", ""))
             close = float(bar.get("close", 0))
@@ -224,18 +239,21 @@ class BacktestSimulator:
                 strategy.on_bar(ohlcv)
             except Exception as exc:
                 logger.error("Strategy on_bar error at %s: %s", ts, exc)
+                error = f"Strategy on_bar failed at {ts}: {exc}"
                 strategy.set_error(str(exc))
-                break
 
             # 4. Collect orders from strategy
-            try:
-                new_orders = strategy.generate_orders()
-            except Exception as exc:
-                logger.error("Strategy generate_orders error: %s", exc)
-                new_orders = []
+            if not error:
+                try:
+                    new_orders = strategy.generate_orders()
+                except Exception as exc:
+                    logger.error("Strategy generate_orders error: %s", exc)
+                    error = f"Strategy generate_orders failed at {ts}: {exc}"
+                    strategy.set_error(str(exc))
+                    new_orders = []
 
-            for order in new_orders:
-                self._submit_order(order, ts, close)
+                for order in new_orders:
+                    self._submit_order(order, ts, close)
 
             # 5. Record equity
             equity = self._calculate_equity(close)
@@ -248,16 +266,21 @@ class BacktestSimulator:
                 positions_value=equity - self._cash,
                 drawdown=dd,
             ))
+            if error:
+                break
+            completed_bars += 1
 
-        # Close remaining positions at last bar's close
-        if bars:
-            last_close = float(bars[-1].get("close", 0))
-            last_ts = str(bars[-1].get("timestamp", ""))
-            self._close_all_positions(last_close, last_ts)
+        try:
+            strategy.stop()
+        except Exception as exc:
+            logger.error("Strategy stop error: %s", exc)
+            error = error or f"Strategy stop failed: {exc}"
 
-        strategy.stop()
+        # Only a completed run liquidates; failed runs retain reached evidence.
+        if not error:
+            self._close_all_positions(close, ts)
 
-        final = self._calculate_equity(float(bars[-1].get("close", 0)) if bars else 0)
+        final = self._calculate_equity(close)
 
         result = BacktestResult(
             config=self.config,
@@ -265,7 +288,8 @@ class BacktestSimulator:
             equity_curve=self._equity_curve,
             orders=self._filled_orders + list(self._pending_orders),
             final_equity=final,
-            total_bars=len(bars),
+            total_bars=completed_bars,
+            error=error,
         )
 
         logger.info(

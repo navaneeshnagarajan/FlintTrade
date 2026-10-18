@@ -552,32 +552,14 @@ def test_shutdown_closes_store_once_only_after_worker_finishes(desk, monkeypatch
 
 
 def test_real_closed_trade_learning_persists_and_reopens_offline(desk, tmp_path):
-    from flinttrade_ai.memory import TradedMemory
-
-    memory_path = str(tmp_path / "lessons")
-    desk.learning = TradedMemory(persist_dir=memory_path)
-
-    def chat(messages):
-        if "retrospection" in messages[0].content:
-            assert desk.sandbox.get_positions() == [], "learning preceded safe square-off"
-            return SimpleNamespace(content='{"recommendations":["Review the opening range before entry"]}')
-        return SimpleNamespace(content="BUY")
-
-    desk.llm.chat = chat
-    assert _start(desk).status_code == 202
-    _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
-    assert desk.client.post("/stop", headers=desk.headers, json={}).status_code == 200
-    _wait_for(lambda: _run_finished(desk))
-    row = desk.store.list_runs()[0]
-    assert row["status"] == "stopped"
-    assert len(desk.sandbox.get_trades()) == 2
-    restored = TradedMemory(persist_dir=memory_path)
-    try:
-        lessons = restored.retrieve("opening range", symbol="RELIANCE")
-        assert any("opening range" in lesson.content for lesson in lessons)
-        assert lessons[0].metadata["source"] == "autonomous-agent-session"
-    finally:
-        restored.close()
+    # The retained runtime regression now asserts the actual canonical owner,
+    # not an unscoped vector backend or an inference-as-learning bypass. The
+    # explicitly consented remote counterpart captures its real protocol wire
+    # in test_run_learning_remote; candidates are never self-validated here.
+    from packages.core.core.tests.test_run_learning import (
+        test_closed_trade_records_and_local_candidates_reopen_without_remote_consent,
+    )
+    test_closed_trade_records_and_local_candidates_reopen_without_remote_consent(desk, tmp_path)
 
 
 @pytest.mark.parametrize(

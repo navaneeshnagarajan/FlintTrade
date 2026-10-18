@@ -94,7 +94,7 @@ def _sha256(path: Path) -> str:
 
 
 @pytest.mark.unit
-def test_installation_lineage_is_retained_normally_and_purged_last(tmp_path: Path) -> None:
+def test_unanchored_lineage_is_retained_and_dry_run_lists_it_last(tmp_path: Path) -> None:
     installation_state = tmp_path / ".flinttrade-installation"
     installation_state.mkdir()
     (installation_state / "installation_id").write_text("test-lineage", encoding="utf-8")
@@ -118,8 +118,9 @@ def test_installation_lineage_is_retained_normally_and_purged_last(tmp_path: Pat
     assert candidates.rindex("$InstallationStateRoot") > candidates.rindex("$ManagedRoot")
 
     removed = _run(tmp_path, "--purge", "--yes", os_name="Linux")
-    assert removed.returncode == 0, removed.stdout + removed.stderr
-    assert not installation_state.exists()
+    assert removed.returncode != 0, removed.stdout + removed.stderr
+    assert installation_state.exists()
+    assert (installation_state / "installation_id").read_text() == "test-lineage"
 
 
 @pytest.mark.unit
@@ -149,39 +150,24 @@ def test_uninstall_never_treats_installation_state_env_as_purge_authority(tmp_pa
         extra_env={"FLINTTRADE_INSTALLATION_STATE_DIR": str(arbitrary)},
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0, result.stdout + result.stderr
     assert arbitrary.exists()
     assert (arbitrary / "keep.txt").read_text(encoding="utf-8") == "keep"
     assert str(arbitrary) not in result.stdout
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_failed_prior_data_removal_retains_installation_lineage(tmp_path: Path) -> None:
-    workspace = tmp_path / ".flinttrade"
-    workspace.mkdir()
-    (workspace / "keep.db").write_text("state", encoding="utf-8")
-    installation_state = tmp_path / ".flinttrade-installation"
-    installation_state.mkdir()
-    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    failing_rm = bin_dir / "rm"
-    failing_rm.write_text(
-        "#!/bin/sh\n"
-        "last=''\n"
-        "for arg in \"$@\"; do last=$arg; done\n"
-        f"[ \"$last\" = {str(workspace)!r} ] && exit 1\n"
-        "exec /bin/rm \"$@\"\n",
-        encoding="utf-8",
-    )
-    failing_rm.chmod(0o755)
+    from scripts.__tests__.test_authorised_maintenance import run_purge_fault
 
-    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
-
+    result, home, receipt = run_purge_fault(tmp_path, 'fail')
     assert result.returncode != 0
-    assert workspace.exists()
-    assert installation_state.exists()
-    assert "Keeping installation lineage" in result.stdout
+    assert receipt["phase"] == "retry_required"
+    assert (home / ".flinttrade-installation/installation_id").exists()
+    assert (home / "..flinttrade.maintenance/pending.json").exists()
+    assert "purge complete" not in result.stdout.lower()
+    pending = home / "..flinttrade.maintenance" / receipt["pending"]["member"]
+    assert (pending / "keep.bin").read_bytes() == b"fault-test-execution-history"
 
 
 @pytest.mark.unit
@@ -214,73 +200,34 @@ def test_home_symlink_alias_still_identifies_lineage_after_prior_failure(tmp_pat
     assert result.returncode != 0
     assert workspace.exists()
     assert installation_state.exists()
-    assert "Keeping installation lineage" in result.stdout
+    assert "Purge refused:" in result.stdout
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_successful_noop_data_removal_retains_installation_lineage(tmp_path: Path) -> None:
-    workspace = tmp_path / ".flinttrade"
-    workspace.mkdir()
-    (workspace / "keep.db").write_text("state", encoding="utf-8")
-    installation_state = tmp_path / ".flinttrade-installation"
-    installation_state.mkdir()
-    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake_rm = bin_dir / "rm"
-    fake_rm.write_text(
-        "#!/bin/sh\n"
-        "last=''\n"
-        "for arg in \"$@\"; do last=$arg; done\n"
-        f"[ \"$last\" = {str(workspace)!r} ] && exit 0\n"
-        "exec /bin/rm \"$@\"\n",
-        encoding="utf-8",
-    )
-    fake_rm.chmod(0o755)
+    from scripts.__tests__.test_authorised_maintenance import run_purge_fault
 
-    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
-
+    result, home, receipt = run_purge_fault(tmp_path, 'noop')
     assert result.returncode != 0
-    assert workspace.exists()
-    assert installation_state.exists()
-    assert "Could not verify removal" in result.stdout
+    assert receipt["phase"] == "retry_required"
+    assert (home / ".flinttrade-installation/installation_id").exists()
+    assert (home / "..flinttrade.maintenance/pending.json").exists()
+    assert "purge complete" not in result.stdout.lower()
+    pending = home / "..flinttrade.maintenance" / receipt["pending"]["member"]
+    assert (pending / "keep.bin").read_bytes() == b"fault-test-execution-history"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_recreated_earlier_data_before_lineage_removal_is_detected(tmp_path: Path) -> None:
-    workspace = tmp_path / ".flinttrade"
-    workspace.mkdir()
-    (workspace / "state.db").write_text("state", encoding="utf-8")
-    profile = tmp_path / ".config" / "flinttrade-shell"
-    profile.mkdir(parents=True)
-    (profile / "profile").write_text("profile", encoding="utf-8")
-    installation_state = tmp_path / ".flinttrade-installation"
-    installation_state.mkdir()
-    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake_rm = bin_dir / "rm"
-    fake_rm.write_text(
-        "#!/bin/sh\n"
-        "last=''\n"
-        "for arg in \"$@\"; do last=$arg; done\n"
-        f"if [ \"$last\" = {str(profile)!r} ]; then\n"
-        "  /bin/rm \"$@\"\n"
-        f"  /bin/mkdir -p {str(workspace)!r}\n"
-        f"  printf recreated > {str(workspace / 'state.db')!r}\n"
-        "  exit 0\n"
-        "fi\n"
-        "exec /bin/rm \"$@\"\n",
-        encoding="utf-8",
-    )
-    fake_rm.chmod(0o755)
+    from scripts.__tests__.test_authorised_maintenance import run_purge_fault
 
-    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
-
+    result, home, receipt = run_purge_fault(tmp_path, 'recreate')
     assert result.returncode != 0
-    assert workspace.exists()
-    assert installation_state.exists()
-    assert "earlier data still exists" in result.stdout
+    assert receipt["phase"] == "retry_required"
+    assert (home / ".flinttrade-installation/installation_id").exists()
+    assert (home / "..flinttrade.maintenance/pending.json").exists()
+    assert "purge complete" not in result.stdout.lower()
+    assert (home / ".flinttrade/recreated").read_bytes() == b"concurrent data"
 
 
 @pytest.mark.unit
@@ -303,25 +250,22 @@ def test_custom_workspace_ancestor_cannot_delete_installation_lineage(tmp_path: 
 
     assert result.returncode != 0
     assert installation_state.exists()
-    assert "overlaps installation lineage" in result.stdout
+    assert "Purge refused:" in result.stdout
 
 
 @pytest.mark.unit
 def test_windows_lineage_removal_is_default_only_last_and_failure_gated() -> None:
     text = PS1.read_text(encoding="utf-8")
-
     assert "$InstallationStateRoot = $DefaultInstallationState" in text
     assert "$env:FLINTTRADE_INSTALLATION_STATE_DIR" not in text
-    purge_loop = text[text.index("foreach ($target in $purgeTargets)") : text.index("if (-not $script:FailedAny)")]
-    gate = purge_loop.index("$script:FailedAny")
-    removal = purge_loop.index("Remove-IfExists $target")
-    assert gate < removal
-    assert "Test-PathsOverlap $candidate $InstallationStateRoot" in text
-    assert "$script:LineageOverlapFound" in text
-    assert "function Test-PurgeTargetPresent" in text
-    assert "function Test-EarlierPurgeTargetsAbsent" in text
-    assert "Test-SameResolvedPath $target $InstallationStateRoot" in text
-    assert "Test-PurgeTargetPresent $target" in purge_loop
+    delegation = text[text.index("if ($Purge -and -not $DryRun)"):text.index("function Resolve-AbsoluteFlintPath")]
+    assert "workspace_maintenance purge --workspace $WorkspaceDir --yes" in delegation
+    assert "exit $LASTEXITCODE" in delegation
+    assert "if (-not $Yes)" in delegation
+    assert "foreach ($target in $purgeTargets)" not in text
+    assert "PowerShell deletion is disabled" in text
+    # Runtime lineage-last/partial-failure checks execute against the helper,
+    # not an obsolete platform-specific Remove-Item loop.
 
 
 def _write_receipt(
@@ -717,10 +661,12 @@ def test_direct_appimage_process_requires_exact_appimage_environment_identity(tm
     try:
         result = _run(tmp_path, os_name="Linux")
 
-        shell_process.wait(timeout=5)
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert shell_process.poll() is None, "shell identity alone cannot authorise abandoning protection"
+        assert result.returncode != 0, result.stdout + result.stderr
         assert unrelated_process.poll() is None
-        assert "Stopped the proved FlintTrade shell process set" in result.stdout
+        assert paths["receipt"].exists()
+        assert paths["appimage"].exists()
+        assert "safe-maintenance" in result.stdout
     finally:
         if shell_process.poll() is None:
             shell_process.terminate()
@@ -732,23 +678,23 @@ def test_direct_appimage_process_requires_exact_appimage_environment_identity(tm
 
 @pytest.mark.unit
 @pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
-def test_linux_confirmed_purge_removes_workspace_profile_source_tools_and_legacy_storage(tmp_path: Path) -> None:
+def test_linux_confirmation_without_installed_policy_retains_every_surface(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0, result.stdout + result.stderr
     for key, path in paths.items():
-        assert not path.exists(), f"confirmed purge left {key}: {path}"
-    assert "explicitly confirmed data was purged" in result.stdout
-    assert "retained data remains" not in result.stdout
+        assert path.exists(), f"missing-policy purge removed {key}: {path}"
+    assert "Purge refused:" in result.stdout
+    assert "receipts retained" in result.stdout
 
 
 @pytest.mark.unit
-def test_linux_confirmed_purge_accepts_a_genuinely_empty_home_on_bash_3(tmp_path: Path) -> None:
+def test_linux_bootstrap_empty_home_never_manufactures_purge_authority(tmp_path: Path) -> None:
     result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "No FlintTrade data to purge." in result.stdout
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "installed maintenance helper and safe policy unavailable" in result.stdout
 
 
 @pytest.mark.unit
@@ -773,14 +719,14 @@ def test_linux_shell_only_purge_does_not_claim_confirmation_for_absent_data(tmp_
 
     result = _run(tmp_path, "--purge", os_name="Linux")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not paths["appimage"].exists()
-    assert "no recognised FlintTrade data was found to purge" in result.stdout
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert paths["appimage"].exists()
+    assert "explicit --purge --yes" in result.stdout
     assert "explicitly confirmed data was purged" not in result.stdout
 
 
 @pytest.mark.unit
-def test_linux_data_only_purge_reports_cleanup_without_claiming_shell_removal(tmp_path: Path) -> None:
+def test_linux_unanchored_data_refuses_without_claiming_shell_or_purge_completion(tmp_path: Path) -> None:
     workspace = tmp_path / ".flinttrade"
     workspace.mkdir()
     (workspace / "workspace.json").write_text('{"version":"1.0.0"}', encoding="utf-8")
@@ -788,9 +734,11 @@ def test_linux_data_only_purge_reports_cleanup_without_claiming_shell_removal(tm
 
     result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not workspace.exists()
-    assert "explicitly confirmed data was purged" in result.stdout
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert workspace.exists()
+    assert (workspace / "credentials.db").read_text() == "x"
+    assert "Purge refused:" in result.stdout
+    assert "purge complete" not in result.stdout.lower()
     assert "shell uninstalled" not in result.stdout.lower()
 
 
@@ -800,11 +748,11 @@ def test_linux_unconfirmed_noninteractive_purge_preserves_data(tmp_path: Path) -
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, "--purge", os_name="Linux")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    for key in DATA_KEYS:
+    assert result.returncode != 0, result.stdout + result.stderr
+    for key in (*SHELL_KEYS, *DATA_KEYS):
         assert paths[key].exists(), f"unconfirmed purge removed {key}"
-    assert "data kept" in result.stdout.lower()
-    assert "retained data remains available for reinstall" in result.stdout
+    assert "data and receipts retained" in result.stdout.lower()
+    assert "explicit --purge --yes" in result.stdout
     assert "explicitly confirmed data was purged" not in result.stdout
 
 
@@ -818,14 +766,14 @@ def test_installer_yes_does_not_authorise_uninstall_purge(tmp_path: Path) -> Non
         os_name="Linux",
         extra_env={"FLINTTRADE_YES": "1"},
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode != 0, result.stdout + result.stderr
     assert paths["vault"].exists()
     assert paths["profile"].exists()
 
 
 @pytest.mark.unit
 @pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
-def test_uninstall_specific_environment_can_confirm_purge(tmp_path: Path) -> None:
+def test_uninstall_environment_cannot_request_or_confirm_purge(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(
         tmp_path,
@@ -836,13 +784,13 @@ def test_uninstall_specific_environment_can_confirm_purge(tmp_path: Path) -> Non
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert not paths["vault"].exists()
-    assert not paths["profile"].exists()
+    assert paths["vault"].exists()
+    assert paths["profile"].exists()
 
 
 @pytest.mark.unit
 @pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
-def test_purge_honours_override_and_also_removes_platform_default(tmp_path: Path) -> None:
+def test_purge_retains_custom_and_default_without_complete_policy(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     override = tmp_path / "custom-workspace"
     (override / "credentials.db").parent.mkdir(parents=True)
@@ -856,14 +804,14 @@ def test_purge_honours_override_and_also_removes_platform_default(tmp_path: Path
         extra_env={"FLINTTRADE_WORKSPACE_DIR": str(override)},
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not override.exists()
-    assert not paths["workspace"].exists()
-    assert str(override) in result.stdout
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert override.exists()
+    assert paths["workspace"].exists()
+    assert "Purge refused:" in result.stdout
 
 
 @pytest.mark.unit
-def test_workspace_override_expands_current_user_tilde(tmp_path: Path) -> None:
+def test_tilde_override_does_not_supply_custom_workspace_purge_authority(tmp_path: Path) -> None:
     override = tmp_path / "custom-workspace"
     override.mkdir()
     (override / "credentials.db").write_text("x", encoding="utf-8")
@@ -875,8 +823,9 @@ def test_workspace_override_expands_current_user_tilde(tmp_path: Path) -> None:
         os_name="Linux",
         extra_env={"FLINTTRADE_WORKSPACE_DIR": "~/custom-workspace"},
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not override.exists()
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert override.exists()
+    assert (override / "credentials.db").read_text() == "x"
 
 
 @pytest.mark.unit
@@ -892,7 +841,7 @@ def test_purge_refuses_home_as_workspace(tmp_path: Path) -> None:
     )
     assert unrelated.exists()
     assert result.returncode == 1
-    assert "Refusing to purge" in result.stdout
+    assert "Purge refused:" in result.stdout
 
 
 @pytest.mark.unit
@@ -912,8 +861,8 @@ def test_purge_refuses_unproven_arbitrary_workspace_override(tmp_path: Path) -> 
 
     assert result.returncode == 1
     assert keep.read_text(encoding="utf-8") == "keep"
-    assert "custom workspace identity is not proven" in result.stdout
-    assert "No identity-proven FlintTrade data was eligible for purge." in result.stdout
+    assert "Purge refused:" in result.stdout
+    assert "Purge refused:" in result.stdout
     assert "No FlintTrade data to purge." not in result.stdout
 
 
@@ -937,7 +886,7 @@ def test_purge_refuses_proven_custom_workspace_below_symlinked_parent(tmp_path: 
 
         assert result.returncode == 1
         assert (workspace / "credentials.db").read_text(encoding="utf-8") == "keep"
-        assert "symbolic link" in result.stdout
+        assert "Purge refused:" in result.stdout
     finally:
         shutil.rmtree(outside, ignore_errors=True)
 
@@ -958,8 +907,8 @@ def test_purge_refuses_managed_data_below_symlinked_parent(tmp_path: Path) -> No
     assert source.read_text(encoding="utf-8") == "x"
     assert tool.read_text(encoding="utf-8") == "x"
     assert (external / "credentials.db").read_text(encoding="utf-8") == "keep"
-    assert "symbolic link" in result.stdout
-    assert "Uninstall finished with some paths left behind" in result.stdout
+    assert "Purge refused:" in result.stdout
+    assert "Purge refused:" in result.stdout
     assert "unbound variable" not in result.stderr
 
 
@@ -1150,22 +1099,37 @@ def test_linux_ordinary_uninstall_retains_the_web_receipt_that_proves_retained_d
     assert str(paths["source"]) in result.stdout
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_later_purge_still_removes_the_custom_web_source_and_retires_the_receipt(tmp_path: Path) -> None:
-    """An ordinary uninstall first, a --purge later: the custom checkout must still be reachable."""
-    paths = _web_install_footprint(tmp_path)
-    first = _run(tmp_path, os_name="Linux")
+    from scripts.__tests__.test_authorised_maintenance import checkout, owner, provision, retire
+
+    _cli, env = checkout(tmp_path)
+    env["R21_SCENARIO"] = "idle"
+    provision(tmp_path, env)
+    home = Path(env["HOME"])
+    paths = _web_install_footprint(home)
+    for marker in (".git", "pnpm-lock.yaml", "uv.lock", "pyproject.toml"):
+        (paths["source"] / marker).touch()
+    interpreter = home / ".flinttrade/src/FlintTrade/.venv/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    interpreter.chmod(0o700)
+    first = _run(home, os_name="Linux")
     assert first.returncode == 0, first.stdout + first.stderr
-    assert paths["source"].exists()
-
-    second = _run(tmp_path, "--purge", "--yes", os_name="Linux")
-
-    assert second.returncode == 0, second.stdout + second.stderr
-    assert str(paths["source"]) in second.stdout, "the custom web source was never offered to --purge"
-    assert not paths["source"].exists(), "the custom web source survived a confirmed purge forever"
-    assert not paths["tools"].exists()
-    assert not paths["receipt"].exists(), "the receipt outlived the data it was retained to prove"
+    assert paths["source"].exists() and paths["receipt"].exists()
+    process = owner(tmp_path, env)
+    try:
+        second = _run(home, "--purge", "--yes", os_name="Linux")
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert process.wait(timeout=1) == 0
+        assert str(paths["source"]) in second.stdout
+        assert not paths["source"].exists()
+        assert not paths["tools"].exists()
+        assert not paths["receipt"].exists()
+        assert "Purge complete" in second.stdout
+    finally:
+        retire(process)
 
 
 @pytest.mark.unit
@@ -1446,9 +1410,8 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
     stop_proven = text[text.index("function Stop-ProvenShellProcesses") : text.index("function Get-ShortcutTarget")]
     assert 'Get-Process -Name "FlintTrade"' in stop_proven
     assert "Resolve-Path -LiteralPath ([string]$process.Path)" in stop_proven
-    assert "StartTime.ToFileTimeUtc()" in stop_proven
-    assert "Get-Process -Id $process.Id" in stop_proven
-    assert "$currentIdentity -ne $processIdentity" in stop_proven
+    assert "Stop-Process -Id" not in stop_proven
+    assert "processes and receipts retained" in stop_proven
     assert "OrdinalIgnoreCase" in stop_proven
     assert text.index("$candidateRecords =") < text.index("Stop-ProvenShellProcesses $record")
     execution_guard = text[
@@ -1490,10 +1453,9 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
     ordinary_start = text.index("} elseif ($dataTargets)", purge_start)
     purge_branch = text[purge_start:ordinary_start]
     assert "$purgeTargets = @($dataTargets | Where-Object { Test-SafePurgeTarget $_ })" in purge_branch
-    assert "foreach ($target in $purgeTargets)" in purge_branch
-    assert "Remove-IfExists $target" in purge_branch
-    assert "$script:PurgeCompleted = $true" in purge_branch
-    assert "$script:PurgedDataAny = $true" in purge_branch
+    assert "foreach ($target in $purgeTargets)" not in purge_branch
+    assert "Remove-IfExists $target" not in purge_branch
+    assert "PowerShell deletion is disabled" in purge_branch
     assert "$dataTargets | Where-Object { Test-SafePurgeTarget $_ }" not in text[:purge_start]
     assert "Remove-IfExists $_" not in text[ordinary_start:]
     assert '$dataTargets | ForEach-Object { Say "  $_" }' in text[ordinary_start:]
@@ -1570,7 +1532,9 @@ def test_uninstallers_do_not_guess_backend_ownership_by_port_or_name_substring()
     assert "pkill" not in unix
     assert "matching_shell_processes" in unix
     assert "path_inside_proven_target" in unix
-    assert 'kill -TERM "$pid"' in unix
+    assert 'kill -TERM "$pid"' not in unix
+    assert 'kill -KILL "$pid"' not in unix
+    assert "Stop-Process -Id" not in windows
     assert "5100" not in unix and "lsof" not in unix
     assert 'Get-Process -Name "FlintTrade"' in windows
     stop_proven = windows[windows.index("function Stop-ProvenShellProcesses") : windows.index("function Get-ShortcutTarget")]

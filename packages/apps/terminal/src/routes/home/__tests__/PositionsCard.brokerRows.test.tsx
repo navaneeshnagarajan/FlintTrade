@@ -40,6 +40,7 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
 }));
 vi.mock("@/stores/tradingStore", () => ({
   useTradingStore: (sel: (s: { totalPnl: number }) => unknown) => sel({ totalPnl: 0 }),
+  useCurrentTradingState: () => ({ totalPnl: 0, positionsStatus: "ready" }),
 }));
 
 import { useModeStore } from "@/stores/modeStore";

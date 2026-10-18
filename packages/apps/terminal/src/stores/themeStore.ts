@@ -31,7 +31,8 @@ import {
   getResolvedVariant,
 } from "@/lib/cinematicThemes";
 import type { CinematicTheme, ColorMode, ThemeDefinition } from "@/lib/cinematicThemes";
-import { elevatedSurfaceColour, unselectedTabColour } from "@/lib/colourMix";
+import { elevatedSurfaceColour, liveChipColour, practiceChipColour, tickerVenueColour, unselectedTabColour } from "@/lib/colourMix";
+import { resolveActionPalette } from "@/lib/actionPalette";
 
 // ---------------------------------------------------------------------------
 // ThemeState
@@ -306,6 +307,27 @@ const storeImpl: StateCreator<
     style.setProperty("--color-accent",      variant.colors.accent);
     style.setProperty("--color-accent-text", variant.colors.accentText);
 
+    // These scoped opaque action roles keep enabled labels stable. Existing
+    // global trading/brand colours and disabled opacity remain independent.
+    // Old custom themes get the explicit mode foreground; invalid custom pairs
+    // use the existing Graphite palette only on these two action surfaces.
+    const fallback = CINEMATIC_THEMES[0][resolvedMode];
+    const profitBackground = resolvedMode === "light" ? variant.trading.profitText : variant.trading.profit;
+    const fallbackProfit = resolvedMode === "light" ? fallback.trading.profitText : fallback.trading.profit;
+    const profitForeground = resolvedMode === "light" ? "#ffffff" : "#0a0a0f";
+    const actionPalettes = {
+      profit: resolveActionPalette(profitBackground, variant.trading.profitForeground ?? profitForeground,
+        { background: fallbackProfit, foreground: profitForeground }),
+      confirmation: resolveActionPalette(variant.colors.accent, variant.colors.accentText,
+        { background: fallback.colors.accent, foreground: fallback.colors.accentText }),
+    };
+    for (const [role, palette] of Object.entries(actionPalettes)) {
+      style.setProperty(`--color-${role === "profit" ? "profit-action" : role}`, palette.background);
+      style.setProperty(`--color-${role}-foreground`, palette.foreground);
+      style.setProperty(`--color-${role}-hover`, palette.hover);
+      style.setProperty(`--color-${role}-pressed`, palette.pressed);
+    }
+
     // ---- Fixed trading semantic colors ----
     // These are consistent across ALL themes and modes.
     style.setProperty(
@@ -429,6 +451,9 @@ const storeImpl: StateCreator<
     style.setProperty("--color-border-strong",    variant.colors.border);
 
     style.setProperty("--color-text-primary",     variant.colors.text);
+    style.setProperty("--color-ticker-venue",     tickerVenueColour(variant.colors.base));
+    style.setProperty("--color-practice-chip",    practiceChipColour(variant.colors.base));
+    style.setProperty("--color-live-chip",        liveChipColour(variant.colors.base));
     style.setProperty("--color-text-disabled",    variant.colors.textDisabled);
     style.setProperty(
       "--fl-color-tab-unselected",

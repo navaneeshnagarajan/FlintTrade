@@ -2,92 +2,141 @@
   "schemaVersion": 1,
   "generatedFrom": {
     "node": {
-      "sha256": "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39",
+      "sha256": "75ff0c104acddb008964dd5feb88f58844b652820cb1cb01696f95031372b293",
       "signature": {
-        "fingerprint": "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
-        "keySha256": "9c51e903b0da945fc21947fd6fce8fb4d72bc20ddf82e8f0aada694e9688447d",
-        "sha256": "169f1452c14cd653247408352f1534b9f31e3d13f9c6399c3977368095e11eda",
-        "url": "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt.sig"
+        "fingerprint": "5BE8A3F6C8A5C01D106C0AD820B1A390B168D356",
+        "keySha256": "5115095e2f8010c75da052ecb1cfb3af630e084f0f8daa93a863557b01b0f90a",
+        "sha256": "671e48de01184d7b0aa3df79c7aaa373ede2374231099973643a20311ed372f9",
+        "url": "https://nodejs.org/dist/v26.11.1/SHASUMS256.txt.sig"
       },
-      "url": "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt"
+      "url": "https://nodejs.org/dist/v26.11.1/SHASUMS256.txt"
     },
     "uv": {
-      "sha256": "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a",
-      "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/sha256.sum"
+      "sha256": "8804e68a18189ed9750e6330db95c49310f320adb89e66dd429c92058f25e1e1",
+      "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/sha256.sum"
+    },
+    "pnpm": {
+      "sha256": "5e7a55df966ff3301e84eccfbd3bd6fe939d07415c1f4e96eed96dfc888fae1d",
+      "snapshot": "checksums/pnpm-12.11.2-assets.json",
+      "sources": [
+        "https://registry.npmjs.org/pnpm/12.11.2",
+        "https://registry.npmjs.org/@pnpm/exe.darwin-arm64/12.11.2",
+        "https://registry.npmjs.org/@pnpm/exe.darwin-x64/12.11.2",
+        "https://registry.npmjs.org/@pnpm/exe.linux-arm64/12.11.2",
+        "https://registry.npmjs.org/@pnpm/exe.linux-x64/12.11.2",
+        "https://registry.npmjs.org/@pnpm/exe.win32-x64/12.11.2"
+      ]
     }
   },
   "node": {
-    "version": "22.23.2",
+    "version": "26.11.1",
     "assets": {
       "darwin-arm64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-darwin-arm64/bin/node",
-        "sha256": "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz"
+        "executable": "node-v26.11.1-darwin-arm64/bin/node",
+        "sha256": "d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac",
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-darwin-arm64.tar.gz"
       },
       "darwin-x64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-darwin-x64/bin/node",
-        "sha256": "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz"
+        "executable": "node-v26.11.1-darwin-x64/bin/node",
+        "sha256": "9a8129bd9ab08039793dd1143a7aedee6b5d60ac06592ad938d8bddf36142f3a",
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-darwin-x64.tar.gz"
       },
       "linux-arm64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-linux-arm64/bin/node",
-        "sha256": "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-arm64.tar.gz"
+        "executable": "node-v26.11.1-linux-arm64/bin/node",
+        "sha256": "170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf",
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-linux-arm64.tar.gz"
       },
       "linux-x64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-linux-x64/bin/node",
-        "sha256": "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz"
+        "executable": "node-v26.11.1-linux-x64/bin/node",
+        "sha256": "15fc043a51a5783f2f4b634561091658f5a7f0e3db03f997dca3a8033a33e45b",
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-linux-x64.tar.gz"
       },
       "win32-x64": {
         "archive": "zip",
-        "executable": "node-v22.23.2-win-x64/node.exe",
-        "sha256": "1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip"
+        "executable": "node-v26.11.1-win-x64/node.exe",
+        "sha256": "97f36a8a9684ff0d3e35758b4610fef5b628a5880e96f2ccc11240e5daf9934e",
+        "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-win-x64.zip"
       }
     }
   },
   "pnpm": {
-    "version": "10.34.5",
-    "integrity": "sha512-a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-    "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
+    "assets": {
+      "darwin-arm64": {
+        "archive": "tar.gz",
+        "executable": "package/pnpm",
+        "sha256": "72464a94a7bcf1ec2c3330aa4f190d2ea77503188f2cd8416eb098b2b5fc8fa0",
+        "url": "https://registry.npmjs.org/@pnpm/exe.darwin-arm64/-/exe.darwin-arm64-12.11.2.tgz",
+        "integrity": "sha512-n9M4On66y8FDxUAKgMO1FXt0qihyG4e+56p3/F0uo8Bx9KplW8BwKVnXigzCJ8aNM6sVVPkOE6M9XXbeVIxnZA=="
+      },
+      "darwin-x64": {
+        "archive": "tar.gz",
+        "executable": "package/pnpm",
+        "sha256": "d70eb9999e447933b77fdd5e18b0aa933f091ea5e687011f36281209a180cc7f",
+        "url": "https://registry.npmjs.org/@pnpm/exe.darwin-x64/-/exe.darwin-x64-12.11.2.tgz",
+        "integrity": "sha512-oSW7n3sBT0c0cyk4kj10T2Y6Mpm+OFEiCAWozgX039tdoI6yqJF1uaFD3sw7ugLdu6VV3+uY0pa1TUZIPdxDWA=="
+      },
+      "linux-arm64": {
+        "archive": "tar.gz",
+        "executable": "package/pnpm",
+        "sha256": "c9b5d1a2a254f4593a6fbd878bbbbc81dce4fb36b1c850cc8f31031dbb08ffdb",
+        "url": "https://registry.npmjs.org/@pnpm/exe.linux-arm64/-/exe.linux-arm64-12.11.2.tgz",
+        "integrity": "sha512-6e8ZAQUwFXAWHHHv5FesWqf/kEK04wuitBv5f/gxzkC0DiBfaixr+f+6JQede8SF4Ji5LcMwVFJbzAtffpWxEg=="
+      },
+      "linux-x64": {
+        "archive": "tar.gz",
+        "executable": "package/pnpm",
+        "sha256": "79008d3130845ee8a0fe4381e6b81815e80e1bd411702f34721b1cc63e6e20bf",
+        "url": "https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.11.2.tgz",
+        "integrity": "sha512-FK7QKe24AYgppJwO3mpooYptduuvIGqKJPi5ac7MdnWkjUy46JBfYhCW0grnkWKC8YOf0x+vGviuQqJEj3SpQQ=="
+      },
+      "win32-x64": {
+        "archive": "tar.gz",
+        "executable": "package/pnpm.exe",
+        "sha256": "ebe73d47d28a28f12df5856bb4657176358e4bc0af3213fc6139fa35edffdd0a",
+        "url": "https://registry.npmjs.org/@pnpm/exe.win32-x64/-/exe.win32-x64-12.11.2.tgz",
+        "integrity": "sha512-8sgX86OvRjJ3yZs/TvGR2L31wH9ScPZ+f+geKI3ikuB0RRiK3i4LlTRO8OXN6pdRqj8epMde4312MCjj7JsJdA=="
+      }
+    },
+    "version": "12.11.2",
+    "integrity": "sha512-25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9",
+    "packageManager": "pnpm@12.11.2+sha512.25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9"
   },
   "uv": {
-    "version": "0.11.16",
+    "version": "0.13.1",
     "assets": {
       "darwin-arm64": {
         "archive": "tar.gz",
         "executable": "uv-aarch64-apple-darwin/uv",
-        "sha256": "2b25be1af546be330b340b0a76b99f989daa6d92678fdffb87438e661e9d88fb",
-        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-apple-darwin.tar.gz"
+        "sha256": "cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-aarch64-apple-darwin.tar.gz"
       },
       "darwin-x64": {
         "archive": "tar.gz",
         "executable": "uv-x86_64-apple-darwin/uv",
-        "sha256": "6b91ae3de155f51bd1f5b74814821c79f016a176561f252cd9ddfb976939af2e",
-        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-apple-darwin.tar.gz"
+        "sha256": "bb7b805bdcf3d0bc8c74ceb94569e6b3e8aa35bd492acdbb9d46bf46d9d4ff6b",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-apple-darwin.tar.gz"
       },
       "linux-arm64": {
         "archive": "tar.gz",
         "executable": "uv-aarch64-unknown-linux-gnu/uv",
-        "sha256": "8c9d0f0ee98166ae6ab198747519ba6f25db29d185bd2ae5960ecebc91a5c22a",
-        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-unknown-linux-gnu.tar.gz"
+        "sha256": "9041c73c99fdc5892cf128140beb354eca9231d502068cc36e6cb53a8e59ad14",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-aarch64-unknown-linux-gnu.tar.gz"
       },
       "linux-x64": {
         "archive": "tar.gz",
         "executable": "uv-x86_64-unknown-linux-gnu/uv",
-        "sha256": "74947fe2c03315cf07e82ab3acc703eddef01aba4d5232a98e4c6825ec116131",
-        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-unknown-linux-gnu.tar.gz"
+        "sha256": "eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-unknown-linux-gnu.tar.gz"
       },
       "win32-x64": {
         "archive": "zip",
         "executable": "uv.exe",
-        "sha256": "dd9d6d6554bfab265bfa98aa8e8a406c5c3a7b97582f93de1f4d48d9154a0395",
-        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip"
+        "sha256": "3b2661a463a5baea7f5076ea2b25ab71d77f36a6c0d809e5350651792f80a672",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-pc-windows-msvc.zip"
       }
     }
   }

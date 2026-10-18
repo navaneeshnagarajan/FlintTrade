@@ -1,3 +1,4 @@
+import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent, scopedIncidentError, incidentScopeForError } from "@/lib/operatorIncidentScope";
 import { useQuery } from "@tanstack/react-query";
 import { isDocumentHidden } from "@/lib/deskPolling";
 import { useRearmPollingWhenVisible } from "@/hooks/useRearmPollingWhenVisible";
@@ -23,7 +24,11 @@ export function useBrokerAccounts(enabled = true) {
   );
   const query = useQuery({
     queryKey: BROKER_ACCOUNTS_QUERY_KEY,
-    queryFn: ({ signal }) => listBrokerAccounts(useBrokerStore.getState().accounts, signal),
+    queryFn: async ({ signal }) => {
+      const scope = captureOperatorIncidentScope();
+      try { return await listBrokerAccounts(useBrokerStore.getState().accounts, signal); }
+      catch (error) { throw scopedIncidentError(error, scope); }
+    },
     enabled,
     // A latched broker rate limit must not keep polling. The operator retries once.
     refetchInterval: () => (brokerRateLimited || isDocumentHidden() ? false : 10_000),
@@ -32,6 +37,8 @@ export function useBrokerAccounts(enabled = true) {
 
   useEffect(() => {
     if (!enabled || !query.error) return;
+    const scope = incidentScopeForError(query.error);
+    if (scope && !isOperatorIncidentScopeCurrent(scope)) return;
     const message = query.error instanceof Error ? query.error.message : String(query.error);
     const httpStatus = "status" in query.error && typeof query.error.status === "number"
       ? query.error.status
@@ -39,7 +46,7 @@ export function useBrokerAccounts(enabled = true) {
     setAccounts(useBrokerStore.getState().accounts.filter((account) => account.source === "native").map((account) => ({
       ...account, status: "error" as const, error_message: message,
     })));
-    noteObservedFailure({ message, httpStatus, provenance: "broker" });
+    noteObservedFailure({ message, httpStatus, provenance: "broker", scope });
   }, [enabled, query.error, setAccounts]);
 
   useEffect(() => {

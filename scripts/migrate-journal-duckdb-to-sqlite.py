@@ -1,103 +1,142 @@
 #!/usr/bin/env python3
-"""Migrate a legacy DuckDB trade journal to the SQLite + FTS5 ``journal.sqlite``.
+"""Offline DuckDB journal migration with verified, resumable publication.
 
-The annotated :class:`~flinttrade_journal.trade_journal.TradeJournal` moved from
-a DuckDB ``journal_entries`` table to its own SQLite database (see G31). This
-script creates the new schema and, if a legacy DuckDB journal exists, copies
-every row through the class itself — so tags and the FTS index are populated
-exactly as a live write would, rather than a hand-rolled column copy that could
-drift from the model. The legacy file is archived (never deleted in place).
-
-Idempotent: re-running when ``journal.sqlite`` already exists is a no-op.
-``duckdb`` is imported lazily (migration-only), so a fresh install with no
-legacy file never needs it.
-
-Usage:
-    python scripts/migrate-journal-duckdb-to-sqlite.py [--workspace ~/.flinttrade]
+All source columns/rows are checked, not silently filtered through defaults.
+SQLite nulls and stored P&L are preserved; the current reader, tag normalisation
+and FTS triggers validate the new database before it becomes public. A failed
+archive returns 3 (published/archive-pending), never completed or a fresh start.
 """
-
 from __future__ import annotations
 
 import argparse
 import logging
-import sys
+import re
+from contextlib import closing
 from pathlib import Path
 
-from flinttrade_journal.trade_journal import JournalEntry, TradeJournal
+from flinttrade_core.legacy_sqlite_migration import (
+    ArchivePending,
+    MigrationRefused,
+    database_digest,
+    migrate_database,
+    rows_digest,
+    sqlite_connection,
+    sqlite_value,
+)
+from flinttrade_core.workspace import workspace_dir
+from flinttrade_journal.trade_journal import TradeJournal, _coerce_timestamp
 
-logger = logging.getLogger("migrate_journal")
-
-# Legacy DuckDB journal columns → JournalEntry fields. The legacy table used the
-# same field names, so this is an identity map for the columns that exist.
-_FIELDS = [
-    "id", "symbol", "exchange", "side", "quantity", "entry_price", "exit_price",
-    "entry_time", "exit_time", "strategy", "tags", "notes", "screenshot_path",
-    "emotion_before", "emotion_after", "setup_quality", "execution_quality",
-    "pnl", "pnl_pct", "risk_reward_ratio", "created_at", "updated_at",
-]
+_TABLES = ("journal_entries", "daily_notes", "journal_screenshots")
 
 
-def _legacy_rows(legacy: Path) -> list[dict]:
-    """Read journal_entries rows from a legacy DuckDB file, or [] if absent."""
-    if not legacy.exists():
-        return []
-    try:
-        import duckdb  # noqa: PLC0415
-    except ModuleNotFoundError:
-        sys.exit("migration requires the 'migration' extra (duckdb missing); uv sync --extra migration")
-    conn = duckdb.connect(str(legacy), read_only=True)
-    try:
-        tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
-        if "journal_entries" not in tables:
-            return []
-        present = [c[0] for c in conn.execute("DESCRIBE journal_entries").fetchall()]
-        cols = [c for c in _FIELDS if c in present]
-        rows = conn.execute(f"SELECT {', '.join(cols)} FROM journal_entries").fetchall()
-        return [dict(zip(cols, row, strict=False)) for row in rows]
-    finally:
-        conn.close()
+def _legacy_rows(source: Path | None, target: Path) -> dict[str, tuple[list[str], list[tuple]]]:
+    if source is None:
+        return {}
+    import duckdb  # noqa: PLC0415 -- migration only; absence is an error, never success
+
+    with duckdb.connect(str(source), read_only=True, config={"threads": 1}) as duck:
+        tables = {r[0] for r in duck.execute("SHOW TABLES").fetchall()}
+        if "journal_entries" not in tables or tables - set(_TABLES):
+            raise MigrationRefused("unsupported or incomplete journal source schema")
+        # Views and non-main schemas could otherwise hide data from SHOW TABLES.
+        if duck.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema <> 'main' "
+                        "OR table_type <> 'BASE TABLE'").fetchone()[0]:
+            raise MigrationRefused("unsupported journal source objects")
+        result = {}
+        with closing(sqlite_connection(target, readonly=True)) as conn:
+            for table in _TABLES:
+                if table not in tables:
+                    continue
+                info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+                columns = [r[1] for r in info]
+                description = duck.execute(f"DESCRIBE {table}").fetchall()
+                if {r[0] for r in description} != set(columns):
+                    raise MigrationRefused("journal column set mismatch")
+                if any(r[1] in {"TIMESTAMP_NS", "TIMESTAMP_S", "TIMESTAMP_MS"} for r in description):
+                    raise MigrationRefused("unsupported journal timestamp precision")
+                rows = duck.execute(f"SELECT {','.join(columns)} FROM {table}").fetchall()
+                converted = [tuple(sqlite_value(value, info[i][2]) for i, value in enumerate(row)) for row in rows]
+                for row in converted:
+                    if any(row[i] is None and (col[3] or col[5]) for i, col in enumerate(info)):
+                        raise MigrationRefused("null journal key or required value")
+                    if table == "journal_entries":
+                        for name in ("entry_time", "exit_time", "created_at", "updated_at"):
+                            value = row[columns.index(name)]
+                            if value is not None and (
+                                _coerce_timestamp(value) is None or re.search(r"[.,]\d{7,}", value)
+                            ):
+                                raise MigrationRefused("journal timestamp cannot be represented by current reader")
+                result[table] = (columns, converted)
+        return result
+
+
+def _build(source: Path | None, target: Path) -> None:
+    with TradeJournal(target) as journal:
+        journal.initialise()
+    tables = _legacy_rows(source, target)
+    with closing(sqlite_connection(target)) as conn:
+        conn.execute("PRAGMA synchronous=FULL")
+        with conn:
+            for table, (columns, rows) in tables.items():
+                conn.executemany(f"INSERT INTO {table} ({','.join(columns)}) VALUES "
+                                 f"({','.join('?' for _ in columns)})", rows)
+    # Preserve stored values (including NULL P&L and tags); add_entry would
+    # recompute P&L and normalise NULL tags to a different stored value.
+    with closing(sqlite_connection(target)) as conn, TradeJournal(target) as journal:
+        with conn:
+            for (entry_id,) in conn.execute("SELECT id FROM journal_entries").fetchall():
+                entry = journal.get_entry(entry_id)
+                if entry is None:
+                    raise MigrationRefused("journal reader lost an entry")
+                conn.executemany("INSERT INTO journal_tags VALUES (?, ?)",
+                                 [(entry_id, tag) for tag in set(entry.tags) if tag])
+
+
+def _validate(source: Path | None, target: Path) -> None:
+    expected = _legacy_rows(source, target)
+    database_digest(target)  # full SQLite integrity and foreign-key checks
+    with closing(sqlite_connection(target, readonly=True)) as conn, TradeJournal(target) as journal:
+        for table in _TABLES:
+            columns, rows = expected.get(table, ([], []))
+            actual = conn.execute(f"SELECT {','.join(columns) if columns else '*'} FROM {table}").fetchall()
+            if rows_digest(actual) != rows_digest(rows):
+                raise MigrationRefused("journal data mismatch")
+        tag_rows = []
+        for row in conn.execute("SELECT id,side,setup_quality,execution_quality FROM journal_entries"):
+            entry = journal.get_entry(row[0])
+            if entry is None or (entry.side, entry.setup_quality, entry.execution_quality) != tuple(row[1:]):
+                raise MigrationRefused("journal reader normalises invalid source values")
+            tag_rows.extend((entry.id, tag) for tag in set(entry.tags) if tag)
+        if rows_digest(conn.execute("SELECT entry_id,tag FROM journal_tags").fetchall()) != rows_digest(tag_rows):
+            raise MigrationRefused("journal tag relationships mismatch")
+        fts = conn.execute("SELECT rowid,id,symbol,notes,tags,strategy FROM journal_fts").fetchall()
+        expected_fts = conn.execute("SELECT rowid,id,symbol,COALESCE(notes,''),COALESCE(tags,''),"
+                                    "COALESCE(strategy,'') FROM journal_entries").fetchall()
+        if rows_digest(fts) != rows_digest(expected_fts):
+            raise MigrationRefused("journal search index mismatch")
 
 
 def migrate(workspace: Path) -> Path:
-    """Create journal.sqlite and copy any legacy DuckDB journal rows into it."""
-    workspace.mkdir(parents=True, exist_ok=True)
-    dst = workspace / "journal.sqlite"
-    if dst.exists():
-        logger.info("journal.sqlite already exists; migration already complete")
-        return dst
-
-    journal = TradeJournal(str(dst))
-    journal.initialise()
-    copied = 0
-    for row in _legacy_rows(workspace / "journal.db"):
-        tags_raw = row.get("tags")
-        if isinstance(tags_raw, str) and tags_raw:
-            import json  # noqa: PLC0415
-
-            try:
-                row["tags"] = json.loads(tags_raw)
-            except json.JSONDecodeError:
-                row["tags"] = [t.strip() for t in tags_raw.split(",") if t.strip()]
-        journal.add_entry(JournalEntry.model_validate(row))
-        copied += 1
-    journal.close()
-    logger.info("journal migration complete: %d legacy rows copied", copied)
-
-    legacy = workspace / "journal.db"
-    if legacy.exists():
-        archive = workspace / "archive" / "migrations"
-        archive.mkdir(parents=True, exist_ok=True)
-        legacy.replace(archive / legacy.name)
-        logger.info("archived legacy journal.db to %s", archive / legacy.name)
-    return dst
+    """Migrate under exclusive backend maintenance, retaining every source byte."""
+    return migrate_database(workspace, source_name="journal.db", destination_name="journal.sqlite",
+                            build=_build, validate=_validate)
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", type=Path, default=Path.home() / ".flinttrade")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workspace", type=Path, default=None)
     args = parser.parse_args()
-    print(migrate(args.workspace))
+    # Library errors can carry row contents. Never emit raw exceptions/tracebacks.
+    logging.basicConfig(level=logging.CRITICAL)
+    try:
+        migrate(args.workspace if args.workspace is not None else workspace_dir())
+    except ArchivePending:
+        print("published/archive-pending: destination retained; rerun to resume archival")
+        return 3
+    except Exception as exc:
+        print(f"migration refused ({type(exc).__name__}); originals retained; reconcile source/dependencies")
+        return 2
+    print("journal migration complete; destination and archive verified")
     return 0
 
 
