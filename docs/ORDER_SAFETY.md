@@ -27,7 +27,7 @@ Settings → Practice does not place.
 
 1. The mode guard runs first. Example data stays HTTP 403 `mode_blocked`
    (`Orders are not available for Example. Switch to Practice or Live to trade.`)
-   and does not enter `Laya.admit`. The `/trade` Order Pad records a sample
+   and does not enter `Laya.admit`. The Terminal Order Pad records a sample
    fill on the client for example data (`Example order placed`, id starting
    `SAMPLE-`). This guard is the server path.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
@@ -44,13 +44,22 @@ Settings → Practice does not place.
    ACL, and consumes the one-shot gate.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
-does not enter SafetySystem, `gate_order`, or `BrokerRouter`. When the
-order names a security id, the quantity must be a positive multiple of
-that contract's lot from the broker instrument master. If the master has
-no lot, the sandbox refuses the order and does not fill it:
-`Not placed. The lot size for NIFTY 24500 CE isn't in the instrument master, so this order can't be sized.`
-An expired future is named as the desk shows it, for example
-`NIFTY-OCT2026-FUT`. The routed place route is Live only and uses the same
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before Laya,
+place refuses a quantity that is not a positive multiple of the lot, or
+that is above the freeze limit, with HTTP 400 `quantity_admission`. The
+Order Pad shows the lot sentence once, inline:
+`Quantity must be a multiple of the lot size (N).`
+`N` is that contract's lot. It is not a published constant. A missing
+verified lot is a different sentence, also shown once, inline:
+`Not placed. The lot size for <name> isn't verified.`
+`<name>` is the contract's display name. The Practice sandbox returns
+that sentence as HTTP 400 with `status: error` and no `code` field, and
+it does not fill the order. A quantity above the freeze limit is not
+split. The sentence is
+`Max <limit> per order for <underlying>. Place smaller orders.`
+`<underlying>` is the index name, such as NIFTY. `<limit>` is the broker
+freeze field when the order carries one, otherwise the exchange figure
+for that underlying. The routed place route is Live only and uses the same
 Live admission. Modify and cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,
@@ -149,7 +158,7 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `downloading` (`Downloading the model · X of Y GB`), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
 (Can't verify the model), `wrong_revision` (Wrong model version),
-`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the sidecar port. For
+`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the managed Laya port. For
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
@@ -164,7 +173,7 @@ including one over an older unverified snapshot, is `download_failed`
 ("Can't download the model"). The `wrong_revision` tooltip is "Laya is running a different model
 than FlintTrade expects." That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
-that this start is not replacing, or a running sidecar that reports
+that this start is not replacing, or a running managed Laya process that reports
 another revision or digest. A dropped connection, a partial download, or
 a failed download or swap, including one that puts the previous
 checkpoint back, is not this code. The
@@ -179,7 +188,7 @@ Every chip-Down refusal reads that sentence.
 decision carries no proof, the refusal code is `laya_unverified` and the
 refusal reads "Not placed. Laya's decision couldn't be verified. Try again."
 
-On each sidecar start FlintTrade hashes `model.safetensors` and every
+On each managed Laya start FlintTrade hashes `model.safetensors` and every
 file in `[checkpoint.manifest]` before launch. The runtime record holds
 the sha256, pid, and start token, and the inode, size, and modification
 time of the weights file and of each pinned file
@@ -197,7 +206,7 @@ record stood in, each model allow keeps its own `effect=allow`
 Laya's decision couldn't be verified. Try again." A health document that
 omits the digest is Ready when that record matches the pin. If the
 record cannot be checked, the chip reason is `unverified`. Stopping the
-sidecar records Down before an in-flight probe can publish Ready. Desk
+managed Laya process records Down before an in-flight probe can publish Ready. Desk
 place surfaces go through this admission. Laya is not Ready by default.
 
 The pins live in
@@ -209,16 +218,16 @@ The pins live in
 When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index (`model.safetensors.index.json`),
 or any extra weights file or other file the launcher could read shows
-Can't verify the model (`unverified`) and the sidecar does not start. A
+Can't verify the model (`unverified`) and the managed Laya process does not start. A
 changed byte in a snapshot that this start is not replacing shows Wrong
-model version (`wrong_revision`) and the sidecar does not start. A changed
-byte in the runtime checkpoint starts the download below; the sidecar does
+model version (`wrong_revision`) and the managed Laya process does not start. A changed
+byte in the runtime checkpoint starts the download below; the managed Laya process does
 not start on that tree. Laya does not reach Ready in these cases. `start`
 downloads the commit in `[checkpoint] revision`, not the model repository's
 default branch, into `<workspace>/runtime/laya/staging` when the weights
 file or a manifest file is not on disk, and when the runtime checkpoint
 is on disk but its hashes are not the pin. The download does not start
-the sidecar. That download sets `HF_HOME` to
+the managed Laya process. That download sets `HF_HOME` to
 `<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
 logs stay out of the shared cache. The model is about 2.37 GB, and that
 size is reported once. While it runs, including a pin change, the chip is
@@ -235,7 +244,7 @@ model"), not `wrong_revision`. A complete download whose files do not
 match the pin is `wrong_revision`, staging is deleted, and the checkpoint
 already on disk stays. An extra loadable file in a complete download is
 `unverified`. A dropped connection, a partial or missing file, or a read
-error is also `download_failed`. The sidecar does not start on files that
+error is also `download_failed`. The managed Laya process does not start on files that
 do not match the pin. If the download does not finish, the chip is `download_failed`, not
 `wrong_revision` and not `unverified`, whatever older snapshot is on
 disk. `unverified` stays when this start did not download. A snapshot
@@ -248,7 +257,7 @@ more `checkpoint.old-*` copies remain, the last `checkpoint.old-*` name
 is restored onto `checkpoint` and any other aside copies are removed. If that restore
 fails, the aside copy stays where it is and that cleanup is skipped. A
 copy that was restored is then checked against the pin. If it does not
-match, the sidecar does not start on it; the pinned download runs
+match, the managed Laya process does not start on it; the pinned download runs
 instead, and a failed download leaves `download_failed` with that copy
 still on disk.
 A verified boot
@@ -258,7 +267,7 @@ symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), the
 launch path is the snapshot file, not the blob. A blob path is still
 refused. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. When the sidecar health document leaves the revision
+id or a revision. When the managed Laya process health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest, so
 the chip leaves Still loading. The launch log line is
 `laya weights path=<path> sha256=<digest>`. The recorded inode, size,
@@ -267,7 +276,7 @@ reports Ready and on each watch tick, about every 1.5 seconds. If one
 changes, the chip shows Can't verify the model and the log line is
 `laya weights path=<path> changed=<field>`, where `<field>` is `inode`,
 `size`, `mtime`, or a comma-separated list of those. The same watch
-reads the pid file (`runtime/laya/sidecar.pid`), the key file
+reads the pid file (the process id file under `runtime/laya`), the key file
 (`runtime/laya/api.key`), and the runtime record, so a command-line
 stop or start, or a key rotation, is reconciled by that watch. The desk
 polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the
@@ -300,14 +309,14 @@ Anything that would flip or add to a position takes the full admit.
 
 `POST /api/v1/orders/cancel-all` requests cancellation only. Cancellation acknowledgement does not establish terminal cancellation or closed exposure. Layer 5 also requests exits after resting-order cancellation; those emergency paths remain reachable while Laya is Down. Only independently confirmed reducing execution may be described as closed.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
-`GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
+`GET /health` records Ready, Degraded, or Down from the opt-in managed Laya process when
 one is registered. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the watched pid, key, and runtime record the same way an order does, then
-publishes Live-facing `laya`, sidecar `laya_practice`,
+publishes Live-facing `laya`, Practice `laya_practice`,
 `laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
-the current mode, so Practice shows the sidecar and does not read Down while
+the current mode, so Practice shows the managed Laya process and does not read Down while
 Practice orders are being admitted. During the first load the chip says
 Still loading. "Not qualified for Live" is the chip tooltip and the popover
-line when the sidecar is up and Live is not qualified. A base checkpoint is not
+line when the managed Laya process is up and Live is not qualified. A base checkpoint is not
 qualified for Live, so Live stays Down until a qualification record exists
 for the exact model revision, weight digest, and policy version
 (`EvidenceUseScope.LIVE_DECISION`). Practice can be Ready or Degraded from
@@ -315,8 +324,8 @@ the same probe. Degraded does not open that class and does not mute Live.
 Degraded enforces the tighter quantity ceiling and the desk says so. Down
 does not add a second deny under a Live control that is already muted.
 Other Live write verbs still reach SafetySystem without this admission.
-Other Practice verbs go straight to the sandbox. The sidecar install is in
-[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#laya-decision-sidecar).
+Other Practice verbs go straight to the sandbox. The managed Laya process install is in
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#laya-decision-process).
 Operator steps are in [Start Laya](USER_GUIDE.md#start-laya).
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
@@ -411,7 +420,7 @@ archive.
 Kill switch triggers:
 
 - Telegram bot: `/kill` command when the operator enables the integration.
-- Terminal UI: the Kill Switch control on the `/trade` workspace (Live mode
+- Terminal UI: the Kill Switch control on Terminal (Live mode
   only), and Activate / Reset on `/automate` → Settings.
 - API: `POST /api/v1/safety/kill-switch` to latch Layer 5 (JSON body
   `{ "reason": "…" }`). `DELETE /api/v1/safety/kill-switch` resets it after

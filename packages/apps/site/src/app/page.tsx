@@ -54,7 +54,7 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
-  'Six native adapters with evidence-gated availability',
+  'Supported native brokers',
   'Practice, Connected (read), and Live',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',

@@ -17,6 +17,48 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Changed
+
+- **Unified application shell.** The app bar lists Terminal, Testing,
+  Portfolio, Automation, Reports, Learn, Brokers, Settings, and System.
+  Older addresses open the matching app and keep the query string, hash,
+  and navigation state: `/home` and `/trade` open Terminal, `/invest`
+  opens Portfolio, `/lab` opens Testing, `/automate` and `/ai` open
+  Automation, `/ditto` opens Brokers, `/admin` opens System, and `/login`
+  opens `/welcome`. The public site redirects `/explore` to the Demo.
+  The public demo bundle replaces `/explore` with Terminal. An installed
+  build replaces `/explore` with `/welcome`; a signed-in Welcome then
+  continues through `/trade` to Terminal. A signed-out installed visit
+  stays on `/welcome`.
+
+- **Execution sessions, protection grants, diagnostics, incidents,
+  datasets, and knowledge.** Loopback session routes now cover
+  `/api/v1/execution-sessions` (a Testing run uses account
+  `paper:run:<run_id>`), `/api/v1/protection/grants`,
+  `GET /api/v1/system/diagnostics`, `/api/v1/system/incidents`,
+  `GET /api/v1/data/datasets`, and `/v1/knowledge` with `/v1/learning`.
+
+- **Mode header check.** When `X-FlintTrade-Mode` is present and differs
+  from the JWT `mode` claim, order routes return HTTP 403
+  `{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}`
+  with no `code` field.
+
+- **Quantity admission.** Before Laya, a lot multiple or a freeze breach
+  is HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
+  once, inline: `Quantity must be a multiple of the lot size (N).` An
+  unverified lot is `Not placed. The lot size for <name> isn't verified.`
+  A freeze breach is not split: `Max <limit> per order for <underlying>. Place smaller orders.`
+  `<underlying>` is the index name, such as NIFTY. The figures are the
+  contract's lot and the broker or exchange freeze limit, not published
+  constants. The Practice sandbox returns an unverified lot as HTTP 400
+  with that message and no `code` field.
+
+- **Exit-all fails closed.** Unavailable position evidence is HTTP 503
+  `Position evidence unavailable; no square-off was sent.` Ambiguous
+  evidence is HTTP 409 `Position evidence is ambiguous; no square-off was sent.`
+  When broker orders cannot be read, a further exit is HTTP 409
+  `exit_orders_unreadable`: `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.`
+
 ### Added
 
 - **Mode honesty bar.** One line under the TopBar for Example, and for
@@ -90,8 +132,8 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
-- **Opt-in Laya decision sidecar for place admission (FT-LAYA-MODEL-001).**
-  After the hard rules, the sidecar may deny or clamp a place only. It
+- **Opt-in Laya decision process for place admission (FT-LAYA-MODEL-001).**
+  After the hard rules, the managed Laya process may deny or clamp a place only. It
   cannot raise a quantity or overturn a rule refusal, and it does not
   place the order. Laya starts Down. A ping does not invent Ready.
   Live stays fail-closed until a qualification record uses
@@ -104,10 +146,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   `python -m flinttrade_core.laya_runtime install` or `start`.
   The CPU install pins `torch==2.14.0+cpu`, `laya==0.3.21`,
   `huggingface_hub==1.33.0`, and `tqdm==4.70.1`
-  in `laya_sidecar_constraints.txt` (no extras; the install requirement
+  in the Laya install constraints file (no extras; the install requirement
   is still `laya[serve]==0.3.21`). The download progress class subclasses
   that pinned `tqdm.auto.tqdm`. Torch is installed first from the CPU
-  index, and the sidecar can share the base interpreter with FlintTrade.
+  index, and the managed Laya process can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
   It is not Ready by default. A first start with the checkpoint missing
   or incomplete downloads the commit named by `[checkpoint] revision`
@@ -123,7 +165,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   `checkpoint.old-<random>` in the same runtime directory, staging is
   renamed onto `checkpoint`, and the old copy is deleted. If that second
   rename fails, the old checkpoint is renamed back, the chip is
-  `download_failed`, and the sidecar does not start. While the download
+  `download_failed`, and the managed Laya process does not start. While the download
   runs, including a pin change, the status word is Downloading (neutral
   colour), not Still loading or Down, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
   The model is about 2.37 GB, and that size is reported once.
@@ -137,14 +179,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   `unverified` stays when this start did not download. `wrong_revision`
   is only a complete download whose files
   do not match the pin, a snapshot already on disk that this start is not
-  replacing, or a running sidecar that reports another revision or digest.
+  replacing, or a running managed Laya process that reports another revision or digest.
   Leftover staging directories and `checkpoint.old-*` copies are removed
   at the start of `start` once a checkpoint is in place, with no chip change and
   no message. If `checkpoint` is missing after a crash between the two
   renames, the last `checkpoint.old-*` name is restored and checked
   against the pin.
-  The sidecar does not start on files that do not match the pin, including
-  that restored copy. The sidecar always runs offline. When its health
+  The managed Laya process does not start on files that do not match the pin, including
+  that restored copy. The managed Laya process always runs offline. When its health
   document leaves the revision empty, FlintTrade fills the pinned
   revision from the verified manifest, so the chip leaves Still loading.
 
@@ -231,10 +273,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 
 - **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
-  Practice shows sidecar Ready, Degraded, Down, Still loading, or
+  Practice shows managed Laya Ready, Degraded, Down, Still loading, or
   Checking. Live shows Live-facing status. "Not qualified for Live" is the tooltip
   and the popover line when Live lacks qualification. Ping
-  publishes Live-facing `laya`, sidecar `laya_practice`, and
+  publishes Live-facing `laya`, Practice `laya_practice`, and
   `laya_live_qualified`, plus a reason code and port. During the first
   load the chip says Still loading and does not read Down. Orders stay
   refused with the Down sentence. A port clash says which port is in use.
@@ -256,11 +298,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   replaces that file and does not treat it as missing. A different path
   that is not there still refuses with that same sentence.
   `downloading` has no Next line. The `download_failed` tooltip is
-  "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
+  "Check your connection, then Start Laya again." A signed-in operator can start the managed Laya process from the popover
   (`POST /api/v1/laya/start`); the chip then says Checking in the
   neutral colour, and the popover says Checking Laya…, until the ping
   confirms Ready, Degraded, or a reason other than `not_started`. A
-  confirmed first load still says Still loading. A dead sidecar is reaped
+  confirmed first load still says Still loading. A dead managed Laya process is reaped
   and reported Stopped. A clamp says "Not placed. Laya allows
   up to N." with Place N and Cancel, and never auto-places. Place N
   sends that quantity, and the Practice review panel shows it. A Down
@@ -295,7 +337,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   The row keeps **Exit pending**. The Live hold is
   for that broker account. When the broker
   order book cannot be read, that refusal is HTTP 409
-  `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol> until your broker's orders load.`
+  `exit_orders_unreadable`: `Not placed. Broker orders for <symbol> are unavailable. Reconcile them before another exit.`
   A signed-out reset with no
   authenticator enrolled reads `Sign in to reset this account. You'll
   need your password.` With an authenticator enrolled it reads `Sign in

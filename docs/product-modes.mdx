@@ -1,6 +1,6 @@
 ---
 title: Product Modes
-description: Practice and Live are Modes. Connected (read) is a broker status. Example is sample data. Provenance stays separate. Home versus Trade ownership.
+description: Practice and Live are Modes. Connected (read) is a broker status. Example is sample data. Provenance stays separate. Home and Trade open Terminal.
 ---
 
 # Product Modes
@@ -31,7 +31,7 @@ Live stays locked while any of these reasons apply, in this order:
 
 Example is sample data, not a Mode. The chip reads **Example**. The signed-in name is **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
 
-On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). **Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`. The server refusal `Orders are not available for Example. Switch to Practice or Live to trade.` is the HTTP path. Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
+On Terminal, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). **Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`. The server refusal `Orders are not available for Example. Switch to Practice or Live to trade.` is the HTTP path. Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
 
 The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the single inline sample XIRR. There is no Portfolio XIRR card. On sample figures, Net Worth reads `Example equity and cash. Connect a broker to see yours.`; the allocation label is `Allocation` with the Example chip. Equity Holdings and Cash leave their notes blank on example data, and those rows do not carry an Example chip. On those Net Worth figures the Example chip paints only on example data. A connected book keeps `Allocation (live assets only)` and `Live from broker`. Mutual Funds on example data reads `Example NAVs · as of 10-Sep-2026`. Benchmark figures stay hard-coded in every Mode and keep the **Example** chip.
 
@@ -52,8 +52,17 @@ Each status has one home.
 
 ## Surface ownership
 
-- **Home**: concise, read-only overview and discovery surface.
-- **Trade**: execution, charts, positions, orders, monitoring, and operational-risk controls.
+The app bar lists Terminal, Testing, Portfolio, Automation, Reports, Learn, Brokers, Settings, and System.
+
+- **Terminal**: markets, the account overview, and manual trading, including charts, positions, orders, and operational-risk controls. Older addresses **Home** and **Trade** open Terminal.
+- **Testing**: strategy research, Practice forward tests, and datasets.
+- **Portfolio**: investments, holdings, allocation, and goals.
+- **Automation**: schedules, strategy runs, and the AI Centre panel. The panel title is AI Centre.
+- **Reports**: journal, performance, notes, and coaching.
+- **Learn**: lessons, glossary, strategies, and documentation.
+- **Brokers**: connections, account roles, and copying readiness.
+- **Settings**: security, preferences, and integrations.
+- **System**: health, network, resources, and operational evidence.
 
 **71 widgets** in the current catalogue.
 

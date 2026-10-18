@@ -125,9 +125,9 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 
 | Item | Status | Notes |
 |---|---|---|
-| Automate pillar (webhooks / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
+| Automate pillar (webhooks / schedules / monitors / Telegram) | ✅ | Automation (`/automation`; a bookmark of `/automate` opens it) → run control (generic HMAC-signed custom webhooks, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
 | Native copy trading | Unavailable | Account metadata is retained; mirroring, risk execution and linking remain unavailable pending a native safety design. |
-| Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
+| Invest & Learn routes | ✅ | Portfolio (`/portfolio`; a bookmark of `/invest` opens it and keeps the hash) and `/learn` (guided learning) |
 
 ## Known backlog (built-but-unreachable / referenced-not-built / blocked)
 
