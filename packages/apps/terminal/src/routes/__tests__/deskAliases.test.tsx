@@ -36,12 +36,30 @@ describe("public entry redirects", () => {
           element: <Navigate to={alias.to} replace />,
         })),
         { path: "/welcome", element: <Landed /> },
+        { path: "/setup", element: <Landed /> },
         { path: "*", element: <div>Page not found</div> },
       ],
       { initialEntries: ["/login"] },
     );
     render(<RouterProvider router={router} />);
     expect(await screen.findByTestId("landed")).toHaveTextContent("/welcome");
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("sends /vault to the vault step of setup", async () => {
+    const router = createMemoryRouter(
+      [
+        ...PUBLIC_ENTRY_REDIRECTS.map((alias) => ({
+          path: alias.path,
+          element: <Navigate to={alias.to} replace />,
+        })),
+        { path: "/setup", element: <Landed /> },
+        { path: "*", element: <div>Page not found</div> },
+      ],
+      { initialEntries: ["/vault"] },
+    );
+    render(<RouterProvider router={router} />);
+    expect(await screen.findByTestId("landed")).toHaveTextContent("/setup#vault");
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
   });
 });
