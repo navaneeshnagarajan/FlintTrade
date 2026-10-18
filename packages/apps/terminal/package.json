@@ -100,7 +100,7 @@
     "eslint": "10.12.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "jsdom": "30.1.2",
-    "mapbox-gl": "3.32.0",
+    "mapbox-gl": "3.33.0",
     "marked": "18.1.0",
     "react-responsive-carousel": "3.2.23",
     "rollup-plugin-visualizer": "7.1.1",
