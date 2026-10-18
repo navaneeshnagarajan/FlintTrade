@@ -931,11 +931,11 @@ constant in this guide.
 sentence once, inline, when a derivative has no verified lot. The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
 Place refuses either that multiple or a freeze breach before Laya, with
-HTTP 400 `quantity_admission`. The freeze sentence is
-`Max <limit> per order for <underlying>. Place smaller orders.`
-`<underlying>` is the index name, such as NIFTY, and the order is not
-split. `<limit>` is the broker freeze field when the body carries one,
-otherwise the exchange figure for that underlying. The Practice sandbox
+HTTP 400 `quantity_admission`. An order over the per-order freeze limit
+is refused with that HTTP 400 and code `quantity_admission`. The message
+gives the limit, names the instrument, and asks for smaller orders. The
+order is not split. The limit is the broker freeze field when the body
+carries one, otherwise the exchange figure. The Practice sandbox
 returns an unverified lot as HTTP 400 with the visible message and no
 `code` field.
 The terminal does not bundle a second copy of the excerpt. The app shell

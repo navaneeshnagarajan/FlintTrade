@@ -69,11 +69,11 @@ contract's lot. An unverified lot is
 `Not placed. The lot size for <name> isn't verified.`
 `<name>` is the contract's display name, shown once, inline. The Practice
 sandbox returns that sentence as HTTP 400 with `status: error` and no
-`code` field. A freeze breach is not split:
-`Max <limit> per order for <underlying>. Place smaller orders.`
-`<underlying>` is the index name, such as NIFTY. `<limit>` is the broker
-`freeze_qty` when the body carries one, otherwise the exchange figure for
-that underlying.
+`code` field. An order over the per-order freeze limit is refused with
+HTTP 400 and code `quantity_admission`. The message gives the limit,
+names the instrument, and asks for smaller orders. The order is not split.
+The limit is the broker `freeze_qty` when the body carries one, otherwise
+the exchange figure.
 
 When the request sends `X-FlintTrade-Mode` and that value differs from the
 JWT `mode` claim, place, the broker place route, and the extended gated
@@ -810,7 +810,7 @@ Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `quantity_admission` | Place refused a lot multiple or a freeze breach before Laya — HTTP 400. `message` is `Quantity must be a multiple of the lot size (N).` or `Max <limit> per order for <underlying>. Place smaller orders.` The Order Pad shows the lot sentence once, inline. `<underlying>` is the index name, such as NIFTY. The order is not split. An unverified Practice lot is a separate HTTP 400 with the message `Not placed. The lot size for <name> isn't verified.` and no `code` field. |
+| `quantity_admission` | Place refused a lot multiple or a freeze breach before Laya — HTTP 400. For a lot multiple, `message` is `Quantity must be a multiple of the lot size (N).` The Order Pad shows that sentence once, inline. An order over the per-order freeze limit uses the same HTTP 400 and code `quantity_admission`. The message gives the limit, names the instrument, and asks for smaller orders. The order is not split. An unverified Practice lot is a separate HTTP 400 with the message `Not placed. The lot size for <name> isn't verified.` and no `code` field. |
 | Mode header mismatch | `X-FlintTrade-Mode` is present and differs from the JWT `mode` claim — HTTP 403. Body is `{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}` and has no `code` field. |
 | `mode_blocked` | A sample-data session (or another blocked session) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` sample-data refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` sample-data refusals (same header/claim gate). Example-data place stays on this code, with message `Orders are not available for Example. Switch to Practice or Live to trade.` |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial on a line named Laya decision, inside one alert (`role="alert"`), the only live region. That line is not its own status. Down is "Laya is Down. New orders are paused until it's Ready. You can still close positions." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |

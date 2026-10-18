@@ -47,10 +47,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   is HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
   once, inline: `Quantity must be a multiple of the lot size (N).` An
   unverified lot is `Not placed. The lot size for <name> isn't verified.`
-  A freeze breach is not split: `Max <limit> per order for <underlying>. Place smaller orders.`
-  `<underlying>` is the index name, such as NIFTY. The figures are the
-  contract's lot and the broker or exchange freeze limit, not published
-  constants. The Practice sandbox returns an unverified lot as HTTP 400
+  An order over the per-order freeze limit is refused with HTTP 400 and
+  code `quantity_admission`. The message gives the limit, names the
+  instrument, and asks for smaller orders. The order is not split. The
+  figures are the contract's lot and the broker or exchange freeze limit,
+  not published constants. The Practice sandbox returns an unverified lot as HTTP 400
   with that message and no `code` field.
 
 - **Exit-all fails closed.** Unavailable position evidence is HTTP 503

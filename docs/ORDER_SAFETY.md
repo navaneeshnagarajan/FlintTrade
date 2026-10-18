@@ -54,12 +54,11 @@ verified lot is a different sentence, also shown once, inline:
 `Not placed. The lot size for <name> isn't verified.`
 `<name>` is the contract's display name. The Practice sandbox returns
 that sentence as HTTP 400 with `status: error` and no `code` field, and
-it does not fill the order. A quantity above the freeze limit is not
-split. The sentence is
-`Max <limit> per order for <underlying>. Place smaller orders.`
-`<underlying>` is the index name, such as NIFTY. `<limit>` is the broker
-freeze field when the order carries one, otherwise the exchange figure
-for that underlying. The routed place route is Live only and uses the same
+it does not fill the order. An order over the per-order freeze limit is
+refused with HTTP 400 and code `quantity_admission`. The message gives
+the limit, names the instrument, and asks for smaller orders. The order
+is not split. The limit is the broker freeze field when the order carries
+one, otherwise the exchange figure. The routed place route is Live only and uses the same
 Live admission. Modify and cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,
