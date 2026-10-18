@@ -28,7 +28,7 @@ Please report issues privately. Do **not** open a public GitHub issue with detai
 - A description of the issue and the affected component or endpoint.
 - Steps to reproduce, ideally with a minimal test case.
 - The version of FlintTrade and the operating system you tested on.
-- Whether the issue is reachable without authentication, or requires a logged-in session, or requires a specific mode (Explore / Practice / Live).
+- Whether the issue is reachable without authentication, or requires a logged-in session, or requires a specific Mode (Practice, Connected (read), or Live). Example data uses the JWT claim `explore` and is not a menu Mode.
 - Any logs or screenshots — please redact broker credentials, account identifiers, and order identifiers before sharing.
 
 ## Response timeline
@@ -46,7 +46,7 @@ If a report stalls or you have not heard back within these windows, please open 
 
 Reports about the FlintTrade codebase itself are in scope. This includes everything under `packages/`, `scripts/`, the GitHub workflows under `.github/`, the build configuration (Docker, Makefile, `pyproject.toml`, `flint.toml`), and the documentation under `docs/` and the repo root.
 
-The mode system (Explore / Practice / Live), the authentication layer (JWT plus API key), the order-safety proxy, the strategy sandbox executor, and any code that touches broker credentials or trade-execution paths are all in scope.
+The mode system (Practice, Connected (read), and Live, plus the example-data JWT claim `explore`), the authentication layer (JWT plus API key), the order-safety proxy, the strategy sandbox executor, and any code that touches broker credentials or trade-execution paths are all in scope.
 
 ## Out of scope
 

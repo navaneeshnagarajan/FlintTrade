@@ -27,7 +27,7 @@ native adapter → BrokerRouter/read port → core backend → terminal
 
 - **Safety:** no reachable ungated live order path — verified via repeated adversarial audit passes and pinned by guard tests. Intentionally-raw paths are Layer-5 emergencies on shrinking allowlists.
 
-- **Modes:** Explore / Practice / Live are enforced server-side via JWT claims; PIN live-unlock and downgrade paths are wired through the app-auth flow, and Practice order placement is proven through the native sandbox engine.
+- **Modes:** Practice and Live are the menu Modes. Connected (read) is a broker status. Example data uses the JWT claim `explore` and is not a menu Mode. PIN live-unlock and the Practice downgrade are wired through the app-auth flow, and Practice order placement is proven through the native sandbox engine.
 
 - **Desktop:** the Electron source-bootstrap shell is complete and locally verified (macOS packaged ad hoc). No complete installer release is published yet — macOS awaits Apple distribution signing and notarisation secrets; Windows/Linux installers build only in CI.
 

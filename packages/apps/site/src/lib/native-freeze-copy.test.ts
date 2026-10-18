@@ -33,8 +33,8 @@ describe('site marketing copy after the native HTTP freeze', () => {
     expect(marketing).not.toContain('currently verified native');
   });
 
-  it('presents only native adapters with evidence-gated availability', () => {
-    expect(homepage).toMatch(/Six native adapters with evidence-gated availability/);
+  it('matches the terminal welcome chip for native brokers', () => {
+    expect(homepage).toMatch(/Supported native brokers/);
     expect(homepage).toContain('Native connections remain frozen');
   });
 

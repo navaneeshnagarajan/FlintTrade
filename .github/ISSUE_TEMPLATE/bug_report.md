@@ -32,7 +32,7 @@ If applicable, add screenshots or paste relevant log output (redact any broker c
 - **OS:** (Windows / macOS / Ubuntu, version)
 - **Browser:** (if a UI bug — Chrome 130, Firefox 132, etc.)
 - **Broker:** (which native adapter — if relevant)
-- **Mode:** Explore / Practice / Live
+- **Mode:** Practice, Connected (read), or Live. Example data is not a menu Mode.
 
 ## Additional context
 

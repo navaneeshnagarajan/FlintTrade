@@ -19,7 +19,7 @@ describe('site sandbox demo routing', () => {
     expect(siteHeader).toContain("href: '/demo-app/welcome'");
     expect(siteHeader).toContain("target={item.newWindow ? '_blank' : undefined}");
     expect(demoPage).toContain("redirect('/demo-app/welcome')");
-    expect(explorePage).toContain("redirect('/demo-app/welcome')");
+    expect(explorePage).toContain("permanentRedirect('/demo-app/welcome')");
     expect(demoPage).not.toContain('<iframe');
     expect(explorePage).not.toContain('<iframe');
   });
