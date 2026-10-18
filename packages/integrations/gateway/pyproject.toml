@@ -10,7 +10,7 @@ dependencies = [
     "httpx==0.28.1",
     "websockets==17.2",
     "cryptography==50.0.2",
-    "dhanhq==2.3.0rc1",
+    "dhanhq==2.3.0",
     "upstox-python-sdk==2.30.0",
     "kotakneoapi==3.0.9",
     # uv installs this hash-locked backend before building the Git-pinned SDK
