@@ -261,10 +261,10 @@
     ) {
       showError(
         backendCancelRequested && backendSnapshot.status === "stopped"
-          ? "Trading-engine startup was cancelled and stopped. Retry when ready, or quit FlintTrade."
+          ? "Trading engine startup was cancelled. Choose Retry to try again, or Quit to close the app."
           : backendCancelRequested
-            ? "Trading-engine startup failed while cancellation was settling. Review the redacted desktop log before retrying or quitting."
-          : "The trading engine could not start or became unavailable. Electron will verify cleanup before retry or quit.",
+            ? "FlintTrade is still stopping the trading engine. Wait a moment, then choose Retry or Quit."
+          : "FlintTrade could not start the trading engine. Choose Retry to try again, or Quit to close the app.",
         backendSnapshot.status === "stopped" ? "backend-stopped" : "backend",
       );
       return;
