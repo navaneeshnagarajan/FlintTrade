@@ -27,7 +27,7 @@ ml = [
 ]
 # PDF support for the canonical RAG pipeline.
 rag = [
-    "pypdf==6.20.0",
+    "pypdf==6.20.1",
 ]
 
 [build-system]
