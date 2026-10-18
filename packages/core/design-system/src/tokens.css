@@ -205,7 +205,7 @@
       --color-ticker-venue: #1a1a1e;
       --color-practice-chip: #6b4500;
       --color-live-chip: #0f5c2c;
-      --color-accent: #15803d;
+      --color-accent: #166534;
       --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
       --color-profit: #15803d;
@@ -232,6 +232,7 @@
   }
 
   html.theme-light {
+    --color-accent: #166534;
     --color-info: #0369a1;
     --color-warning: #92400e;
     --color-bullish-text: #166534;
