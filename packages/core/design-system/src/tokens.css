@@ -216,6 +216,14 @@
       --color-confirmation-hover: color-mix(in srgb, var(--color-confirmation) 90%, #0a0a0f);
       --color-confirmation-pressed: color-mix(in srgb, var(--color-confirmation) 80%, #0a0a0f);
       --color-loss: #b91c1c;
+      --color-warning: #92400e;
+      --color-bullish-text: #166534;
+      --color-bearish-text: #991b1b;
+      --color-atm-text: #92400e;
+      --color-itm-text: #166534;
+      --color-otm-text: #9a3412;
+      --color-neutral-text: #1d4ed8;
+      --color-info: #0369a1;
       --color-surface-floating: #ffffff;
       --shadow-raised: 0 1px 3px rgba(0,0,0,0.08);
       --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12);
@@ -225,6 +233,13 @@
 
   html.theme-light {
     --color-info: #0369a1;
+    --color-warning: #92400e;
+    --color-bullish-text: #166534;
+    --color-bearish-text: #991b1b;
+    --color-atm-text: #92400e;
+    --color-itm-text: #166534;
+    --color-otm-text: #9a3412;
+    --color-neutral-text: #1d4ed8;
     --color-ticker-venue: #1a1a1e;
     --color-practice-chip: #6b4500;
     --color-live-chip: #0f5c2c;
@@ -243,15 +258,54 @@
     --secondary: 240 5% 92%;
     --secondary-foreground: 240 10% 10%;
     --muted: 240 5% 92%;
-    --muted-foreground: 240 4% 46%;
+    --muted-foreground: 240 4% 42%;
     --accent: 240 5% 92%;
     --accent-foreground: 240 10% 10%;
-    --destructive: 0 84% 60%;
+    --destructive: 0 74% 35%;
     --destructive-foreground: 0 0% 100%;
     --border: 240 6% 82%;
     --input: 240 6% 82%;
     --ring: 142 71% 35%;
   }
+}
+
+/* Bright Tailwind inks fail 4.5:1 on light surfaces. Light theme keeps the
+   same utilities and darkens only the text colour. */
+html.theme-light .text-amber-300,
+html.theme-light .text-amber-400,
+html.theme-light .text-amber-500,
+html.theme-light .text-yellow-300,
+html.theme-light .text-yellow-400,
+html.theme-light .text-yellow-500 {
+  color: #92400e;
+}
+html.theme-light .text-emerald-300,
+html.theme-light .text-emerald-400,
+html.theme-light .text-emerald-500,
+html.theme-light .text-green-300,
+html.theme-light .text-green-400,
+html.theme-light .text-green-500 {
+  color: #166534;
+}
+html.theme-light .text-orange-300,
+html.theme-light .text-orange-400,
+html.theme-light .text-orange-500 {
+  color: #9a3412;
+}
+html.theme-light .text-red-300,
+html.theme-light .text-red-400,
+html.theme-light .text-red-500 {
+  color: #991b1b;
+}
+html.theme-light .text-sky-300,
+html.theme-light .text-sky-400,
+html.theme-light .text-sky-500 {
+  color: #0369a1;
+}
+html.theme-light .text-blue-300,
+html.theme-light .text-blue-400,
+html.theme-light .text-blue-500 {
+  color: #1d4ed8;
 }
 
 /* ---------- Theme tokens ---------- */
