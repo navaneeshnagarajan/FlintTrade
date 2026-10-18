@@ -3,8 +3,9 @@
 
 NSE and BSE publish quantity freeze limits (QF limits) that cap the
 maximum quantity allowed in a single order for F&O instruments.
-For example, NIFTY futures have a freeze limit of 1,800 contracts.
-Oversized orders are rejected at the exchange level.
+NSE/FAOP/76693 (1 October 2026, effective 5 October 2026) sets the
+index limits used when a broker does not supply ``freeze_qty``.
+An order above that limit is refused. It is not split.
 
 This module enforces QF limits *pre-placement* in the FlintTrade engine,
 providing a clear error message before the order hits the exchange.
@@ -16,9 +17,9 @@ restarts.
 CSV format (NSE freeze CSV)::
 
     SYMBOL,EXCHANGE,MAX_QTY
-    NIFTY,NFO,1800
-    BANKNIFTY,NFO,900
-    FINNIFTY,NFO,1800
+    NIFTY,NFO,3510
+    BANKNIFTY,NFO,1440
+    FINNIFTY,NFO,3240
 
 Usage::
 
@@ -27,7 +28,7 @@ Usage::
 
     valid, reason = manager.validate("NIFTY25APRFUT", "NFO", 2000)
     if not valid:
-        print(reason)  # "Quantity 2000 exceeds freeze limit 1800 for NIFTY25APRFUT on NFO"
+        print(reason)  # "Quantity 4000 exceeds freeze limit 3510 for NIFTY on NFO"
 
 Admin routes::
 
@@ -103,16 +104,101 @@ def _default_db_path() -> Path:
     return target
 
 
-# Well-known NSE freeze defaults — used when no CSV is loaded.
-# Source: NSE circular on F&O quantity limits (updated periodically).
+# Index quantity freeze limits from NSE/FAOP/76693.
+# The circular replaces the earlier computation method for these indices.
+# SENSEX and BANKEX are BSE names and are not in that circular.
+_NSE_INDEX_FREEZE: dict[str, int] = {
+    "NIFTY": 3_510,
+    "BANKNIFTY": 1_440,
+    "FINNIFTY": 3_240,
+    "MIDCPNIFTY": 5_760,
+    "NIFTYNXT50": 1_125,
+    "NIFTYFPI": 53_900,
+}
+
+# Well-known defaults seeded when no CSV is loaded.
 _NSE_DEFAULTS: dict[tuple[str, str], int] = {
-    ("NIFTY", "NFO"): 1800,
-    ("BANKNIFTY", "NFO"): 900,
-    ("FINNIFTY", "NFO"): 1800,
-    ("MIDCPNIFTY", "NFO"): 2100,
+    **{(symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()},
     ("SENSEX", "BFO"): 500,
     ("BANKEX", "BFO"): 900,
 }
+
+_INDEX_FREEZE_NAMES: tuple[str, ...] = tuple(
+    sorted(_NSE_INDEX_FREEZE, key=len, reverse=True)
+)
+
+
+def index_underlying(symbol: str) -> str | None:
+    """Return the NSE index name inside a contract symbol, if one is listed.
+
+    Longer names are tried first so ``NIFTYNXT50`` is not read as ``NIFTY``.
+    """
+    compact = "".join(str(symbol).upper().split())
+    if not compact:
+        return None
+    for name in _INDEX_FREEZE_NAMES:
+        if compact == name or compact.startswith(name):
+            return name
+    return None
+
+
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer, ignoring booleans and other types."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
+
+
+def order_symbol_label(symbol: str) -> str:
+    """Symbol named in the freeze refusal. Blank input uses a neutral label."""
+    text = " ".join(str(symbol).split())
+    return text or "this contract"
+
+
+def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
+    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/76693 index table.
+
+    Returns:
+        The maximum quantity for one order, or ``None`` when no freeze applies.
+    """
+    supplied = _positive_int(broker_freeze_qty)
+    if supplied is not None:
+        return supplied
+    underlying = index_underlying(symbol)
+    if underlying is None:
+        return None
+    return _NSE_INDEX_FREEZE[underlying]
+
+
+def quantity_admission_refusal(
+    symbol: str,
+    _exchange: str,
+    quantity: int,
+    *,
+    lot_size: int | None = None,
+    broker_freeze_qty: int | None = None,
+) -> str | None:
+    """Refuse a quantity that is not a lot multiple or is above the freeze quantity.
+
+    A missing lot size skips the multiple check. A missing freeze quantity
+    skips the freeze check. The sentences are the same for Practice and Live.
+    Nothing here splits the order into smaller slices.
+
+    Args:
+        _exchange: Order segment. The visible lot sentence does not name it.
+
+    Returns:
+        An operator sentence, or ``None`` when the quantity may continue.
+    """
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        return None
+    lot = _positive_int(lot_size)
+    if lot is not None and quantity % lot != 0:
+        return f"Quantity must be a multiple of the lot size ({lot})."
+    limit = resolve_freeze_quantity(symbol, broker_freeze_qty)
+    if limit is None or quantity <= limit:
+        return None
+    return f"Max {limit} per order for {order_symbol_label(symbol)}. Place smaller orders."
 
 
 # ---------------------------------------------------------------------------
@@ -336,8 +422,8 @@ class QuantityFreezeManager:
         Expected CSV format::
 
             SYMBOL,EXCHANGE,MAX_QTY
-            NIFTY,NFO,1800
-            BANKNIFTY,NFO,900
+            NIFTY,NFO,3510
+            BANKNIFTY,NFO,1440
 
         Rows with missing or non-numeric MAX_QTY are skipped with a warning.
 

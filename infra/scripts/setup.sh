@@ -164,8 +164,8 @@ TICK_DATA_DIR="${TICK_DATA_DIR:-$DATA_DIR/ticks}"
 header "FlintTrade Python packages"
 
 # SC-07: hash-verified install only (requirements.lock is fully pinned)
-pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" --break-system-packages -q 2>/dev/null || \
-    pip3 install --require-hashes -r "$FLINTTRADE_DIR/requirements.lock" -q
+pip3 install --require-hashes --only-binary=growwapi -r "$FLINTTRADE_DIR/requirements.lock" --break-system-packages -q 2>/dev/null || \
+    pip3 install --require-hashes --only-binary=growwapi -r "$FLINTTRADE_DIR/requirements.lock" -q
 ok "Root requirements installed"
 
 # The hash-only requirements export cannot carry Kotak Neo's operator-cleared
@@ -175,7 +175,7 @@ ok "Root requirements installed"
 SOURCE_PYTHON=python3
 HAVE_UV=false
 if command -v uv >/dev/null 2>&1; then
-    uv sync --frozen --all-packages
+    uv sync --frozen --all-packages --no-build-package growwapi
     SOURCE_PYTHON="$FLINTTRADE_DIR/.venv/bin/python"
     "$SOURCE_PYTHON" "$FLINTTRADE_DIR/scripts/broker_sdk_environment.py" repair
     HAVE_UV=true

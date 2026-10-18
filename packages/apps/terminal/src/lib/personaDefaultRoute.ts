@@ -10,9 +10,8 @@ export type Persona = "trader" | "investor" | "beginner";
 export function personaDefaultRoute(
   persona: Persona | string | null | undefined
 ): "/home" | "/trade" {
-  if (persona === "trader") return "/trade";
-  // beginner + investor + unknown/legacy → Home orientation first
-  return "/home";
+  void persona;
+  return "/trade";
 }
 
 /**

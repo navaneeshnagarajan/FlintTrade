@@ -16,10 +16,11 @@ const outputDirectory = path.join(packageRoot, "release", "electron");
 const FUSE_DISABLED = 48;
 const FUSE_ENABLED = 49;
 const SOURCE_BOOTSTRAP_FILES = [
-  "checksums/node-release-marco-ippolito.asc",
-  "checksums/node-v22.23.2-SHASUMS256.txt",
-  "checksums/node-v22.23.2-SHASUMS256.txt.sig",
-  "checksums/uv-0.11.16-sha256.sum",
+  "checksums/node-release-key.asc",
+  "checksums/node-v26.11.1-SHASUMS256.txt",
+  "checksums/node-v26.11.1-SHASUMS256.txt.sig",
+  "checksums/pnpm-12.11.2-assets.json",
+  "checksums/uv-0.13.1-sha256.sum",
   "flinttrade-bootstrap.ps1",
   "flinttrade-bootstrap.sh",
   "flinttrade-safe-rmtree.py",

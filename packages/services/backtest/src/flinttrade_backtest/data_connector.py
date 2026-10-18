@@ -41,6 +41,8 @@ class DataResult:
     source: str = ""
     gaps: list[DataGap] = field(default_factory=list)
     error: str = ""
+    manifest: dict[str, Any] | None = None
+    provenance_status: str = "unqualified_legacy"
 
     @property
     def total_bars(self) -> int:
@@ -52,44 +54,57 @@ class DataResult:
 
 
 def normalize_bar(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a raw bar dict to the standard format."""
-    return {
-        "timestamp": str(raw.get("timestamp", raw.get("datetime", raw.get("date", "")))),
-        "open": float(raw.get("open", raw.get("Open", 0))),
-        "high": float(raw.get("high", raw.get("High", 0))),
-        "low": float(raw.get("low", raw.get("Low", 0))),
-        "close": float(raw.get("close", raw.get("Close", 0))),
-        "volume": int(raw.get("volume", raw.get("Volume", 0)) or 0),
-        "oi": int(raw.get("oi", raw.get("OI", raw.get("open_interest", 0))) or 0),
-    }
+    """Normalise legacy fields without inventing volume/OI or truncating units.
+
+    Legacy date/naive timestamps remain labelled unqualified. Canonical
+    publication requires the explicit offset/calendar contract separately.
+    """
+    import math
+
+    result: dict[str, Any] = {"timestamp": str(raw.get("timestamp", raw.get("datetime", raw.get("date", ""))))}
+    for key in ("open", "high", "low", "close", "volume", "oi"):
+        value = raw.get(key, raw.get(key.capitalize() if key != "oi" else "OI", raw.get("open_interest") if key == "oi" else None))
+        if value is None or value == "":
+            if key in ("volume", "oi"):
+                result[key] = None
+                continue
+            raise ValueError(f"missing {key}")
+        if isinstance(value, bool):
+            raise ValueError(f"invalid {key}")
+        number = float(value)
+        if not math.isfinite(number) or number < 0 or (key in ("open", "high", "low", "close") and number == 0):
+            raise ValueError(f"invalid {key}")
+        result[key] = number
+    if not result["low"] <= min(result["open"], result["close"]) <= max(result["open"], result["close"]) <= result["high"]:
+        raise ValueError("incoherent high/low/open/close range")
+    datetime.fromisoformat(result["timestamp"])
+    return result
 
 
 def validate_bars(bars: list[dict[str, Any]]) -> list[str]:
-    """Validate bar data integrity. Returns list of issues."""
-    issues: list[str] = []
+    """Return all integrity issues; malformed/nonfinite input cannot be success."""
     if not bars:
-        issues.append("No bars")
-        return issues
-
-    prev_ts = ""
-    for i, bar in enumerate(bars):
-        ts = str(bar.get("timestamp", ""))
-        if not ts:
-            issues.append(f"Bar {i}: missing timestamp")
-        if ts and ts <= prev_ts:
-            issues.append(f"Bar {i}: timestamp {ts} not ascending (prev={prev_ts})")
-        prev_ts = ts
-
-        for field_name in ("open", "high", "low", "close"):
-            val = bar.get(field_name, 0)
-            if val is None or float(val) <= 0:
-                issues.append(f"Bar {i}: {field_name}={val} invalid")
-
-        high_val, low_val = float(bar.get("high", 0)), float(bar.get("low", 0))
-        if high_val < low_val:
-            issues.append(f"Bar {i}: high ({high_val}) < low ({low_val})")
-
+        return ["No bars"]
+    issues = []
+    previous = None
+    for index, bar in enumerate(bars):
+        try:
+            parsed = normalize_bar(bar)
+            current = datetime.fromisoformat(parsed["timestamp"])
+            if previous is not None and current <= previous:
+                issues.append(f"Bar {index}: timestamp not ascending")
+            previous = current
+        except (TypeError, ValueError, OverflowError, AttributeError) as exc:
+            issues.append(f"Bar {index}: {exc}")
     return issues
+
+
+def _normalise_series(rows: Any) -> list[dict[str, Any]]:
+    bars = [normalize_bar(row) for row in rows]
+    issues = validate_bars(bars)
+    if issues:
+        raise ValueError("; ".join(issues[:5]))
+    return bars
 
 
 def detect_gaps(
@@ -133,8 +148,9 @@ class DuckDBConnector:
         result = conn.load("RELIANCE", "NSE", "5m", "2025-01-01", "2025-12-31")
     """
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(self, db_path: str | None = None, *, pipeline: Any = None) -> None:
         self._db_path = db_path
+        self._pipeline = pipeline
 
     def load(
         self,
@@ -155,11 +171,12 @@ class DuckDBConnector:
             )
 
         try:
-            pipeline = DataPipeline(self._db_path) if self._db_path else DataPipeline()
-            raw_bars = pipeline.get_bars(table, symbol, exchange, start_date, end_date)
-            pipeline.close()
+            from contextlib import nullcontext
+            with (nullcontext(self._pipeline) if self._pipeline is not None
+                  else DataPipeline(self._db_path, read_only=True)) as pipeline:
+                raw_bars = pipeline.get_bars(table, symbol, exchange, start_date, end_date)
 
-            bars = [normalize_bar(b) for b in raw_bars]
+            bars = _normalise_series(raw_bars)
             return DataResult(
                 bars=bars, symbol=symbol, exchange=exchange,
                 interval=interval, source="duckdb",
@@ -196,7 +213,7 @@ class CSVConnector:
         """Load bars from a CSV string."""
         try:
             reader = csv.DictReader(io.StringIO(csv_str))
-            bars = [normalize_bar(row) for row in reader]
+            bars = _normalise_series(reader)
             return DataResult(bars=bars, source="csv")
         except Exception as exc:
             return DataResult(source="csv", error=str(exc))
@@ -221,7 +238,7 @@ class JSONConnector:
                 data = json.load(f)
             if not isinstance(data, list):
                 return DataResult(source="json", error="JSON must be an array of bar objects")
-            bars = [normalize_bar(item) for item in data]
+            bars = _normalise_series(data)
             return DataResult(bars=bars, source="json")
         except Exception as exc:
             return DataResult(source="json", error=str(exc))
@@ -233,7 +250,7 @@ class JSONConnector:
             data = json.loads(json_str)
             if not isinstance(data, list):
                 return DataResult(source="json", error="JSON must be an array")
-            bars = [normalize_bar(item) for item in data]
+            bars = _normalise_series(data)
             return DataResult(bars=bars, source="json")
         except Exception as exc:
             return DataResult(source="json", error=str(exc))
@@ -288,7 +305,7 @@ class YFinanceConnector:
                     "high": row["High"],
                     "low": row["Low"],
                     "close": row["Close"],
-                    "volume": row["Volume"] if row["Volume"] == row["Volume"] else 0,
+                    "volume": row["Volume"] if row["Volume"] == row["Volume"] else None,
                 }))
 
             return DataResult(
@@ -315,8 +332,8 @@ class DataConnector:
         result = dc.load("RELIANCE", "NSE", "5m", "2025-01-01", "2025-12-31")
     """
 
-    def __init__(self, duckdb_path: str | None = None) -> None:
-        self._duckdb = DuckDBConnector(duckdb_path)
+    def __init__(self, duckdb_path: str | None = None, *, pipeline: Any = None) -> None:
+        self._duckdb = DuckDBConnector(duckdb_path, pipeline=pipeline)
         self._csv = CSVConnector()
         self._json = JSONConnector()
         self._yfinance = YFinanceConnector()
@@ -330,25 +347,41 @@ class DataConnector:
         end_date: str = "",
         source: str = "auto",
     ) -> DataResult:
-        """Load data from the specified or best available source."""
-        if source == "duckdb" or source == "auto":
-            result = self._duckdb.load(symbol, exchange, interval, start_date, end_date)
-            if result.success:
-                return result
-            if source == "duckdb":
-                return result
+        """Load an explicitly selected source; ``auto`` means local-only.
 
-        if source == "yfinance" or source == "auto":
-            result = self._yfinance.load(symbol, interval, start_date, end_date)
-            if result.success:
-                return result
-            if source == "yfinance":
-                return result
+        An unavailable local series never authorises remote provider failover.
+        """
+        if source in ("duckdb", "auto"):
+            return self._duckdb.load(symbol, exchange, interval, start_date, end_date)
+
+        if source == "yfinance":
+            return self._yfinance.load(symbol, interval, start_date, end_date)
 
         return DataResult(
             symbol=symbol, exchange=exchange, interval=interval,
             error=f"No data found from source={source}",
         )
+
+    def load_manifest(self, snapshot_id: str, *, scope: dict[str, Any]) -> DataResult:
+        """Load an exact immutable input; partial history is not a successful run input."""
+        from flinttrade_historical.pipeline import DataPipeline
+
+        try:
+            from contextlib import nullcontext
+            with (nullcontext(self._duckdb._pipeline) if self._duckdb._pipeline is not None
+                  else DataPipeline(self._duckdb._db_path, read_only=True)) as pipeline:
+                snapshot = pipeline.history_snapshot(snapshot_id, scope=scope)
+            if snapshot is None:
+                return DataResult(source="manifest", error="Historical snapshot unavailable")
+            identity = snapshot["identity"]
+            return DataResult(
+                bars=snapshot["bars"], symbol=identity["instrument_id"], exchange=identity["venue"],
+                interval=str(identity["interval_seconds"]) + "s", source="manifest", manifest=snapshot,
+                provenance_status=snapshot["status"],
+                error="" if snapshot["status"] == "available" else "Historical coverage incomplete",
+            )
+        except Exception:
+            return DataResult(source="manifest", error="Historical manifest unavailable or invalid")
 
     def load_csv(self, path: str) -> DataResult:
         """Load from CSV file."""

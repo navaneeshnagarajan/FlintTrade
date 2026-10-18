@@ -126,15 +126,22 @@ class AgentRunStore:
         path: SQLite file path; ``:memory:`` is supported for isolated tests.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, strict_existing: bool = False) -> None:
         if str(path) != ":memory:":
             path = Path(path).expanduser().resolve()
             path.parent.mkdir(parents=True, exist_ok=True)
         self._database_path = str(path)
+        if strict_existing and (str(path) == ":memory:" or not Path(path).is_file()):
+            raise ValueError("Established execution history unavailable")
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self._database_path, isolation_level=None, check_same_thread=False, timeout=10.0)
         self._conn.row_factory = sqlite3.Row
         try:
+            if strict_existing:
+                expected = {"agent_runs", "agent_run_events", "agent_runs_one_active", "agent_runs_newest", "agent_run_events_by_run"}
+                names = {row[0] for row in self._conn.execute("SELECT name FROM sqlite_master")}
+                if not expected <= names:
+                    raise ValueError("Established execution schema unavailable")
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.execute("PRAGMA synchronous = FULL")
             self._conn.execute("PRAGMA foreign_keys = ON")
@@ -341,6 +348,51 @@ class AgentRunStore:
             ).fetchall()
             return [self._run(row) for row in rows]
 
+    def rearm_execution(self, scope: dict[str, str]) -> dict[str, Any]:
+        """Rearm an exact retired owner after core flat proof; never replay writes.
+
+        The caller must hold the backend/run/book fence. This changes lifecycle
+        only: order events, model controls, config and execution identity remain.
+        """
+        _payload(scope)
+        run_id = _identifier(scope.get("run_id"))
+        with self._transaction():
+            row = self.get_run(run_id)
+            if (row is None or row["config"].get("execution_session") != scope
+                    or row["config"].get("owner") != scope.get("actor")
+                    or row["status"] not in {"stopped", "completed", "failed", "reconciliation_required"}):
+                raise ValueError("execution scope or lifecycle mismatch")
+            pending = None
+            for event in self._conn.execute("SELECT kind,data FROM agent_run_events WHERE run_id=? ORDER BY seq", (run_id,)):
+                value = json.loads(event["data"])
+                if event["kind"] == "dispatch_started":
+                    if pending is not None:
+                        raise ValueError("uncertain dispatch requires reconciliation")
+                    pending = value.get("order")
+                    if not isinstance(pending, dict):
+                        raise ValueError("uncertain dispatch evidence")
+                elif event["kind"] == "dispatch_result":
+                    response = value.get("response", {})
+                    if (pending is None or value.get("order") != pending or not isinstance(response, dict)
+                            or response.get("status") not in {"COMPLETE", "success", "error"}
+                            or any(word in str(response.get("code", "")) for word in ("uncertain", "unknown", "reconciliation"))):
+                        raise ValueError("uncertain dispatch requires reconciliation")
+                    pending = None
+            if pending is not None:
+                raise ValueError("uncertain dispatch requires reconciliation")
+            stamp = _stamp()
+            self._conn.execute("UPDATE agent_runs SET status='starting',updated_at=? WHERE run_id=?", (stamp, run_id))
+            self._conn.execute("INSERT INTO agent_run_events(run_id,kind,data,created_at) VALUES (?,'execution_rearmed',?,?)",
+                               (run_id, _payload({"scope": scope}), stamp))
+            result = self.get_run(run_id)
+            assert result is not None
+            return result
+
+    def ownership_census(self) -> list[dict[str, Any]]:
+        """Unpaginated durable owner identities for maintenance, never UI state."""
+        with self._lock:
+            return [self._run(row) for row in self._conn.execute("SELECT * FROM agent_runs ORDER BY run_id")]
+
     def events(self, run_id: str, *, after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
         """Return at most 1,000 events after an exclusive global sequence cursor."""
         _identifier(run_id)
@@ -380,6 +432,49 @@ class AgentRunStore:
                     ),
                 )
             return len(rows)
+
+    @contextmanager
+    def run_fence(self, run_id: str) -> Iterator[None]:
+        """Serialise model control with this store's lifecycle/evidence writers."""
+        _identifier(run_id)
+        with self._lock:
+            if self.get_run(run_id) is None:
+                raise KeyError(run_id)
+            yield
+
+    def model_control(self, run_id: str, key: str) -> tuple[int, dict[str, Any] | None]:
+        """Read the latest append-only model control, never execution state."""
+        _identifier(run_id)
+        _identifier(key)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT data FROM agent_run_events WHERE run_id=? AND kind='model_control' "
+                "AND json_extract(data, '$.key')=? ORDER BY seq DESC LIMIT 1", (run_id, key),
+            ).fetchone()
+            if row is None:
+                return 0, None
+            value = json.loads(row[0])
+            return value["revision"], value["value"]
+
+    def configure_model_control(
+        self, run_id: str, key: str, value: dict[str, Any], *, expected_revision: int,
+    ) -> int:
+        """CAS model metadata into the existing run's durable event history."""
+        _identifier(run_id)
+        _identifier(key)
+        _bounded_integer(expected_revision, minimum=0, maximum=(1 << 63) - 2)
+        encoded = _payload({"key": key, "revision": expected_revision + 1, "value": value})
+        with self._transaction():
+            if self.get_run(run_id) is None:
+                raise KeyError(run_id)
+            revision, _ = self.model_control(run_id, key)
+            if revision != expected_revision:
+                raise ValueError("model control revision changed")
+            self._conn.execute(
+                "INSERT INTO agent_run_events(run_id,kind,data,created_at) VALUES (?,'model_control',?,?)",
+                (run_id, encoded, _stamp()),
+            )
+        return expected_revision + 1
 
     def close(self) -> None:
         """Close the connection after serialising with any pending operation."""

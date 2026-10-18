@@ -96,7 +96,7 @@ describe("LearnRoute", () => {
 
   it("renders the Learn heading, matching its sidebar label", () => {
     renderLearnRoute();
-    expect(screen.getByRole("heading", { level: 1, name: "Learn" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Learning library" })).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 

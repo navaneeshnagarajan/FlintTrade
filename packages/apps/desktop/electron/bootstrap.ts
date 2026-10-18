@@ -56,9 +56,10 @@ export interface BootstrapToolManifest {
       url: string;
     };
     uv: { sha256: string; url: string };
+    pnpm: { sha256: string; snapshot: string; sources: string[] };
   };
   node: { assets: Record<string, ManifestAsset>; version: string };
-  pnpm: { integrity: string; packageManager: string; version: string };
+  pnpm: { assets: Record<string, ManifestAsset>; integrity: string; packageManager: string; version: string };
   schemaVersion: number;
   uv: { assets: Record<string, ManifestAsset>; version: string };
 }
@@ -152,6 +153,7 @@ export interface BootstrapDependencies {
     acquireOperationLock(request: OperationLeaseRequest): Promise<() => Promise<void>>;
     appendText(target: string, content: string): Promise<void>;
     assertDirectoryIdentity(target: string, identity: FileSystemIdentity, requireEmpty?: boolean): Promise<void>;
+    assertManagedVirtualEnvironment(root: string, pythonHome: string, managedRoot: string): Promise<void>;
     directoryIdentity(target: string): Promise<FileSystemIdentity>;
     directoryMetadata(target: string): Promise<FileSystemDirectoryMetadata>;
     ensureDurableDirectory(target: string, knownDurableAncestor: string): Promise<void>;
@@ -241,6 +243,8 @@ export interface OperationLeaseRequest {
 }
 
 export interface BootstrapResult {
+  backendDisposition?: "adopt-recovered";
+  recoveredBackend?: { attempt: number; launchToken: string };
   cancelled?: boolean;
   containmentFailed?: true;
   error?: string;
@@ -299,7 +303,7 @@ interface InstalledMarkerV3 extends Omit<InstalledMarkerV2, "schemaVersion"> {
 type InstalledMarker = InstalledMarkerV2 | InstalledMarkerV3;
 
 interface ToolPaths {
-  corepackJs: string;
+  pnpm: string;
   node: string;
   uv: string;
 }
@@ -333,6 +337,13 @@ const nodeAssetPolicy: DownloadPolicy = Object.freeze({
   allowedHosts: ["nodejs.org"],
   idleTimeoutMs: 60_000,
   label: "Node tool archive",
+  maxBytes: 256 * 1024 * 1024,
+  totalTimeoutMs: 10 * 60_000,
+});
+const pnpmAssetPolicy: DownloadPolicy = Object.freeze({
+  allowedHosts: ["registry.npmjs.org"],
+  idleTimeoutMs: 60_000,
+  label: "pnpm tool archive",
   maxBytes: 256 * 1024 * 1024,
   totalTimeoutMs: 10 * 60_000,
 });
@@ -427,13 +438,6 @@ function archiveName(url: string): string {
 function isWithin(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function corepackRelativePath(nodeExecutable: string, platform: NodeJS.Platform): string {
-  const root = platform === "win32" ? path.posix.dirname(nodeExecutable) : path.posix.dirname(path.posix.dirname(nodeExecutable));
-  return platform === "win32"
-    ? path.posix.join(root, "node_modules", "corepack", "dist", "corepack.js")
-    : path.posix.join(root, "lib", "node_modules", "corepack", "dist", "corepack.js");
 }
 
 export function createFirstRunBootstrap(options: BootstrapOptions) {
@@ -1030,7 +1034,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const installTool = async (
     attempt: number,
     signal: AbortSignal,
-    tool: "node" | "uv",
+    tool: "node" | "pnpm" | "uv",
     asset: ManifestAsset,
     version: string,
   ): Promise<{ executable: string; tree: SourceTreeIdentity }> => {
@@ -1050,7 +1054,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       asset.url,
       archive,
       signal,
-      tool === "node" ? nodeAssetPolicy : uvAssetPolicy,
+      tool === "node" ? nodeAssetPolicy : tool === "pnpm" ? pnpmAssetPolicy : uvAssetPolicy,
     );
     assertAttempt(attempt, signal);
     const archiveVerified =
@@ -1171,7 +1175,8 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const provisionTools = async (attempt: number, signal: AbortSignal): Promise<ToolPaths> => {
     const uvAsset = manifest.uv.assets[target];
     const nodeAsset = manifest.node.assets[target];
-    if (!uvAsset || !nodeAsset) throw new Error(`No verified bootstrap tool manifest exists for ${target}.`);
+    const pnpmAsset = manifest.pnpm.assets?.[target];
+    if (!uvAsset || !nodeAsset || !pnpmAsset) throw new Error(`No verified bootstrap tool manifest exists for ${target}.`);
     await publish(attempt, "installing-tools", `Provisioning uv ${manifest.uv.version}`, 28);
     const uvInstall = await installTool(attempt, signal, "uv", uvAsset, manifest.uv.version);
     const uvProbe = await requiredCommand(attempt, signal, {
@@ -1205,32 +1210,20 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     if (nodeProbe.stdout.trim() !== `v${manifest.node.version}`) {
       throw new Error("The verified Node executable reported an unexpected version.");
     }
-    const corepackRelative = corepackRelativePath(nodeAsset.executable, options.platform);
-    const corepackEntry = nodeInstall.tree.entries.find((entry) => entry.path === corepackRelative);
-    if (corepackEntry?.type !== "file") throw new Error("Verified Node distribution did not contain confined Corepack JavaScript.");
-    const corepackJs = path.join(
-      desktopPaths.toolsRoot,
-      "node",
-      manifest.node.version,
-      target,
-      ...corepackRelative.split("/"),
-    );
-    const canonicalNodeRoot = await dependencies.fileSystem.realpath(
-      path.join(desktopPaths.toolsRoot, "node", manifest.node.version, target),
-    );
-    if (!isWithin(canonicalNodeRoot, await dependencies.fileSystem.realpath(corepackJs))) {
-      throw new Error("Corepack JavaScript escaped the verified Node tool root.");
-    }
-    await requiredCommand(attempt, signal, {
-      args: [corepackJs, "--version"],
-      command: nodeInstall.executable,
-      env: {
-        COREPACK_DEFAULT_TO_LATEST: "0",
-        COREPACK_HOME: path.join(desktopPaths.toolsRoot, "corepack"),
-      },
+    // Current Node distributions no longer bundle Corepack, and pnpm is a
+    // native executable. Give it the same archive/tree/promotion proof as Node
+    // and uv rather than asking another manager to acquire or select it.
+    await publish(attempt, "installing-tools", `Provisioning pnpm ${manifest.pnpm.version}`, 40);
+    const pnpmInstall = await installTool(attempt, signal, "pnpm", pnpmAsset, manifest.pnpm.version);
+    const pnpmProbe = await requiredCommand(attempt, signal, {
+      args: ["--version"],
+      command: pnpmInstall.executable,
       timeoutMs: 15_000,
     });
-    return { corepackJs, node: nodeInstall.executable, uv: uvInstall.executable };
+    if (pnpmProbe.stdout.trim() !== manifest.pnpm.version) {
+      throw new Error("The verified pnpm executable reported an unexpected version.");
+    }
+    return { pnpm: pnpmInstall.executable, node: nodeInstall.executable, uv: uvInstall.executable };
   };
 
   const buildCandidate = async (
@@ -1252,7 +1245,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       state.publishForAttempt(attempt, { message: sanitise(match[3]!), phase, progress: Number(match[2]) });
     };
     await publish(attempt, "syncing-python", "Starting the packaged source build", 44);
-    const common = [candidate, tools.uv, tools.node, tools.corepackJs, desktopPaths.toolsRoot, manifest.pnpm.version];
+    const common = [candidate, tools.uv, tools.node, tools.pnpm, desktopPaths.toolsRoot, manifest.pnpm.version];
     const invocation: Omit<CommandInvocation, "signal"> =
       options.platform === "win32"
         ? {
@@ -1269,7 +1262,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
               common[1]!,
               "-Node",
               common[2]!,
-              "-CorepackJs",
+              "-Pnpm",
               common[3]!,
               "-ToolsRoot",
               common[4]!,
@@ -1321,14 +1314,51 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     ) {
       throw new Error("The built virtual environment contains an aliased relocation boundary.");
     }
-    const relocatableSettings = (await dependencies.fileSystem.readText(configurationPath))
-      .split(/\r?\n/)
-      .flatMap((line) => {
-        const match = /^\s*relocatable\s*=\s*(\S+)\s*$/.exec(line);
-        return match ? [match[1]] : [];
-      });
-    if (relocatableSettings.length !== 1 || relocatableSettings[0] !== "true") {
-      throw new Error("The built virtual environment is not explicitly relocatable.");
+    const configurationText = await dependencies.fileSystem.readTextNoFollow(configurationPath);
+    const configuration = new Map<string, string>();
+    if (configurationText.startsWith("\uFEFF") || configurationText.includes("\uFFFD")) {
+      throw new Error("The managed virtual environment configuration is not valid BOM-less UTF-8.");
+    }
+    for (const line of configurationText.split(/\r?\n/)) {
+      const separator = line.indexOf("=");
+      if (separator < 0) continue;
+      const key = line.slice(0, separator).trim();
+      const value = line.slice(separator + 1).trim();
+      const canonicalKey = key.toLowerCase() === "version" ? "version_info" : key.toLowerCase();
+      if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new Error("Malformed managed virtual environment configuration.");
+      if (!["home", "uv", "version_info", "relocatable"].includes(canonicalKey)) continue;
+      if (key !== canonicalKey || configuration.has(canonicalKey)) {
+        throw new Error("Ambiguous managed virtual environment configuration.");
+      }
+      configuration.set(key, value);
+    }
+    if (configuration.size !== 4 || configuration.get("relocatable") !== "true") {
+      throw new Error("The built virtual environment is not explicitly relocatable and source-bound.");
+    }
+    if (configuration.get("version_info") !== "3.14.8" || configuration.get("uv") !== "0.13.1") {
+      throw new Error("Managed Python 3.14.8 is required; preserve this environment and explicitly rebuild it before reuse.");
+    }
+    const pythonHome = configuration.get("home")!;
+    if (!path.isAbsolute(pythonHome)) throw new Error("Managed Python home must be absolute.");
+    const managedPythonRoot = await dependencies.fileSystem.realpath(path.join(desktopPaths.toolsRoot, "python"));
+    const canonicalPythonHome = await dependencies.fileSystem.realpath(pythonHome);
+    if (!isWithin(managedPythonRoot, canonicalPythonHome) || canonicalPythonHome === managedPythonRoot) {
+      throw new Error("The virtual environment Python home is outside the managed tool root.");
+    }
+    await dependencies.fileSystem.assertManagedVirtualEnvironment(environmentRoot, canonicalPythonHome, managedPythonRoot);
+    const runtime = await requiredCommand(attempt, signal, {
+      command: path.join(environmentRoot, options.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
+      args: ["-I", "-S", "-c", "import json,os,sys; print(json.dumps({'version': '.'.join(map(str,sys.version_info[:3])), 'base_executable': os.path.realpath(sys._base_executable)}))"],
+      timeoutMs: 30_000,
+    });
+    const observed: unknown = JSON.parse(runtime.stdout);
+    const expectedBaseExecutable = await dependencies.fileSystem.realpath(
+      path.join(canonicalPythonHome, options.platform === "win32" ? "python.exe" : "python3.14"),
+    );
+    if (typeof observed !== "object" || observed === null ||
+        !("version" in observed) || observed.version !== "3.14.8" ||
+        !("base_executable" in observed) || observed.base_executable !== expectedBaseExecutable) {
+      throw new Error("The managed Python runtime does not match exact Python 3.14.8 and its source home.");
     }
     const probe = await requiredCommand(attempt, signal, {
       args: ["--version"],
@@ -1391,6 +1421,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
         "python",
         "uv-cache",
         `node/${manifest.node.version}`,
+        `pnpm/${manifest.pnpm.version}`,
         `uv/${manifest.uv.version}`,
       ],
       [],

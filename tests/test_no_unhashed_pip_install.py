@@ -203,7 +203,7 @@ def test_supported_install_paths_repair_and_attest_repo_local_broker_sdk_pins() 
             missing.append(path)
 
     ft = (_REPO_ROOT / "scripts" / "ft.py").read_text(encoding="utf-8")
-    if "repair_kotakneo_environment(Path(python))" not in ft:
+    if "repair_broker_sdk_environment(Path(python))" not in ft:
         missing.append("scripts/ft.py")
 
     assert not missing, "Install paths omit exact broker SDK repair/attestation: " + ", ".join(missing)
@@ -214,7 +214,7 @@ def test_docker_repairs_broker_sdk_before_copying_builder_environment() -> None:
     """The runtime image must inherit the attested Git-pinned SDK from its builder."""
     dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "COPY requirements.lock broker-sdk-build.lock brokers.lock ./" in dockerfile
+    assert "COPY requirements.lock broker-sdk-build.lock broker-sdk-git-requirements.txt brokers.lock ./" in dockerfile
     assert "COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py" in dockerfile
     assert "apt-get install -y --no-install-recommends git" in dockerfile
     assert dockerfile.index("python scripts/broker_sdk_environment.py repair") < dockerfile.index(

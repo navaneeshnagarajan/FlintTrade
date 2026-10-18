@@ -205,6 +205,7 @@ def test_as_dict_keys() -> None:
         "mean_final", "std_final",
         "probability_of_loss", "var_95", "cvar_95",
         "max_drawdown_p50", "max_drawdown_p95", "n_simulations",
+        "sampling_method", "terminal_distribution_estimated",
     }
     assert expected_keys == set(d.keys())
 

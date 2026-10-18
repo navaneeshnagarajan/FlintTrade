@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 _TEST_API_KEY = "test-operations-routes-key"
 

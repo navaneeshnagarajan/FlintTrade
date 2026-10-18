@@ -20,12 +20,13 @@ import math
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 from .ai_broker_context import DERIVATIVE_EXCHANGES, BrokerAnalysisContext, BrokerContextError
 from .backend_instance import BackendLeaseUnavailable, require_backend_lease_proof
@@ -121,7 +122,23 @@ class PracticeAgentAdapter:
         max_quote_age_seconds: float = 30.0,
         event_sink: EventSink | None = None,
         stop_check: Callable[[], bool] | None = None,
+        execution_binding: Any = None,
     ) -> None:
+        self._initialise(app, max_quote_age_seconds, event_sink, stop_check)
+        if execution_binding is not None:
+            from .execution_session import RunExecutionBinding
+
+            if type(execution_binding) is not RunExecutionBinding or execution_binding.registry.app is not app:
+                raise PracticeAgentError("practice_execution_scope_invalid")
+            execution_binding.validate()
+            self._execution_binding = execution_binding
+        if type(session_token) is not str or not session_token or len(session_token) > 16_384:
+            raise PracticeAgentError("practice_session_invalid")
+        self.__token = session_token
+        self.validate_session()
+
+    def _initialise(self, app: Flask, max_quote_age_seconds: float, event_sink: EventSink | None,
+                    stop_check: Callable[[], bool] | None) -> None:
         if not isinstance(app, Flask) or not isinstance(app.config.get("RATE_LIMITER"), RateLimiter):
             raise PracticeAgentError("practice_runtime_unavailable")
         if app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True:
@@ -131,16 +148,14 @@ class PracticeAgentAdapter:
         except BackendLeaseUnavailable:
             raise PracticeAgentError("practice_runtime_unavailable") from None
         if (
-            type(session_token) is not str
-            or not session_token
-            or len(session_token) > 16_384
-            or type(max_quote_age_seconds) not in {float, int}
+            type(max_quote_age_seconds) not in {float, int}
             or not math.isfinite(max_quote_age_seconds)
             or not 0 < max_quote_age_seconds <= 60
         ):
             raise PracticeAgentError("practice_session_invalid")
         self._app = app
-        self.__token = session_token
+        self._execution_binding: Any = None
+        self.__token = ""
         self._identity: tuple[str, str] | None = None
         self._max_quote_age = float(max_quote_age_seconds)
         self._event_sink = event_sink
@@ -149,7 +164,94 @@ class PracticeAgentAdapter:
         self._reconciliation_required = False
         self._cache: dict[tuple[str, str], BrokerAnalysisContext] = {}
         self._dispatch_lock = asyncio.Lock()
-        self.validate_session()
+        self._model_admission: tuple[Any, Any, str, str] | None = None
+        self._model_proposal: tuple[int, str] | None = None
+        self._protection: tuple[Any, Any] | None = None
+        self._protective_request: ContextVar[bool] = ContextVar("practice_protective_request", default=False)
+
+    @classmethod
+    def for_protection(cls, app: Flask, services: Any, scope: Any, *, event_sink: EventSink | None = None,
+                       stop_check: Callable[[], bool] | None = None,
+                       execution_binding: Any = None) -> PracticeAgentAdapter:
+        """Construct a JWT-free owner; resume must reconcile before it can act."""
+        from dataclasses import asdict
+
+        from .execution_session import ExecutionSession, RunExecutionBinding
+        from .protection_grants import ProtectionServices
+
+        if type(services) is not ProtectionServices or type(scope) is not ExecutionSession:
+            raise PracticeAgentError("protection_scope_invalid")
+        if scope.environment != "paper" or (
+            scope.account != "paper:sandbox" and (type(execution_binding) is not RunExecutionBinding
+                                                  or execution_binding.scope != scope)
+        ):
+            raise PracticeAgentError("protection_scope_invalid")
+        if execution_binding is not None:
+            if (type(execution_binding) is not RunExecutionBinding or execution_binding.scope != scope
+                    or execution_binding.registry.app is not app):
+                raise PracticeAgentError("protection_scope_invalid")
+            execution_binding.validate()
+        _, grant = services._read(scope.run_id)
+        if grant["scope"] != asdict(scope) or grant["revoked"]:
+            raise PracticeAgentError("protection_scope_invalid")
+        adapter = cls.__new__(cls)
+        adapter._initialise(app, grant["policy"]["read"]["max_age_seconds"], event_sink, stop_check)
+        adapter._execution_binding = execution_binding
+        adapter.bind_protection(services, scope)
+        return adapter
+
+    def bind_protection(self, services: Any, scope: Any) -> None:
+        """Bind exact core ownership; this does not issue protection permission."""
+        from .protection_grants import ProtectionServices
+
+        if type(services) is not ProtectionServices or services.app is not self._app:
+            raise PracticeAgentError("protection_owner_invalid")
+        if self._protection is not None and self._protection != (services, scope):
+            raise PracticeAgentError("protection_owner_conflict")
+        self._protection = (services, scope)
+
+    def _independent_protection(self) -> bool:
+        if not self._protective_request.get() or self._protection is None:
+            return False
+        services, scope = self._protection
+        return services.has_grant(scope)
+
+    def _validate_authority(self) -> None:
+        if self._execution_binding is not None:
+            try:
+                self._execution_binding.validate()
+            except Exception:
+                raise PracticeAgentError("practice_execution_scope_invalid") from None
+        if self._independent_protection():
+            if self._closed:
+                raise PracticeAgentError("practice_stopped")
+            if self._app.config.get("BACKEND_LEASE_PROOF") is not self._backend_lease_proof:
+                raise PracticeAgentError("practice_runtime_unavailable")
+            require_backend_lease_proof(self._backend_lease_proof)
+            services, scope = self._protection
+            services.validate(scope)
+        else:
+            self.validate_session()
+
+    def _sandbox(self) -> Any:
+        if self._execution_binding is not None:
+            self._execution_binding.validate()
+            return self._execution_binding.sandbox
+        return self._app.config.get("DATA_SANDBOX_ENGINE")
+
+    def bind_model_admission(self, runs: Any, activation: Any, run_id: str, role: str) -> None:
+        """Bind core-owned generation admission; never accept it from order JSON."""
+        scope = runs.scope(run_id)
+        account = self._execution_binding.scope.account if self._execution_binding is not None else "paper:sandbox"
+        if scope.environment != "paper" or scope.account != account or self._model_admission is not None:
+            raise PracticeAgentError("practice_model_scope_invalid")
+        self._model_admission = (runs, activation, run_id, role)
+
+    def record_model_proposal(self, generation: int, candidate: str) -> None:
+        """Record the identity captured before inference, including a late result."""
+        if type(generation) is not int or type(candidate) is not str or not candidate:
+            raise PracticeAgentError("practice_model_scope_invalid")
+        self._model_proposal = (generation, candidate)
 
     @property
     def mode(self) -> str:
@@ -179,10 +281,16 @@ class PracticeAgentAdapter:
         try:
             with self._app.app_context():
                 claims = decode_token(self.__token)
+                if self._execution_binding is not None:
+                    from .auth_routes import verify_operator_session_token
+
+                    self._execution_binding.validate()
+                    if verify_operator_session_token(self.__token).actor_ref != self._execution_binding.scope.actor:
+                        raise ValueError
             subject, jti, expiry = claims.get("sub"), claims.get("jti"), claims.get("exp")
             if (
                 claims.get("type") != "session"
-                or claims.get("mode") != "practice"
+                or claims.get("mode") not in ({"practice", "live"} if self._execution_binding is not None else {"practice"})
                 or claims.get("setup_session") is True
                 or type(subject) is not str
                 or not subject.strip()
@@ -320,9 +428,12 @@ class PracticeAgentAdapter:
     def _collect(self, symbol: str, exchange: str) -> BrokerAnalysisContext:
         from .ai_broker_context import collect_configured_broker_context
 
-        self.validate_session()
+        self._validate_authority()
         if self._app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True:
             raise PracticeAgentError("practice_runtime_unavailable")
+        if self._independent_protection():
+            services, scope = self._protection
+            return services.collect(scope, symbol, exchange)
         with self._app.test_request_context(
             "/api/v1/ai/agent/market-data",
             method="GET",
@@ -334,7 +445,7 @@ class PracticeAgentAdapter:
             return collect_configured_broker_context(symbol, exchange)
 
     async def _context(self, symbol: str, exchange: str, *, fresh: bool = False) -> BrokerAnalysisContext:
-        self.validate_session()
+        self._validate_authority()
         self._instrument(symbol, exchange)
         key = (symbol, exchange)
         if not fresh and key in self._cache:
@@ -345,7 +456,7 @@ class PracticeAgentAdapter:
                 self._cache.pop(key, None)
         try:
             context = await asyncio.to_thread(self._collect, symbol, exchange)
-            self.validate_session()
+            self._validate_authority()
             if type(context) is not BrokerAnalysisContext:
                 raise PracticeAgentError("practice_market_data_invalid")
             self._quote(context, symbol, exchange)
@@ -469,7 +580,7 @@ class PracticeAgentAdapter:
 
         try:
             if positions is None or orders is None:
-                sandbox = self._app.config.get("DATA_SANDBOX_ENGINE")
+                sandbox = self._sandbox()
                 positions, orders = sandbox.get_positions(), sandbox.get_orders()
             if (
                 not isinstance(positions, list)
@@ -493,7 +604,7 @@ class PracticeAgentAdapter:
 
     def _dispatch_guard(self, body: dict[str, Any]) -> None:
         self._check_cancellation()
-        self.validate_session()
+        self._validate_authority()
         if self._reconciliation_required:
             raise PracticeAgentError("practice_reconciliation_required")
         # Ordinary draining brakes entries, while an already owned exact
@@ -514,6 +625,8 @@ class PracticeAgentAdapter:
         # This callable is installed only in our in-process request environ.
         # External HTTP request headers/body cannot supply an environ callable.
         try:
+            if request.environ.get("flinttrade.execution_binding") is not self._execution_binding:
+                raise PracticeAgentError("practice_execution_scope_invalid")
             # Re-read under the canonical lock: reset/cancellation can change
             # the sandbox after the pre-admission snapshots were collected.
             self._dispatch_guard(body)
@@ -526,23 +639,46 @@ class PracticeAgentAdapter:
     @contextmanager
     def _write_admission(self, body: dict[str, Any], context: BrokerAnalysisContext) -> Iterator[None]:
         """Lease just the synchronous sandbox write, never Laya or evidence I/O."""
-        from flinttrade_engine.safety import SafetyBypassError
+        from flinttrade_engine.safety import KillSwitchActiveError, SafetyBypassError
 
         self._dispatch_guard(body)
         self._quote(context, body["symbol"], body["exchange"])
         self._lot_quantity(context, body)
-        if self._is_reduction(body):
-            # Canonical contract lock still owns the fresh reduction proof.
-            # This is a sandbox exit, not signed broker emergency authority.
-            yield
-            return
         with ExitStack() as admission:
+            if self._execution_binding is not None:
+                try:
+                    admission.enter_context(self._execution_binding.fence(entries=not self._is_reduction(body)))
+                except Exception:
+                    raise PracticeAgentError("practice_execution_scope_invalid") from None
+            if self._model_admission is not None:
+                runs, activation, run_id, role = self._model_admission
+                admission.enter_context(runs.fence(run_id, role))
+                if not self._protective_request.get():
+                    proposal = self._model_proposal
+                    self._model_proposal = None  # one analysis, not a reusable permit
+                    if proposal is None or not activation.accepts(
+                        run_id, role, generation=proposal[0], candidate=proposal[1]
+                    ):
+                        raise PracticeAgentError("practice_model_generation_retired")
+                    self._emit("model_proposal_admitted", {"run_id": run_id, "role": role,
+                               "generation": proposal[0], "candidate": proposal[1], "order": body})
+            reducing = self._is_reduction(body)
+            if self._protective_request.get() and not reducing:
+                raise PracticeAgentError("practice_protection_not_reducing")
+            if reducing:
+                # Exact canonical reduction proof remains required. Only explicit
+                # deterministic intent is independent of managed model epochs.
+                yield
+                return
             try:
                 # The shared normal-write lease orders the L5 latch against
                 # the fill, only after slow Laya admission has returned.
-                admission.enter_context(self._app.config["SAFETY"].l5_kill.broker_write_admission(False))
-            except SafetyBypassError:
+                selector = self._execution_binding.scope.account if self._execution_binding is not None else "paper:sandbox"
+                admission.enter_context(self._app.config["SAFETY"].l5_kill.broker_write_admission(False, selector))
+            except KillSwitchActiveError:
                 raise PracticeAgentError("practice_kill_switch_active") from None
+            except SafetyBypassError:
+                raise PracticeAgentError("practice_safety_unavailable") from None
             yield
 
     @staticmethod
@@ -553,7 +689,7 @@ class PracticeAgentAdapter:
         order_id = response.get("order_id")
         if response.get("status") != "COMPLETE" or type(order_id) is not str or not order_id:
             raise PracticeAgentError("practice_reconciliation_required")
-        sandbox = self._app.config.get("DATA_SANDBOX_ENGINE")
+        sandbox = self._sandbox()
         trades = sandbox.get_trades()
         matched = [trade for trade in trades if str(trade.get("order_id") or trade.get("orderid") or "") == order_id]
         if len(matched) != 1:
@@ -587,6 +723,10 @@ class PracticeAgentAdapter:
         # This marker comes from the validated quote receipt, never order input;
         # observation/source timestamps retain their separate evidence meanings.
         body = {**body, "price": float(record["value"]["ltp"]), "price_basis": "ltp"}
+        protection_principal = None
+        if self._independent_protection():
+            services, scope = self._protection
+            protection_principal, body = services.prepare(scope, body, context)
         self._emit(
             "dispatch_started",
             {
@@ -609,8 +749,13 @@ class PracticeAgentAdapter:
                 "/api/v1/orders/place",
                 method="POST",
                 json=body,
-                headers={"Authorization": "Bearer " + self.__token, "X-FlintTrade-Mode": "practice"},
+                headers=({"X-FlintTrade-Mode": "practice"} if protection_principal is not None else
+                         {"Authorization": "Bearer " + self.__token, "X-FlintTrade-Mode": "practice"}),
                 environ_overrides={
+                    **({"flinttrade.execution_binding": self._execution_binding}
+                       if self._execution_binding is not None else {}),
+                    **({"flinttrade.protection_principal": protection_principal}
+                       if protection_principal is not None else {}),
                     "flinttrade.practice_agent_guard": lambda body, positions, orders: self._locked_dispatch_guard(
                         body, positions, orders, context
                     )
@@ -679,6 +824,15 @@ class PracticeAgentAdapter:
             raise
         except Exception:
             return self._refusal("practice_order_invalid")
+
+    @contextmanager
+    def protective_action(self) -> Iterator[None]:
+        """Scope one fixed core protection algorithm, never an HTTP/model field."""
+        marker = self._protective_request.set(True)
+        try:
+            yield
+        finally:
+            self._protective_request.reset(marker)
 
     async def route_order(self, order: Any) -> PracticeDecision:
         """Adapt a canonical typed Order into the trader's decision protocol."""

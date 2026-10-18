@@ -19,6 +19,8 @@ import { useAtomValue } from "jotai";
 import { memo, useRef, useEffect, useState } from "react";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import type { WsTick } from "@/types/api";
+import { useModeStore } from "@/stores/modeStore";
+import { withExampleTickerPrices } from "./exampleTickerPrices";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 // ---------------------------------------------------------------------------
@@ -119,7 +121,7 @@ const TickerChip = memo(function TickerChip({ name, data }: TickerChipProps) {
       ? "text-profit"
       : pct <= -0.1
         ? "text-loss"
-        : "text-amber-400";
+        : "text-text-primary";
 
   return (
     <span
@@ -131,14 +133,14 @@ const TickerChip = memo(function TickerChip({ name, data }: TickerChipProps) {
       }
     >
       {/* Symbol name */}
-      <span className="text-xs text-text-muted font-mono whitespace-nowrap">
+      <span className="text-[12px] leading-4 text-text-primary font-mono whitespace-nowrap">
         {name}
       </span>
 
       {/* Price */}
       <span
         aria-live="off"
-        className={`text-xs font-mono tabular-nums transition-colors duration-200 whitespace-nowrap ${priceColour}`}
+        className={`text-[12px] leading-4 font-mono tabular-nums transition-colors duration-200 whitespace-nowrap ${priceColour}`}
       >
         {hasLivePrice
           ? ltp!.toLocaleString("en-IN", {
@@ -150,14 +152,14 @@ const TickerChip = memo(function TickerChip({ name, data }: TickerChipProps) {
 
       {/* Change % */}
       {hasLivePrice && pct !== null ? (
-        <span className={`text-xs font-mono tabular-nums whitespace-nowrap ${pctColour}`}>
+        <span className={`text-[12px] leading-4 font-mono tabular-nums whitespace-nowrap ${pctColour}`}>
           {pct >= 0 ? "\u25b2" : "\u25bc"}
           {Math.abs(pct).toFixed(2)}%
         </span>
       ) : null}
 
       {/* Divider dot */}
-      <span className="text-border-default/60 text-xs" aria-hidden="true">·</span>
+      <span className="text-text-primary text-[12px] leading-4" aria-hidden="true">·</span>
     </span>
   );
 });
@@ -190,7 +192,8 @@ export default function TickerMarquee({
 }: TickerMarqueeProps) {
   // Fall back to Jotai atom when no symbols prop provided
   const atomSymbols = useAtomValue(indicesSummaryAtom);
-  const symbols: TickerSymbol[] = propSymbols ?? atomSymbols;
+  const example = useModeStore((state) => state.mode === "explore");
+  const symbols: TickerSymbol[] = withExampleTickerPrices(propSymbols ?? atomSymbols, example);
   const reducedMotion = usePrefersReducedMotion();
 
   // Counter bumped every 30 s to force aria-live re-announcement of current prices

@@ -67,6 +67,13 @@ function isAllowedNavigation(currentUrl: string, targetUrl: string, policy: Rend
   return classifyRendererUrl(targetUrl, policy) === currentOrigin;
 }
 
+function isOwnedOAuthLaunch(currentUrl: string, rawUrl: string, policy: RendererOriginPolicy): boolean {
+  if (classifyRendererUrl(currentUrl, policy) !== "terminal" || classifyRendererUrl(rawUrl, policy) !== "terminal") return false;
+  const url = new URL(rawUrl);
+  return url.pathname === "/v1/services/connections/oauth/launch" && !url.hash
+    && /^\?ticket=[A-Za-z0-9_-]{43}$/.test(url.search);
+}
+
 export function installSessionHardening(session: SessionLike): void {
   session.setPermissionCheckHandler(() => false);
   session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
@@ -96,7 +103,12 @@ export function hardenWebContents(contents: WebContentsLike, policy: WebContents
     if (!policy.development) contents.closeDevTools();
   });
   contents.setWindowOpenHandler(({ url }) => {
-    openExternalIfSafe(url, policy.openExternal);
+    const currentPolicy = typeof policy.originPolicy === "function" ? policy.originPolicy() : policy.originPolicy;
+    if (isOwnedOAuthLaunch(contents.getURL(), url, currentPolicy)) {
+      void Promise.resolve(policy.openExternal(url)).catch(() => undefined);
+    } else {
+      openExternalIfSafe(url, policy.openExternal);
+    }
     return { action: "deny" };
   });
 }

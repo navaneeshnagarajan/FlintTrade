@@ -84,6 +84,7 @@ _BROKER_SDK_ENVIRONMENT = _load_module_from_path(
 )
 remove_kotak_distributions = _BROKER_SDK_ENVIRONMENT.remove_kotak_distributions
 repair_kotakneo_environment = _BROKER_SDK_ENVIRONMENT.repair_kotakneo_environment
+repair_broker_sdk_environment = _BROKER_SDK_ENVIRONMENT.repair_broker_sdk_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """Repository root - ``scripts/ft.py`` lives one level below it."""
@@ -128,8 +129,8 @@ PRUNED_DIRS = frozenset({".git", ".venv", ".local"})
 COMMANDS: dict[str, str] = {
     "start": "Start the FlintTrade backend API on port 5100",
     "start-gateway": "Alias for start (the standalone FlintTrade backend)",
-    "stop": "Stop the FlintTrade backend listening on the backend port",
-    "restart": "Stop then start the FlintTrade backend",
+    "stop": "Request workspace stop (refused without verified safe-maintenance policy)",
+    "restart": "Request stop, then start only after confirmed safe shutdown",
     "status": "Show backend, port-ownership, workspace and version status",
     "dev": "Run the terminal dev server alongside the FlintTrade backend",
     "setup": "First-time setup - install Python and Node dependencies",
@@ -709,7 +710,7 @@ def ci_env() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-INIT_ARGV: tuple[str, ...] = ("-m", "flinttrade_core.cli", "init", "--provision-master-password")
+INIT_ARGV: tuple[str, ...] = ("-m", "flinttrade_core.workspace_maintenance", "provision")
 """The first-run workspace/master-password provisioning step."""
 
 INIT_VERBOSE_ARGV: tuple[str, ...] = (*INIT_ARGV, "--verbose")
@@ -775,38 +776,17 @@ def cmd_start(_args: list[str]) -> int:
     return run([python, "-m", "flinttrade_core.app"], env=env, check=False)
 
 
-def cmd_stop(_args: list[str]) -> int:
-    """Stop the FlintTrade backend listening on the backend port.
+def cmd_stop(args: list[str]) -> int:
+    """Stop the exact owner only after its concrete safe-maintenance decision.
 
-    Args:
-        _args: Unused positional arguments.
-
-    Returns:
-        0 when the port is free or was freed; 1 when the owner is unknown or the
-        process would not exit.
+    A port/PID or executable name is never authority. The core helper owns the
+    bounded drain, native exit proof and retained pending-cleanup transaction.
     """
-    if not port_is_live(BACKEND_PORT):
-        info(f"No FlintTrade backend listening on port {BACKEND_PORT}.")
-        return 0
-
-    pid = port_owner_pid(BACKEND_PORT)
-    if pid is None:
-        warn(f"Port {BACKEND_PORT} is in use but its owning PID is unknown on this host.")
-        warn("Stop the FlintTrade backend process manually, then re-run.")
-        return 1
-
-    info(f"Stopping FlintTrade backend on port {BACKEND_PORT} (PID {pid})")
-    if not terminate_pid(pid):
-        fail(f"Could not terminate PID {pid}; stop it manually.")
-        return 1
-
-    for _ in range(20):
-        if not port_is_live(BACKEND_PORT):
-            info(f"Port {BACKEND_PORT} is free.")
-            return 0
-        time.sleep(0.5)
-    warn(f"PID {pid} was signalled but port {BACKEND_PORT} is still in use.")
-    return 1
+    python = resolve_python()
+    return run(
+        [python, "-m", "flinttrade_core.workspace_maintenance", "stop", "--workspace", str(workspace_dir()), *args],
+        env=python_env(), check=False,
+    )
 
 
 def cmd_restart(args: list[str]) -> int:
@@ -818,7 +798,7 @@ def cmd_restart(args: list[str]) -> int:
     Returns:
         The exit code of the failing step, or the backend's exit code.
     """
-    code = cmd_stop([])
+    code = cmd_stop(args)
     if code != 0:
         fail("Restart aborted: the running backend could not be stopped.")
         return code
@@ -1159,9 +1139,9 @@ def cmd_setup(_args: list[str]) -> int:
     uv = shutil.which("uv")
     if uv:
         info("Syncing the Python workspace with uv...")
-        run([uv, "sync", "--frozen", "--all-packages"])
+        run([uv, "sync", "--frozen", "--all-packages", "--no-build-package", "growwapi"])
         python = resolve_python()
-        repair_kotakneo_environment(Path(python))
+        repair_broker_sdk_environment(Path(python))
         info("OK Python workspace synced")
     else:
         info("uv not found; falling back to the hash-verified pip baseline.")
@@ -1169,8 +1149,8 @@ def cmd_setup(_args: list[str]) -> int:
         if not lock.is_file():
             fail("requirements.lock is missing; install uv from https://docs.astral.sh/uv/ and re-run.")
             return 1
-        run([python, "-m", "pip", "install", "--require-hashes", "-r", str(lock)])
-        repair_kotakneo_environment(Path(python))
+        run([python, "-m", "pip", "install", "--require-hashes", "--only-binary=growwapi", "-r", str(lock)])
+        repair_broker_sdk_environment(Path(python))
         info("OK Third-party requirements and pinned broker SDKs installed")
         # requirements.lock is exported with `--no-emit-workspace`, so it carries
         # ONLY third-party dependencies: none of the thirteen flinttrade_* packages

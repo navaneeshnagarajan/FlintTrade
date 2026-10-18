@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from .db import open_sqlite
 from .owner_file_lock import OwnerSafeFileLock
@@ -123,7 +123,9 @@ class ServiceUsageLedger:
     attempts UNKNOWN; opening another process must not mutate active attempts.
     """
 
-    def __init__(self, root: Path, *, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(self, root: Path, *, clock: Callable[[], datetime] | None = None,
+                 failure_sink: Callable[[str], None] | None = None) -> None:
+        self._failure_sink = failure_sink
         self._root = Path(root).absolute()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._thread_lock = threading.RLock()
@@ -156,11 +158,47 @@ class ServiceUsageLedger:
                         db.execute("PRAGMA user_version = 1")
                         db.commit()
                         self._directory.write_text("authority.json", canonical({"identity": identity}))
-                    if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+                    version = db.execute("PRAGMA user_version").fetchone()[0]
+                    if version not in {1, 2}:
                         raise UsageUnavailable("unsupported or incomplete usage database")
                     marker = json.loads(self._directory.read_text("authority.json"))
                     if db.execute("SELECT identity FROM metadata").fetchall() != [(marker["identity"],)]:
                         raise UsageUnavailable("usage database identity mismatch")
+                    if version == 1:
+                        # One transactional migration, never recreate a missing
+                        # v2 authority table after it has contained receipts.
+                        db.execute("BEGIN IMMEDIATE")
+                        db.execute(
+                            "CREATE TABLE task_controls (key TEXT PRIMARY KEY, "
+                            "revision INTEGER NOT NULL, payload TEXT NOT NULL)"
+                        )
+                        db.execute(
+                            "CREATE TABLE task_receipts (request_id TEXT PRIMARY KEY, "
+                            "actor TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL)"
+                        )
+                        db.execute(
+                            "CREATE TABLE task_control_history (key TEXT NOT NULL, "
+                            "revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(key,revision))"
+                        )
+                        db.execute(
+                            "CREATE TABLE quota_members (connection_id TEXT PRIMARY KEY, group_id TEXT NOT NULL)"
+                        )
+                        db.execute("PRAGMA user_version = 2")
+                        db.commit()
+                    expected = {
+                        "metadata",
+                        "budgets",
+                        "budget_history",
+                        "tariffs",
+                        "attempts",
+                        "task_controls",
+                        "task_receipts",
+                        "task_control_history",
+                        "quota_members",
+                    }
+                    present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    if not expected <= present:
+                        raise UsageUnavailable("usage authority table is missing")
                 info = validate_owner_owned_regular_file(self._path, require_hardened=True)
                 self._file_identity = (info.st_dev, info.st_ino)
         except BaseException:
@@ -223,36 +261,208 @@ class ServiceUsageLedger:
         self.close()
 
     def configure_budget(self, policy: BudgetPolicy, *, expected_revision: int) -> int:
+        """CAS the explicit connection budget without discarding usage."""
+        with self._transaction() as db:
+            return self._configure_budget(db, policy, expected_revision=expected_revision)
+
+    def _configure_budget(self, db: sqlite3.Connection, policy: BudgetPolicy, *, expected_revision: int) -> int:
         """CAS the current policy; keep old policy snapshots and all usage."""
         if type(policy) is not BudgetPolicy:
             raise ValueError("exact BudgetPolicy required")
         integer(expected_revision, "expected_revision")
         key = str(policy.connection.connection_id)
-        with self._transaction() as db:
-            previous = db.execute("SELECT revision, policy FROM budgets WHERE connection_id=?", (key,)).fetchone()
-            revision = previous[0] if previous else 0
-            if revision != expected_revision:
-                raise UsageConflict("budget revision changed")
-            if previous:
-                old = json.loads(previous[1])
-                if old["connection"] != policy.connection.to_dict() or old["currency"] != policy.currency:
-                    raise UsageConflict("budget connection and currency are immutable")
-                bounds_changed = (old["window_start"], old["window_end"]) != (
-                    policy.window_start.isoformat(),
-                    policy.window_end.isoformat(),
-                )
-                old_end = datetime.fromisoformat(old["window_end"])
-                if bounds_changed and (utc(self._clock()) < old_end or policy.window_start < old_end):
-                    raise UsageConflict("only an expired budget period may roll forward")
-            revision = integer(revision + 1, "budget revision", minimum=1)
-            encoded = canonical(policy.to_dict())
-            db.execute("INSERT INTO budget_history VALUES (?, ?, ?)", (key, revision, encoded))
-            db.execute(
-                "INSERT INTO budgets VALUES (?, ?, ?) ON CONFLICT(connection_id) DO UPDATE SET "
-                "revision=excluded.revision, policy=excluded.policy",
-                (key, revision, encoded),
+        previous = db.execute("SELECT revision, policy FROM budgets WHERE connection_id=?", (key,)).fetchone()
+        revision = previous[0] if previous else 0
+        if revision != expected_revision:
+            raise UsageConflict("budget revision changed")
+        if previous:
+            old = json.loads(previous[1])
+            if old["connection"] != policy.connection.to_dict() or old["currency"] != policy.currency:
+                raise UsageConflict("budget connection and currency are immutable")
+            bounds_changed = (old["window_start"], old["window_end"]) != (
+                policy.window_start.isoformat(),
+                policy.window_end.isoformat(),
             )
-            return revision
+            old_end = datetime.fromisoformat(old["window_end"])
+            if bounds_changed and (utc(self._clock()) < old_end or policy.window_start < old_end):
+                raise UsageConflict("only an expired budget period may roll forward")
+        revision = integer(revision + 1, "budget revision", minimum=1)
+        encoded = canonical(policy.to_dict())
+        db.execute("INSERT INTO budget_history VALUES (?, ?, ?)", (key, revision, encoded))
+        db.execute(
+            "INSERT INTO budgets VALUES (?, ?, ?) ON CONFLICT(connection_id) DO UPDATE SET "
+            "revision=excluded.revision, policy=excluded.policy",
+            (key, revision, encoded),
+        )
+        return revision
+
+    def control(self, key: str) -> tuple[int, dict[str, Any] | None]:
+        """Read a detached task-policy snapshot from the accounting authority."""
+        text(key, "control key")
+        with self._transaction() as db:
+            row = db.execute("SELECT revision,payload FROM task_controls WHERE key=?", (key,)).fetchone()
+            return (row[0], json.loads(row[1])) if row else (0, None)
+
+    def check_available(self) -> None:
+        """Require retained control custody without constructing or repairing it."""
+        with self._transaction() as db:
+            db.execute("SELECT key,revision,payload FROM task_controls LIMIT 0")
+            db.execute("SELECT key,revision,payload FROM task_control_history LIMIT 0")
+
+    def diagnostic_observation(self) -> dict[str, Any]:
+        """Bounded passive counts from this exact existing usage owner.
+
+        Pending receipts may be abandoned; they do not measure active compute.
+        No prompt, identity, tariff source, destination or configuration escapes.
+        """
+        with self._transaction() as db:
+            receipts = db.execute("SELECT json_extract(payload,'$.outcome') FROM task_receipts ORDER BY rowid DESC LIMIT 1001").fetchall()
+            attempts = db.execute("SELECT state FROM attempts ORDER BY rowid DESC LIMIT 1001").fetchall()
+        tasks = dict.fromkeys(("completed", "failed", "refused", "unknown"), 0)
+        states = dict.fromkeys(("PREPARED", "INVOKED", "UNKNOWN", "SETTLED", "CANCELLED", "other"), 0)
+        for (value,) in receipts[:1000]:
+            tasks[value if value in tasks else "unknown"] += 1
+        for (value,) in attempts[:1000]:
+            states[value if value in states else "other"] += 1
+        return {"status": "available", "source": "service_usage_ledger", "observed_at": datetime.now(UTC).isoformat(),
+                "freshness": "observed", "measurement": "retained_receipt_counts", "coverage": "latest_1000_per_kind",
+                "has_more": len(receipts) > 1000 or len(attempts) > 1000,
+                "tasks": tasks, "attempts": states, "active": None, "latency_ms": None,
+                "capacity": None, "reason": "receipts_do_not_measure_serving_capacity_or_active_compute"}
+
+    def control_snapshot(self, key: str) -> tuple[int, dict[str, Any] | None]:
+        """Exact current/history read; lost established history is not unissued.
+
+        No constructors, migrations or repair writes belong in a readback. Keep
+        this stronger receipt contract separate from ordinary policy lookups.
+        """
+        text(key, "control key")
+        with self._transaction() as db:
+            row = db.execute("SELECT revision,payload FROM task_controls WHERE key=?", (key,)).fetchone()
+            history = db.execute("SELECT revision,payload FROM task_control_history WHERE key=? "
+                                 "ORDER BY revision", (key,)).fetchall()
+            if row is None and not history:
+                return 0, None
+            if row is None or not history or type(row[0]) is not int or row != history[-1]:
+                raise UsageUnavailable("control history unavailable")
+            for expected, (revision, encoded) in enumerate(history, start=1):
+                if type(revision) is not int or revision != expected:
+                    raise UsageUnavailable("control history unavailable")
+                try:
+                    payload = json.loads(encoded)
+                    if type(payload) is not dict or canonical(payload) != encoded:
+                        raise ValueError("non-canonical control payload")
+                except (ValueError, TypeError) as exc:
+                    raise UsageUnavailable("control payload unavailable") from exc
+            return row[0], json.loads(row[1])
+
+    def configure_control(
+        self, key: str, payload: dict[str, Any], *, expected_revision: int,
+        expected_controls: dict[str, dict[str, Any]] | None = None,
+    ) -> int:
+        """CAS one policy and its exact dependency payloads in the same transaction."""
+        with self._transaction() as db:
+            for dependency, expected in (expected_controls or {}).items():
+                row = db.execute("SELECT payload FROM task_controls WHERE key=?", (dependency,)).fetchone()
+                if row is None or row[0] != canonical(expected):
+                    raise UsageConflict("dependent control changed")
+            return self._configure_control(db, key, payload, expected_revision=expected_revision)
+
+    def _configure_control(
+        self, db: sqlite3.Connection, key: str, payload: dict[str, Any], *, expected_revision: int
+    ) -> int:
+        """CAS validated core policy; this method never establishes entitlement."""
+        text(key, "control key")
+        integer(expected_revision, "control revision")
+        encoded = canonical(payload)
+        row = db.execute("SELECT revision,payload FROM task_controls WHERE key=?", (key,)).fetchone()
+        revision = row[0] if row else 0
+        if revision != expected_revision:
+            raise UsageConflict("control revision changed")
+        if key.startswith("quota:") and row:
+            previous = json.loads(row[1])
+            if previous["currency"] != payload["currency"]:
+                raise UsageConflict("quota currency is immutable")
+            if (previous["window_start"], previous["window_end"]) != (payload["window_start"], payload["window_end"]):
+                old_end = datetime.fromisoformat(previous["window_end"])
+                if utc(self._clock()) < old_end or datetime.fromisoformat(payload["window_start"]) < old_end:
+                    raise UsageConflict("quota period cannot reset existing usage")
+        if key.startswith("admission:"):
+            connection_id = key.removeprefix("admission:")
+            group = payload["quota_group"]
+            member = db.execute("SELECT group_id FROM quota_members WHERE connection_id=?", (connection_id,)).fetchone()
+            if member and member[0] != group:
+                raise UsageConflict("quota membership cannot discard accumulated usage")
+            if db.execute("SELECT 1 FROM task_controls WHERE key=?", ("quota:" + group,)).fetchone() is None:
+                raise UsageUnavailable("shared quota is not configured")
+            db.execute("INSERT OR IGNORE INTO quota_members VALUES (?,?)", (connection_id, group))
+        revision += 1
+        db.execute("INSERT INTO task_control_history VALUES (?,?,?)", (key, revision, encoded))
+        db.execute(
+            "INSERT INTO task_controls VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET "
+            "revision=excluded.revision,payload=excluded.payload",
+            (key, revision, encoded),
+        )
+        return revision
+
+    def configure_admission(
+        self, key: str, payload: dict[str, Any], budget: BudgetPolicy, *, expected_revision: int
+    ) -> tuple[int, dict[str, Any]]:
+        """Commit policy, quota membership and its budget in one transaction."""
+        with self._transaction() as db:
+            row = db.execute(
+                "SELECT revision FROM budgets WHERE connection_id=?", (str(budget.connection.connection_id),)
+            ).fetchone()
+            budget_revision = self._configure_budget(db, budget, expected_revision=row[0] if row else 0)
+            value = {**payload, "budget_revision": budget_revision}
+            revision = self._configure_control(db, key, value, expected_revision=expected_revision)
+            return revision, value
+
+    def begin_task(self, request_id: str, actor: str, digest: str) -> tuple[bool, dict[str, Any]]:
+        """Claim a durable task identity once; crash recovery never resends it."""
+        for value in (request_id, actor, digest):
+            text(value, "task identity")
+        with self._transaction() as db:
+            row = db.execute(
+                "SELECT actor,digest,payload FROM task_receipts WHERE request_id=?", (request_id,)
+            ).fetchone()
+            if row:
+                if row[:2] != (actor, digest):
+                    raise UsageConflict("task identity conflict")
+                return False, json.loads(row[2])
+            receipt = {"request_id": request_id, "outcome": "pending", "code": "outcome_unknown", "attempts": []}
+            db.execute("INSERT INTO task_receipts VALUES (?,?,?,?)", (request_id, actor, digest, canonical(receipt)))
+            return True, receipt
+
+    def finish_task(self, request_id: str, receipt: dict[str, Any]) -> None:
+        """Persist redacted context/selection evidence, never prompt or secrets."""
+        with self._transaction() as db:
+            changed = db.execute(
+                "UPDATE task_receipts SET payload=? WHERE request_id=?", (canonical(receipt), request_id)
+            ).rowcount
+            if changed != 1:
+                raise UsageConflict("task was not claimed")
+            # The durable owner identity plus the claimed key, NOT receipt text,
+            # names this observation consistently across reopen/repeated finish.
+            reference = str(uuid5(UUID(db.execute("SELECT identity FROM metadata").fetchone()[0]),
+                                  "task:" + request_id))
+        if receipt.get("outcome") == "failed" and self._failure_sink is not None:
+            self._failure_sink(reference)
+
+    def task_receipt(self, request_id: str, actor: str) -> dict[str, Any]:
+        """Read only the exact requesting principal's task receipt."""
+        with self._transaction() as db:
+            row = db.execute(
+                "SELECT payload FROM task_receipts WHERE request_id=? AND actor=?", (request_id, actor)
+            ).fetchone()
+            if row is None:
+                raise KeyError(request_id)
+            return json.loads(row[0])
+
+    def budget(self, connection: ServiceConnectionRef) -> tuple[int, dict[str, Any]]:
+        """Read the current explicit budget; absence and expiry are not unlimited."""
+        with self._transaction() as db:
+            return self._budget(db, connection, utc(self._clock()))
 
     @staticmethod
     def _budget(db: sqlite3.Connection, connection: ServiceConnectionRef, now: datetime) -> tuple[int, dict[str, Any]]:
@@ -268,15 +478,82 @@ class ServiceUsageLedger:
             raise UsageUnavailable("budget period is not current")
         return row[0], value
 
-    @staticmethod
-    def _check_budget(
-        db: sqlite3.Connection, connection: ServiceConnectionRef, policy: dict[str, Any], extra: UsageAmounts
+    def check_capacity(self, connection: ServiceConnectionRef, reservation: UsageAmounts) -> None:
+        """Preflight both connection and shared quota before even router egress."""
+        with self._transaction() as db:
+            _, policy = self._budget(db, connection, utc(self._clock()))
+            self._check_budget(db, connection, policy, reservation)
+
+    def check_sequence_capacity(
+        self, first: tuple[ServiceConnectionRef, UsageAmounts], second: tuple[ServiceConnectionRef, UsageAmounts]
     ) -> None:
+        """Check router plus task spend atomically; their concurrency is sequential."""
+        with self._transaction() as db:
+            for connection, amount in (first, second):
+                _, policy = self._budget(db, connection, utc(self._clock()))
+                self._check_budget(db, connection, policy, amount)
+            combined = UsageAmounts(
+                **{
+                    dimension: max(getattr(first[1], dimension), getattr(second[1], dimension))
+                    if dimension == "concurrency"
+                    else getattr(first[1], dimension) + getattr(second[1], dimension)
+                    for dimension in USAGE_DIMENSIONS
+                }
+            )
+            if first[0] == second[0]:
+                _, policy = self._budget(db, first[0], utc(self._clock()))
+                self._check_budget(db, first[0], policy, combined)
+                return
+            groups = [
+                db.execute(
+                    "SELECT group_id FROM quota_members WHERE connection_id=?", (str(pair[0].connection_id),)
+                ).fetchone()
+                for pair in (first, second)
+            ]
+            if groups[0] is not None and groups[0] == groups[1]:
+                group_id = groups[0][0]
+                row = db.execute("SELECT payload FROM task_controls WHERE key=?", ("quota:" + group_id,)).fetchone()
+                if row is None:
+                    raise UsageUnavailable("shared quota is missing")
+                rows = db.execute(
+                    "SELECT a.state,a.charged,a.created_at FROM attempts a JOIN quota_members m "
+                    "ON a.connection_id=m.connection_id WHERE m.group_id=?",
+                    (group_id,),
+                ).fetchall()
+                self._check_rows(rows, json.loads(row[0]), combined)
+
+    def _check_budget(
+        self, db: sqlite3.Connection, connection: ServiceConnectionRef, policy: dict[str, Any], extra: UsageAmounts
+    ) -> None:
+        rows = db.execute(
+            "SELECT state,charged,created_at FROM attempts WHERE connection_id=?", (str(connection.connection_id),)
+        ).fetchall()
+        self._check_rows(rows, policy, extra)
+        member = db.execute(
+            "SELECT group_id FROM quota_members WHERE connection_id=?", (str(connection.connection_id),)
+        ).fetchone()
+        if member:
+            row = db.execute("SELECT payload FROM task_controls WHERE key=?", ("quota:" + member[0],)).fetchone()
+            if row is None:
+                raise UsageUnavailable("shared quota is missing")
+            group = json.loads(row[0])
+            if group["currency"] != policy["currency"] or not (
+                datetime.fromisoformat(group["window_start"])
+                <= utc(self._clock())
+                < datetime.fromisoformat(group["window_end"])
+            ):
+                raise UsageUnavailable("shared quota is not current")
+            rows = db.execute(
+                "SELECT a.state,a.charged,a.created_at FROM attempts a JOIN quota_members m "
+                "ON a.connection_id=m.connection_id WHERE m.group_id=?",
+                (member[0],),
+            ).fetchall()
+            self._check_rows(rows, group, extra)
+
+    @staticmethod
+    def _check_rows(rows: list[tuple[str, str, str]], policy: dict[str, Any], extra: UsageAmounts) -> None:
         totals = extra.to_dict()
-        for state, charged, created in db.execute(
-            "SELECT state, charged, created_at FROM attempts WHERE connection_id=?",
-            (str(connection.connection_id),),
-        ):
+        for state, charged, created in rows:
             outstanding = state in _OUTSTANDING
             in_window = policy["window_start"] <= created < policy["window_end"]
             values = json.loads(charged)
@@ -431,14 +708,29 @@ class ServiceUsageLedger:
         )
         return self._record(db, attempt_id)
 
-    def mark_invoked(self, attempt_id: str) -> AttemptRecord:
+    def mark_invoked(
+        self,
+        attempt_id: str,
+        *,
+        control_versions: dict[str, int] | None = None,
+        expected_budget_revision: int | None = None,
+        expires_at: datetime | None = None,
+    ) -> AttemptRecord:
         """Commit invocation once, immediately before provider I/O; never retry."""
         with self._transaction() as db:
             record = self._record(db, attempt_id)
             if record.state != "PREPARED":
                 raise UsageConflict("attempt cannot be invoked again")
             now = utc(self._clock())
-            _, policy = self._budget(db, record.connection, now)
+            for key, version in (control_versions or {}).items():
+                row = db.execute("SELECT revision FROM task_controls WHERE key=?", (key,)).fetchone()
+                if row is None or row[0] != version:
+                    raise UsageConflict("admission configuration changed")
+            if expires_at is not None and now >= utc(expires_at):
+                raise UsageConflict("admission entitlement expired")
+            budget_revision, policy = self._budget(db, record.connection, now)
+            if expected_budget_revision is not None and budget_revision != expected_budget_revision:
+                raise UsageConflict("budget changed")
             if not (
                 datetime.fromisoformat(policy["window_start"])
                 <= record.created_at

@@ -109,7 +109,7 @@ export const SPARK_MAX = 20;
 
 export const WATCHLIST_COLUMNS: WatchlistColumnDef[] = [
   { id: "symbol", label: "Symbol", fixed: true },
-  { id: "sparkline", label: "Sparkline" },
+  { id: "sparkline", label: "Trend" },
   { id: "price", label: "LTP" },
   { id: "changePct", label: "% change" },
   { id: "changeAbs", label: "Net change" },

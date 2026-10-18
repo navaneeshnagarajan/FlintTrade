@@ -29,7 +29,8 @@ const tradeJournalMocks = vi.hoisted(() => ({
 // the Calendar/Performance tabs run their own "tradeJournal"-rooted queries,
 // but only when their tab content mounts, and their keys carry a marker
 // segment — the guard below keeps the capture on the tool's range query.
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useQuery: (options: {
     enabled?: boolean;
     queryKey?: unknown[];
@@ -88,10 +89,10 @@ vi.mock("@/widgets/trading/Fills/FillsTable", () => ({
 
 // Session-tab live sources (exercised via their own suite; stubbed empty here)
 vi.mock("@/hooks/useTradebook", () => ({
-  useTradebook: () => ({ data: [] }),
+  useTradebook: () => ({ data: [], isSuccess: true, isError: false, isLoading: false, isStale: false, fetchStatus: "idle" }),
 }));
 vi.mock("@/hooks/useOrders", () => ({
-  useOrders: () => ({ data: [] }),
+  useOrders: () => ({ data: [], isSuccess: true, isError: false, isLoading: false, isStale: false, fetchStatus: "idle" }),
 }));
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
@@ -146,6 +147,7 @@ import { istDayKey, sevenDaysAgoISO, todayISO } from "../utils";
 import { toIstIsoDate } from "@/lib/ist";
 import { getTradeJournal } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
+import { setAccountRuntime } from "@/test-utils/accountQueryHarness";
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -266,13 +268,15 @@ describe("TradeJournalTool (Trade Review)", () => {
     vi.useRealTimers();
   });
 
-  it("mounts the Session tab with its provenance badge", async () => {
+  it("mounts the Session tab without inventing installed trades", async () => {
+    setAccountRuntime();
     render(<TradeJournalTool />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Session" }));
 
     expect(screen.getByText("Today's Session")).toBeInTheDocument();
-    // Stubbed empty tradebook → no closed round trips → disclosed sample.
+    expect(screen.getByText("No round trips closed yet today.")).toBeInTheDocument();
+    expect(screen.queryByText("+₹12,850")).not.toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 

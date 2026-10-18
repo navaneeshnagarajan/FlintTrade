@@ -13,6 +13,9 @@ import uuid
 
 import pytest
 from flask import Flask
+from flinttrade_core.auth_routes import _create_token
+
+pytestmark = pytest.mark.usefixtures("owned_auth_state")
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +97,12 @@ def client(activity_log: MagicMock):
     flask_app.config["TESTING"] = True
     flask_app.config["ACTIVITY_LOG"] = activity_log
     flask_app.register_blueprint(activity_bp)
+    with flask_app.app_context():
+        token = _create_token("synthetic-activity", scopes=("admin.activity",))
+        from flinttrade_core import auth_routes
+        auth_routes.decode_token(token)
     with flask_app.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = "Bearer " + token
         yield c
 
 
@@ -110,7 +118,12 @@ def client_no_log():
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
     flask_app.register_blueprint(activity_bp)
+    with flask_app.app_context():
+        token = _create_token("synthetic-activity", scopes=("admin.activity",))
+        from flinttrade_core import auth_routes
+        auth_routes.decode_token(token)
     with flask_app.test_client() as c:
+        c.environ_base["HTTP_AUTHORIZATION"] = "Bearer " + token
         yield c
 
 

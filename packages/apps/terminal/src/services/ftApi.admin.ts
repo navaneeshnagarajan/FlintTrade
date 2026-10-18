@@ -1,4 +1,5 @@
 import { EXAMPLE_LABEL, visibleServiceNote } from "@/lib/operatorModeLabel";
+import { captureOperatorIncidentScope } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
 
 import {
@@ -419,6 +420,7 @@ export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
  * current Mode, plus unavailable host resources — never sample disk or RAM.
  */
 export async function getHealth(): Promise<SystemHealth> {
+  const scope = captureOperatorIncidentScope();
   try {
     const resp = await fetch(`${getBase()}/api/v1/health`, {
       headers: buildHeaders(false),
@@ -428,7 +430,7 @@ export async function getHealth(): Promise<SystemHealth> {
     if (resp.ok) return body as SystemHealth;
     if (isDemoAuthSession()) return sampleHealthFallback();
     const message = `FT API health: HTTP ${resp.status}`;
-    noteObservedFailure({ message, httpStatus: resp.status, provenance: "general" });
+    noteObservedFailure({ message, httpStatus: resp.status, provenance: "general", scope });
     throw new FtApiError(message, resp.status, body);
   } catch (err) {
     if (err instanceof FtApiError) throw err;

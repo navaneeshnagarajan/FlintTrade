@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook as rtlRenderHook, waitFor, type RenderHookOptions } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -34,32 +34,36 @@ vi.mock("@/services/api", () => ({
   getBrokerCapabilities: mocks.getBrokerCapabilities,
 }));
 
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (value: { mode: string }) => unknown) =>
-    selector({ mode: state.mode }),
-}));
+// Setup eagerly imports authority readers: seed their real store instances.
+import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useAuthStore } from "@/stores/authStore";
 
-vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: (selector: (value: { host: string; apiKey: string }) => unknown) =>
-    selector({ host: state.host, apiKey: state.apiKey }),
-}));
+function seedRealStores() {
+  useAuthStore.setState({ status: "logged-in", token: "synthetic-capability-session" });
+  useModeStore.setState({ mode: state.mode as AppMode });
+  useBrokerStore.setState({
+    accounts: state.accounts.map(account => ({
+      ...account, label: "Synthetic capability account", status: "connected",
+      connected_at: null, error_message: null, is_primary: account.is_primary ?? false,
+    })),
+    activeAccountId: state.activeAccountId,
+  });
+  // The retired host key is deliberately injected as stale legacy state; it
+  // must not participate in today's account/broker authority.
+  const legacyTransport = { host: state.host, apiKey: state.apiKey };
+  useConnectionStore.setState(legacyTransport);
+}
 
-vi.mock("@/stores/brokerStore", () => ({
-  brokerAccountKey: (account: (typeof state.accounts)[number]) =>
-    `${account.source}:${account.broker}:${account.account_id}`,
-  findBrokerAccountMatch: (
-    accounts: typeof state.accounts,
-    selector: string | null,
-  ) => accounts.find((account) => (
-    `${account.source}:${account.broker}:${account.account_id}` === selector
-  )),
-  useBrokerStore: (
-    selector: (value: {
-      accounts: typeof state.accounts;
-      activeAccountId: string | null;
-    }) => unknown,
-  ) => selector({ accounts: state.accounts, activeAccountId: state.activeAccountId }),
-}));
+// Keep the original scenarios intact, synchronising each existing boundary.
+function renderHook<Result, Props>(callback: (props: Props) => Result, options: RenderHookOptions<Props>) {
+  act(seedRealStores);
+  const hook = rtlRenderHook(callback, options);
+  return { ...hook, rerender: (props?: Props) => {
+    act(() => { seedRealStores(); hook.rerender(props); });
+  } };
+}
 
 import { useBrokerCapabilities } from "../useBrokerCapabilities";
 

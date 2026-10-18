@@ -448,7 +448,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       });
       if (quantity == null) {
         setOrderMsg({
-          text: `Lot size for ${orderSymbol} is unverified — order not sent`,
+          text: `Not placed. The lot size for ${orderSymbol} isn't verified.`,
           ok: false,
         });
         clearTimeout(orderMsgTimerRef.current);

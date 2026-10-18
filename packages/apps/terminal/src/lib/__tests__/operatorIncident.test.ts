@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { killAllArmed } from "@/routes/killAllGate";
 import { mirrorStartArmed } from "@/routes/mirrorStartGate";
@@ -6,6 +9,7 @@ import {
   classifyObservedFailure,
   classifyOperatorSignals,
   EDGE_STATUS_LINKS,
+  EXIT_REQUESTED,
   honestBrokerStatus,
   liveWritesMuted,
   type OperatorSignals,
@@ -105,6 +109,21 @@ const MONEY_PATH_FIXTURES: Array<{ name: string; signals: OperatorSignals }> = [
     }),
   },
 ];
+
+describe("shared exit acknowledgement", () => {
+  it("defines the requested exit sentence once for the pad and positions", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pad = readFileSync(join(here, "../../widgets/trading/OrderPad/OrderPadWidget.tsx"), "utf8");
+    const positions = readFileSync(join(here, "../../widgets/trading/Positions/PositionsWidget.tsx"), "utf8");
+    expect(EXIT_REQUESTED).toBe(
+      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+    );
+    expect(pad).toContain("EXIT_REQUESTED");
+    expect(positions).toContain("EXIT_REQUESTED");
+    expect(pad).not.toContain(EXIT_REQUESTED);
+    expect(positions).not.toContain(EXIT_REQUESTED);
+  });
+});
 
 describe("operator incident classifier", () => {
   it.each(MONEY_PATH_FIXTURES)(

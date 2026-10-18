@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from types import MethodType
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from flask import Flask
@@ -17,7 +18,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _runtime_app(backend_lease_proof=None) -> object:
+def _runtime_app(backend_lease_proof=None) -> Any:
     """Build the lifecycle shell without running the heavyweight constructor."""
     from flinttrade_core.app import FlintTradeApp
     from flinttrade_gateway.registry import create_owned_registry
@@ -94,6 +95,75 @@ def _set_calendar_load(
     app.cron.load_holidays = load_holidays
 
 
+@pytest.mark.parametrize("kind", ["desktop", "wsgi"])
+def test_inherited_release_owner_refuses_before_touching_parent_dependencies(monkeypatch, kind):
+    from flinttrade_core import app as core, desktop
+
+    app = Flask("inherited-release")
+    effects = []
+    if kind == "desktop":
+        owner = desktop._DesktopShutdownRecoveryOwner(app)
+        release_owner = owner
+        def release():
+            owner.release(deadline=time.monotonic() + 1)
+    else:
+        owner = core._WSGIStartupRecovery(app, MagicMock())
+        release_owner = owner._ensure_release_owner()
+        release = owner.retry_recovery
+    monkeypatch.setattr(release_owner, "_shutdown", lambda deadline: effects.append("dispose") or True)
+    pid = core.os.getpid()
+    monkeypatch.setattr(core.os, "getpid", lambda: pid + 1)
+    with pytest.raises(RuntimeError):
+        release()
+    assert effects == []
+    assert not release_owner._released
+
+
+def test_wsgi_lease_release_uses_remaining_deadline_and_retains_worker(monkeypatch):
+    from flinttrade_core import app as core
+
+    owner = core._WSGIStartupRecovery(Flask("bounded-lease"), MagicMock())
+    monkeypatch.setattr(owner._ensure_release_owner(), "release", lambda **kwargs: None)
+    entered, finish = threading.Event(), threading.Event()
+    calls = []
+
+    def held(lease):
+        calls.append(lease)
+        entered.set()
+        assert finish.wait(2)
+
+    monkeypatch.setattr(core, "release_retained_backend_instance_lease", held)
+    try:
+        started = time.monotonic()
+        with pytest.raises((RuntimeError, TimeoutError)):
+            owner.retry_recovery(timeout=0.05)
+        assert time.monotonic() - started < 0.5
+        assert entered.is_set() and not owner._complete
+    finally:
+        finish.set()
+        owner.retry_recovery(timeout=2)
+    assert len(calls) == 1 and owner._complete
+
+
+@pytest.mark.parametrize("kind", ["desktop", "async"])
+def test_unknown_shared_close_protocol_cannot_be_reported_disposed(monkeypatch, kind):
+    from flinttrade_core import desktop
+
+    app = Flask("unknown-shared-protocol")
+    exact = object()
+    app.config["MODEL_RUN_SERVICES"] = exact
+    if kind == "desktop":
+        owner = desktop._DesktopShutdownRecoveryOwner(app)
+        with pytest.raises(RuntimeError):
+            owner.release(deadline=time.monotonic() + 2)
+    else:
+        owner = _runtime_app()
+        owner._flask_app = app
+        with pytest.raises(RuntimeError):
+            asyncio.run(owner.stop(timeout=2))
+    assert app.config["MODEL_RUN_SERVICES"] is exact
+
+
 def test_owned_schedulers_start_under_a_fail_closed_calendar() -> None:
     """Calendar-independent jobs and Practice scheduling must survive native broker outage."""
     app = _runtime_app()
@@ -147,6 +217,47 @@ async def test_stop_during_holiday_load_prevents_startup_from_resuming(
     app.cron.register_builtin_jobs.assert_not_called()
     app.time_scheduler.set_holidays.assert_not_called()
     assert flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
+
+
+@pytest.mark.asyncio
+async def test_eod_download_callback_uses_the_installed_flask_context(monkeypatch, tmp_path, backend_lease_factory):
+    from flask import current_app, has_app_context
+
+    import flinttrade_core.app as app_module
+    import flinttrade_historical.watchlist_routes as watchlist_routes
+
+    runtime = _runtime_app()
+    flask_app = Flask("scheduled-shared-history")
+    flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
+    ready = asyncio.Event()
+    observations = []
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    runtime._backend_lease_proof = backend_lease_factory()
+    runtime._refresh_market_calendar = AsyncMock(return_value=False)
+    runtime.cron.start.side_effect = ready.set
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
+    monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_auto_sync_enabled", lambda: True)
+    monkeypatch.setattr(app_module, "_wire_ml_signal_runtime", lambda *_args: None)
+
+    def download(start, end):
+        assert has_app_context(), "scheduled download lost the installed data owner"
+        assert current_app._get_current_object() is flask_app
+        observations.append((start, end))
+        return "synthetic-job-receipt"
+
+    monkeypatch.setattr(watchlist_routes, "start_watchlist_download", download)
+    task = asyncio.create_task(runtime.start())
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=3)
+        assert not has_app_context()
+        assert runtime.cron.eod_sync_starter() == "synthetic-job-receipt"
+        assert len(observations) == 1
+        assert observations[0][0] <= observations[0][1]
+    finally:
+        await runtime.stop(timeout=3)
+        await asyncio.wait_for(task, timeout=3)
 
 
 def test_runtime_admission_closes_before_authentication(
@@ -278,6 +389,140 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies(monk
     assert close_after_handler == [True]
     assert runtime.scheduler.stop_all.await_count == 2
     runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_start", [False, True], ids=["normal-stop", "startup-rollback"])
+async def test_shared_service_owners_close_only_after_request_drain(
+    monkeypatch: pytest.MonkeyPatch, failed_start: bool,
+) -> None:
+    """Learning/context users quiesce before their shared dispatch ledger closes."""
+    from flinttrade_core.app import _install_runtime_request_tracking
+
+    runtime = _runtime_app()
+    flask_app = Flask("shared-service-drain")
+    tracker = _install_runtime_request_tracking(flask_app)
+    runtime._flask_app = flask_app
+    runtime._startup_recovery_pending = failed_start
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    draining = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    condition_wait = tracker._condition.wait
+    keys = ("MODEL_RUN_SERVICES", "DATA_RUNTIME", "LEARNING_CONSENT_LEDGER", "KNOWLEDGE_RUNTIME", "SERVICE_TASK_DISPATCHER")
+    closed: list[str] = []
+    responses: list[int] = []
+
+    def observe_drain(timeout: float | None = None) -> bool:
+        loop.call_soon_threadsafe(draining.set)
+        return condition_wait(timeout)
+
+    def close_owner(key: str) -> None:
+        assert finished.is_set(), "shared dependency closed under an admitted handler"
+        closed.append(key)
+
+    monkeypatch.setattr(tracker._condition, "wait", observe_drain)
+    owners = {key: MagicMock() for key in keys}
+    for key, owner in owners.items():
+        owner.close.side_effect = lambda key=key: close_owner(key)
+        flask_app.config[key] = owner
+
+    @flask_app.get("/held-task")
+    def held_task() -> tuple[str, int]:
+        started.set()
+        assert release.wait(timeout=10.0)
+        finished.set()
+        return "completed", 200
+
+    thread = threading.Thread(
+        target=lambda: responses.append(flask_app.test_client().get("/held-task").status_code), daemon=True,
+    )
+    stop_task = None
+    thread.start()
+    try:
+        assert await asyncio.to_thread(started.wait, 2.0)
+        stop_task = asyncio.create_task(runtime.stop(timeout=5.0))
+        await asyncio.wait_for(draining.wait(), timeout=2.0)
+        assert closed == []
+        assert flask_app.test_client().get("/held-task").status_code == 503
+    finally:
+        release.set()
+        try:
+            if stop_task is not None:
+                await asyncio.wait_for(stop_task, timeout=3.0)
+        finally:
+            thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert responses == [200]
+    assert closed == list(keys)
+    await runtime.stop(timeout=1.0)
+    for owner in owners.values():
+        owner.close.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_start", [False, True], ids=["normal-stop", "startup-rollback"])
+async def test_shared_service_close_failure_retains_dependencies_for_explicit_retry(failed_start: bool) -> None:
+    """A failed consent checkpoint cannot release the usage authority it still owns."""
+    runtime = _runtime_app()
+    flask_app = Flask("shared-service-close-failure")
+    runtime._flask_app = flask_app
+    runtime._startup_recovery_pending = failed_start
+    consent = MagicMock()
+    knowledge = MagicMock()
+    dispatcher = MagicMock()
+    consent.close.side_effect = RuntimeError("synthetic consent checkpoint failure")
+    flask_app.config.update(
+        LEARNING_CONSENT_LEDGER=consent, KNOWLEDGE_RUNTIME=knowledge, SERVICE_TASK_DISPATCHER=dispatcher,
+    )
+
+    with pytest.raises(RuntimeError, match="shutdown"):
+        await runtime.stop(timeout=2.0)
+    assert runtime._stop_completed is False
+    knowledge.close.assert_not_called()
+    dispatcher.close.assert_not_called()
+    runtime.client.close.assert_not_awaited()
+    runtime.audit.close.assert_not_called()
+
+    consent.close.side_effect = None
+    await runtime.stop(timeout=2.0)
+    assert runtime._stop_completed is True
+    assert consent.close.call_count == 2
+    knowledge.close.assert_called_once_with()
+    dispatcher.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("key", ["DATA_RUNTIME", "MODEL_RUN_SERVICES"])
+@pytest.mark.parametrize("failed_start", [False, True], ids=["normal-stop", "startup-rollback"])
+@pytest.mark.asyncio
+async def test_data_and_model_close_failure_retains_broker_dependencies(monkeypatch, failed_start, key):
+    import flinttrade_core.app as app_module
+
+    runtime = _runtime_app()
+    app = Flask("data-model-close-failure")
+    runtime._flask_app = app
+    runtime._startup_recovery_pending = failed_start
+    owner, consent = MagicMock(), MagicMock()
+    owner.close.side_effect = RuntimeError("synthetic owner still draining")
+    app.config[key] = owner
+    app.config["LEARNING_CONSENT_LEDGER"] = consent
+    retired = []
+    monkeypatch.setattr(app_module, "retire_broker_dependencies", lambda *_args, **_kwargs: retired.append(True) or True)
+    with pytest.raises(RuntimeError, match="shutdown"):
+        await runtime.stop(timeout=2)
+    assert not retired, "broker owner retired before its data/model borrower drained"
+    assert app.config[key] is owner
+    consent.close.assert_not_called()
+    runtime.client.close.assert_not_awaited()
+    owner.close.side_effect = None
+    await runtime.stop(timeout=2)
+    assert retired
+    assert key not in app.config
+    assert runtime._stop_completed
+    assert owner.close.call_count == 2
+    consent.close.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -2173,7 +2418,7 @@ def test_wsgi_post_factory_failure_cleans_runtime_before_releasing_lease(
         lambda _app, **_kwargs: events.append("local-ai-stop") or True,
     )
     monkeypatch.setattr(
-        app_module,
+        __import__("flinttrade_core.desktop", fromlist=["shutdown_ditto_runtime"]),
         "shutdown_ditto_runtime",
         lambda _app, **_kwargs: events.append("ditto-stop") or True,
     )
@@ -2206,6 +2451,7 @@ def test_wsgi_post_factory_failure_cleans_runtime_before_releasing_lease(
         "lease-retained",
         "local-ai-stop",
         "ditto-stop",
+        "ditto-stop",
         "lease-released",
     ]
 
@@ -2222,7 +2468,7 @@ def test_wsgi_post_factory_cleanup_failure_retains_exact_recovery_authority(
     events: list[str] = []
     flask_app = Flask("wsgi-post-factory-recovery")
     lease = MagicMock(proof=backend_lease_proof)
-    ditto_results = iter((False, True))
+    ditto_results = iter((False, True, True))
     monkeypatch.setattr(app_module, "_APP_CACHE", None)
     monkeypatch.setattr(app_module, "_APP_CACHE_PID", None)
     monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
@@ -2236,7 +2482,7 @@ def test_wsgi_post_factory_cleanup_failure_retains_exact_recovery_authority(
         lambda _app, **_kwargs: events.append("local-ai-stop") or True,
     )
     monkeypatch.setattr(
-        app_module,
+        __import__("flinttrade_core.desktop", fromlist=["shutdown_ditto_runtime"]),
         "shutdown_ditto_runtime",
         lambda _app, **_kwargs: events.append("ditto-stop") or next(ditto_results),
     )
@@ -2270,7 +2516,7 @@ def test_wsgi_post_factory_cleanup_failure_retains_exact_recovery_authority(
     assert events == [
         "local-ai-stop",
         "ditto-stop",
-        "local-ai-stop",
+        "ditto-stop",
         "ditto-stop",
         "lease-released",
     ]

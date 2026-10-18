@@ -55,7 +55,7 @@ export function SymbolRow({
   const formulaValue = evaluateFormula(quote, formula, customFormulas);
 
   return (
-    <div className="relative group/wl">
+    <div role="listitem" className="relative group/wl">
     <button
       type="button"
       aria-label={item.symbol}

@@ -5,15 +5,15 @@ describe("personaDefaultRoute", () => {
   it("sends traders to Trade", () => {
     expect(personaDefaultRoute("trader")).toBe("/trade");
   });
-  it("sends beginners to Home", () => {
-    expect(personaDefaultRoute("beginner")).toBe("/home");
+  it("sends beginners to the unified Terminal alias", () => {
+    expect(personaDefaultRoute("beginner")).toBe("/trade");
   });
-  it("sends investors to Home (Invest is secondary)", () => {
-    expect(personaDefaultRoute("investor")).toBe("/home");
+  it("sends investors to the unified Terminal alias (Invest is secondary)", () => {
+    expect(personaDefaultRoute("investor")).toBe("/trade");
   });
-  it("falls back to Home for null/unknown", () => {
-    expect(personaDefaultRoute(null)).toBe("/home");
-    expect(personaDefaultRoute(undefined)).toBe("/home");
-    expect(personaDefaultRoute("legacy")).toBe("/home");
+  it("falls back to the unified Terminal alias for null/unknown", () => {
+    expect(personaDefaultRoute(null)).toBe("/trade");
+    expect(personaDefaultRoute(undefined)).toBe("/trade");
+    expect(personaDefaultRoute("legacy")).toBe("/trade");
   });
 });

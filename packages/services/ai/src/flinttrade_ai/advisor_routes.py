@@ -28,7 +28,7 @@ _SYSTEM_PROMPT = (
     "without proper risk disclaimers. Practice simulated fills and native "
     "Connected (read) feeds are analysis context only — not a live order path "
     "and not a guarantee of profitable alphas. Never place or claim to place "
-    "a Live order. Kotak Neo has no Practice sandbox."
+    "a Live order. Kotak Neo has no Practice session."
 )
 
 

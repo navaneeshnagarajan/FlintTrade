@@ -69,7 +69,7 @@ def test_auth_state_default_is_workspace_scoped(monkeypatch, tmp_path: Path) -> 
     auth_state_mod.reset_singleton_for_tests()
     try:
         state = auth_state_mod.get_auth_state()
-        assert state._db_path == tmp_path / "auth_state.duckdb"
+        assert state._db_path == tmp_path / "auth_state.sqlite"
         assert state._db_path.exists()
     finally:
         auth_state_mod.reset_singleton_for_tests()

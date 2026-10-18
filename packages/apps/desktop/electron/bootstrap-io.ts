@@ -589,6 +589,71 @@ function noFollowRegularFile(target: string): boolean {
   }
 }
 
+async function assertManagedVirtualEnvironment(
+  root: string,
+  pythonHome: string,
+  managedRoot: string,
+  platform: NodeJS.Platform,
+): Promise<void> {
+  const owner = typeof process.geteuid === "function" ? process.geteuid() : undefined;
+  const within = (base: string, target: string) => {
+    const relative = path.relative(base, target);
+    return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
+  };
+  const check = async (target: string) => {
+    const metadata = await lstat(target);
+    // uv's owned install-lock inode is data, not executable/source authority.
+    const uvLock = target === path.join(managedRoot, ".lock") || target === path.join(root, ".lock");
+    if (uvLock && !metadata.isFile()) throw new Error("Managed Python install lock must be ordinary.");
+    if (platform !== "win32" && (metadata.uid !== owner || (!uvLock && !metadata.isSymbolicLink() && (metadata.mode & 0o022) !== 0))) {
+      throw new Error("Managed virtual environment ownership or write mode changed.");
+    }
+    if (!metadata.isDirectory() && !metadata.isFile() && !metadata.isSymbolicLink()) {
+      throw new Error("Managed virtual environment contains a non-ordinary entry.");
+    }
+    return metadata;
+  };
+  const managedMetadata = await check(managedRoot);
+  const rootMetadata = await check(root);
+  if (!managedMetadata.isDirectory() || !rootMetadata.isDirectory()) {
+    throw new Error("Managed runtime roots must be no-follow directories.");
+  }
+  const walk = async (directory: string, managed: boolean): Promise<void> => {
+    for (const name of await readdir(directory)) {
+      const target = path.join(directory, name);
+      const metadata = await check(target);
+      if (metadata.isSymbolicLink()) {
+        const literal = await readlink(target);
+        const resolved = await realpath(target);
+        if (managed) {
+          if (!within(managedRoot, resolved)) throw new Error("Managed Python link escapes its tool root.");
+        } else {
+          const relative = path.relative(root, target).split(path.sep).join("/");
+          const permitted = platform !== "win32" && (
+            (relative === "lib64" && literal === "lib") ||
+            (relative === "bin/python" && resolved === await realpath(path.join(pythonHome, "python3.14"))) ||
+            (["bin/python3", "bin/python3.14"].includes(relative) && literal === "python")
+          );
+          if (!permitted) throw new Error("Unexpected managed virtual environment link.");
+        }
+      } else if (metadata.isDirectory()) await walk(target, managed);
+    }
+  };
+  await walk(managedRoot, true);
+  await walk(root, false);
+  const expected = path.join(pythonHome, platform === "win32" ? "python.exe" : "python3.14");
+  const expectedMetadata = await check(expected);
+  if (!expectedMetadata.isFile() || (platform !== "win32" && (expectedMetadata.mode & 0o111) === 0)) {
+    throw new Error("Managed Python 3.14.8 minor-alias executable is unavailable.");
+  }
+  const launcher = path.join(root, platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  if (platform === "win32") {
+    if (!(await check(launcher)).isFile()) throw new Error("Managed Windows Python launcher is not ordinary.");
+  } else if (await realpath(launcher) !== await realpath(expected)) {
+    throw new Error("Managed Python launcher source does not match its validated home.");
+  }
+}
+
 async function readNoFollowRegularText(target: string): Promise<string> {
   const before = await lstat(target);
   if (before.isSymbolicLink() || !before.isFile()) {
@@ -4442,6 +4507,8 @@ function createFileSystem(
     promoteAbsent: (source, destination, identity) =>
       promoteAbsent(source, destination, identity, platform, command, options, getPosixAtomicPromoter),
     readText: (target) => readFile(target, "utf8"),
+    assertManagedVirtualEnvironment: (root, pythonHome, managedRoot) =>
+      assertManagedVirtualEnvironment(root, pythonHome, managedRoot, platform),
     readTextNoFollow: readNoFollowRegularText,
     realpath,
     remove: (target) => rm(target, { force: true, recursive: true }),

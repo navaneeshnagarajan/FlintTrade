@@ -84,15 +84,15 @@ if [ "$MODE" = "native" ]; then
     fi
 
     # SC-07: hash-verified install only (requirements.lock is fully pinned)
-    $PIP install --require-hashes -r "$REPO_ROOT/requirements.lock" -q 2>/dev/null || \
-        $PIP install --require-hashes -r "$REPO_ROOT/requirements.lock" --break-system-packages -q
+    $PIP install --require-hashes --only-binary=growwapi -r "$REPO_ROOT/requirements.lock" -q 2>/dev/null || \
+        $PIP install --require-hashes --only-binary=growwapi -r "$REPO_ROOT/requirements.lock" --break-system-packages -q
 
     ok "Python dependencies updated"
 
     # requirements.lock is registry-only; uv.lock carries the exact
     # operator-cleared git pin for broker SDKs such as Kotak Neo.
     if command -v uv >/dev/null 2>&1; then
-        (cd "$REPO_ROOT" && uv sync --frozen --all-packages --no-dev)
+        (cd "$REPO_ROOT" && uv sync --frozen --all-packages --no-dev --no-build-package growwapi)
         ok "Repo .venv synced with broker SDK pins"
     else
         warn "uv not found; using the target interpreter's pip for exact broker SDK pins."

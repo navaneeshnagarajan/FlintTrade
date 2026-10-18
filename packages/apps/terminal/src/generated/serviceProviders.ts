@@ -31,7 +31,8 @@ export const LLM_PROVIDER_PROFILES = [
   {
     "apiKeyEnv": "OPENAI_API_KEY",
     "authModes": [
-      "api_key"
+      "api_key",
+      "chatgpt_oauth"
     ],
     "defaultHost": "",
     "defaultModel": "gpt-4o-mini",

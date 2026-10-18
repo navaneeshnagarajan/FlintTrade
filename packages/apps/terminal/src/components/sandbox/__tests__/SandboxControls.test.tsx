@@ -31,7 +31,7 @@ function statusResp(): JsonResp {
     ok: true,
     json: async () => ({
       status: "success",
-      data: { capital: 1_000_000, initial_capital: 1_000_000, pnl: 0, trades_count: 0 },
+      data: { capital: 1_000_000, initial_capital: 1_000_000, pnl: 0, gross_pnl: 0, charges: 0, trades_count: 0 },
     }),
   };
 }
@@ -88,12 +88,12 @@ function renderWithProviders() {
 }
 
 describe("SandboxControls", () => {
-  it("renders the Virtual Capital and Practice policy sections", () => {
+  it("renders the Virtual Capital and Practice policy sections after the authoritative read", async () => {
     renderWithProviders();
     expect(screen.getByText("Virtual Capital")).toBeInTheDocument();
     expect(screen.queryByText("Place Practice Order")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Place Practice Order/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Practice Policy")).toBeInTheDocument();
+    expect(await screen.findByText("Practice Policy")).toBeInTheDocument();
     expect(screen.getByText("Adjust Capital")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export data/i })).toBeInTheDocument();
   });

@@ -32,6 +32,8 @@ describe("useDemoFeed", () => {
 
   it("writes simulated ticks into the shared market atoms", () => {
     renderHook(() => useDemoFeed());
+    const immediate = getDefaultStore().get(tickAtomFamily(NIFTY_KEY));
+    expect(immediate?.ltp).toBeGreaterThan(0);
     vi.advanceTimersByTime(1000);
     const tick = getDefaultStore().get(tickAtomFamily(NIFTY_KEY));
     expect(tick).not.toBeNull();

@@ -14,6 +14,20 @@ import pytest
 _TEST_API_KEY = "test-backtest-routes-key"
 
 
+@pytest.fixture(autouse=True)
+def synthetic_history_only(monkeypatch):
+    """Never let route reachability tests fall through to real history."""
+    from flinttrade_backtest.data_connector import DataConnector, DataResult
+
+    def load(self, symbol, exchange, interval, start_date, end_date):
+        return DataResult(
+            symbol=symbol, exchange=exchange, interval=interval,
+            source="synthetic-test", error="No synthetic history supplied",
+        )
+
+    monkeypatch.setattr(DataConnector, "load", load)
+
+
 @pytest.fixture(scope="module")
 def monkeypatch_module():
     """Module-scoped monkeypatch fixture."""
@@ -190,17 +204,17 @@ class TestBacktestRun:
         from flinttrade_backtest.result_store import BacktestResultStore
 
         store = BacktestResultStore(tmp_path)
+        previous_store = flask_app.config.get("BACKTEST_RESULT_STORE")
         flask_app.config["BACKTEST_RESULT_STORE"] = store
 
-        class _FakeConfig:
-            def __init__(self, **_kwargs):
-                pass
+        from flinttrade_backtest.simulator import BacktestConfig as _FakeConfig
 
         class _FakeStrategy:
             def __init__(self, **_kwargs):
                 pass
 
         class _FakeResult:
+            error = ""
             trades: list = []
             equity_curve: list = []
             total_bars = 10
@@ -215,6 +229,7 @@ class TestBacktestRun:
                 return _FakeResult()
 
         class _FakeData:
+            source = "synthetic-test"
             success = True
             error = None
             bars = [1, 2, 3]
@@ -249,6 +264,9 @@ class TestBacktestRun:
             return (_FakeConfig, _FakeSim, {"EMACrossover": _FakeStrategy}, _FakeDataConnector, _FakeMetrics)
 
         monkeypatch.setattr(br, "_load_backtest_engine", _fake_engine)
+        # Normal startup owns the connector now; inject synthetic inputs at
+        # that actual factory rather than the obsolete engine fallback.
+        monkeypatch.setitem(flask_app.config, "BACKTEST_DATA_CONNECTOR_FACTORY", _FakeDataConnector)
         try:
             resp = client.post(
                 "/api/v1/backtest/run",
@@ -280,7 +298,7 @@ class TestBacktestRun:
             assert saved["max_drawdown"] == -0.1
             assert saved["win_rate"] == 0.6
         finally:
-            flask_app.config["BACKTEST_RESULT_STORE"] = None
+            flask_app.config["BACKTEST_RESULT_STORE"] = previous_store
 
 
 class TestStrategiesRunning:

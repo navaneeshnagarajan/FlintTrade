@@ -9,9 +9,10 @@
  *   </Page>
  *
  * PageHeader owns the route's single visible H1 and uses the same padding,
- * type scale and divider on every page. PageBody is the scroll container:
+ * type scale and divider on every page. PageBody is the default scroll container:
  * one gutter, one set of widths, and bottom room so the last row is never
- * hidden behind floating chrome.
+ * hidden behind floating chrome. In compact docked tools, Page can instead
+ * own scrolling so the header cannot consume the body's entire viewport.
  */
 
 import * as React from "react";
@@ -23,16 +24,27 @@ import { cn } from "@/lib/utils";
 // Page
 // ---------------------------------------------------------------------------
 
-export type PageProps = React.HTMLAttributes<HTMLDivElement>;
+export interface PageProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Scroll the body beneath a fixed header, or the complete header/body flow. */
+  scroll?: "body" | "page";
+}
 
-export function Page({ className, children, ...rest }: PageProps) {
+const PageScrollContext = React.createContext<"body" | "page">("body");
+
+export function Page({ scroll = "body", className, children, ...rest }: PageProps) {
   return (
-    <div
-      className={cn("flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface-base", className)}
-      {...rest}
-    >
-      {children}
-    </div>
+    <PageScrollContext.Provider value={scroll}>
+      <div
+        className={cn(
+          "flex h-full min-h-0 min-w-0 flex-col bg-surface-base",
+          scroll === "page" ? "overflow-y-auto" : "overflow-hidden",
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </div>
+    </PageScrollContext.Provider>
   );
 }
 
@@ -254,8 +266,12 @@ export function PageBody({
   children,
   ...rest
 }: PageBodyProps) {
+  const scroll = React.useContext(PageScrollContext);
   return (
-    <div className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto", className)} {...rest}>
+    <div
+      className={cn("min-w-0", scroll === "page" ? "shrink-0" : "min-h-0 flex-1 overflow-y-auto", className)}
+      {...rest}
+    >
       <div
         className={cn(
           "mx-auto w-full min-w-0",

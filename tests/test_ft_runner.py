@@ -91,7 +91,7 @@ def test_arbitrary_name_load_uses_the_exact_sibling_setup_helper(tmp_path: Path)
         "spec = importlib.util.spec_from_file_location('arbitrary_ft_name', path)\n"
         "module = importlib.util.module_from_spec(spec)\n"
         "spec.loader.exec_module(module)\n"
-        "actual = pathlib.Path(module.repair_kotakneo_environment.__code__.co_filename).resolve()\n"
+        "actual = pathlib.Path(module.repair_broker_sdk_environment.__code__.co_filename).resolve()\n"
         "assert actual == pathlib.Path(sys.argv[2]), (actual, sys.argv[2])\n"
     )
 
@@ -769,7 +769,12 @@ def test_public_dev_cli_cleans_owned_process_trees(
     runner = _copy_runner_fixture(tmp_path)
     package = tmp_path / "packages/core/core/src/flinttrade_core"
     package.mkdir(parents=True)
-    (package / "__init__.py").touch()
+    # Keep the actual shared exclusion/provisioning wrapper in the public CLI
+    # path; only provisioning and the external backend below are inert.
+    real_core = _REPO_ROOT / "packages/core/core/src/flinttrade_core"
+    (package / "__init__.py").write_text(f"__path__.append({str(real_core)!r})\n", encoding="utf-8")
+    for helper in ("workspace_maintenance.py", "backend_instance.py"):
+        shutil.copy2(real_core / helper, package / helper)
     (package / "cli.py").write_text("# Harmless stand-in for first-run provisioning.\n", encoding="utf-8")
     (package / "app.py").write_text("from fake_dev import serve\nserve('backend')\n", encoding="utf-8")
     fake = tmp_path / "fake_dev.py"

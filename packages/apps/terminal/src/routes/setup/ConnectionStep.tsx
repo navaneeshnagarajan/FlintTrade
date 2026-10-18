@@ -190,7 +190,7 @@ export function ConnectionStep({
           <p className="text-xs text-text-muted">
             Native Dhan + Kotak Neo stays {CONNECTED_READ_LABEL}. Successful
             non-funded reads never become placeable Live orders. Neo has no
-            Practice sandbox. {NEO_OPERATOR_COPY}
+            Practice session. {NEO_OPERATOR_COPY}
           </p>
         )}
 

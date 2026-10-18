@@ -11,6 +11,8 @@ from datetime import date, timedelta
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
+
 
 # ---------------------------------------------------------------------------
 # EarningsEvent model
@@ -367,7 +369,7 @@ def _restore_env():
     os.environ.update(original)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def route_client(_restore_env):
     """Flask test client with a pre-seeded earnings calendar."""
     os.environ["FLINTTRADE_API_KEY"] = _TEST_API_KEY

@@ -271,7 +271,7 @@ def test_tune_is_refused_on_test_and_does_not_edit_dev_thresholds(capsys: pytest
     assert _POLICY.read_bytes() == before
     assert main(["--cases", str(_FIXTURE), "--split", "test", "--skip-drills"]) == 0
     scored = capsys.readouterr().out
-    assert "test_scored_once=yes" in scored
+    assert "test_scored_once=yes" not in scored
     assert "split=test " in scored
     assert "id=ex-side-01-a" in scored
     assert "id=ex-rat-01-a" not in scored
@@ -395,15 +395,23 @@ def test_all_down_is_unavailable_not_a_model_score_or_latency_sample() -> None:
 
 @pytest.mark.unit
 def test_down_heavy_run_cannot_hide_the_successful_model_latency(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    real_perf_counter = time.perf_counter
+
     class _OneModelResult(_Client):
         def decide(self, state: str, questions: object) -> dict[str, object]:
+            # Unrelated clock users must not consume benchmark samples.
+            assert time.perf_counter() > 0
             if not self.states:
                 return super().decide(state, questions)
             return _Unavailable().decide(state, questions)
 
     ticks = iter([0.0, 4.0, *[value for i in range(1, 301) for value in (10.0 * i, 10.0 * i + 0.001)]])
-    monkeypatch.setattr("flinttrade_engine.laya_benchmark.time.perf_counter", lambda: next(ticks))
+    monkeypatch.setattr("flinttrade_engine.laya_benchmark._perf_counter", lambda: next(ticks))
+    assert time.perf_counter is real_perf_counter, "benchmark clock must not replace the process clock"
     text = run_benchmark(_deny_cases(301), _OneModelResult(0.95)).render()
+    assert next(ticks, None) is None
     assert _metric(text, "latency_p95_within_bar") == "no"
     assert _metric(text, "latency_p95_ms") == "4000.000"
     assert _metric(text, "n_model_scored_repeats") == "1"

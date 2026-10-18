@@ -154,11 +154,11 @@ def _authorise() -> tuple[str, str, tuple[Any, int] | None]:
     return token, verified.actor_ref, None
 
 
-def _sandbox_flat(app: Any) -> bool:
+def _sandbox_flat(app: Any, *, sandbox: Any = None) -> bool:
     """Prove no exposure and no pending orders, including orders from prior days."""
-    sandbox = app.config.get("DATA_SANDBOX_ENGINE")
+    sandbox = sandbox if sandbox is not None else app.config.get("DATA_SANDBOX_ENGINE")
     if sandbox is None:
-        raise RuntimeError("Practice sandbox is unavailable")
+        raise RuntimeError("Practice is unavailable")
     positions = sandbox.get_positions()
     orders = sandbox.get_all_orders()
     if type(positions) is not list or type(orders) is not list:
@@ -195,6 +195,8 @@ class _Run:
     learning_active: bool = False
     model_budget: PracticeModelBudget | None = None
     safety_error: str = ""
+    close_requested: threading.Event = field(default_factory=threading.Event)
+    protection_only: bool = False
 
 
 class _ObservedLLM:
@@ -205,6 +207,10 @@ class _ObservedLLM:
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
         operation = "reflection" if self.run.learning_active else "analysis"
+        services = self.supervisor.app.config.get("MODEL_RUN_SERVICES")
+        managed = services is not None and self.run.adapter._model_admission is not None
+        if managed and operation == "analysis" and not services.runs.snapshot(self.run.run_id, "reasoning").entries_armed:
+            raise RuntimeError("configured_model_unavailable")
         self._require_admission(operation)
         budget = self.run.model_budget
         if budget is None:
@@ -214,16 +220,25 @@ class _ObservedLLM:
         except ModelBudgetExhausted:
             # A final reserved decision may complete. Only a subsequent
             # attempt stops analysis, without sending another provider request.
-            self.run.stop.set()
-            if self.run.trader is not None:
-                self.run.trader.request_stop(square_off=True)
+            if self.supervisor.execution_binding is not None:
+                self.supervisor.execution_binding.registry.retire_entries(self.supervisor.execution_binding.scope)
+            elif managed:
+                services.runs.pause_entries(self.run.run_id, "reasoning")
+            else:
+                self.run.stop.set()
+                if self.run.trader is not None:
+                    self.run.trader.request_stop(square_off=True)
             self.supervisor._event(self.run, "model_limit_exhausted", {"operation": operation, **budget.snapshot()})
             raise
         # Evidence I/O may have taken time or triggered shutdown. Recheck
         # immediately before dispatch; never hold a safety lease over the call.
         self._require_admission(operation)
         try:
-            response = bounded_practice_chat(self.client, budget.output_limit, *args, **kwargs)
+            services = self.supervisor.app.config.get("MODEL_RUN_SERVICES")
+            if services is not None and operation == "analysis" and self.run.adapter._model_admission is not None:
+                response = services.chat(self.run, args[0] if args else kwargs["messages"])
+            else:
+                response = bounded_practice_chat(self.client, budget.output_limit, *args, **kwargs)
             if getattr(response, "error", "") or not str(getattr(response, "content", "") or "").strip():
                 raise RuntimeError("configured_model_unavailable")
             return response
@@ -233,9 +248,14 @@ class _ObservedLLM:
             )
             if operation == "analysis":
                 self.run.model_error = "configured_model_unavailable"
-                self.run.stop.set()
-                if self.run.trader is not None:
-                    self.run.trader.request_stop(square_off=True)
+                if self.supervisor.execution_binding is not None:
+                    self.supervisor.execution_binding.registry.retire_entries(self.supervisor.execution_binding.scope)
+                elif managed:
+                    services.runs.pause_entries(self.run.run_id, "reasoning")
+                else:
+                    self.run.stop.set()
+                    if self.run.trader is not None:
+                        self.run.trader.request_stop(square_off=True)
             raise RuntimeError("configured_model_unavailable") from None
 
     def _require_admission(self, operation: str) -> None:
@@ -248,16 +268,23 @@ class _ObservedLLM:
 class PracticeAgentSupervisor:
     """Own one worker and its durable evidence for the complete app lifetime."""
 
-    def __init__(self, app: Any, store: Any) -> None:
+    def __init__(self, app: Any, store: Any, *, execution_binding: Any = None) -> None:
         from .backend_instance import require_backend_lease_proof  # noqa: PLC0415
         from .owner_file_lock import OwnerSafeFileLock  # noqa: PLC0415
 
         self.app = app
+        self.execution_binding = execution_binding
+        if execution_binding is not None:
+            from .execution_session import RunExecutionBinding
+            if type(execution_binding) is not RunExecutionBinding or execution_binding.registry.app is not app:
+                raise ValueError("Exact app-owned execution binding required")
+            execution_binding.validate()
+        self.sandbox = execution_binding.sandbox if execution_binding is not None else app.config.get("DATA_SANDBOX_ENGINE")
         self._backend_proof = require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
         if app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True:
             raise RuntimeError("Practice runtime is not accepting work")
         self.store = store
-        self.lock = threading.RLock()
+        self.lock = execution_binding.registry.lock if execution_binding is not None else threading.RLock()
         self.shutdown_requested = threading.Event()
         self.run: _Run | None = None
         self._store_closed = False
@@ -342,6 +369,9 @@ class PracticeAgentSupervisor:
                 run.stop.set()
                 raise
             run.snapshot = snapshot
+            if self.execution_binding is not None:
+                self.execution_binding.registry.observe(self.execution_binding.scope, status,
+                    uncertain=run.evidence_failed or bool(run.adapter and run.adapter.reconciliation_required))
 
     def _event(self, run: _Run, kind: str, data: dict[str, Any]) -> None:
         try:
@@ -352,6 +382,11 @@ class PracticeAgentSupervisor:
             raise
         if kind == "data_unavailable":
             run.data_error = str(data.get("code") or "market_data_unavailable")[:128]
+            if self.execution_binding is not None:
+                self.execution_binding.registry.retire_entries(self.execution_binding.scope)
+                return
+            if run.protection_only:
+                return
             # The generic strategy tolerates absent indicators. This production
             # capability requires its configured inputs: brake immediately,
             # before delayed analysis or another symbol can place an entry.
@@ -388,6 +423,11 @@ class PracticeAgentSupervisor:
             raise PracticeAgentError("practice_reconciliation_required") from None
         if run.evidence_failed:
             raise PracticeAgentError("practice_reconciliation_required")
+        if self.execution_binding is not None:
+            try:
+                self.execution_binding.validate(entries=True)
+            except ValueError:
+                return True
         kill_code = practice_entry_kill_code(self.app)
         if kill_code is not None:
             self._safety_brake(run, kill_code, "entry")
@@ -415,8 +455,11 @@ class PracticeAgentSupervisor:
     def _safety_brake(self, run: _Run, code: str, operation: str) -> None:
         """Stop new work and durably record the first safe admission reason."""
         with self.lock:
-            run.stop.set()
-            if run.trader is not None:
+            if self.execution_binding is not None:
+                self.execution_binding.registry.retire_entries(self.execution_binding.scope)
+            else:
+                run.stop.set()
+            if run.trader is not None and self.execution_binding is None:
                 run.trader.request_stop(square_off=True)
             if not run.safety_error:
                 run.safety_error = code
@@ -453,7 +496,7 @@ class PracticeAgentSupervisor:
                 identities[symbol] = session.opens_at.isoformat() + "/" + session.closes_at.isoformat()
         return identities
 
-    def start(self, token: str, owner: str, config: dict[str, Any], llm: Any = None) -> dict[str, Any]:
+    def start(self, token: str, owner: str, config: dict[str, Any], llm: Any = None, *, rearm: bool = False) -> dict[str, Any]:
         """Claim durable ownership before constructing or executing a trader."""
         from .practice_agent_adapter import PracticeAgentAdapter  # noqa: PLC0415
 
@@ -466,10 +509,22 @@ class PracticeAgentSupervisor:
                 raise RuntimeError("A Practice agent worker is still owned; stop it first")
             if self.run is not None and (self.run.evidence_failed or not self.run.cleanup_complete):
                 raise RuntimeError("The preceding Practice worker requires reconciliation")
-            if not _sandbox_flat(self.app):
+            if not _sandbox_flat(self.app, sandbox=self.sandbox):
                 raise RuntimeError("Practice positions and pending orders must be flat before starting")
-            run_id = str(uuid.uuid4())
-            row = self.store.create_run(run_id=run_id, mode="practice", config={**config, "owner": owner})
+            binding = self.execution_binding
+            run_id = binding.scope.run_id if binding is not None else str(uuid.uuid4())
+            if binding is not None and binding.scope.actor != owner:
+                raise ValueError("Execution scope mismatch")
+            persisted = {**config, "owner": owner}
+            if binding is not None:
+                from dataclasses import asdict
+                persisted["execution_session"] = asdict(binding.scope)
+            if rearm:
+                if binding is None or self.store.get_run(run_id)["config"] != persisted:
+                    raise ValueError("Exact unchanged run configuration required")
+                row = self.store.rearm_execution(persisted["execution_session"])
+            else:
+                row = self.store.create_run(run_id=run_id, mode="practice", config=persisted)
             run = _Run(run_id, owner, config, row["created_at"])
             run.model_budget = PracticeModelBudget(
                 config["model_call_limit"],
@@ -484,8 +539,18 @@ class PracticeAgentSupervisor:
                     token,
                     event_sink=lambda kind, data: self._event(run, kind, data),
                     stop_check=lambda: self._entry_brake(run),
+                    **({"execution_binding": binding} if binding is not None else {}),
                 )
                 run.adapter.validate_session()
+                protection = self.app.config.get("PROTECTION_SERVICES")
+                if protection is not None:
+                    from .execution_session import ExecutionSession
+                    scope = binding.scope if binding is not None else ExecutionSession(run_id, owner, "paper:sandbox", "paper")
+                    run.adapter._protection_supervisor = self
+                    protection.attach(scope, self.store, run.adapter)
+                services = self.app.config.get("MODEL_RUN_SERVICES")
+                if services is not None:
+                    services.attach_practice(self)
                 run.thread = threading.Thread(target=self._worker, args=(run, llm), name="practice-agent", daemon=True)
                 self._event(run, "run_started", {"mode": "practice"})
                 run.snapshot = self._snapshot(run)
@@ -503,6 +568,46 @@ class PracticeAgentSupervisor:
                 raise
             return dict(run.snapshot)
 
+    def resume_protection(self, protection: Any) -> bool:
+        """Reconstruct only a pinned fixed rule after canonical reconciliation.
+
+        Called under the registry recovery fence before worker publication. It
+        neither builds a model client nor attaches learning/adoption authority.
+        """
+        from .practice_agent_adapter import PracticeAgentAdapter
+        scope = self.execution_binding.scope
+        row = self.store.get_run(scope.run_id)
+        config = {key: value for key, value in row["config"].items() if key not in {"owner", "execution_session"}}
+        config = validate_practice_config(config)
+        run = _Run(scope.run_id, scope.actor, config, row["created_at"], protection_only=True)
+        self.run = run
+        run.adapter = PracticeAgentAdapter.for_protection(self.app, protection, scope,
+            execution_binding=self.execution_binding, stop_check=lambda: True,
+            event_sink=lambda kind, data: self._event(run, kind, data))
+        run.adapter._protection_supervisor = self
+        protection.attach(scope, self.store, run.adapter)
+        reconciled = protection.reconcile(scope)
+        remaining = reconciled["remaining_quantity"]
+        if remaining == 0:
+            run.adapter.close()
+            run.cleanup_complete = True
+            self._persist(run, "stopped")
+            protection.reconcile(scope)
+            return False
+        _, grant = protection.validate(scope)
+        detail = grant.get("monitor")
+        if (type(detail) is not dict or detail.get("symbol") not in config["symbols"]
+                or detail.get("quantity") != grant["policy"]["position"]["quantity"]
+                or not 0 < remaining <= detail["quantity"]):
+            raise ValueError("fixed protection rule unavailable")
+        run.trader = self._construct_trader(run, None)
+        symbol = detail["symbol"]
+        run.trader.state.active_positions = {symbol: detail["entry_price"]}
+        run.trader.state.position_details = {symbol: {key: value for key, value in detail.items() if key != "symbol"}}
+        run.trader.state.position_details[symbol]["quantity"] = remaining
+        run.snapshot = self._snapshot(run)
+        return True
+
     def stop(self, owner: str) -> dict[str, Any] | None:
         """Brake entries immediately, retaining ownership throughout cleanup."""
         with self.lock:
@@ -510,8 +615,10 @@ class PracticeAgentSupervisor:
             if run is None or run.owner != owner or run.thread is None or not run.thread.is_alive():
                 return None
             run.stop.set()
+            if self.execution_binding is None:
+                run.close_requested.set()
             if run.trader is not None:
-                run.trader.request_stop(square_off=True)
+                run.trader.request_stop(square_off=self.execution_binding is None)
             self._persist(run, "stopping")
             return dict(run.snapshot)
 
@@ -586,8 +693,8 @@ class PracticeAgentSupervisor:
                 )
             if row["status"] != "reconciliation_required":
                 raise RuntimeError("Only a run requiring reconciliation can be resolved")
-            if not _sandbox_flat(self.app):
-                raise RuntimeError("Practice positions or pending orders remain; inspect the sandbox before resolving")
+            if not _sandbox_flat(self.app, sandbox=self.sandbox):
+                raise RuntimeError("Practice positions or pending orders remain; inspect the Practice book before resolving")
             snapshot = {
                 **row["snapshot"],
                 "status": "stopped",
@@ -625,15 +732,44 @@ class PracticeAgentSupervisor:
         trader_config = {
             key: value for key, value in run.config.items() if key not in {"model_call_limit", "model_output_limit"}
         }
-        return AutonomousTrader(
+        services = self.app.config.get("MODEL_RUN_SERVICES")
+        if run.protection_only:
+            knowledge = {"memory": None, "skill_registry": None, "skills_workspace": None, "automatic_learning": False}
+        elif services is not None and self.app.config.get("KNOWLEDGE_RUNTIME") is not None:
+            knowledge = services.practice_context(run)
+        else:
+            knowledge = {"memory": _build_learning_memory(), "skill_registry": self.app.config.get("SKILL_REGISTRY"),
+                         "skills_workspace": _build_skills_workspace()}
+        class ProtectedPracticeTrader(AutonomousTrader):
+            """Bind only the existing fixed algorithms to reducing capability.
+
+            Ordinary execute stays on model generation admission. This local
+            specialisation changes no Live executor or shared trading algorithm.
+            """
+
+            async def monitor(self, position: dict[str, Any]) -> None:
+                with run.adapter.protective_action():
+                    await super().monitor(position)
+
+            def _is_square_off_time(self, symbol: str | None = None) -> bool:
+                # Independent sessions retain strategy risk exits, not a routine
+                # time-based liquidation inherited from the legacy singleton.
+                if self_owner.execution_binding is not None:
+                    return False
+                return super()._is_square_off_time(symbol)
+
+            async def _square_off_all(self) -> bool:
+                with run.adapter.protective_action():
+                    return await super()._square_off_all()
+
+        self_owner = self
+        return ProtectedPracticeTrader(
             llm_client=_ObservedLLM(self, run, llm),
             broker_client=run.adapter,
             order_executor=run.adapter,
             config=AgentConfig(**trader_config),
             vault=_build_vault(),
-            memory=_build_learning_memory(),
-            skill_registry=self.app.config.get("SKILL_REGISTRY"),
-            skills_workspace=_build_skills_workspace(),
+            **knowledge,
             market_session_provider=lambda exchange, symbol, day: scheduler.get_market_session(
                 exchange, on=day, symbol=symbol
             ),
@@ -647,16 +783,22 @@ class PracticeAgentSupervisor:
         self._event(run, "session_ending", {"reason": reason})
         if not await run.trader._finish_square_off(reason):  # noqa: SLF001 - reuse the engine's authoritative exit logic
             raise RuntimeError("Practice square-off incomplete")
-        if not _sandbox_flat(self.app) or run.adapter.reconciliation_required:
-            raise RuntimeError("Practice sandbox requires reconciliation")
+        if not _sandbox_flat(self.app, sandbox=self.sandbox) or run.adapter.reconciliation_required:
+            raise RuntimeError("Practice requires reconciliation")
         self._event(run, "session_flat", {"daily_pnl": run.trader.state.daily_pnl})
-        if run.model_budget is not None and run.model_budget.exhausted:
+        # Canonical local evidence has no inference budget. Its separate core
+        # learning client applies any remote consent/reservation at the wire.
+        if run.protection_only:
+            run.settlement_failed = False
+            return
+        canonical_learning = run.trader.learning_records is not None and run.trader.learning_client is not None
+        if not canonical_learning and run.model_budget is not None and run.model_budget.exhausted:
             self._event(
                 run, "session_learning_skipped", {"reason": "model_limit_exhausted", **run.model_budget.snapshot()}
             )
             run.settlement_failed = False
             return
-        learning_brake = self._model_brake(run, "reflection")
+        learning_brake = None if canonical_learning else self._model_brake(run, "reflection")
         if learning_brake is not None:
             self._safety_brake(run, learning_brake, "reflection")
             self._event(run, "session_learning_skipped", {"reason": learning_brake})
@@ -671,7 +813,70 @@ class PracticeAgentSupervisor:
         self._event(run, "session_learning_finished", {"closed_trade_count": len(run.trader.state.closed_trades)})
         run.settlement_failed = False
 
+    async def _bound_loop(self, run: _Run) -> None:
+        """Same trader and protection algorithms, independent entry lifetime."""
+        next_cycle = 0.0
+        while not run.stop.is_set() and not self.shutdown_requested.is_set():
+            if run.close_requested.is_set():
+                await self._settle_session(run, "Explicit run Close")
+                run.stop.set()
+                break
+            try:
+                if run.protection_only:
+                    raise ValueError("protection-only owner")
+                run.adapter.validate_session()
+                run.cycle_sessions = self._session_identities(run.trader)
+                armed = not self._entry_brake(run)
+            except Exception:
+                self.execution_binding.registry.retire_entries(self.execution_binding.scope)
+                armed = False
+            try:
+                if armed and monotonic() >= next_cycle:
+                    self._persist(run, "running")
+                    result = await run.trader.run_cycle()
+                    for action in result.get("actions", {}).values():
+                        if "signal" in action:
+                            action["signal"] = str(action["signal"])
+                    self._event(run, "cycle_finished", result)
+                    self._persist(run, "running")
+                    next_cycle = monotonic() + run.trader.config.cycle_interval_sec
+                elif run.trader.state.active_positions:
+                    if (run.adapter._protection is not None
+                            and run.adapter._protection[0].has_grant(run.adapter._protection[1])):
+                        self.app.config["PROTECTION_SERVICES"].validate(self.execution_binding.scope)
+                    await run.trader._monitor_open_positions()
+                if not armed and _sandbox_flat(self.app, sandbox=self.sandbox) and not run.trader.state.active_positions:
+                    await self._settle_session(run, "Retired entries and reconciled flat")
+                    run.stop.set()
+            except Exception:
+                # Outage retirement is not a blanket square-off instruction.
+                # Existing fixed risk rules/protection still run independently.
+                self.execution_binding.registry.retire_entries(self.execution_binding.scope)
+            await asyncio.to_thread(run.stop.wait, 0.25)
+
+    async def _duty_loop(self, run: _Run) -> None:
+        """Original legacy owner, independent fixed duty only after JWT loss."""
+        run.protection_only = True
+        protection, scope = run.adapter._protection
+        while not run.stop.is_set() and not self.shutdown_requested.is_set():
+            try:
+                protection.validate(scope)
+                await run.trader._monitor_open_positions()
+                if not run.trader.state.active_positions and _sandbox_flat(self.app, sandbox=self.sandbox):
+                    run.stop.set()
+                    break
+            except Exception:
+                # Retired/expired/unknown duty is retained, not blanket closed
+                # or used as permission to restore ordinary inference/entries.
+                pass
+            await asyncio.to_thread(run.stop.wait, 0.25)
+        if run.close_requested.is_set() and not self.shutdown_requested.is_set() and not run.evidence_failed:
+            await self._settle_session(run, "Explicit legacy Close")
+
     async def _loop(self, run: _Run) -> None:
+        if self.execution_binding is not None:
+            await self._bound_loop(run)
+            return
         from flinttrade_ai.autonomous_agent import AgentState  # noqa: PLC0415
 
         from .practice_agent_adapter import practice_entry_kill_code  # noqa: PLC0415
@@ -681,7 +886,15 @@ class PracticeAgentSupervisor:
         settled_day: str | None = None
         next_cycle = 0.0
         while not run.stop.is_set() and not self.shutdown_requested.is_set():
-            run.adapter.validate_session()
+            try:
+                run.adapter.validate_session()
+            except Exception:
+                if not run.adapter._closed and run.adapter._protection is not None:
+                    protection, scope = run.adapter._protection
+                    if protection.has_grant(scope):
+                        await self._duty_loop(run)
+                        return
+                raise
             kill_code = practice_entry_kill_code(self.app)
             if kill_code is not None:
                 self._safety_brake(run, kill_code, "cycle")
@@ -700,7 +913,7 @@ class PracticeAgentSupervisor:
                 await self._settle_session(run, "Market session boundary")
                 settled_day = session_day
             if day is not None and day != session_day:
-                if not _sandbox_flat(self.app):
+                if not _sandbox_flat(self.app, sandbox=self.sandbox):
                     raise RuntimeError("New session cannot reset while Practice exposure remains")
                 trader.state = AgentState(
                     trade_counts=dict.fromkeys(trader.config.symbols, 0),
@@ -726,7 +939,7 @@ class PracticeAgentSupervisor:
                 self._persist(run, "stopping" if run.stop.is_set() else "running")
                 if run.data_error:
                     raise RuntimeError("Configured market data unavailable: " + run.data_error)
-                if run.model_error:
+                if run.model_error and run.adapter._model_admission is None:
                     raise RuntimeError("Configured model unavailable")
                 if run.adapter.reconciliation_required:
                     raise RuntimeError("Practice dispatch requires reconciliation")
@@ -745,12 +958,14 @@ class PracticeAgentSupervisor:
         with self.app.app_context():
             try:
                 try:
-                    if llm is None:
+                    if run.protection_only:
+                        llm = None
+                    elif llm is None:
                         from .agent_routes import _build_llm  # noqa: PLC0415
 
                         llm = _build_llm()
                     run.llm = llm
-                    frozen = freeze_practice_client(llm, output_limit=run.config["model_output_limit"])
+                    frozen = llm if run.protection_only else freeze_practice_client(llm, output_limit=run.config["model_output_limit"])
                     if frozen is not llm:
                         run.llm = frozen
                         llm.close()
@@ -759,7 +974,8 @@ class PracticeAgentSupervisor:
                     run.model_error = "configured_model_unavailable"
                     self._event(run, "model_unavailable", {"code": run.model_error, "operation": "construction"})
                     raise RuntimeError("configured_model_unavailable") from None
-                run.trader = self._construct_trader(run, llm)
+                if run.trader is None:
+                    run.trader = self._construct_trader(run, llm)
                 if run.stop.is_set():
                     run.trader.request_stop(square_off=True)
                 asyncio.run(self._loop(run))
@@ -780,6 +996,7 @@ class PracticeAgentSupervisor:
                 # known positions, using the original, freshly validated session.
                 if (
                     run.trader is not None
+                    and self.execution_binding is None
                     and not run.adapter.reconciliation_required
                     and not run.evidence_failed
                     and not run.settlement_failed
@@ -801,8 +1018,19 @@ class PracticeAgentSupervisor:
                     terminal = "reconciliation_required"
                     error = "Practice learning cleanup did not complete"
                 try:
+                    if (run.adapter._protection is not None and not run.adapter.reconciliation_required
+                            and not run.evidence_failed and not run.settlement_failed
+                            and run.trader is not None and not run.trader.stop_failure
+                            and _sandbox_flat(self.app, sandbox=self.sandbox)):
+                        protection, scope = run.adapter._protection
+                        if protection.has_grant(scope) and protection.reconcile(scope)["remaining_quantity"] == 0:
+                            # A completed exact independent write can precede its
+                            # caller-state update. Reconcile identities, never
+                            # infer an exit or manufacture a closed-trade lesson.
+                            run.trader.state.active_positions.clear()
+                            run.trader.state.position_details.clear()
                     if (
-                        not _sandbox_flat(self.app)
+                        not _sandbox_flat(self.app, sandbox=self.sandbox)
                         or run.adapter.reconciliation_required
                         or run.evidence_failed
                         or (run.trader is not None and (run.trader.state.active_positions or run.trader.stop_failure))
@@ -814,9 +1042,14 @@ class PracticeAgentSupervisor:
                 except Exception:
                     terminal = "reconciliation_required"
                     error = "Practice flat state could not be verified"
-                run.adapter.close()
+                if run.adapter is not None:
+                    run.adapter.close()
                 try:
                     self._persist(run, terminal, error=error)
+                    if terminal == "stopped" and run.adapter._protection is not None:
+                        protection, scope = run.adapter._protection
+                        if protection.has_grant(scope):
+                            protection.reconcile(scope)
                 except Exception:
                     # Leave the durable active row for crash recovery, but expose
                     # the in-memory failure now and refuse dependency teardown.
@@ -844,16 +1077,19 @@ class PracticeAgentSupervisor:
                 return self._close_store()
             run.stop.set()
             if run.trader is not None:
-                run.trader.request_stop(square_off=True)
+                run.trader.request_stop(square_off=self.execution_binding is None)
             thread = run.thread
         if thread is not None and thread.ident is not None:
             thread.join(max(0.0, deadline - monotonic()))
             if thread.is_alive():
                 return False
+        if (run.trader is not None
+                and not run.trader.join_background_learning(max(0.0, deadline - monotonic()))):
+            return False
         if not run.cleanup_complete or run.evidence_failed or run.status in _ACTIVE:
             return False
         with self.lock:
-            return self._close_store()
+            return True if self.execution_binding is not None else self._close_store()
 
     def _close_store(self) -> bool:
         if self._store_closed:
@@ -1027,7 +1263,7 @@ def resolve_practice_run(run_id: str) -> tuple[Any, int]:
                 "The worker has not finished; reconciliation cannot release it": "The worker has not finished; reconciliation cannot release it",
                 "Practice resources have not closed; reconciliation cannot release them": "Practice resources have not closed; reconciliation cannot release them",
                 "Only a run requiring reconciliation can be resolved": "Only a run requiring reconciliation can be resolved",
-                "Practice positions or pending orders remain; inspect the sandbox before resolving": "Practice positions or pending orders remain; inspect the sandbox before resolving",
+                "Practice positions or pending orders remain; inspect the Practice book before resolving": "Practice positions or pending orders remain; inspect the Practice book before resolving",
             },
             409,
             "Practice reconciliation could not be verified",

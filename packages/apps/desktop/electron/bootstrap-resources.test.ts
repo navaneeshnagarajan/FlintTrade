@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const resourceRoot = path.resolve(import.meta.dirname, "..", "resources", "bootstrap");
 const posixScript = path.join(resourceRoot, "flinttrade-bootstrap.sh");
@@ -54,6 +54,9 @@ const electronBundler = path.resolve(import.meta.dirname, "..", "scripts", "bund
 const desktopPackage = path.resolve(import.meta.dirname, "..", "package.json");
 
 describe("packaged bootstrap entrypoints", () => {
+  const inheritedUmask = process.umask(0o077);
+  // Restore process-global test setup; each launched installer sets its own umask.
+  afterAll(() => process.umask(inheritedUmask));
   it("ships an inert exact Git common-directory scaffold", () => {
     const common = path.join(resourceRoot, "git-common");
     expect(readdirSync(common).sort()).toEqual(["objects", "refs"]);
@@ -82,11 +85,12 @@ describe("packaged bootstrap entrypoints", () => {
         const candidate = path.join(root, "workspace", "source", "FlintTrade.[candidate]-1");
         const tools = path.join(root, "workspace", "tools");
         const node = path.join(tools, "node", "bin", "node");
-        const corepack = path.join(tools, "node", "lib", "node_modules", "corepack", "dist", "corepack.js");
+        const pnpm = path.join(tools, "pnpm");
         const uv = path.join(tools, "uv", "uv");
         const pythonVersionRoot = path.join(tools, "python", "cpython-3.12.0");
         const pythonAlias = path.join(tools, "python", "cpython-3.12");
         const pythonHome = path.join(pythonAlias, "bin");
+        const stagedPythonHome = path.join(tools, "python", "cpython-3.14.8", "bin");
         for (const required of [
           "package.json",
           "pyproject.toml",
@@ -115,6 +119,9 @@ mv "\$source_path" "\$destination_path"
 `,
         );
         chmodSync(path.join(pythonVersionRoot, "bin", "python3.12"), 0o755);
+        mkdirSync(stagedPythonHome, { recursive: true, mode: 0o700 });
+        copyFileSync(path.join(pythonVersionRoot, "bin", "python3.12"), path.join(stagedPythonHome, "python3.14"));
+        chmodSync(path.join(stagedPythonHome, "python3.14"), 0o755);
         symlinkSync(pythonVersionRoot, pythonAlias, "junction");
         const environment = path.join(candidate, ".venv");
         mkdirSync(path.join(environment, "lib"));
@@ -125,25 +132,20 @@ mv "\$source_path" "\$destination_path"
           `home = ${pythonHome}\nuv = 0.11.16\nversion_info = 3.12.0\nrelocatable = true\n`,
         );
         mkdirSync(path.dirname(node), { recursive: true });
-        mkdirSync(path.dirname(corepack), { recursive: true });
+        mkdirSync(path.dirname(pnpm), { recursive: true });
         mkdirSync(path.dirname(uv), { recursive: true });
         writeFileSync(
           node,
           `#!/bin/sh
-if [ "\${1-}" = "--version" ]; then printf '%s\\n' v22.23.1; exit 0; fi
-case "\${1-}" in */corepack.js) shift;; *) exit 71;; esac
-[ "\${COREPACK_DEFAULT_TO_LATEST-}" = 0 ] || exit 72
-[ -n "\${COREPACK_HOME-}" ] || exit 73
-if [ "\${1-}" = "--version" ]; then printf '%s\\n' 0.29.4; exit 0; fi
-if [ "\${1-}" = pnpm ] && [ "\${2-}" = "--version" ]; then printf '%s\\n' 10.34.5; fi
-if [ "\${FLINTTRADE_TEST_FAIL_PNPM_INSTALL-}" = 1 ] &&
-  [ "\${1-}" = pnpm ] && [ "\${2-}" = install ]; then
-  exit 96
-fi
-exit 0
+[ "\${1-}" = "--version" ] || exit 71
+printf '%s\\n' v26.11.1
 `,
         );
-        writeFileSync(corepack, "#!/usr/bin/env node\n");
+        writeFileSync(pnpm, `#!/bin/sh
+if [ "\${1-}" = --version ]; then printf '%s\\n' 12.11.2; exit 0; fi
+if [ "\${FLINTTRADE_TEST_FAIL_PNPM_INSTALL-}" = 1 ] && [ "\${1-}" = install ]; then exit 96; fi
+exit 0
+`);
         writeFileSync(
           uv,
           `#!/bin/sh
@@ -163,15 +165,16 @@ if [ "\${1-}" = venv ]; then
   [ -n "\$target" ] && [ "\$target" != .venv ] || exit 77
   mkdir -p "\$target/lib" "\$target/bin"
   ln -s lib "\$target/lib64"
-  ln -s '${pythonHome}/python3.12' "\$target/bin/python"
+  ln -s '${stagedPythonHome}/python3.14' "\$target/bin/python"
   ln -s python "\$target/bin/python3"
-  ln -s python "\$target/bin/python3.12"
+  ln -s python "\$target/bin/python3.14"
   if [ "\${FLINTTRADE_TEST_INVALID_STAGED_CONFIG-}" = 1 ]; then
     staged_version=3.13.0
   else
-    staged_version=3.12.0
+    staged_version=3.14.8
   fi
-  printf '%s\n' 'home = ${pythonHome}' 'uv = 0.11.16' "version_info = \$staged_version" 'relocatable = true' > "\$target/pyvenv.cfg"
+  staged_uv=\${FLINTTRADE_TEST_STAGED_UV_VERSION-0.13.1}
+  printf '%s\n' 'home = ${stagedPythonHome}' "uv = \$staged_uv" "version_info = \$staged_version" 'relocatable = true' > "\$target/pyvenv.cfg"
 fi
 if [ "\${1-}" = sync ]; then
   [ -n "\${UV_PROJECT_ENVIRONMENT-}" ] || exit 79
@@ -183,10 +186,10 @@ fi
 exit 0
 `,
         );
-        for (const executable of [node, corepack, uv]) chmodSync(executable, 0o755);
+        for (const executable of [node, pnpm, uv]) chmodSync(executable, 0o755);
 
         expect(() =>
-          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"], {
             env: {
               PATH: "/usr/bin:/bin",
               UV_PROJECT_ENVIRONMENT: poisonedUvTarget,
@@ -197,9 +200,22 @@ exit 0
           }),
         ).not.toThrow();
         expect(existsSync(staleEnvironmentFile)).toBe(false);
+        const configurationPath = path.join(candidate, ".venv", "pyvenv.cfg");
+        const currentConfiguration = readFileSync(configurationPath, "utf8");
+        // Both the previous release and a healthy current environment must be
+        // preserved until their explicitly requested replacement succeeds.
+        for (const previousUv of ["0.13.0", "0.13.1"]) {
+          writeFileSync(configurationPath, currentConfiguration.replace(/^uv = .+$/m, `uv = ${previousUv}`));
+          const rebuilt = spawnSync(
+            "/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
+            { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } },
+          );
+          expect(rebuilt.status, `${rebuilt.stdout}\n${rebuilt.stderr}`).toBe(0);
+          expect(readFileSync(configurationPath, "utf8")).toContain("\nuv = 0.13.1\n");
+        }
         rmSync(path.join(candidate, ".venv"), { force: true, recursive: true });
         expect(() =>
-          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"], {
             env: {
               PATH: "/usr/bin:/bin",
               UV_PROJECT_ENVIRONMENT: poisonedUvTarget,
@@ -210,13 +226,13 @@ exit 0
           }),
         ).not.toThrow();
         expect(readFileSync(path.join(candidate, ".venv", "pyvenv.cfg"), "utf8")).toContain(
-          "version_info = 3.12.0",
+          "version_info = 3.14.8",
         );
         const preservedEnvironmentFile = path.join(candidate, ".venv", "preserved");
         writeFileSync(preservedEnvironmentFile, "preserved\n");
         const invalidStagedResult = spawnSync(
           "/bin/sh",
-          [posixScript, candidate, uv, node, corepack, tools, "10.34.5"],
+          [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
           {
             encoding: "utf8",
             env: {
@@ -234,9 +250,20 @@ exit 0
         expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
           [],
         );
+        for (const stagedUv of ["0.13.0", "0.13.2"]) {
+          const retainedConfiguration = readFileSync(configurationPath);
+          const refused = spawnSync(
+            "/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
+            { encoding: "utf8", env: { PATH: "/usr/bin:/bin", FLINTTRADE_TEST_STAGED_UV_VERSION: stagedUv } },
+          );
+          expect(refused.status).not.toBe(0);
+          expect(`${refused.stdout}\n${refused.stderr}`).toContain("Refusing staged .venv");
+          expect(readFileSync(configurationPath)).toEqual(retainedConfiguration);
+          expect(readFileSync(preservedEnvironmentFile, "utf8")).toBe("preserved\n");
+        }
         const failedJavascriptResult = spawnSync(
           "/bin/sh",
-          [posixScript, candidate, uv, node, corepack, tools, "10.34.5"],
+          [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
           {
             encoding: "utf8",
             env: {
@@ -259,7 +286,7 @@ exit 0
         writeFileSync(outsideSentinel, "outside\n");
         const occupiedFinalResult = spawnSync(
           "/bin/sh",
-          [posixScript, candidate, uv, node, corepack, tools, "10.34.5"],
+          [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"],
           {
             encoding: "utf8",
             env: {
@@ -293,10 +320,12 @@ exit 0
         const tools = path.join(root, "workspace", "tools");
         const node = path.join(tools, "node.cmd");
         const uv = path.join(tools, "uv.cmd");
-        const corepack = path.join(tools, "corepack.js");
+        const pnpm = path.join(tools, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
         const pythonVersionRoot = path.join(tools, "python", "cpython-3.12.0");
         const pythonAlias = path.join(tools, "python", "cpython-3.12");
         const pythonHome = path.join(pythonAlias, "bin");
+        const stagedPythonHome = path.join(tools, "python", "cpython-3.14.8", "bin");
+        mkdirSync(stagedPythonHome, { recursive: true });
         for (const required of [
           "package.json",
           "pyproject.toml",
@@ -339,23 +368,16 @@ exit 0
           `home = ${pythonHome}\nuv = 0.11.16\nversion_info = 3.12.0\nrelocatable = true\n`,
         );
         mkdirSync(tools, { recursive: true });
-        writeFileSync(corepack, "// verified Corepack fixture\n");
+        writeFileSync(pnpm, process.platform === "win32"
+          ? '@echo off\nif "%~1"=="--version" echo 12.11.2\nif "%FLINTTRADE_TEST_FAIL_PNPM_INSTALL%"=="1" if "%~1"=="install" exit /b 96\nexit /b 0\n'
+          : "#!/bin/sh\nprintf '%s\\n' 12.11.2\n", { mode: 0o755 });
         writeFileSync(
           node,
           `@echo off
 if "%~1"=="--version" (
-  echo v22.23.2
+  echo v26.11.1
   exit /b 0
 )
-if "%~2"=="--version" (
-  echo 0.34.6
-  exit /b 0
-)
-if "%~2"=="pnpm" if "%~3"=="--version" (
-  echo 10.34.5
-  exit /b 0
-)
-if "%FLINTTRADE_TEST_FAIL_PNPM_INSTALL%"=="1" if "%~2"=="pnpm" if "%~3"=="install" exit /b 96
 exit /b 0
 `,
         );
@@ -374,12 +396,16 @@ if "%~1"=="venv" if not "%~5"==".venv" (
   mkdir "%~5\\Scripts"
   copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\python.exe" >nul
   if not "%FLINTTRADE_TEST_MISSING_STAGED_LAUNCHER%"=="1" copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\pythonw.exe" >nul
-  >"%~5\\pyvenv.cfg" echo home = ${pythonHome}
-  >>"%~5\\pyvenv.cfg" echo uv = 0.11.16
+  >"%~5\\pyvenv.cfg" echo home = ${stagedPythonHome}
+  if "%FLINTTRADE_TEST_STAGED_UV_VERSION%"=="" (
+    >>"%~5\\pyvenv.cfg" echo uv = 0.13.1
+  ) else (
+    >>"%~5\\pyvenv.cfg" echo uv = %FLINTTRADE_TEST_STAGED_UV_VERSION%
+  )
   if "%FLINTTRADE_TEST_INVALID_STAGED_CONFIG%"=="1" (
     >>"%~5\\pyvenv.cfg" echo version_info = 3.13.0
   ) else (
-    >>"%~5\\pyvenv.cfg" echo version_info = 3.12.0
+    >>"%~5\\pyvenv.cfg" echo version_info = 3.14.8
   )
   >>"%~5\\pyvenv.cfg" echo relocatable = true
   exit /b 0
@@ -420,12 +446,12 @@ exit /b 0
               uv,
               "-Node",
               node,
-              "-CorepackJs",
-              corepack,
+              "-Pnpm",
+              pnpm,
               "-ToolsRoot",
               tools,
               "-PnpmVersion",
-              "10.34.5",
+              "12.11.2",
             ],
             {
               encoding: "utf8",
@@ -485,12 +511,12 @@ exit /b 0
             uv,
             "-Node",
             node,
-            "-CorepackJs",
-            corepack,
+            "-Pnpm",
+            pnpm,
             "-ToolsRoot",
             tools,
             "-PnpmVersion",
-            "10.34.5",
+            "12.11.2",
           ],
           {
             encoding: "utf8",
@@ -572,12 +598,12 @@ exit /b 0
             uv,
             "-Node",
             node,
-            "-CorepackJs",
-            corepack,
+            "-Pnpm",
+            pnpm,
             "-ToolsRoot",
             tools,
             "-PnpmVersion",
-            "10.34.5",
+            "12.11.2",
           ],
           {
             encoding: "utf8",
@@ -604,6 +630,14 @@ exit /b 0
         expect(readFileSync(path.join(incompleteOrphan, "sentinel"), "utf8")).toBe("preserve\n");
         rmSync(unownedLookalike, { recursive: true });
         rmSync(incompleteOrphan, { recursive: true });
+        const configurationPath = path.join(candidate, ".venv", "pyvenv.cfg");
+        const currentConfiguration = readFileSync(configurationPath, "utf8");
+        for (const previousUv of ["0.13.0", "0.13.1"]) {
+          writeFileSync(configurationPath, currentConfiguration.replace(/^uv = .+$/m, `uv = ${previousUv}`));
+          const rebuilt = invokeBootstrap();
+          expect(rebuilt.status, `${rebuilt.stdout}\n${rebuilt.stderr}`).toBe(0);
+          expect(readFileSync(configurationPath, "utf8")).toMatch(/(?:^|\r?\n)uv = 0\.13\.1(?:\r?\n|$)/);
+        }
         const preservedEnvironmentFile = path.join(candidate, ".venv", "preserved");
         writeFileSync(preservedEnvironmentFile, "preserved\n");
         const invalidStagedResult = spawnSync(
@@ -621,12 +655,12 @@ exit /b 0
             uv,
             "-Node",
             node,
-            "-CorepackJs",
-            corepack,
+            "-Pnpm",
+            pnpm,
             "-ToolsRoot",
             tools,
             "-PnpmVersion",
-            "10.34.5",
+            "12.11.2",
           ],
           {
             encoding: "utf8",
@@ -645,6 +679,14 @@ exit /b 0
         expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
           [],
         );
+        for (const stagedUv of ["0.13.0", "0.13.2"]) {
+          const retainedConfiguration = readFileSync(configurationPath);
+          const refused = invokeBootstrap({ FLINTTRADE_TEST_STAGED_UV_VERSION: stagedUv });
+          expect(refused.status).not.toBe(0);
+          expect(`${refused.stdout}\n${refused.stderr}`).toContain("Refusing staged .venv");
+          expect(readFileSync(configurationPath)).toEqual(retainedConfiguration);
+          expect(readFileSync(preservedEnvironmentFile, "utf8")).toBe("preserved\n");
+        }
         const failedJavascriptResult = spawnSync(
           "powershell.exe",
           [
@@ -660,12 +702,12 @@ exit /b 0
             uv,
             "-Node",
             node,
-            "-CorepackJs",
-            corepack,
+            "-Pnpm",
+            pnpm,
             "-ToolsRoot",
             tools,
             "-PnpmVersion",
-            "10.34.5",
+            "12.11.2",
           ],
           {
             encoding: "utf8",
@@ -971,9 +1013,9 @@ exit /b 0
 
         const uv = path.join(tools, process.platform === "win32" ? "uv.cmd" : "uv");
         const node = path.join(tools, process.platform === "win32" ? "node.cmd" : "node");
-        const corepack = path.join(tools, "corepack.js");
+        const pnpm = path.join(tools, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
         mkdirSync(tools, { recursive: true });
-        for (const tool of [uv, node, corepack]) writeFileSync(tool, "must not run\n");
+        for (const tool of [uv, node, pnpm]) writeFileSync(tool, "must not run\n");
 
         const result =
           process.platform === "win32"
@@ -992,18 +1034,18 @@ exit /b 0
                   uv,
                   "-Node",
                   node,
-                  "-CorepackJs",
-                  corepack,
+                  "-Pnpm",
+                  pnpm,
                   "-ToolsRoot",
                   toolsArgument,
                   "-PnpmVersion",
-                  "10.34.5",
+                  "12.11.2",
                 ],
                 { encoding: "utf8" },
               )
             : spawnSync(
                 "/bin/sh",
-                [posixScript, candidate, uv, node, corepack, toolsArgument, "10.34.5"],
+                [posixScript, candidate, uv, node, pnpm, toolsArgument, "12.11.2"],
                 {
                   encoding: "utf8",
                   env: {
@@ -1025,7 +1067,7 @@ exit /b 0
           scenario === "contradictory-relocatable-metadata" ||
           scenario === "alternate-relocatable-metadata" ||
           scenario === "unicode-whitespace-relocatable-metadata"
-            ? "not a uv-managed relocatable Python 3.12 environment"
+            ? "expected relocatable managed Python 3.14.8 or supported legacy Python 3.12 for explicit rebuild"
             : scenario.endsWith("linked-python-root") ||
                 scenario === "fresh-linked-tools-root" ||
                 scenario === "fresh-noncanonical-tools-path" ||
@@ -1071,9 +1113,11 @@ exit /b 0
 
       const uv = path.join(tools, process.platform === "win32" ? "uv.cmd" : "uv");
       const node = path.join(tools, process.platform === "win32" ? "node.cmd" : "node");
-      const corepack = path.join(tools, "corepack.js");
+      const pnpm = path.join(tools, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
       mkdirSync(tools, { recursive: true });
-      writeFileSync(corepack, "// verified Corepack fixture\n");
+      writeFileSync(pnpm, process.platform === "win32"
+          ? '@echo off\nif "%~1"=="--version" echo 12.11.2\nif "%FLINTTRADE_TEST_FAIL_PNPM_INSTALL%"=="1" if "%~1"=="install" exit /b 96\nexit /b 0\n'
+          : "#!/bin/sh\nprintf '%s\\n' 12.11.2\n", { mode: 0o755 });
       if (process.platform === "win32") {
         const pythonAlias = path.join(tools, "python", "cpython-3.12");
         writeFileSync(
@@ -1095,9 +1139,7 @@ exit /b 0
         writeFileSync(
           node,
           `@echo off
-if "%~1"=="--version" echo v22.23.2
-if "%~2"=="--version" echo 0.34.6
-if "%~2"=="pnpm" if "%~3"=="--version" echo 10.34.5
+if "%~1"=="--version" echo v26.11.1
 exit /b 0
 `,
         );
@@ -1122,10 +1164,7 @@ exit 0
         writeFileSync(
           node,
           `#!/bin/sh
-if [ "\${1-}" = --version ]; then printf '%s\n' v22.23.1; exit 0; fi
-case "\${1-}" in */corepack.js) shift;; *) exit 71;; esac
-if [ "\${1-}" = --version ]; then printf '%s\n' 0.29.4; exit 0; fi
-if [ "\${1-}" = pnpm ] && [ "\${2-}" = --version ]; then printf '%s\n' 10.34.5; fi
+if [ "\${1-}" = --version ]; then printf '%s\n' v26.11.1; exit 0; fi
 exit 0
 `,
         );
@@ -1150,16 +1189,16 @@ exit 0
                 uv,
                 "-Node",
                 node,
-                "-CorepackJs",
-                corepack,
+                "-Pnpm",
+                pnpm,
                 "-ToolsRoot",
                 tools,
                 "-PnpmVersion",
-                "10.34.5",
+                "12.11.2",
               ],
               { encoding: "utf8" },
             )
-          : spawnSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+          : spawnSync("/bin/sh", [posixScript, candidate, uv, node, pnpm, tools, "12.11.2"], {
               encoding: "utf8",
               env: { PATH: "/usr/bin:/bin" },
             });
@@ -1182,9 +1221,9 @@ exit 0
       expect(powershell).toContain(argument);
     }
     expect(powershell).toContain('"flinttrade-ticks",');
-    expect(combined).toContain("pnpm 10.34.5");
+    expect(combined).toContain("pnpm 12.11.2");
     expect(combined).toContain("--frozen-lockfile");
-    expect(combined).toContain("COREPACK_HOME");
+    expect(combined).not.toContain("CorepackJs");
     expect(combined).toContain("UV_CACHE_DIR");
     expect(combined).toContain("UV_MANAGED_PYTHON");
     expect(combined).toContain("UV_NO_EDITABLE");
@@ -1193,13 +1232,13 @@ exit 0
     expect(combined).toContain("UV_PROJECT_ENVIRONMENT");
     expect(combined).toContain("UV_PYTHON_INSTALL_DIR");
     expect(combined).toContain("UV_WORKING_DIR");
-    expect(posix).toContain("python install 3.12 --no-bin");
+    expect(posix).toContain("python install 3.14.8 --no-bin");
     expect(powershell).toContain('"--no-bin",');
     expect(powershell).toContain('"--no-registry",');
     expect(posix).toContain(
-      '"$uv" venv --relocatable --python 3.12 "$staging_virtual_environment"',
+      '"$uv" venv --relocatable --python 3.14.8 "$staging_virtual_environment"',
     );
-    for (const argument of ['"venv",', '"--relocatable",', '"--python",', '"3.12",']) {
+    for (const argument of ['"venv",', '"--relocatable",', '"--python",', '"3.14.8",']) {
       expect(powershell).toContain(argument);
     }
     expect(powershell).toContain("$stagingVirtualEnvironmentPath,");
@@ -1218,9 +1257,9 @@ exit 0
       posix.indexOf('"$uv" sync --frozen'),
     );
     expect(powershell.indexOf('"venv",')).toBeLessThan(powershell.indexOf('"sync",'));
-    expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$node" "$corepack_js" --version'));
+    expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$pnpm" --version'));
     expect(powershell.indexOf("$env:PATH")).toBeLessThan(
-      powershell.indexOf('Invoke-Checked $Node @($CorepackJs, "--version")'),
+      powershell.indexOf('Invoke-Checked $Pnpm @("--version")'),
     );
     expect(powershell).not.toContain("corepack.cmd");
     expect(combined).not.toMatch(/\b(?:sudo|doas|apt(?:-get)?|dnf|yum|brew|choco|winget)\b/i);

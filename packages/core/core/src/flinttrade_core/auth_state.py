@@ -1,55 +1,30 @@
-"""Persistent backing stores for auth_routes rate-limit + revocation state.
+"""Durable SQLite JWT revocations, rate-limit events and OTP request history.
 
-Without persistence:
-- A revoked JWT remains valid on every other gunicorn worker until its
-  natural expiry — because each worker has its own ``_REVOKED_JTIS`` dict.
-- Rate-limit counters reset on worker restart, letting an attacker reset
-  lockout state by triggering recycling.
-- OTP request history lives only in the worker that served the first
-  call, so a second request on a different worker skips the cap.
-
-This module backs all three stores with a single DuckDB file at
-``<workspace>/auth_state.duckdb``. DuckDB is chosen for consistency with
-the rest of FlintTrade's persistence layer (same dependency already in
-use). Every operation takes a per-process lock plus relies on DuckDB's
-internal mutex so concurrent writes from multiple gunicorn workers
-serialise correctly.
-
-The module is intentionally import-light — call ``get_auth_state()`` at
-app-factory time and pass the instance around through ``app.config``.
+The authority is ``<workspace>/auth_state.sqlite``. Legacy DuckDB requires the
+explicit offline migration CLI, never an automatic fallback or empty reset.
 """
-
 from __future__ import annotations
 
-import logging
+import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
-logger = logging.getLogger("flinttrade.core.auth_state")
+from flinttrade_core.auth_state_runtime import (
+    AuthStateUnavailable,
+    check_auth_migration_evidence,
+    open_authority_database,
+    validate_schema,
+)
 
 
 def _default_db_path() -> Path:
     """Return the workspace-scoped AuthState database path."""
-    from .workspace import workspace_dir  # noqa: PLC0415
+    from .workspace import workspace_dir
 
-    return workspace_dir() / "auth_state.duckdb"
+    return workspace_dir() / "auth_state.sqlite"
 
-
-# DuckDB sizes a per-database task scheduler from the host core count and starts
-# that many background OS threads eagerly, even for a store this small. Destroying
-# the database — which is what ``close()`` does once the last connection goes —
-# joins every one of those threads, and on Windows that join has been observed to
-# block forever under heavy parallel load (measured: the process wedged inside
-# ``duckdb::DatabaseInstance::~DatabaseInstance`` → ``WaitForSingleObject``).
-#
-# This store only ever runs single-row point queries against three tiny tables,
-# and every entry point already serialises on ``self._lock``, so a parallel
-# execution pool buys nothing. Pinning it to one thread means no background
-# threads are started at all (measured: 3 per database by default on a 4-core
-# host, 0 with this config), which removes the join — and with it the hang — from
-# the shutdown path entirely.
-_SINGLE_THREADED_CONFIG = {"threads": 1}
 
 _CREATE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS revoked_jtis (
@@ -72,115 +47,110 @@ CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_requests (email, ts);
 
 
 class AuthState:
-    """DuckDB-backed persistence for JWT revocation, OTP log, rate-limit buckets."""
+    """SQLite-backed persistence, with process-safe atomic admission."""
 
     def __init__(self, db_path: str | Path | None = None) -> None:
-        import duckdb  # lazy — deliberate; avoids cost when unused
-
-        if db_path is None:
-            db_path = _default_db_path()
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = duckdb.connect(str(self._db_path), config=_SINGLE_THREADED_CONFIG)
+        self._default_bound = db_path is None
+        self._db_path = (Path(db_path) if db_path is not None else _default_db_path()).absolute()
+        check_auth_migration_evidence(self._db_path)
+        self._conn = open_authority_database(self._db_path, _CREATE_SCHEMA_SQL)
         self._lock = threading.Lock()
-        for stmt in _CREATE_SCHEMA_SQL.strip().split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                self._conn.execute(stmt)
+        stat = self._db_path.stat()
+        self._identity = (stat.st_dev, stat.st_ino)
+        self._pid = os.getpid()
+        self._closed = False
 
-    # ------------------------------------------------------------------
-    # JWT revocation
-    # ------------------------------------------------------------------
+    def _check_authority(self) -> None:
+        if self._closed or self._pid != os.getpid():
+            raise AuthStateUnavailable("closed or inherited auth owner")
+        try:
+            stat = self._db_path.stat()
+        except OSError as exc:
+            raise AuthStateUnavailable("auth authority disappeared") from exc
+        if self._db_path.is_symlink() or (stat.st_dev, stat.st_ino) != self._identity:
+            raise AuthStateUnavailable("auth authority was replaced")
+        check_auth_migration_evidence(self._db_path)
+        validate_schema(self._conn, _CREATE_SCHEMA_SQL)
+
+    @contextmanager
+    def _transaction(self):
+        with self._lock:
+            self._check_authority()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                validate_schema(self._conn, _CREATE_SCHEMA_SQL)
+                yield
+                validate_schema(self._conn, _CREATE_SCHEMA_SQL)
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def revoke_jti(self, jti: str, exp: float) -> None:
-        """Persist a revoked JWT id. ``exp`` is the token's UTC epoch expiry."""
-        with self._lock:
+        """Persist a revoked JWT id with its UTC epoch expiry."""
+        with self._transaction():
             self._conn.execute(
                 "INSERT OR REPLACE INTO revoked_jtis (jti, exp, revoked_at) VALUES (?, ?, ?)",
-                [jti, exp, time.time()],
+                (jti, exp, time.time()),
             )
-            self._cleanup_revoked_jtis_locked()
+            self._conn.execute("DELETE FROM revoked_jtis WHERE exp <= ?", (time.time(),))
 
     def is_jti_revoked(self, jti: str) -> bool:
+        """Read revocation without altering expired historical evidence."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT 1 FROM revoked_jtis WHERE jti = ? LIMIT 1",
-                [jti],
-            ).fetchone()
-            return row is not None
+            self._check_authority()
+            return self._conn.execute("SELECT 1 FROM revoked_jtis WHERE jti=?", (jti,)).fetchone() is not None
 
-    def _cleanup_revoked_jtis_locked(self) -> None:
-        """Remove jtis whose token expiry has passed."""
-        self._conn.execute(
-            "DELETE FROM revoked_jtis WHERE exp <= ?",
-            [time.time()],
-        )
-
-    # ------------------------------------------------------------------
-    # Rate limiter (sliding window)
-    # ------------------------------------------------------------------
-
-    def check_rate_limit(
-        self,
-        endpoint: str,
-        ip: str,
-        max_requests: int,
-        window_seconds: int,
-    ) -> bool:
-        """Return True when a request is within the limit, False otherwise.
-
-        Records the new request timestamp only when allowed, to keep the
-        bucket deterministic across concurrent workers.
-        """
-        now = time.time()
-        cutoff = now - window_seconds
-        with self._lock:
-            # Prune expired events for this key so the count is tight.
+    def check_rate_limit(self, endpoint: str, ip: str, max_requests: int, window_seconds: int) -> bool:
+        """Atomically prune/count/admit, recording only an allowed request."""
+        with self._transaction():
+            now = time.time()
             self._conn.execute(
-                "DELETE FROM rate_limit_events WHERE endpoint = ? AND ip = ? AND ts <= ?",
-                [endpoint, ip, cutoff],
+                "DELETE FROM rate_limit_events WHERE endpoint=? AND ip=? AND ts<=?",
+                (endpoint, ip, now - window_seconds),
             )
-            count_row = self._conn.execute(
-                "SELECT COUNT(*) FROM rate_limit_events WHERE endpoint = ? AND ip = ?",
-                [endpoint, ip],
-            ).fetchone()
-            count = int(count_row[0]) if count_row else 0
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM rate_limit_events WHERE endpoint=? AND ip=?", (endpoint, ip),
+            ).fetchone()[0]
             if count >= max_requests:
                 return False
-            self._conn.execute(
-                "INSERT INTO rate_limit_events (endpoint, ip, ts) VALUES (?, ?, ?)",
-                [endpoint, ip, now],
-            )
+            self._conn.execute("INSERT INTO rate_limit_events VALUES (?,?,?)", (endpoint, ip, now))
             return True
 
-    # ------------------------------------------------------------------
-    # OTP request log
-    # ------------------------------------------------------------------
-
     def record_otp_request(self, email: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO otp_requests (email, ts) VALUES (?, ?)",
-                [email, time.time()],
-            )
+        """Append an OTP request, including equal-timestamp duplicates."""
+        with self._transaction():
+            self._conn.execute("INSERT INTO otp_requests VALUES (?,?)", (email, time.time()))
+
+    def check_otp_request_limit(self, email: str, max_requests: int, window_seconds: int) -> bool:
+        """Atomically count and record an allowed OTP request across processes."""
+        with self._transaction():
+            now = time.time()
+            cutoff = now - window_seconds
+            self._conn.execute("DELETE FROM otp_requests WHERE ts<=?", (cutoff,))
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM otp_requests WHERE email=? AND ts>?", (email, cutoff),
+            ).fetchone()[0]
+            if count >= max_requests:
+                return False
+            self._conn.execute("INSERT INTO otp_requests VALUES (?,?)", (email, now))
+            return True
 
     def count_recent_otp_requests(self, email: str, window_seconds: int) -> int:
-        cutoff = time.time() - window_seconds
-        with self._lock:
-            # Prune old rows so the table stays small.
-            self._conn.execute(
-                "DELETE FROM otp_requests WHERE ts <= ?",
-                [cutoff],
-            )
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM otp_requests WHERE email = ? AND ts > ?",
-                [email, cutoff],
-            ).fetchone()
-            return int(row[0]) if row else 0
+        """Prune expired history and count the remaining requests for an email."""
+        with self._transaction():
+            cutoff = time.time() - window_seconds
+            self._conn.execute("DELETE FROM otp_requests WHERE ts<=?", (cutoff,))
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM otp_requests WHERE email=? AND ts>?", (email, cutoff),
+            ).fetchone()[0]
 
     def close(self) -> None:
+        """Close this owner's connection."""
         with self._lock:
-            self._conn.close()
+            if not self._closed:
+                self._conn.close()
+                self._closed = True
 
 
 _SINGLETON: AuthState | None = None
@@ -188,27 +158,25 @@ _SINGLETON_LOCK = threading.Lock()
 
 
 def get_auth_state(db_path: str | Path | None = None) -> AuthState:
-    """Return the process-wide AuthState singleton, creating it on first call.
-
-    Subsequent calls ignore ``db_path`` — pass it only on first
-    construction (usually at Flask app-factory time).
-    """
-    global _SINGLETON
-    if _SINGLETON is None:
-        with _SINGLETON_LOCK:
-            if _SINGLETON is None:
-                _SINGLETON = AuthState(db_path=db_path)
-                logger.info("AuthState initialised at %s", _SINGLETON._db_path)
-    return _SINGLETON
-
-
-def reset_singleton_for_tests() -> None:
-    """Drop the singleton — test-only helper so fixtures can rebind the DB path."""
+    """Return the process-wide auth owner, explicitly bindable on first use."""
     global _SINGLETON
     with _SINGLETON_LOCK:
         if _SINGLETON is not None:
-            try:
-                _SINGLETON.close()
-            except Exception:  # noqa: BLE001
-                pass
+            if db_path is not None and Path(db_path).absolute() != _SINGLETON._db_path:
+                raise AuthStateUnavailable("auth owner already bound to a different path")
+            if db_path is None and _SINGLETON._default_bound and _default_db_path().absolute() != _SINGLETON._db_path:
+                raise AuthStateUnavailable("default auth workspace changed; owner cannot be rebound")
+            if _SINGLETON._closed or _SINGLETON._pid != os.getpid():
+                _SINGLETON = AuthState(None if _SINGLETON._default_bound else _SINGLETON._db_path)
+        if _SINGLETON is None:
+            _SINGLETON = AuthState(db_path=db_path)
+        return _SINGLETON
+
+
+def reset_singleton_for_tests() -> None:
+    """Drop the singleton — tests only; production must retain its authority."""
+    global _SINGLETON
+    with _SINGLETON_LOCK:
+        if _SINGLETON is not None:
+            _SINGLETON.close()
         _SINGLETON = None

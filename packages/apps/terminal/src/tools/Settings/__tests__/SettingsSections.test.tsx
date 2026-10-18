@@ -5,9 +5,30 @@
  *         RiskSection, GeneralSection.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render as renderComponent, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
 import "@testing-library/jest-dom";
+
+// Pure section smoke tests retain inert query results, but use the production
+// query/cache owner and stores required by scoped children and router links.
+const clients: QueryClient[] = [];
+function render(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  clients.push(client);
+  return renderComponent(<MemoryRouter><QueryClientProvider client={client}>{ui}</QueryClientProvider></MemoryRouter>);
+}
+beforeEach(() => {
+  useAuthStore.setState({ status: "logged-out", token: null });
+  useModeStore.setState({ mode: "explore" });
+});
+afterEach(() => {
+  cleanup();
+  clients.splice(0).forEach(client => client.clear());
+});
 
 // ---------------------------------------------------------------------------
 // Mocks — must be before imports
@@ -62,7 +83,8 @@ vi.mock("@/components/ui/GlassCard", () => ({
 }));
 
 // TanStack Query (SecuritySection + RiskSection)
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async importOriginal => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useQuery: () => ({
     data: undefined,
     isLoading: false,
@@ -73,12 +95,7 @@ vi.mock("@tanstack/react-query", () => ({
     mutate: vi.fn(),
     isPending: false,
   }),
-  useQueryClient: () => ({
-    invalidateQueries: vi.fn(),
-    cancelQueries: vi.fn(),
-    getQueryData: vi.fn(),
-    setQueryData: vi.fn(),
-  }),
+
 }));
 
 // ftApi services (SecuritySection + RiskSection + MonitoringSection)
@@ -131,12 +148,7 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
 vi.mock("@/components/sandbox/SandboxControls", () => ({
   default: () => <div data-testid="sandbox-controls" />,
 }));
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector?: unknown) =>
-    typeof selector === "function"
-      ? (selector as (s: Record<string, unknown>) => unknown)({ mode: "explore" })
-      : { mode: "explore" },
-}));
+
 vi.mock("@/stores/skillStore", () => {
   const state = {
     globalLevel: "intermediate",

@@ -1,5 +1,5 @@
 /**
- * ModeSelection — skip setup lands on persona default workspace (Slice 2).
+ * ModeSelection — all retained persona choices enter the unified Terminal.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -40,13 +40,13 @@ describe("ModeSelection Slice 2", () => {
     settingsPersona.value = "beginner";
   });
 
-  it("skip setup navigates to persona default (beginner → Home)", () => {
+  it("skip setup navigates beginner to the Terminal compatibility entry", () => {
     render(<ModeSelection onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /skip setup/i }));
-    expect(mockNavigate).toHaveBeenCalledWith("/home");
+    expect(mockNavigate).toHaveBeenCalledWith("/trade");
   });
 
-  it("skip setup navigates trader to Trade", () => {
+  it("skip setup navigates trader to the same Terminal compatibility entry", () => {
     settingsPersona.value = "trader";
     render(<ModeSelection onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /skip setup/i }));

@@ -30,6 +30,8 @@ export default defineConfig({
   // fail-closed: neither .env.production nor any other terminal .env* file can
   // populate import.meta.env. The launcher also strips inherited VITE_* values.
   envDir: publicDemoBuild ? false : undefined,
+  // Isolated CI keeps generated optimisation data outside read-only inputs.
+  cacheDir: process.env.FLINTTRADE_E2E_CACHE_DIR,
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
     __FLINTTRADE_VERSION_INVENTORY__: JSON.stringify(readVersionInventory(import.meta.dirname)),
@@ -111,6 +113,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Installed core keeps fonts same-origin under default-src 'self'. Tiny
+    // subsets must not become data: URLs; keep Vite defaults for other assets.
+    assetsInlineLimit: (filePath) => /\.(?:woff2?|ttf|otf)$/i.test(filePath) ? false : undefined,
     // Plotly powers 3D volatility surfaces and is isolated in a lazy analysis
     // chunk. Keep the warning budget above that known async payload so new
     // warnings point at unexpected growth, not the intentional chart engine.

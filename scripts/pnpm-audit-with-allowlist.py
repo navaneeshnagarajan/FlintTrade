@@ -47,6 +47,21 @@ def _active_allowlist() -> set[str]:
 
 
 def _collect_advisories(report: dict) -> list[dict]:
+    if not isinstance(report, dict) or "error" in report or not any(
+        key in report for key in ("advisories", "vulnerabilities")
+    ):
+        raise ValueError("Missing audit result")
+    for key in ("advisories", "vulnerabilities"):
+        if key not in report:
+            continue
+        records = report[key]
+        if not isinstance(records, dict):
+            raise ValueError("Invalid advisory collection")
+        for value in records.values():
+            if not isinstance(value, dict) or value.get("severity") not in {
+                "info", "low", "moderate", "high", "critical"
+            }:
+                raise ValueError("Invalid advisory severity")
     out: list[dict] = []
     for adv in (report.get("advisories") or {}).values():
         out.append({
@@ -71,35 +86,42 @@ def _collect_advisories(report: dict) -> list[dict]:
 
 
 def main() -> int:
+    output = REPO / "pnpm-audit-report.json"
+    try:
+        output.unlink(missing_ok=True)
+    except OSError:
+        print("Cannot retire stale audit evidence (failing closed)", file=sys.stderr)
+        return 2
     try:
         proc = subprocess.run(
             ["pnpm", "audit", "--json", "--audit-level", "high"],
             capture_output=True, text=True, check=False,
+            cwd=REPO, timeout=120,
         )
-    except FileNotFoundError:
-        print("pnpm not installed — run `corepack enable && pnpm install --frozen-lockfile` "
-              "first (failing closed)", file=sys.stderr)
+    except (OSError, subprocess.TimeoutExpired):
+        print("pnpm audit unavailable (failing closed)", file=sys.stderr)
         return 2
-    if not proc.stdout.strip():
-        # pnpm exits 0 + empty when no advisories; non-empty stderr only on tooling error
-        if proc.returncode not in (0, 1):
-            print(f"pnpm audit tooling error (rc={proc.returncode}):\n{proc.stderr}",
-                  file=sys.stderr)
-            return 2
-        print("pnpm audit: no advisories reported")
-        return 0
+    if proc.returncode not in (0, 1) or not proc.stdout.strip():
+        print("pnpm audit did not produce valid evidence (failing closed)", file=sys.stderr)
+        return 2
     try:
         report = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        print(f"pnpm audit emitted non-JSON: {e}\n{proc.stdout[:2000]}", file=sys.stderr)
+        advisories = _collect_advisories(report)
+        expected_failure = any(adv["severity"] in BLOCKING_SEVERITIES for adv in advisories)
+        if (proc.returncode == 1) != expected_failure:
+            raise ValueError("Audit exit status contradicts the result")
+        active_allow = _active_allowlist()
+    except (ValueError, TypeError, AttributeError, OSError, yaml.YAMLError):
+        print("pnpm audit evidence or allowlist invalid (failing closed)", file=sys.stderr)
         return 2
 
-    (REPO / "pnpm-audit-report.json").write_text(
-        json.dumps(report, indent=2), encoding="utf-8")
-
-    active_allow = _active_allowlist()
+    try:
+        output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except OSError:
+        print("Cannot persist audit evidence (failing closed)", file=sys.stderr)
+        return 2
     blocking: list[dict] = []
-    for adv in _collect_advisories(report):
+    for adv in advisories:
         if adv["severity"] not in BLOCKING_SEVERITIES:
             continue
         if adv["id"] in active_allow:

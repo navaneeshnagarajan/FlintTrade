@@ -4,6 +4,7 @@
  */
 
 import { create } from "zustand";
+import { isOperatorIncidentScopeCurrent, type OperatorIncidentScope } from "@/lib/operatorIncidentScope";
 import {
   classifyObservedFailure,
   type BrokerRejectSignal,
@@ -187,7 +188,9 @@ export function noteObservedFailure(input: {
   httpStatus: number | null;
   broker?: string | null;
   provenance?: "general" | "broker" | "order";
+  scope?: OperatorIncidentScope;
 }): void {
+  if (input.scope && !isOperatorIncidentScopeCurrent(input.scope)) return;
   const observed = classifyObservedFailure({
     message: input.message,
     httpStatus: input.httpStatus,

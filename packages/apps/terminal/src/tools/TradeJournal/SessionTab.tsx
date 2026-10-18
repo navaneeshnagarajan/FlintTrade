@@ -3,14 +3,14 @@
  *
  * Ported from the retired SessionStats widget (merge 2.12) with its provenance
  * semantics intact:
- *   - Live sources: today's fills paired into closed round trips via the shared
- *     FIFO pairing in ``lib/pnl.roundTripsFromTrades`` (the canonical realised
- *     P&L definition), and the order book for the status summary.
- *   - The disclosed sample renders ONLY when no real closed round trip exists
- *     (fresh session, explore mode, or no fills yet) — and then the whole tab,
- *     including the trade-log table, is sample. The original widget once
- *     rendered the sample table under a Live badge; that regression stays
- *     pinned in the tests.
+ *   - Installed Live/Practice: today's fills paired via the shared FIFO helper
+ *     in ``lib/pnl.roundTripsFromTrades``, with an independent order summary.
+ *     Unavailable reads never become zero success or example trades. Retained
+ *     same-scope evidence is explicitly stale when reads cannot refresh.
+ *   - Explicit Explore: fixed examples throughout the tab, irrespective of
+ *     installed caches. The global mode-honesty bar owns simulation disclosure.
+ *   - Fill restoration provenance survives pairing; submission ACKs are not
+ *     fills. This presentation does not wire native broker journal ingestion.
  *
  * Displays: session equity curve, order counts, win rate, max drawdown
  * (absolute ₹ from the equity peak), best/worst trade, hold/active/idle time
@@ -24,7 +24,8 @@ import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useTradebook } from "@/hooks/useTradebook";
 import { useOrders } from "@/hooks/useOrders";
-import { useModeStore } from "@/stores/modeStore";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import { useAccountQueryAvailability } from "@/hooks/useAccountQueryAvailability";
 import { roundTripsFromTrades } from "@/lib/pnl";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 
@@ -51,7 +52,7 @@ export interface OrderSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Sample data (disclosed — never shown once a real round trip closes)
+// Sample data (explicit Explore only; never an installed-data fallback)
 // ---------------------------------------------------------------------------
 
 export const SAMPLE_SESSION_TRADES: SessionTrade[] = [
@@ -201,12 +202,12 @@ function MiniEquity({ trades }: { trades: SessionTrade[] }) {
 // Order summary bar
 // ---------------------------------------------------------------------------
 
-function OrderBar({ summary }: { summary: OrderSummary }) {
+function OrderBar({ summary, stale = false }: { summary: OrderSummary; stale?: boolean }) {
   const { placed, filled, rejected, pending } = summary;
   return (
     <div
       className="flex items-center gap-3 flex-wrap"
-      aria-label={`Orders: ${placed} placed, ${filled} filled, ${rejected} rejected, ${pending} pending`}
+      aria-label={`${stale ? "Last available orders" : "Orders"}: ${placed} placed, ${filled} filled, ${rejected} rejected, ${pending} pending`}
     >
       {[
         { label: "Placed",   value: placed,   colour: "text-text-primary" },
@@ -229,23 +230,38 @@ function OrderBar({ summary }: { summary: OrderSummary }) {
 
 export function SessionTab() {
   const track = useTrackBehavior();
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const context = useAccountReadContext();
+  const isExplore = context.identity.mode === "explore";
 
   useEffect(() => {
     track("trade", "tool_view_trade_review_session");
   }, [track]);
 
-  // Live sources: today's fills (round trips via the shared FIFO pairing) and
-  // the order book (status summary). Both stay disabled in explore mode —
-  // explore renders the disclosed sample only, never a broker request.
-  const tradebookQuery = useTradebook({ enabled: !isExplore });
-  const ordersQuery = useOrders({ enabled: !isExplore });
+  // One captured scope binds both existing query owners. Query data may
+  // survive a same-scope error/disable, but cannot count as current evidence.
+  // Explore selects its own examples, not merely disabled installed queries.
+  const tradebookQuery = useTradebook({ enabled: !isExplore, context });
+  const ordersQuery = useOrders({ enabled: !isExplore, context });
+  const tradesStatus = useAccountQueryAvailability({
+    accountReadsEnabled: !isExplore && context.enabled,
+    hasData: tradebookQuery.data !== undefined,
+    fetchStatus: tradebookQuery.fetchStatus, isError: tradebookQuery.isError,
+    isLoading: tradebookQuery.isLoading, isStale: tradebookQuery.isStale,
+  });
+  const ordersStatus = useAccountQueryAvailability({
+    accountReadsEnabled: !isExplore && context.enabled,
+    hasData: ordersQuery.data !== undefined,
+    fetchStatus: ordersQuery.fetchStatus, isError: ordersQuery.isError,
+    isLoading: ordersQuery.isLoading, isStale: ordersQuery.isStale,
+  });
+  const tradesAvailable = isExplore || tradesStatus === "ready" || tradesStatus === "stale";
+  const ordersAvailable = isExplore || ordersStatus === "ready" || ordersStatus === "stale";
+  const tradesStale = !isExplore && tradesStatus === "stale";
+  const ordersStale = !isExplore && ordersStatus === "stale";
 
-  const liveTrades = useMemo(() => {
+  const accountTrades = useMemo(() => {
     const fills = tradebookQuery.data ?? [];
-    if (fills.length === 0) return null;
     const trips = roundTripsFromTrades(fills);
-    if (trips.length === 0) return null;
     return trips.map((t, index) => ({
       id: `RT${index + 1}`,
       symbol: t.symbol,
@@ -258,9 +274,8 @@ export function SessionTab() {
     }));
   }, [tradebookQuery.data]);
 
-  const liveOrderSummary = useMemo(() => {
+  const accountOrderSummary = useMemo(() => {
     const orders = ordersQuery.data ?? [];
-    if (orders.length === 0) return null;
     const status = (o: { status: string }) => o.status.toLowerCase();
     return {
       placed: orders.length,
@@ -270,13 +285,11 @@ export function SessionTab() {
     };
   }, [ordersQuery.data]);
 
-  const isLive = liveTrades !== null;
-  const sessionTrades = liveTrades ?? SAMPLE_SESSION_TRADES;
-  // A live session with an empty order book is zeros, not the Explore sample
-  // counts. The Mode honesty bar owns the Explore disclaimer.
-  const orderSummary = isLive
-    ? (liveOrderSummary ?? { placed: 0, filled: 0, rejected: 0, pending: 0 })
-    : (liveOrderSummary ?? SAMPLE_ORDER_SUMMARY);
+  const hasClosedTrades = !isExplore && accountTrades.length > 0;
+  const modeLabel = context.identity.mode === "practice" ? "Practice" : "Live";
+  const sessionTrades = isExplore ? SAMPLE_SESSION_TRADES : accountTrades;
+  // Only explicit Explore owns example counts. Empty installed books are zero.
+  const orderSummary = isExplore ? SAMPLE_ORDER_SUMMARY : accountOrderSummary;
 
   const metrics = useMemo(() => computeSessionMetrics(sessionTrades), [sessionTrades]);
   const idleMinutes = Math.max(0, metrics.sessionMinutes - metrics.activeMinutes);
@@ -288,21 +301,21 @@ export function SessionTab() {
       <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-surface-card border-b border-border-default">
         <Clock size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Today's Session</span>
-        {/* Provenance: Live only when today's tradebook produced at least
-            one CLOSED round trip; the disclosed sample renders otherwise
-            (fresh session, explore mode, or no fills yet). */}
-        {isLive && (
+        {/* The source mode is not determined by whether any fills closed. */}
+        {hasClosedTrades && tradesAvailable && (
           <span
-            className="px-1.5 py-0.5 text-xxs rounded border bg-profit/10 text-profit border-profit/30"
+            className={cn("px-1.5 py-0.5 text-xxs rounded border", context.identity.mode === "practice"
+              ? "bg-warning/10 text-warning border-warning/30"
+              : "bg-profit/10 text-profit border-profit/30")}
             role="status"
-            aria-label="Showing statistics computed from today's real closed trades"
+            aria-label={`${modeLabel} session statistics`}
           >
-            Live
+            {modeLabel}{tradesStale ? " · stale" : ""}
           </span>
         )}
         <div className="flex-1" />
-        <span className={cn("text-sm font-bold font-mono tabular-nums", metrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
-          {fmtPnl(metrics.totalPnl)}
+        <span className={cn("text-sm font-bold font-mono tabular-nums", !tradesAvailable ? "text-text-muted" : metrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
+          {tradesAvailable ? fmtPnl(metrics.totalPnl) : "—"}
         </span>
       </div>
 
@@ -313,7 +326,14 @@ export function SessionTab() {
           <p id="ss-equity" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1">
             Session Equity
           </p>
-          <MiniEquity trades={sessionTrades} />
+          {tradesStale && (
+            <p role="status" className="text-xs text-warning">Trades stale — showing the last available fills.</p>
+          )}
+          {tradesAvailable ? <MiniEquity trades={sessionTrades} /> : (
+            <p role="status" className="text-xs text-text-muted">
+              {tradesStatus === "loading" ? "Loading trades…" : "Trades unavailable."}
+            </p>
+          )}
         </section>
 
         {/* Orders */}
@@ -324,9 +344,17 @@ export function SessionTab() {
             </p>
             
           </div>
-          <OrderBar summary={orderSummary} />
+          {ordersStale && (
+            <p role="status" className="text-xs text-warning">Orders stale — showing the last available order book.</p>
+          )}
+          {ordersAvailable ? <OrderBar summary={orderSummary} stale={ordersStale} /> : (
+            <p role="status" className="text-xs text-text-muted">
+              {ordersStatus === "loading" ? "Loading orders…" : "Orders unavailable."}
+            </p>
+          )}
         </section>
 
+        {tradesAvailable && <>
         {/* Key stats grid */}
         <section aria-labelledby="ss-stats">
           <p id="ss-stats" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1">
@@ -455,10 +483,11 @@ export function SessionTab() {
           </table>
           {sessionTrades.length === 0 && (
             <p className="text-xxs text-text-muted py-2 text-center">
-              No round trips closed yet today.
+              {tradesStale ? "No closed round trips in the last available fills." : "No round trips closed yet today."}
             </p>
           )}
         </section>
+        </>}
       </div>
     </div>
   );

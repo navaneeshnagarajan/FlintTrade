@@ -1,0 +1,136 @@
+{
+  "cases": [
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 access grant revoke actual Testing Paper identity with unchanged live selection"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 access grant revoke actual Testing Paper identity with unchanged practice selection"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 exact rights-source selected read preview confirmation independent GET"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 exact rights-output selected read preview confirmation independent GET"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 exact evaluation selected read preview confirmation independent GET"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 exact candidate selected read preview confirmation independent GET"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 exact training-backend selected read preview confirmation independent GET"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 compact long document review keyboard cancel"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 mismatched reviewed rights refuse"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 learning dataset nine explicit bounds separate consent and existing binding"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 binding refusal expired retains no extra authority"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 binding refusal revoked retains no extra authority"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 binding refusal expanded retains no extra authority"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 history selector blank omission"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 history selector exact owned scope"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 history selector malformed refusal"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real preview retires across run without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real preview retires across Activity without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real ack retires across run without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real ack retires across Activity without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real readback retires across run without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 held real readback retires across Activity without replay"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 protection not issued compact review and keyboard cancel"
+    },
+    {
+      "file": "run-policy-integrated.spec.ts",
+      "name": "R46 protection custody unavailable"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 malformed ACK actual core write one independent read never verified success"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 real decoded GET delivery after run retirement"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 real decoded GET delivery after Activity retirement"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 real decoded GET delivery after run retirement after real confirmation"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 real decoded GET delivery after Activity retirement after real confirmation"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 preview-auth scoped backtest refused by unchanged normal core"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 genuine issued auth replacement retires reviewed private draft"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 genuine backend replacement retires reviewed private draft"
+    },
+    {
+      "file": "run-policy-remaining.spec.ts",
+      "name": "R62 protection requires canonical owned entry negative not positive qualification"
+    }
+  ]
+}

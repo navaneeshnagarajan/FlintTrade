@@ -167,12 +167,18 @@ export interface FlintHistogramChart<
 
 export const FLINT_VOLUME_SCALE_OPTIONS = {
   scaleMargins: { top: 0.85, bottom: 0 },
+  // Volume magnitude stays in the histogram. Axis ticks would sit on the
+  // same edge as the lowest price.
+  ticksVisible: false,
+  borderVisible: false,
 }
 
 export const FLINT_DEFAULT_VOLUME_OPTIONS = {
   priceFormat: { type: "volume" },
   priceScaleId: "vol",
   color: "rgba(107, 107, 120, 0.28)",
+  lastValueVisible: false,
+  priceLineVisible: false,
 } as const
 
 export const FLINT_TRANSPARENT_CHART_LAYOUT = {
@@ -363,12 +369,27 @@ export function splitFlintChartTheme(theme: FlintLightweightChartTheme): {
   }
 }
 
+const TIME_SCALE_ZOOM_KEYS = [
+  "barSpacing",
+  "minBarSpacing",
+  "maxBarSpacing",
+  "rightOffset",
+  "rightOffsetPixels",
+] as const
+
 export function applyFlintChartTheme<TChart extends FlintRuntimeChartLike>(
   chart: TChart,
   theme: FlintLightweightChartTheme,
   options: FlintChartShellOptions = {},
 ): void {
-  chart.applyOptions(createFlintChartOptions(theme, options))
+  const chartOptions = createFlintChartOptions(theme, options)
+  // A theme refresh repaints colours and type. Re-applying bar spacing
+  // pins the series back to the 7px default and leaves a wide plot mostly empty.
+  const timeScale = chartOptions.timeScale
+  if (isRecord(timeScale)) {
+    for (const key of TIME_SCALE_ZOOM_KEYS) delete timeScale[key]
+  }
+  chart.applyOptions(chartOptions)
 }
 
 export function applyFlintCandlestickTheme<

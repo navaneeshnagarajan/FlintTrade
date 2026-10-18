@@ -18,6 +18,7 @@ import {
   INTERMEDIATE_WIDGET_IDS,
   useCommandRegistry,
 } from "../useCommandRegistry";
+import { APPS } from "@/layout/appCatalog";
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 import { widgetCatalog } from "@/layout/widgetFactory";
 
@@ -75,30 +76,42 @@ describe("useCommandRegistry — skill-tier widget gates", () => {
   });
 });
 
-describe("useCommandRegistry — Home navigation (Slice 2)", () => {
-  it("includes nav:home Go to Home with Alt+H before nav:trade", () => {
+// Independent product contract, not APPS.map compared with itself.
+const approvedApps = [
+  ["terminal", "Terminal", "/terminal"], ["testing", "Testing", "/testing"],
+  ["portfolio", "Portfolio", "/portfolio"], ["automation", "Automation", "/automation"],
+  ["reports", "Reports", "/reports"], ["learn", "Learn", "/learn"],
+  ["brokers", "Brokers", "/brokers"], ["settings", "Settings", "/settings"],
+  ["system", "System", "/system"],
+] as const;
+
+describe("useCommandRegistry — unified app navigation", () => {
+  it("exposes the complete approved catalogue in canonical order with the Terminal shortcut", () => {
     const { result } = renderHook(() => useCommandRegistry());
-    const home = result.current.commands.find((c) => c.id === "nav:home");
-    const trade = result.current.commands.find((c) => c.id === "nav:trade");
-    expect(home).toBeDefined();
-    expect(home?.title).toBe("Go to Home");
-    expect(home?.shortcut).toBe("Alt+H");
-    expect(home?.category).toBe("navigate");
-    expect(trade).toBeDefined();
-    expect(trade?.shortcut).toBe("Alt+T");
-    const ids = result.current.commands.map((c) => c.id);
-    expect(ids.indexOf("nav:home")).toBeLessThan(ids.indexOf("nav:trade"));
+    expect(APPS.map(({ id, name, path }) => [id, name, path])).toEqual(approvedApps);
+    const navigation = result.current.commands.filter(command => command.category === "navigate");
+    expect(navigation.map(({ id, title, shortcut }) => [id, title, shortcut])).toEqual(
+      approvedApps.map(([id, name]) => [`nav:${id}`, `Go to ${name}`, id === "terminal" ? "Alt+T" : undefined]),
+    );
+    expect(navigation.map(command => command.id)).toEqual(APPS.map(app => `nav:${app.id}`));
+    expect(result.current.commands.some(command => command.id === "nav:home" || command.id === "nav:trade")).toBe(false);
   });
 
-  it("nav:home dispatches flinttrade:navigate to /home", () => {
+  it("dispatches each canonical app action to its exact approved path", () => {
     const { result } = renderHook(() => useCommandRegistry());
-    const home = result.current.commands.find((c) => c.id === "nav:home");
     const listener = vi.fn();
     window.addEventListener("flinttrade:navigate", listener);
-    home?.action();
-    expect(listener).toHaveBeenCalledTimes(1);
-    const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path?: string }>;
-    expect(event.detail.path).toBe("/home");
-    window.removeEventListener("flinttrade:navigate", listener);
+    try {
+      for (const [index, [id, , path]] of approvedApps.entries()) {
+        const command = result.current.commands.find(candidate => candidate.id === `nav:${id}`);
+        expect(command).toBeDefined();
+        command!.action();
+        expect(listener).toHaveBeenCalledTimes(index + 1);
+        const event = listener.mock.calls[index][0] as CustomEvent<{ path: string }>;
+        expect(event.detail).toEqual({ path });
+      }
+    } finally {
+      window.removeEventListener("flinttrade:navigate", listener);
+    }
   });
 });

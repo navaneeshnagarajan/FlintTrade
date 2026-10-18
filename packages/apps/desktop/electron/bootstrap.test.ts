@@ -72,6 +72,7 @@ afterAll(async () => {
 const revision = "a".repeat(40);
 const nodeBytes = Buffer.from("pinned node archive");
 const uvBytes = Buffer.from("pinned uv archive");
+const pnpmBytes = Buffer.from("pinned native pnpm archive");
 const sha256 = (value: Buffer) => createHash("sha256").update(value).digest("hex");
 const manifest: BootstrapToolManifest = {
   schemaVersion: 1,
@@ -82,38 +83,47 @@ const manifest: BootstrapToolManifest = {
         fingerprint: "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
         keySha256: "3".repeat(64),
         sha256: "4".repeat(64),
-        url: "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt.sig",
+        url: "https://nodejs.org/dist/v26.11.1/SHASUMS256.txt.sig",
       },
-      url: "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt",
+      url: "https://nodejs.org/dist/v26.11.1/SHASUMS256.txt",
     },
-    uv: { sha256: "2".repeat(64), url: "https://github.com/astral-sh/uv/releases/download/0.11.16/sha256.sum" },
+    uv: { sha256: "2".repeat(64), url: "https://github.com/astral-sh/uv/releases/download/0.13.1/sha256.sum" },
+    pnpm: { sha256: "5".repeat(64), snapshot: "checksums/pnpm-12.11.2-assets.json", sources: ["https://registry.npmjs.org/pnpm/12.11.2"] },
   },
   node: {
-    version: "22.23.2",
+    version: "26.11.1",
     assets: {
       "darwin-arm64": {
         archive: "tar.gz",
-        executable: "node-v22.23.2-darwin-arm64/bin/node",
+        executable: "node-v26.11.1-darwin-arm64/bin/node",
         sha256: sha256(nodeBytes),
-        url: "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz",
+        url: "https://nodejs.org/dist/v26.11.1/node-v26.11.1-darwin-arm64.tar.gz",
       },
       "win32-x64": {
         archive: "zip",
-        executable: "node-v22.23.2-win-x64/node.exe",
+        executable: "node-v26.11.1-win-x64/node.exe",
         sha256: sha256(nodeBytes),
-        url: "https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip",
+        url: "https://nodejs.org/dist/v26.11.1/node-v26.11.1-win-x64.zip",
       },
     },
   },
-  pnpm: { integrity: "sha512-test", packageManager: "pnpm@10.34.5+sha512.test", version: "10.34.5" },
+  pnpm: {
+    integrity: "sha512-test", packageManager: "pnpm@12.11.2+sha512.test", version: "12.11.2",
+    assets: Object.fromEntries(["darwin-arm64", "win32-x64"].map((target) => [target, {
+      archive: "tar.gz" as const,
+      executable: target === "win32-x64" ? "package/pnpm.exe" : "package/pnpm",
+      sha256: sha256(pnpmBytes),
+      url: `https://registry.npmjs.org/@pnpm/exe.${target}/-/exe.${target}-12.11.2.tgz`,
+    }])),
+  },
   uv: {
-    version: "0.11.16",
+    version: "0.13.1",
     assets: {
       "darwin-arm64": {
         archive: "tar.gz",
         executable: "uv-aarch64-apple-darwin/uv",
         sha256: sha256(uvBytes),
-        url: "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-apple-darwin.tar.gz",
+        url: "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-aarch64-apple-darwin.tar.gz",
       },
       "win32-x64": {
         archive: "zip",
@@ -123,7 +133,7 @@ const manifest: BootstrapToolManifest = {
         // nested path, so it agreed with the bug instead of catching it.
         executable: "uv.exe",
         sha256: sha256(uvBytes),
-        url: "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip",
+        url: "https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-pc-windows-msvc.zip",
       },
     },
   },
@@ -162,7 +172,7 @@ async function writeRepositoryShape(
   }
   await writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@10.34.5+sha512.test" }),
+    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@12.11.2+sha512.test" }),
   );
   for (const file of ["pyproject.toml", "uv.lock", "pnpm-lock.yaml"]) await writeFile(path.join(root, file), file);
   await writeFile(path.join(root, "packages", "apps", "terminal", "package.json"), '{"name":"@flinttrade/terminal"}');
@@ -361,6 +371,7 @@ async function crashBootstrapCommandOwner(input: {
 }
 
 interface FixtureOptions {
+  pnpmFault?: "checksum" | "version" | "linked-executable";
   addedArchiveSource?: boolean;
   abortArchiveKind?: "tar.gz" | "zip";
   badArchiveShape?: boolean;
@@ -398,6 +409,7 @@ interface FixtureOptions {
   uncontainedOnAbort?: boolean;
   onExtract?: BootstrapDependencies["extractArchive"];
   virtualEnvironment?: "missing" | "nonrelocatable" | "relocatable";
+  virtualEnvironmentUv?: string;
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -649,17 +661,17 @@ async function fixture(options: FixtureOptions = {}) {
           {
             name: "uv --version",
             matches: toolName === "uv" && versionProbe && invocation.args.length === 1,
-            stdout: "uv 0.11.16 (135a36367 2026-05-21 aarch64-apple-darwin)\n",
+            stdout: "uv 0.13.1 (synthetic-test-build)\n",
           },
           {
             name: "node --version",
             matches: toolName === "node" && versionProbe && invocation.args.length === 1,
-            stdout: "v22.23.2\n",
+            stdout: "v26.11.1\n",
           },
           {
-            name: "node <corepack.js> --version",
-            matches: toolName === "node" && versionProbe && invocation.args.length > 1,
-            stdout: "0.34.6\n",
+            name: "pnpm --version",
+            matches: toolName === "pnpm" && versionProbe && invocation.args.length === 1,
+            stdout: options.pnpmFault === "version" ? "12.11.20\n" : "12.11.2\n",
           },
         ].filter((probe) => probe.matches);
         // The production code turns any rejected command into a generic
@@ -676,12 +688,13 @@ async function fixture(options: FixtureOptions = {}) {
           );
         }
         if (toolProbes[0]) {
-          if (toolProbes[0].name.includes("corepack") && !/(?:^|[\\/])corepack\.js$/.test(invocation.args[0] ?? "")) {
-            failStub(
-              `The Corepack probe stub was handed ${invocation.args[0]}, which is not the confined corepack.js path.`,
-            );
-          }
           return { contained: true, exitCode: 0, stderr: "", stdout: toolProbes[0].stdout };
+        }
+        if (/^python(?:\.exe)?$/.test(path.basename(invocation.command))) {
+          return { contained: true, exitCode: 0, stderr: "", stdout: JSON.stringify({
+            version: "3.14.8",
+            base_executable: path.join(root, "tools", "python", "cpython-3.14.8", "bin", platform === "win32" ? "python.exe" : "python3.14"),
+          }) };
         }
         if (/^pytest(?:\.exe)?$/.test(path.basename(invocation.command))) {
           const environmentRoot = path.dirname(path.dirname(invocation.command));
@@ -737,15 +750,26 @@ async function fixture(options: FixtureOptions = {}) {
           if (virtualEnvironment !== "missing") {
             const scripts = path.join(candidate, ".venv", platform === "win32" ? "Scripts" : "bin");
             const pytest = path.join(scripts, platform === "win32" ? "pytest.exe" : "pytest");
-            await mkdir(scripts, { recursive: true });
+            await mkdir(scripts, { recursive: true, mode: 0o700 });
+            const managedPythonHome = path.join(root, "tools", "python", "cpython-3.14.8", "bin");
+            await mkdir(managedPythonHome, { recursive: true, mode: 0o700 });
+            const managedPython = path.join(managedPythonHome, platform === "win32" ? "python.exe" : "python3.14");
+            await writeFile(managedPython, "synthetic managed interpreter");
+            await chmod(managedPython, 0o755);
+            const venvPython = path.join(scripts, platform === "win32" ? "python.exe" : "python");
+            if (platform === "win32") await writeFile(venvPython, "synthetic Windows launcher");
+            else await symlink(managedPython, venvPython);
             await writeFile(
               path.join(candidate, ".venv", "pyvenv.cfg"),
-              virtualEnvironment === "relocatable" ? "relocatable = true\n" : `home = ${candidate}/managed-python\n`,
+              virtualEnvironment === "relocatable"
+                ? `home = ${managedPythonHome}\nuv = ${options.virtualEnvironmentUv ?? "0.13.1"}\nversion_info = 3.14.8\nrelocatable = true\n`
+                : `home = ${candidate}/managed-python\n`,
+              { mode: 0o600 },
             );
             await writeFile(pytest, platform === "win32" ? "pytest launcher" : "#!/bin/sh\nexit 0\n");
             if (platform !== "win32") await chmod(pytest, 0o755);
           }
-          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 10.34.5 dependencies", "stdout");
+          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 12.11.2 dependencies", "stdout");
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tbuilding-terminal\t84\tBuilding the terminal for production", "stdout");
           return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
@@ -762,7 +786,11 @@ async function fixture(options: FixtureOptions = {}) {
       async file(url, destination) {
         downloads.push(url);
         downloadDestinations.push(destination);
-        const bytes = url.includes("uv-") ? (options.badUvChecksum ? Buffer.from("tampered") : uvBytes) : nodeBytes;
+        const bytes = url.includes("uv-")
+          ? (options.badUvChecksum ? Buffer.from("tampered") : uvBytes)
+          : url.includes("@pnpm/")
+            ? (options.pnpmFault === "checksum" ? Buffer.from("tampered pnpm") : pnpmBytes)
+            : nodeBytes;
         await mkdir(path.dirname(destination), { recursive: true });
         await writeFile(destination, bytes);
         return {
@@ -820,21 +848,21 @@ async function fixture(options: FixtureOptions = {}) {
           await mkdir(path.dirname(executable), { recursive: true });
           await writeFile(executable, "node");
           await chmod(executable, 0o755);
-          const corepack =
-            platform === "win32"
-              ? path.join(destination, "node-v22.23.2-win-x64", "node_modules", "corepack", "dist", "corepack.js")
-              : path.join(
-                  destination,
-                  "node-v22.23.2-darwin-arm64",
-                  "lib",
-                  "node_modules",
-                  "corepack",
-                  "dist",
-                  "corepack.js",
-                );
-          await mkdir(path.dirname(corepack), { recursive: true });
-          await writeFile(corepack, "corepack");
-          return [manifest.node.assets[target]!.executable, path.relative(destination, corepack)];
+          // Current official Node archives do not bundle Corepack.
+          return [manifest.node.assets[target]!.executable];
+        }
+        if (name.startsWith("exe.")) {
+          const executable = path.join(destination, manifest.pnpm.assets[target]!.executable);
+          await mkdir(path.dirname(executable), { recursive: true });
+          if (options.pnpmFault === "linked-executable") {
+            const outside = path.join(root, "outside-pnpm");
+            await writeFile(outside, "foreign");
+            await symlink(outside, executable);
+            return [manifest.pnpm.assets[target]!.executable];
+          }
+          await writeFile(executable, "native pnpm");
+          await chmod(executable, 0o755);
+          return [manifest.pnpm.assets[target]!.executable];
         }
         const extracted = stripExpectedRoot ? destination : path.join(destination, `FlintTrade-${revision}`);
         await writeRepositoryShape(extracted, false);
@@ -972,6 +1000,66 @@ afterEach(async () => {
 });
 
 describe("first-run source bootstrap", () => {
+  it.each(["3.12.0", "3.14.7", "3.15.0", "duplicate", "alias", "outside-home", "linked-config", "wrong-home-patch", "mode-drift", "linked-python"])(
+    "refuses non-current managed environment %s without rebuilding or executing it",
+    async (fault) => {
+      const test = await fixture();
+      await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+      const config = path.join(test.activeSource, ".venv", "pyvenv.cfg");
+      const original = await readFile(config, "utf8");
+      let changed = original;
+      if (fault.startsWith("3.")) changed = original.replace("3.14.8\nrelocatable", `${fault}\nrelocatable`);
+      if (fault === "duplicate") changed += "version_info = 3.14.8\n";
+      if (fault === "alias") changed = original.replace("version_info", "Version");
+      if (fault === "outside-home") changed = original.replace(/^home = .*$/m, `home = ${test.root}`);
+      if (fault === "wrong-home-patch") {
+        const wrong = path.join(test.root, "tools", "python", "cpython-3.12.0", "bin");
+        await mkdir(wrong, { recursive: true });
+        changed = original.replace(/^home = .*$/m, `home = ${wrong}`);
+      }
+      if (fault === "mode-drift") await chmod(path.join(test.activeSource, ".venv"), 0o777);
+      if (fault === "linked-python") {
+        const python = path.join(test.activeSource, ".venv", "bin", "python");
+        await rm(python);
+        await symlink("/bin/sh", python);
+      }
+      if (fault === "linked-config") {
+        const target = path.join(test.activeSource, ".venv", "alternate.cfg");
+        await rename(config, target);
+        await symlink(target, config);
+      } else await writeFile(config, changed);
+      const beforeCalls = test.calls.length;
+      const beforeBuilds = test.builtCandidates.length;
+      await expect(test.controller.start()).resolves.toMatchObject({ ok: false });
+      expect(test.builtCandidates).toHaveLength(beforeBuilds);
+      expect(test.calls.slice(beforeCalls).some((call) => /^pytest(?:\.exe)?$/.test(path.basename(call.command)))).toBe(false);
+      expect(await readFile(config, "utf8")).toBe(fault === "linked-config" ? original : changed);
+    },
+  );
+
+  it("refuses a runtime that disagrees with exact managed configuration", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const originalRun = test.dependencies.command.run;
+    test.dependencies.command.run = async (invocation) => {
+      if (path.basename(invocation.command) === "python") {
+        return { contained: true, exitCode: 0, stderr: "", stdout: JSON.stringify({ version: "3.14.7" }), stdoutTruncated: false, stderrTruncated: false };
+      }
+      return originalRun(invocation);
+    };
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: false });
+  });
+
+  it("reuses an exact managed Python 3.14.8 environment without a second build", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const before = await readFile(path.join(test.activeSource, ".venv", "pyvenv.cfg"));
+    const builds = test.builtCandidates.length;
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    expect(test.builtCandidates).toHaveLength(builds);
+    expect(await readFile(path.join(test.activeSource, ".venv", "pyvenv.cfg"))).toEqual(before);
+  });
+
   it("builds a Git candidate with frozen locks and promotes only the commit-bound result", async () => {
     const test = await fixture();
     const result = await test.controller.start();
@@ -992,8 +1080,8 @@ describe("first-run source bootstrap", () => {
     const buildCall = test.calls.find((call) => call.command === "/bin/sh");
     expect(buildCall?.args[0]).toMatch(/resources\/bootstrap\/flinttrade-bootstrap\.sh$/);
     expect(buildCall?.args[1]).toMatch(/FlintTrade\.candidate-1-[0-9a-f-]{36}$/);
-    expect(buildCall?.args.at(-1)).toBe("10.34.5");
-    expect(buildCall?.args.some((argument) => argument.endsWith("corepack.js"))).toBe(true);
+    expect(buildCall?.args.at(-1)).toBe("12.11.2");
+    expect(buildCall?.args[4]).toBe(path.join(test.root, "tools", "pnpm", "12.11.2", "darwin-arm64", "package", "pnpm"));
     expect(test.calls.some((call) => call.command.endsWith("corepack.cmd"))).toBe(false);
     expect(test.calls.some((call) => /cargo/i.test([call.command, ...call.args].join(" ")))).toBe(false);
   });
@@ -1045,6 +1133,15 @@ describe("first-run source bootstrap", () => {
       path.join(test.builtCandidates[0]!, ".venv", "bin", "pytest"),
       path.join(test.activeSource, ".venv", "bin", "pytest"),
     ]);
+  });
+
+  it.each(["0.13.0", "0.13.2"])("refuses staged uv metadata from %s", async (virtualEnvironmentUv) => {
+    const test = await fixture({ virtualEnvironmentUv });
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/Managed Python 3\.14\.8 is required/),
+      ok: false,
+    });
+    expect(await exists(test.activeSource)).toBe(false);
   });
 
   it.each(["darwin", "win32"] as const)(
@@ -1205,12 +1302,12 @@ describe("first-run source bootstrap", () => {
       `${test.activeSource}.candidate-8.unpack`,
       `${test.activeSource}.candidate-9-${randomUUID()}`,
       `${test.activeSource}.candidate-10-${randomUUID()}.unpack-${randomUUID()}`,
-      path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64.extracting-9"),
+      path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64.extracting-9"),
       path.join(
         test.root,
         "tools",
         "uv",
-        "0.11.16",
+        "0.13.1",
         `darwin-arm64.extracting-10-${randomUUID()}`,
       ),
       path.join(
@@ -1411,13 +1508,17 @@ describe("first-run source bootstrap", () => {
     await writeFile(sourceArchive, "foreign-source");
     await writeFile(uvArchive, "foreign-uv");
     await writeFile(nodeArchive, "foreign-node");
+    const pnpmArchive = path.join(toolDownloads, path.basename(new URL(manifest.pnpm.assets["darwin-arm64"]!.url).pathname));
+    await writeFile(pnpmArchive, "foreign-pnpm");
 
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true, provenance: "github-archive" });
 
     expect(await readFile(sourceArchive, "utf8")).toBe("foreign-source");
     expect(await readFile(uvArchive, "utf8")).toBe("foreign-uv");
     expect(await readFile(nodeArchive, "utf8")).toBe("foreign-node");
-    expect(test.downloadDestinations).toHaveLength(3);
+    expect(await readFile(pnpmArchive, "utf8")).toBe("foreign-pnpm");
+    expect(test.downloadDestinations).toHaveLength(4);
+    expect(test.downloadDestinations).not.toContain(pnpmArchive);
     expect(test.downloadDestinations).not.toContain(sourceArchive);
     expect(test.downloadDestinations).not.toContain(uvArchive);
     expect(test.downloadDestinations).not.toContain(nodeArchive);
@@ -1677,33 +1778,30 @@ describe("first-run source bootstrap", () => {
     });
   });
 
-  it("invokes Corepack JavaScript from the exact verified target layout", async () => {
+  it("invokes native pnpm from the exact verified target layout without Corepack", async () => {
     const test = await fixture();
-    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const corepackArgument = test.calls
-      .find((call) => call.command === "/bin/sh")
-      ?.args.find((argument) => argument.endsWith("corepack.js"));
-
-    expect(corepackArgument).toBe(
-      path.join(
-        test.root,
-        "tools",
-        "node",
-        "22.23.2",
-        "darwin-arm64",
-        "node-v22.23.2-darwin-arm64",
-        "lib",
-        "node_modules",
-        "corepack",
-        "dist",
-        "corepack.js",
-      ),
-    );
+    const result = await test.controller.start();
+    expect(result.ok, result.error).toBe(true);
+    const executable = path.join(test.root, "tools", "pnpm", "12.11.2", "darwin-arm64", "package", "pnpm");
+    expect(test.calls.find((call) => call.command === "/bin/sh")?.args[4]).toBe(executable);
+    expect(test.calls.some((call) => call.command === executable && call.args.join(" ") === "--version")).toBe(true);
+    expect(test.calls.some((call) => call.args.some((arg) => arg.includes("corepack")))).toBe(false);
   });
+
+  it.each(["checksum", "version", "linked-executable"] as const)(
+    "refuses native pnpm %s before source building or promotion", async (pnpmFault) => {
+      const test = await fixture({ pnpmFault });
+      const result = await test.controller.start();
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(pnpmFault === "checksum" ? /pnpm archive checksum/ : pnpmFault === "version" ? /pnpm executable.*version/ : /symlink|symbolic|confined|outside/i);
+      expect(test.builtCandidates).toEqual([]);
+      expect(await exists(test.activeSource)).toBe(false);
+    },
+  );
 
   it("fails closed without deleting a pre-existing unverified tool root", async () => {
     const test = await fixture();
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const sentinel = path.join(installRoot, "foreign-sentinel");
     await mkdir(installRoot, { recursive: true });
     await writeFile(sentinel, "foreign");
@@ -1719,7 +1817,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves a tool whose installed tree and marker were modified together", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     await writeFile(executable, "tampered");
@@ -1744,7 +1842,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves a tool whose verification marker is a symlink", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const externalMarker = path.join(test.root, "external-tool-marker.json");
     await writeFile(externalMarker, await readFile(markerPath));
@@ -1763,7 +1861,7 @@ describe("first-run source bootstrap", () => {
 
   it("keeps a partial marker write inside an unpromoted candidate and succeeds on retry", async () => {
     const test = await fixture({ toolMarkerWriteFailure: "once" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
 
     await expect(test.controller.start()).resolves.toMatchObject({
@@ -1783,7 +1881,7 @@ describe("first-run source bootstrap", () => {
 
   it("rejects an archive that claims FlintTrade's reserved internal tool marker", async () => {
     const test = await fixture({ toolReservedMarker: "file" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
 
     await expect(test.controller.start()).resolves.toMatchObject({
       error: expect.stringMatching(/reserved verification marker/i),
@@ -1794,7 +1892,7 @@ describe("first-run source bootstrap", () => {
 
   it("retries cleanly when the marker-bearing tool root was promoted before interruption", async () => {
     const test = await fixture({ toolPromotionFailure: "after" });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
 
     await expect(test.controller.start()).resolves.toMatchObject({
@@ -1813,7 +1911,7 @@ describe("first-run source bootstrap", () => {
   it("accepts the exact legacy sibling marker used by pre-release tool installs", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const internalMarker = path.join(installRoot, ".flinttrade-tool-verified.json");
     const legacyMarker = `${installRoot}.flinttrade-tool-verified.json`;
     await rename(internalMarker, legacyMarker);
@@ -1829,7 +1927,7 @@ describe("first-run source bootstrap", () => {
   it("fails closed and preserves an altered tool root whose verification marker is missing", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
-    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const installRoot = path.join(test.root, "tools", "uv", "0.13.1", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
     const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const originalExecutable = await readFile(executable);

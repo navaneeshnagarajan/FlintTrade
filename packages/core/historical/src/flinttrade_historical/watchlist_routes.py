@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, has_app_context, jsonify, request
 
 from .historify_jobs import STATUS_REFUSED, HistorifyJobManager
 from .watchlist import DownloadWatchlist
@@ -76,7 +76,12 @@ _job_manager: HistorifyJobManager | None = None
 
 
 def _get_job_manager() -> HistorifyJobManager:
-    """Return the module-level download job manager, creating it lazily."""
+    """Use the installed app's retained owner; standalone callers stay separate."""
+    if has_app_context() and "HISTORIFY_JOB_MANAGER" in current_app.config:
+        manager = current_app.config["HISTORIFY_JOB_MANAGER"]
+        if not isinstance(manager, HistorifyJobManager):
+            raise RuntimeError("Installed historical job owner unavailable")
+        return manager
     global _job_manager  # noqa: PLW0603
     if _job_manager is None:
         _job_manager = HistorifyJobManager()
@@ -226,7 +231,7 @@ def trigger_download() -> tuple[Any, int]:
     job = start_watchlist_download(from_date, to_date)
     if job is None:
         return jsonify({"status": "error", "message": "No enabled watchlist items to download"}), 400
-    status_code = 507 if job.status == STATUS_REFUSED else 202
+    status_code = 503 if job.error == "historical_owner_retired" else 507 if job.status == STATUS_REFUSED else 202
     return jsonify({"status": "success", "data": job.to_dict()}), status_code
 
 
@@ -255,19 +260,28 @@ def start_watchlist_download(from_date: date, to_date: date) -> Any | None:
         from flinttrade_core.broker_client import resolve_broker_client  # noqa: PLC0415
 
         from .historify import HistorifyDownloader  # noqa: PLC0415
-        from .pipeline import DataPipeline  # noqa: PLC0415
+        from .pipeline import DataPipeline, app_history_pipeline  # noqa: PLC0415
 
         client, close_client = resolve_broker_client(app_obj)
+        shared = app_history_pipeline(app_obj)
+        storage = shared if shared is not None else DataPipeline()
+        downloader = None
         try:
-            downloader = HistorifyDownloader(client, DataPipeline())
-            await downloader.download_symbols(
+            downloader = HistorifyDownloader(client, storage)
+            result = await downloader.download_symbols(
                 symbols,
                 intervals,
                 from_date,
                 to_date,
                 progress_callback=progress,
             )
+            if result.failed:
+                raise RuntimeError("Historical source unavailable or incomplete; download not complete")
         finally:
+            if downloader is not None:
+                downloader.close()
+            if shared is None:
+                storage.close()
             if close_client:
                 await client.close()
 

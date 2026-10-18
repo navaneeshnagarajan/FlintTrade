@@ -55,7 +55,7 @@ if [ ! -x "$VENV_PIP" ]; then
     echo "ERROR: $VENV_PIP is missing. Re-run infra/scripts/setup-production.sh so the unit venv exists."
     exit 1
 fi
-sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
+sudo "$VENV_PIP" install --require-hashes --only-binary=growwapi -r requirements.lock -q
 echo "Installing and attesting pinned broker SDKs..."
 sudo "$VENV_PYTHON" "$REPO_DIR/scripts/broker_sdk_environment.py" repair
 

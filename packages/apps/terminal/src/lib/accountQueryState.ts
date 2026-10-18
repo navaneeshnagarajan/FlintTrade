@@ -1,6 +1,32 @@
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
 
 export type AccountQueryFetchStatus = "fetching" | "paused" | "idle";
+export type AccountQueryAvailability = "loading" | "ready" | "stale" | "unavailable";
+
+export interface AccountQueryAvailabilityInput {
+  accountReadsEnabled: boolean;
+  fetchStatus: AccountQueryFetchStatus;
+  hasData: boolean;
+  isError: boolean;
+  isLoading: boolean;
+  isOnline: boolean;
+  isStale: boolean;
+}
+
+/**
+ * Presentation only: retain same-scope evidence, including genuine zero.
+ * Fresh cached evidence remains ready during a refetch; fetching alone does
+ * not expire it. Query isStale owns age/invalidation, without another clock.
+ * Offline, paused, disabled or failed reads cannot claim current evidence.
+ * Callers retire foreign/session data and select Explore samples separately.
+ */
+export function resolveAccountQueryAvailability({
+  accountReadsEnabled, fetchStatus, hasData, isError, isLoading, isOnline, isStale,
+}: AccountQueryAvailabilityInput): AccountQueryAvailability {
+  const unavailable = !accountReadsEnabled || !isOnline || isError || fetchStatus === "paused";
+  if (hasData) return unavailable || isStale ? "stale" : "ready";
+  return !unavailable && isLoading && fetchStatus === "fetching" ? "loading" : "unavailable";
+}
 
 interface AccountQueryUiInput {
   accountReadsEnabled: boolean;

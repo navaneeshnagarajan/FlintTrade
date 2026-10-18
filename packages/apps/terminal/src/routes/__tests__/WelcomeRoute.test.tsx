@@ -471,7 +471,7 @@ describe("WelcomeRoute", () => {
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeInTheDocument();
   });
 
-  it("logged-in trader continues to Trade (persona default)", async () => {
+  it("logged-in trader continues to Terminal through its compatibility entry", async () => {
     authState.status = "logged-in";
     settingsPersona.value = "trader";
     render(<WelcomeRoute />);
@@ -480,21 +480,21 @@ describe("WelcomeRoute", () => {
     });
   });
 
-  it("logged-in beginner continues to Home (persona default)", async () => {
+  it("logged-in beginner continues to Terminal through its compatibility entry", async () => {
     authState.status = "logged-in";
     settingsPersona.value = "beginner";
     render(<WelcomeRoute />);
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/home", { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith("/trade", { replace: true });
     });
   });
 
-  it("logged-in investor continues to Home (persona default)", async () => {
+  it("logged-in investor continues to Terminal through its compatibility entry", async () => {
     authState.status = "logged-in";
     settingsPersona.value = "investor";
     render(<WelcomeRoute />);
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/home", { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith("/trade", { replace: true });
     });
   });
 });

@@ -33,9 +33,11 @@ vi.mock("@/chrome/TopBarV2", () => ({
   default: () => <div data-testid="topbar">TopBar</div>,
 }));
 
-vi.mock("@/chrome/DockSidebar", () => ({
-  default: () => null,
+vi.mock("@/chrome/AppNavigation", () => ({
+  AppNavigation: () => <nav aria-label="Apps" />,
+  SystemStatusBar: () => <footer>System</footer>,
 }));
+vi.mock("@/routes/UnifiedAppsHost", () => ({ UnifiedAppsHost: () => null }));
 
 vi.mock("@/chrome/TickerBar", () => ({
   default: () => <div data-testid="ticker-strip">TickerStrip</div>,
@@ -127,26 +129,8 @@ vi.mock("@/hooks/useTradingStoreSync", () => ({
   useTradingStoreSync: vi.fn(),
 }));
 
-// Default: live mode (no banner). vi.hoisted so the variable is available in the
-// hoisted vi.mock factory.
-const { mockModeStore } = vi.hoisted(() => ({
-  mockModeStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ mode: "live" }),
-  ),
-}));
-
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: mockModeStore,
-}));
-
-vi.mock("@/stores/authStore", () => ({
-  useAuthStore: Object.assign(
-    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ status: "logged-in" }),
-    ),
-    { getState: () => ({ checkIdle: vi.fn(), touchActivity: vi.fn() }), setState: vi.fn() },
-  ),
-}));
+// Keep auth/mode hooks and imperative receipt guards on the same real stores.
+// Partial hook mocks cannot supply their subscription and retirement contract.
 
 // ---------------------------------------------------------------------------
 // Import after mocks
@@ -158,6 +142,10 @@ import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useTradingStore } from "@/stores/tradingStore";
+import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
+import { PRIMARY_NATIVE_ACCOUNT, PRIMARY_SCOPE } from "@/test-utils/accountQueryHarness";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appLayoutSource = () =>
@@ -193,9 +181,15 @@ function renderApp() {
 describe("AppLayout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ mode: "live" }),
-    );
+    useAuthStore.setState((state) => ({
+      ...useAuthStore.getInitialState(),
+      status: "logged-in",
+      token: "synthetic-app-layout-session",
+      username: "synthetic-operator",
+      sessionGeneration: state.sessionGeneration + 1,
+      lastActivity: Date.now(),
+    }));
+    useModeStore.getState().setMode("live");
     // Reset sessionStorage so DailyWelcome / small screen overlays don't interfere
     sessionStorage.clear();
     // Reset localStorage so tour state is fresh per test
@@ -210,14 +204,15 @@ describe("AppLayout", () => {
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     mockBrokerConnected.value = true;
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
-    useTradingStore.setState({ totalPnl: 0 });
+    useTradingStore.getState().resetSessionState();
+    useBrokerStore.getState().resetSessionState();
     mockLocation.pathname = "/trade";
   });
 
-  it("keeps the narrow-screen warning below the route's page heading level", () => {
+  it("keeps compact apps usable without a blocking desktop warning", () => {
     Object.defineProperty(window, "innerWidth", { value: 390, writable: true });
     renderApp();
-    expect(screen.getByRole("heading", { level: 2, name: "FlintTrade is designed for desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
@@ -228,7 +223,7 @@ describe("AppLayout", () => {
     expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
     expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
     // <main> landmark named after the route, matching its sidebar label
-    expect(screen.getByRole("main", { name: "Trade" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Terminal" })).toBeInTheDocument();
     // The shell leaves the single H1 to the route itself
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
@@ -245,9 +240,7 @@ describe("AppLayout", () => {
   });
 
   it("shows the Practice Mode line and leaves the incident slot empty", () => {
-    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ mode: "practice" }),
-    );
+    useModeStore.getState().setMode("practice");
 
     renderApp();
 
@@ -260,9 +253,7 @@ describe("AppLayout", () => {
   });
 
   it("shows the Explore Mode line and never an incident strip", () => {
-    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ mode: "explore" }),
-    );
+    useModeStore.getState().setMode("explore");
 
     renderApp();
 
@@ -299,7 +290,15 @@ describe("AppLayout", () => {
     useSettingsStore.setState({
       riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 5000 },
     });
-    useTradingStore.setState({ totalPnl: -2500 });
+    // The sync hook is mocked here: seed its complete scoped contract. A feed
+    // outage must not hide a known loss from this selected account's cache.
+    useBrokerStore.getState().setAccounts([PRIMARY_NATIVE_ACCOUNT]);
+    useBrokerStore.getState().setActiveAccount(brokerAccountKey(PRIMARY_NATIVE_ACCOUNT));
+    useTradingStore.setState({
+      scopeKey: PRIMARY_SCOPE,
+      positionsStatus: "stale",
+      totalPnl: -2500,
+    });
     renderApp();
 
     const strip = screen.getByTestId("incident-strip");
@@ -308,6 +307,24 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
       "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
+  });
+
+  it("does not promote another account's cached loss into the current Live risk banner", () => {
+    mockBrokerConnected.value = false;
+    useSettingsStore.setState({
+      riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 5000 },
+    });
+    // No account is selected. The old account's otherwise valid cached loss
+    // must not outrank the current disconnected-feed incident.
+    useTradingStore.setState({
+      scopeKey: PRIMARY_SCOPE,
+      positionsStatus: "stale",
+      totalPnl: -2500,
+    });
+    renderApp();
+
+    expect(screen.getByTestId("incident-strip")).toHaveAttribute("data-banner-kind", "feed_disconnected");
+    expect(screen.getByTestId("incident-strip")).not.toHaveTextContent(/Live risk/i);
   });
 
   it("hides the ticker strip on Compact desk until desk tools expand", () => {
@@ -342,9 +359,7 @@ describe("AppLayout", () => {
   });
 
   it("does not show the daily welcome card in explore mode", () => {
-    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ mode: "explore" }),
-    );
+    useModeStore.getState().setMode("explore");
 
     renderApp();
 

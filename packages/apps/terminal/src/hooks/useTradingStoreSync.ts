@@ -2,7 +2,8 @@ import { useEffect } from "react";
 
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
-import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import { useAccountQueryAvailability } from "@/hooks/useAccountQueryAvailability";
 import { useTradingStore } from "@/stores/tradingStore";
 
 /**
@@ -20,20 +21,31 @@ import { useTradingStore } from "@/stores/tradingStore";
  * forbids.
  */
 export function useTradingStoreSync(sessionEnabled = true): void {
-  const scopedAccountReadsEnabled = useAccountReadsEnabled();
-  const accountReadsEnabled = sessionEnabled && scopedAccountReadsEnabled;
-  const funds = useFunds({ enabled: accountReadsEnabled });
-  const positions = usePositions({ enabled: accountReadsEnabled });
+  const context = useAccountReadContext();
+  const canRetain = sessionEnabled && context.identity.mode !== "explore";
+  const accountReadsEnabled = sessionEnabled && context.enabled;
+  const funds = useFunds({ enabled: accountReadsEnabled, context });
+  const positions = usePositions({ enabled: accountReadsEnabled, context });
+  const fundsData = canRetain ? funds.data : undefined;
+  const positionsData = canRetain ? positions.data : undefined;
+  const fundsStatus = useAccountQueryAvailability({
+    accountReadsEnabled, hasData: fundsData !== undefined,
+    fetchStatus: funds.fetchStatus, isError: funds.isError,
+    isLoading: funds.isLoading, isStale: funds.isStale,
+  });
+  const positionsStatus = useAccountQueryAvailability({
+    accountReadsEnabled, hasData: positionsData !== undefined,
+    fetchStatus: positions.fetchStatus, isError: positions.isError,
+    isLoading: positions.isLoading, isStale: positions.isStale,
+  });
 
   useEffect(() => {
-    if (accountReadsEnabled && funds.data) {
-      useTradingStore.getState().updateFromFunds(funds.data);
-    }
-  }, [accountReadsEnabled, funds.data]);
-
-  useEffect(() => {
-    if (accountReadsEnabled && positions.data) {
-      useTradingStore.getState().updateFromPositions(positions.data);
-    }
-  }, [accountReadsEnabled, positions.data]);
+    useTradingStore.getState().syncAccountSnapshot({
+      scopeKey: sessionEnabled ? context.identity.scopeKey : null,
+      fundsStatus,
+      positionsStatus,
+      funds: fundsData,
+      positions: positionsData,
+    });
+  }, [sessionEnabled, context.identity.scopeKey, fundsData, positionsData, fundsStatus, positionsStatus]);
 }

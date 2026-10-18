@@ -343,6 +343,7 @@ function MetricCard({ metric }: { metric: RiskMetric }) {
       {/* Traffic light dot */}
       <div
         className={cn("w-2.5 h-2.5 rounded-full shrink-0", BAR_CLASSES[metric.level])}
+        role="img"
         aria-label={`${metric.level} status`}
       />
     </div>
@@ -377,7 +378,7 @@ function ProgressRow({
         </div>
         <div className="flex items-center gap-1.5">
           <span className={cn("font-mono tabular-nums text-xs font-medium", TEXT_CLASSES[level])}>{usedLabel}</span>
-          <span className="text-xs text-text-disabled">/ {maxLabel}</span>
+          <span className="text-xs text-text-muted">/ {maxLabel}</span>
           <Badge className={cn("text-xxs px-1 py-0 border", BADGE_CLASSES[level])}>
             {usagePct.toFixed(0)}%
           </Badge>
@@ -409,7 +410,7 @@ function UnavailableRow({
         <span className="text-text-disabled">{icon}</span>
         <span className="text-xs text-text-secondary">{label}</span>
       </div>
-      <span className="max-w-[65%] text-right text-xxs leading-relaxed text-text-disabled">
+      <span className="max-w-[65%] text-right text-xxs leading-relaxed text-text-muted">
         Unavailable: {detail}
       </span>
     </div>
@@ -441,7 +442,7 @@ function StatusBanner({ level, timestamp }: { level: TrafficLight; timestamp: st
       aria-label={`Overall risk status: ${STATUS_LABELS[level]}`}
     >
       <span>{STATUS_LABELS[level]}</span>
-      <span className="text-xxs font-normal opacity-70">{timestamp}</span>
+      <span className="text-xxs font-normal">{timestamp}</span>
     </div>
   );
 }
@@ -523,7 +524,12 @@ function RiskWidget() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2"
+        role="region"
+        aria-label="Risk details"
+        tabIndex={0}
+      >
         {!data ? (
           <div className="rounded border border-border-default bg-surface-card px-3 py-4 text-center text-xs text-text-muted" role="status">
             Connect a broker to load risk metrics
@@ -608,7 +614,7 @@ function RiskWidget() {
         {/* Local references; these values are not backend or broker enforcement.
             They are the same settingsStore.riskLimits values MTM Monitor plots. */}
         <div className="bg-surface-card rounded-lg border border-border-default px-3 py-2">
-          <p className="text-xxs text-text-disabled uppercase tracking-wider mb-1.5">Local Reference Values</p>
+          <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">Local Reference Values</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             {[
               ["Lot reference", String(riskLimits.maxPositionLots)],

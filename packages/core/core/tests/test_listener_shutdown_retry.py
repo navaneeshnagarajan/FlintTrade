@@ -144,6 +144,7 @@ async def test_normal_listener_successful_callback_is_shared_with_a_shorter_call
 
     completed = threading.Event()
     publish = threading.Event()
+    stop_started = asyncio.Event()
     runtimes: list[Any] = []
     listeners: list[Any] = []
     real_stop = app_module._FlaskServerOwner.stop
@@ -159,6 +160,7 @@ async def test_normal_listener_successful_callback_is_shared_with_a_shorter_call
 
     async def observe_runtime(runtime: Any, *, timeout: float | None = None) -> None:
         runtimes.append(runtime)
+        stop_started.set()
         await real_runtime_stop(runtime, timeout=timeout)
 
     monkeypatch.setattr(app_module._FlaskServerOwner, "stop", stop_listener)
@@ -167,6 +169,9 @@ async def test_normal_listener_successful_callback_is_shared_with_a_shorter_call
         normal.test_normal_factory_runtime_readiness_refusal_and_clean_stop(monkeypatch, offline_startup)
     )
     try:
+        # Do not charge factory startup and the HTTP control sequence against
+        # the listener callback's five-second observation budget.
+        await normal._wait_started(normal_control, stop_started)
         assert await asyncio.to_thread(completed.wait, 5)
         runtime = runtimes[0]
         listener = listeners[0]

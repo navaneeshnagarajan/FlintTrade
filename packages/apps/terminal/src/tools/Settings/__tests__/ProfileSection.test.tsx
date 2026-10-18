@@ -3,18 +3,21 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, renderHook, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { ProfileSection } from "../ProfileSection";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useFeatureGate } from "@/hooks/useFeatureGate";
+import { useSkillContent } from "@/hooks/useSkillContent";
+import { widgetCatalog } from "@/layout/widgetFactory";
 
 describe("ProfileSection", () => {
   beforeEach(() => {
     act(() => {
-      useSettingsStore.setState({ name: "Navaneesh", experience: "pro" });
+      useSettingsStore.setState({ name: "Example Operator", experience: "pro" });
       useModeStore.setState({ mode: "explore" });
       useConnectionStore.setState({ status: "disconnected" });
       useAuthStore.setState({ status: "unknown", username: null });
@@ -25,17 +28,30 @@ describe("ProfileSection", () => {
   afterEach(() => cleanup());
 
   it.each([["beginner", "Getting Started"], ["intermediate", "Confident"], ["pro", "Expert"], ["custom", "Custom"]] as const)(
-    "shows the shared label for %s", (experience, label) => {
+    "keeps discovery unrestricted and omits the retired %s experience label", (experience, label) => {
       act(() => useSettingsStore.setState({ experience }));
       render(<ProfileSection />);
-      expect(screen.getByText(label)).toBeVisible();
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+      expect(screen.queryByText(/skill & experience/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Operator display name")).toHaveValue("Example Operator");
+      const { result } = renderHook(() => ({
+        automation: useFeatureGate("route:automate"),
+        content: useSkillContent(),
+      }));
+      expect(result.current.automation).toBe("visible");
+      expect(new Set(result.current.content.availableWidgets)).toEqual(new Set(widgetCatalog.map(widget => widget.id)));
+      expect(result.current.content.availableTools).toContain("trade-journal");
+      expect(result.current.content.showAdvanced).toBe(true);
+      // Visibility is not trading authority or a login; existing gates stay.
+      expect(useModeStore.getState().mode).toBe("explore");
+      expect(useAuthStore.getState().status).toBe("unknown");
     },
   );
 
   it("renders the operator display name", () => {
     render(<ProfileSection />);
-    expect(screen.getByText("Navaneesh")).toBeInTheDocument();
-    expect(screen.getByLabelText("Operator display name")).toHaveValue("Navaneesh");
+    expect(screen.getByText("Example Operator")).toBeInTheDocument();
+    expect(screen.getByLabelText("Operator display name")).toHaveValue("Example Operator");
   });
 
   it("persists an edited display name to the settings store", () => {
@@ -68,22 +84,22 @@ describe("ProfileSection", () => {
   // operator is logged in, which the other tests never set, so they were
   // entirely unrendered/untested.
   it("renders Lock and Sign out actions when logged in", () => {
-    act(() => useAuthStore.setState({ status: "logged-in", username: "navaneesh" }));
+    act(() => useAuthStore.setState({ status: "logged-in", username: "Example Operator" }));
     render(<ProfileSection />);
-    expect(screen.getByText(/signed in as navaneesh/i)).toBeInTheDocument();
+    expect(screen.getByText(/signed in as Example Operator/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /lock now/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
   });
 
   it("locks the session from the Profile Manager", () => {
-    act(() => useAuthStore.setState({ status: "logged-in", username: "navaneesh" }));
+    act(() => useAuthStore.setState({ status: "logged-in", username: "Example Operator" }));
     render(<ProfileSection />);
     fireEvent.click(screen.getByRole("button", { name: /lock now/i }));
     expect(useAuthStore.getState().status).toBe("pin-required");
   });
 
   it("signs out from the Profile Manager", () => {
-    act(() => useAuthStore.setState({ status: "logged-in", username: "navaneesh" }));
+    act(() => useAuthStore.setState({ status: "logged-in", username: "Example Operator" }));
     render(<ProfileSection />);
     fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
     expect(useAuthStore.getState().status).toBe("logged-out");

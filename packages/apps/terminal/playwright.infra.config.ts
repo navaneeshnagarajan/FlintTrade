@@ -6,12 +6,12 @@ process.env["CI"] = "true";
 
 /**
  * Network-independent configuration for the fail-closed infrastructure tests.
- * Every HTTP request in the spec is intercepted by the synthetic registry, so
- * this configuration intentionally has no webServer or external service.
+ * Registry controls intercept their requests; native decoded-read controls own
+ * a test-scoped loopback listener. Neither needs a Vite application server.
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "infra-self-tests.spec.ts",
+  testMatch: ["infra-self-tests.spec.ts", "run-policy-negative-seams.spec.ts"],
   timeout: 30_000,
   fullyParallel: true,
   forbidOnly: true,

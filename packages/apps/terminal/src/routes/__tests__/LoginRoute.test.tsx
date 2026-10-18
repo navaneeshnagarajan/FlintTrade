@@ -936,6 +936,27 @@ describe("LoginRoute", () => {
     );
   });
 
+  it("shows cold authenticator recovery refusal without claiming password reset", async () => {
+    const fetchSpy = mockAuthFetch({ totpEnabled: false, onOther: url => {
+      if (url.endsWith("/forgot-password-otp")) return jsonResponse({ status: "success" });
+      if (url.endsWith("/reset-password-otp")) return jsonResponse({ status: "error", code: "authenticator_recovery_required" }, 409);
+      return jsonResponse({ status: "error" }, 500);
+    } });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+    fireEvent.click(screen.getByRole("button", { name: /forgot your password/i }));
+    fireEvent.change(screen.getByLabelText("Password reset email"), { target: { value: "operator@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send reset code/i }));
+    await screen.findByText("Enter reset code");
+    fireEvent.change(screen.getByLabelText("Password reset code"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "synthetic-new-password" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "synthetic-new-password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset password$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("authenticator_recovery_required");
+    expect(screen.getByRole("alert")).toHaveTextContent("unchanged");
+    expect(screen.queryByRole("heading", { name: /^Password reset$/ })).not.toBeInTheDocument();
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).includes("/reset-password-otp"))).toHaveLength(1);
+  });
+
   it("does not submit a password reset when confirmations differ", async () => {
     const fetchSpy = mockAuthFetch({
       totpEnabled: false,

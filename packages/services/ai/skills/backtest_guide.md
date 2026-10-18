@@ -1,78 +1,77 @@
 ---
 name: backtest_guide
 category: strategy
-description: How to use FlintTrade's backtest engine — data, metrics, walk-forward, pitfalls
+description: Run the selected FlintTrade strategy on provenance-bound history; interpret failures and evidence honestly
+version: 2
 ---
 # FlintTrade Backtest Guide
 
-## Data Pipeline
+## Choose the actual strategy interface
 
-Historical OHLCV data flows through the `historical` package:
-- Source: OpenChart (free, NSE), yfinance (fallback)
-- Storage: DuckDB at `~/.flinttrade/data/historical.duckdb`
-- Resolutions: 1m, 3m, 5m, 15m, 30m, 1h, 1D
-- Equity history: up to 20 years | F&O: up to 3 years (exchange limit)
-
-Fetch via `historical` package before running any backtest.
-
-## Strategy Structure
-
-A backtest strategy must implement:
-```python
-def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
-    # df has columns: open, high, low, close, volume
-    # Must return df with added column: signal (1=buy, -1=sell, 0=hold)
-    ...
-```
-
-Entry/exit rules must be vectorised (pandas/numpy). Avoid Python loops for performance.
-
-## Key Metrics
-
-| Metric | Good | Acceptable |
-|---|---|---|
-| Annual Return | > 25% | > 15% |
-| Sharpe Ratio | > 1.5 | > 1.0 |
-| Sortino Ratio | > 2.0 | > 1.2 |
-| Max Drawdown | < 15% | < 25% |
-| Win Rate | > 55% | > 45% |
-| Profit Factor | > 1.8 | > 1.3 |
-| Calmar Ratio | > 1.5 | > 0.8 |
-
-## Walk-Forward Testing
-
-Purpose: Detect overfitting. A strategy that only works on training data is useless.
-
-Steps:
-1. Split data: 70% in-sample (IS), 30% out-of-sample (OOS)
-2. Optimise parameters on IS only
-3. Apply optimised parameters to OOS without touching
-4. OOS Sharpe should be at least 70% of IS Sharpe
-
-Rolling walk-forward: repeat in 6-month windows, check consistency.
-
-## Monte Carlo Simulation
-
-Randomises trade order 1,000 times to estimate the true distribution of outcomes.
-- 5th percentile drawdown → worst realistic scenario
-- Use this for position sizing, not the average-case drawdown
-
-## Common Backtesting Pitfalls
-
-1. **Look-ahead bias** — using future data in signal calculation. Always use `.shift(1)`.
-2. **Survivorship bias** — testing only currently-listed stocks. Index constituent history matters.
-3. **Overfitting** — too many parameters, too short a test period. Rule: minimum 100 trades.
-4. **Ignoring slippage** — use 0.05% per trade for liquid stocks, 0.1%+ for small-caps.
-5. **Ignoring impact costs** — large orders move the market. Limit position size to <1% of daily volume.
-
-## Accessing the Backtest Engine
+`flinttrade_backtest.simulator.BacktestSimulator` accepts a `BacktestConfig`,
+then `run(strategy, bars)`. This surface consumes an engine `BaseStrategy`:
+`start`, `on_bar`, `generate_orders`, and `stop` are load-bearing callbacks.
+Do not substitute a `generate_signals` function or a different template interface.
+The backtest-template engine has its own `BaseBacktestStrategy` contract; use the
+engine matching the selected candidate, not a buy-and-hold replacement.
 
 ```python
-from packages.backtest_engine.src.simulator import BacktestSimulator
+from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
+from flinttrade_engine.strategy import BaseStrategy
 
-sim = BacktestSimulator(symbol="NIFTY", exchange="NSE_INDEX",
-                        start="2023-01-01", end="2024-12-31",
-                        interval="1D")
-results = sim.run(strategy_fn=generate_signals, initial_capital=100000)
-print(results.sharpe, results.max_drawdown)
+
+def evaluate_candidate(strategy: BaseStrategy, bars: list[dict], config: BacktestConfig):
+    result = BacktestSimulator(config).run(strategy, bars)
+    if result.error:
+        raise RuntimeError(result.error)
+    return result
 ```
+
+Supply previously authorised historical bars with `timestamp`, `open`, `high`,
+`low`, `close`, and `volume`. A simulator does not fetch history automatically.
+Keep source, venue, currency, calendar, adjustments, coverage and immutable dataset
+identity with the experiment. Missing history is unavailable, not a reason to
+silently switch providers or fabricate prices. Check the configured historical
+source's actual supported range; there is no universal years-of-history promise.
+
+## Freeze before measuring
+
+Record the exact candidate code and parameters, data manifest, split, simulator,
+cost model and acceptance policy. Define chronological development and held-out
+periods before optimisation. Purge overlapping labels and keep related examples
+in the same split. Never tune against the final-test labels or report training
+scores as out-of-sample performance. Historical as-of LLM prompts cannot remove
+knowledge acquired during pretraining; prospective frozen-candidate evidence is
+needed for economic conclusions.
+
+## Failed runs are failed evidence
+
+Check the returned error and completion evidence before storing scores. A failed
+callback, partial history or uncertain fill is not a successful zero-return run.
+Do not manufacture closing fills from unvisited bars. Keep failed trials and the
+original error; never replace a failed candidate with a baseline strategy.
+
+## Metrics and costs
+
+Report return, drawdown, turnover, exposure and risk-adjusted metrics with units,
+period, sample size and cost assumptions. Win rate alone does not establish
+profitability. Use source-appropriate commissions, taxes, spread, slippage,
+funding, borrow and impact assumptions; this guide supplies no universal numeric
+acceptance thresholds or profitable defaults. Absence of adequate evidence means
+no promotion, not an invented confidence score.
+
+## Resampling and robustness
+
+A permutation of fixed trade P&Ls changes path-dependent drawdowns but preserves
+the terminal P&L sum. It is not a distribution of possible terminal profits or
+proof of a worst realistic scenario. Use a statistically justified null for the
+advertised statistic; preserve dependence where relevant. Walk-forward must run
+the selected strategy and fit only on the permitted past. Test sensitivity to
+costs, gaps and regime changes without modifying sealed acceptance criteria.
+
+## Adoption is separate
+
+A backtest result does not grant trading authority. Qualification, prospective
+checks, current data rights and the exact run's unchanged account/time/risk grant
+remain necessary. Retain the incumbent and verify handover/rollback. Neither a
+skill update nor a trained model can increase limits or bypass gated execution.

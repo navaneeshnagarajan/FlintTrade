@@ -607,7 +607,6 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
         "disclosed_quantity": _order_quantity(getattr(order, "disclosed_quantity", 0),
                                               field="disclosed_quantity", allow_zero=True),
         "validity": _norm_place_validity(getattr(order, "validity", None)),
-        "symbol": str(getattr(order, "symbol", "")),
     }
     second_leg = tuple(getattr(order, field, None) for field in ("price1", "trigger_price1", "quantity1"))
     if any(value is not None for value in second_leg):

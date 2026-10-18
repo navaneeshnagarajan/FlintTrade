@@ -45,10 +45,10 @@ describe("fdc3 contexts", () => {
       .toEqual({ symbol: "GOLD", exchange: "MCX" });
   });
 
-  it("falls back to NSE for an external instrument context without the extension", () => {
+  it("refuses an ambiguous external instrument context without a venue", () => {
     expect(
       instrumentFromContext({ type: "fdc3.instrument", id: { ticker: "RELIANCE" } }),
-    ).toEqual({ symbol: "RELIANCE", exchange: "NSE" });
+    ).toBeNull();
   });
 
   it("rejects non-instrument and unusable contexts", () => {

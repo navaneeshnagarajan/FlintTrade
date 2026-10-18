@@ -95,6 +95,10 @@ def _hash_pin(pin: str) -> str:
     return pin_salt.hex() + ":" + pin_hash_bytes.hex()
 
 
+class AuthenticatorRecoveryRequired(RuntimeError):
+    """The existing authenticator cannot be safely rewrapped for recovery."""
+
+
 def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
     """Derive a Fernet key from the master password and salt via PBKDF2-HMAC-SHA256.
 
@@ -433,6 +437,7 @@ class AuthService:
 
         if hasattr(self, "_totp_secret_cache"):
             delattr(self, "_totp_secret_cache")
+        self._totp_reset_material = None
 
         logger.info("Account fully reset via setup-wizard escape hatch")
 
@@ -507,6 +512,7 @@ class AuthService:
 
         # Cache the TOTP secret in memory for immediate use
         self._totp_secret_cache = totp_secret
+        self._totp_reset_material = (encrypted, totp_secret)
 
         logger.info("Account created for %s", username)
         return backup_codes
@@ -566,6 +572,7 @@ class AuthService:
         try:
             plaintext = fernet.decrypt(encrypted).decode("utf-8")
             self._totp_secret_cache = plaintext
+            self._totp_reset_material = (encrypted, plaintext)
         except InvalidToken:
             if not self._legacy_totp_fallback_enabled():
                 logger.warning(
@@ -626,6 +633,7 @@ class AuthService:
             [new_encrypted, new_salt],
         )
         self._db.commit()
+        self._totp_reset_material = (new_encrypted, totp_secret)
 
     def is_totp_enabled(self) -> bool:
         """Return True when the operator has confirmed authenticator enrolment.
@@ -791,6 +799,10 @@ class AuthService:
         rejected at decode time. Without this stamp a leaked token
         would remain valid until natural expiry.
 
+        Rewraps the existing authenticator and advances the session epoch in
+        the same transaction. An enrolled seed that cannot be recovered is a
+        refusal, not a successful password change with unusable MFA.
+
         Args:
             username: Must match the stored username.
             new_password: The new password (must pass strength check).
@@ -804,17 +816,31 @@ class AuthService:
         if len(new_password) < 8:
             raise ValueError("Password too weak — minimum 8 characters")
 
-        row = self._db.execute("SELECT username FROM account WHERE id = 1").fetchone()
-        if not row or row["username"] != username:
-            return False
-
         password_hash = self._hasher.hash(new_password)
-        with self._write_lock:
-            self._db.execute(
-                "UPDATE account SET password_hash = ?, password_changed_at = ? WHERE id = 1",
-                [password_hash, time.time()],
+        with self._immediate_write() as db:
+            row = db.execute(
+                "SELECT username, totp_secret_encrypted, totp_enabled FROM account WHERE id = 1"
+            ).fetchone()
+            if not row or row["username"] != username:
+                return False
+            material = getattr(self, "_totp_reset_material", None)
+            secret = material[1] if material and material[0] == bytes(row["totp_secret_encrypted"]) else None
+            if not secret:
+                if row["totp_enabled"]:
+                    # Email access cannot decrypt a password-wrapped MFA seed.
+                    # Preserve password/enrolment until authorised recovery.
+                    raise AuthenticatorRecoveryRequired("Authenticator recovery is required before password reset")
+                secret = pyotp.random_base32()
+            salt = os.urandom(16)
+            encrypted = _derive_fernet_key(new_password, salt).encrypt(secret.encode("utf-8"))
+            db.execute(
+                "UPDATE account SET password_hash = ?, password_changed_at = ?, "
+                "totp_secret_encrypted = ?, totp_salt = ? WHERE id = 1",
+                [password_hash, time.time(), encrypted, salt],
             )
-            self._db.commit()
+            self._bump_epoch_locked()
+        self._totp_secret_cache = secret
+        self._totp_reset_material = (encrypted, secret)
         return True
 
     def get_password_changed_at(self) -> float:
@@ -904,6 +930,7 @@ class AuthService:
             self._db.commit()
 
         self._totp_secret_cache = totp_secret
+        self._totp_reset_material = (encrypted, totp_secret)
         return (self.get_totp_provisioning_uri(), backup_codes)
 
     def close(self) -> None:

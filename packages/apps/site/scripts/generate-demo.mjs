@@ -44,6 +44,11 @@ const buildEnv = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !key.startsWith('VITE_')),
 );
 buildEnv.FLINTTRADE_PUBLIC_DEMO_BUILD = '1';
+try {
+  buildEnv.VITE_PUBLIC_PREVIEW_AS_OF = execFileSync('git', ['show', '-s', '--format=%cI', 'HEAD'], { cwd: terminalDir, encoding: 'utf8' }).trim();
+} catch {
+  buildEnv.VITE_PUBLIC_PREVIEW_AS_OF = new Date().toISOString();
+}
 
 console.log('[generate-demo] building terminal (vite build --base=/demo-app/)…');
 execFileSync(process.execPath, [viteJs, 'build', '--base=/demo-app/'], {

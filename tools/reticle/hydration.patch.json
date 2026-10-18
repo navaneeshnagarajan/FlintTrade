@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "candidate_id": "reticle-3.6.0+r39.hydration-contract.1",
+  "edits": [
+    {
+      "path": "@reticlehq/engine/dist/disagreement/contradictions.js",
+      "input_sha256": "d5f5435be73596755db59daf05202e57d034de2605899587854018ffcf8e025f",
+      "output_sha256": "e203f393864b3b2516e316331fe354bed15d79c619e206c41635d6ac9dd4d4d1",
+      "replacements": [
+        {
+          "old": "import { ContradictionKind, EventType, NEXT_ACTION_FIELD,",
+          "new": "import { ContradictionKind, EventType, RETICLE_HYDRATION_SIGNAL, NEXT_ACTION_FIELD,"
+        },
+        {
+          "old": "    const successSignals = signals.filter((name) => !ACKNOWLEDGED.test(name));",
+          "new": "    // R39: React's exact SDK first-commit signal means handlers attached, not a\n    // domain write succeeded. Keep the event in the window and every other rule.\n    // Only the producer's exact name + empty-object payload has this contract;\n    // prefixes, custom payloads and generic hydration names remain app claims.\n    const successSignals = events\n        .filter((e) => e.type === EventType.SIGNAL)\n        .filter((e) => {\n        const payload = e.data['data'];\n        return !(e.data['name'] === RETICLE_HYDRATION_SIGNAL &&\n            payload !== null && typeof payload === 'object' &&\n            !Array.isArray(payload) && Object.keys(payload).length === 0);\n    })\n        .map((e) => asString(e.data['name']) ?? 'signal')\n        .filter((name) => !ACKNOWLEDGED.test(name));"
+        }
+      ]
+    }
+  ],
+  "semantic_scope": "Exclude only exact SDK first-commit lifecycle from domain-success classification",
+  "wire_limitation": "A custom producer deliberately using the identical reserved name and empty payload is indistinguishable on this wire; custom domain outcomes must not masquerade as the reserved SDK lifecycle contract."
+}

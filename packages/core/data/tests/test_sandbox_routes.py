@@ -41,7 +41,9 @@ def _make_mock_engine(starting_capital: float = 500_000.0) -> MagicMock:
     engine.get_positions.return_value = []
     engine.get_orders.return_value = []
     engine.get_trades.return_value = []
-    engine.get_pnl.return_value = {"realised": 0.0, "unrealised": 0.0, "total": 0.0}
+    engine.get_pnl.return_value = {
+        "realised": 0.0, "unrealised": 0.0, "total": 0.0, "gross": 0.0, "net": 0.0, "charges": 0.0,
+    }
     engine.get_pnl_history.return_value = []
     engine.config = SandboxConfig(starting_capital=starting_capital)
     engine.update_config.return_value = engine.config

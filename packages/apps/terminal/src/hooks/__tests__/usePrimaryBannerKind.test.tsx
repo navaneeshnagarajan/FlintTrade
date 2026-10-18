@@ -6,6 +6,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
+import { setAccountRuntime, PRIMARY_SCOPE } from "@/test-utils/accountQueryHarness";
 
 const mockBrokerConnected = vi.hoisted(() => ({ value: true }));
 const mockSafety = vi.hoisted(() => ({
@@ -37,12 +38,13 @@ describe("usePrimaryBannerKind", () => {
     mockSafety.kill_switch_active = false;
     mockSafety.daily_loss_hard_stop_active = false;
     mockSafety.daily_loss_pause_active = false;
-    useModeStore.setState({ mode: "live" });
+    setAccountRuntime();
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
     useSettingsStore.setState({
       riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 0 },
     });
-    useTradingStore.setState({ totalPnl: 0 });
+    useTradingStore.getState().resetSessionState();
+    useTradingStore.setState({ scopeKey: PRIMARY_SCOPE, positionsStatus: "ready", totalPnl: 0 });
   });
 
   it("Explore leaves the incident slot empty even when the feed is down", () => {

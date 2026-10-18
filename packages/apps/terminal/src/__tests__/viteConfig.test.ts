@@ -72,6 +72,17 @@ describe("Vite configuration", () => {
     });
   });
 
+  it("emits fonts as same-origin assets instead of data URLs under factory CSP", async () => {
+    const loaded = await loadTerminalViteConfig();
+    const policy = loaded?.config.build?.assetsInlineLimit;
+    expect(typeof policy).toBe("function");
+    if (typeof policy !== "function") throw new Error("Explicit font asset policy missing");
+    for (const filename of ["tiny.woff2", "tiny.woff", "tiny.ttf", "tiny.otf"]) {
+      expect(policy(`/synthetic/fonts/${filename}`, Buffer.alloc(16))).toBe(false);
+    }
+    expect(policy("/synthetic/image.svg", Buffer.alloc(16))).toBeUndefined();
+  });
+
   it("ordinary terminal builds keep Vite's current dotenv loading behaviour", () => {
     expect(loadEnvDirInChild(false)).not.toBe(false);
   });

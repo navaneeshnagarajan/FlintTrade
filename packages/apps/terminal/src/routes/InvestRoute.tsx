@@ -47,6 +47,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { CanonicalPortfolioEvidence } from "@/components/data/CanonicalPortfolioEvidence";
 import {
   Page,
   PageBody,
@@ -263,7 +264,7 @@ function InvestShell() {
     : pageTabId("invest-group", activeGroupId);
 
   return (
-    <Page>
+    <Page role="region" aria-label="Investment views and evidence" tabIndex={0} className="overflow-y-auto">
       <PageHeader
         title="Invest"
         tourTarget="holdings"
@@ -323,13 +324,17 @@ function InvestShell() {
         )}
       </PageHeader>
 
+      <div className="shrink-0 px-[var(--ft-page-gutter)] py-2">
+        <CanonicalPortfolioEvidence />
+      </div>
+
       {/* Content */}
       {FULL_HEIGHT_TABS.includes(activeTab) ? (
         <div
           role="tabpanel"
           id={panelId}
           aria-labelledby={panelLabelledBy}
-          className="flex-1 flex flex-col overflow-hidden"
+          className="h-full shrink-0 flex flex-col overflow-hidden"
         >
           {!isPractice && <InvestBrokerHint className="mx-[var(--ft-page-gutter)] mt-5 shrink-0" />}
           <TabTransition tabKey={activeTab} className="flex-1 flex flex-col overflow-hidden">
@@ -341,6 +346,7 @@ function InvestShell() {
           role="tabpanel"
           id={panelId}
           aria-labelledby={panelLabelledBy}
+          className="flex-none overflow-visible"
         >
           {!isPractice && <InvestBrokerHint className="mb-5" />}
           <TabTransition tabKey={activeTab}>

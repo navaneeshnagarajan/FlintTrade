@@ -1,77 +1,47 @@
 #!/usr/bin/env python3
-"""Migrate ``~/.flinttrade/auth_state.duckdb`` → ``auth_state.sqlite`` (data-layer §5.2).
+"""Offline auth-state migration to the actual SQLite runtime authority.
 
-Full Parquet round-trip with BLOB + TIMESTAMP fidelity (DB H4): CSV silently
-corrupts microsecond timestamps and base64-truncates BLOBs; Parquet preserves
-both natively. Idempotent across restarts — writes to a ``.new`` file and only
-atomically renames after every table's row count (and sampled BLOB checksums)
-verifies. The legacy DuckDB is age-encrypted and archived (never deleted in
-plaintext) only after the rename succeeds (§5.3 crash matrix).
+Publication requires real AuthState/webhook readers, exact typed data and
+verified encrypted custody. Standalone webhook authorities are never discarded.
 
-The canonical ``_SCHEMA_DDL`` below is the single source of truth for a fresh
-``auth_state.sqlite`` install (it mirrors §7.1's webhooks/nonces shape verbatim);
-``create_schema`` is dependency-free so a fresh install never needs DuckDB.
-
-Heavy, migration-only dependencies (``duckdb``, ``pyarrow``, ``pyrage``) are
-imported lazily so importing this module — and running ``create_schema`` on a
-fresh install — never requires them. Install them with the ``migration`` extra:
-``uv sync --extra migration``.
-
-Usage:
-    python scripts/migrate-auth-state-duckdb-to-sqlite.py [--workspace ~/.flinttrade]
-    # master password: getpass at TTY (default), OR --master-password-fd N.
+AGE requires pyrage, a flinttrade-core dependency (not an optional extra).
+Missing crypto or reader support is a failure, never skipped work. Passwords enter only through a TTY or
+--master-password-fd; auth.db password/MFA material is not changed by this tool.
 """
-
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import hashlib
 import logging
 import os
+import sqlite3
 import sys
-import time
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
-from typing import Sequence
 
-from flinttrade_core.db import open_sqlite
+from flinttrade_core.auth_state_migration import record_webhook_selection, validate_staged_selection
+from flinttrade_core.legacy_sqlite_migration import (
+    ArchivePending,
+    MigrationRefused,
+    database_digest,
+    file_digest,
+    fsync_directory,
+    fsync_file,
+    migrate_database,
+    publish_noreplace,
+    require_regular,
+    rows_digest,
+    sqlite_connection,
+    sqlite_value,
+)
+from flinttrade_core.secure_file import harden
+from flinttrade_core.workspace import workspace_dir
 
-logger = logging.getLogger("migrate_auth_state")
+_TABLES = ("revoked_jtis", "rate_limit_events", "otp_requests", "webhooks", "webhook_nonces")
 
-# Tables expected in auth_state.duckdb, with their target durability profile.
-_EXPECTED_TABLES: dict[str, str] = {
-    "revoked_jtis": "normal",
-    "rate_limit_events": "normal",
-    "otp_requests": "normal",
-    "consent_ledger": "full",
-    "agent_runs": "full",
-    "webhooks": "full",
-    "webhook_nonces": "normal",
-    "audit_chain_head": "full",
-    "auth_sessions": "normal",
-}
 
-# Pre-flight: reject migration upfront if a table uses a DuckDB type SQLite
-# cannot represent, rather than losing data silently.
-_PRE_FLIGHT_CHECKS: dict[str, str] = {
-    "no_interval_columns": (
-        "SELECT table_name, column_name FROM information_schema.columns "
-        "WHERE data_type LIKE '%INTERVAL%'"
-    ),
-    "no_struct_columns": (
-        "SELECT table_name, column_name FROM information_schema.columns "
-        "WHERE data_type LIKE '%STRUCT%' OR data_type LIKE '%LIST%' OR data_type LIKE '%MAP%'"
-    ),
-}
-
-# Per-table BLOB columns for sha256 round-trip verification.
-_BLOB_COLUMNS: dict[str, Sequence[str]] = {
-    "webhooks": ("secret_encrypted_aes_gcm_siv",),
-}
-
-# Canonical auth_state schema (§5 + §7.1). Single source of truth for fresh
-# installs and migration targets alike.
 _SCHEMA_DDL = """
     CREATE TABLE IF NOT EXISTS revoked_jtis (
         jti        TEXT PRIMARY KEY,
@@ -202,266 +172,299 @@ _SCHEMA_DDL = """
 
 
 def create_schema(sqlite_path: str | os.PathLike[str]) -> None:
-    """Apply the canonical auth_state schema (dependency-free; fresh-install safe)."""
-    with closing(open_sqlite(str(sqlite_path), durability="normal")) as conn:
+    """Retain the historical schema utility; NOT a runtime migration guarantee."""
+    with closing(sqlite3.connect(sqlite_path)) as conn:
         conn.executescript(_SCHEMA_DDL)
 
 
-# ---------------------------------------------------------------------------
-# Migration helpers (lazy heavy deps: duckdb / pyarrow / pyrage)
-# ---------------------------------------------------------------------------
+def _create_staging_schema(sqlite_path: str | os.PathLike[str]) -> None:
+    """Create a staging schema from the actual AuthState and webhook owners."""
+    from flinttrade_core.auth_state import _CREATE_SCHEMA_SQL
+    from flinttrade_webhooks.webhook_replay import ensure_nonce_schema
+    from flinttrade_webhooks.webhook_secret_store import _WEBHOOK_SECRET_SCHEMA
 
-
-def _require_migration_deps():
-    try:
-        import duckdb  # noqa: PLC0415
-        import pyarrow.parquet as pq  # noqa: PLC0415
-    except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
-        sys.exit(
-            f"migration requires the 'migration' extra ({exc.name} missing); "
-            "install with: uv sync --extra migration"
-        )
-    return duckdb, pq
+    with closing(sqlite3.connect(sqlite_path)) as conn:
+        conn.executescript(_CREATE_SCHEMA_SQL)
+        conn.executescript(_WEBHOOK_SECRET_SCHEMA)
+        ensure_nonce_schema(conn)
 
 
 def _read_master_password(args: argparse.Namespace) -> str:
-    """Read the master password via getpass (TTY) or --master-password-fd (Security H11).
-
-    NEVER via argv or environment variable — those leak to process listings,
-    shell history, CI logs, and tracebacks that dump sys.argv / os.environ.
-    """
     if args.master_password_fd is not None:
-        with os.fdopen(args.master_password_fd, "r") as fd:
-            return fd.readline().rstrip("\n")
-    if not sys.stdin.isatty():
-        sys.exit("master password input requires a TTY; use --master-password-fd N otherwise")
-    return getpass.getpass("master password: ")
+        with os.fdopen(args.master_password_fd, "r") as stream:
+            password = stream.readline().rstrip("\n")
+    elif sys.stdin.isatty():
+        password = getpass.getpass("master password: ")
+    else:
+        raise MigrationRefused("master password requires a TTY or --master-password-fd")
+    if not password:
+        raise MigrationRefused("empty master password")
+    return password
 
 
-def _run_pre_flight(duck, *, accept_unknown_tables: bool = False) -> None:
-    for check, sql in _PRE_FLIGHT_CHECKS.items():
-        rows = duck.execute(sql).fetchall()
-        if rows:
-            logger.error("pre-flight %s failed: %s", check, rows)
-            sys.exit(f"pre-flight check {check!r} failed; refusing to migrate")
-    actual = {row[0] for row in duck.execute("SHOW TABLES").fetchall()}
-    unknown = actual - set(_EXPECTED_TABLES) - {"sqlite_sequence", "sqlite_stat1"}
-    if unknown and not accept_unknown_tables:
-        sys.exit(
-            f"refusing to migrate: unknown source tables {sorted(unknown)}; "
-            f"rerun with --accept-unknown-tables to proceed"
-        )
-    if unknown:
-        logger.warning("ignoring unknown source tables: %s", sorted(unknown))
-    logger.info("pre-flight checks OK")
+def _plaintext(blob: bytes, webhook_id: str, version: int, master_dek: bytes, legacy_key: bytes | None) -> bytes:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.fernet import Fernet, InvalidToken
 
+    from flinttrade_webhooks.webhook_keys import decrypt_webhook_secret
 
-def _export_to_parquet(duck, table: str, parquet_path: Path) -> int:
-    duck.execute(f"COPY (SELECT * FROM {table}) TO '{parquet_path}' (FORMAT PARQUET)")
-    src_count = duck.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-    logger.info("exported %s (%d rows)", table, src_count)
-    return int(src_count)
-
-
-def _import_from_parquet(sqlite_path: Path, table: str, parquet_path: Path, durability: str) -> int:
-    import pyarrow.parquet as pq  # noqa: PLC0415
-
-    rows = pq.read_table(parquet_path).to_pylist()
-    with closing(open_sqlite(str(sqlite_path), durability=durability)) as conn:
-        if not rows:
-            return 0
-        cols = list(rows[0].keys())
-        placeholders = ",".join("?" for _ in cols)
-        conn.executemany(
-            f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders})",
-            [tuple(row[c] for c in cols) for row in rows],
-        )
-        return int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
-
-
-def _verify_row_counts(src: int, dst: int, table: str) -> None:
-    if src != dst:
-        sys.exit(f"row count mismatch on {table}: duckdb={src} sqlite={dst}")
-    logger.info("row count OK on %s: %d", table, src)
-
-
-def _verify_blob_checksums(duck, sqlite_path: Path, table: str, blob_cols: Sequence[str]) -> None:
-    sample = duck.execute(f"SELECT * FROM {table} ORDER BY random() LIMIT 3").fetchall()
-    duck_cols = [c[0] for c in duck.execute(f"DESCRIBE {table}").fetchall()]
-    with closing(open_sqlite(str(sqlite_path), durability="normal")) as sconn:
-        for src_row in sample:
-            pk_col, pk_val = duck_cols[0], src_row[0]
-            dst_row = sconn.execute(f"SELECT * FROM {table} WHERE {pk_col} = ?", (pk_val,)).fetchone()
-            assert dst_row is not None, f"missing row in sqlite: {pk_col}={pk_val!r}"
-            for col in blob_cols:
-                idx = duck_cols.index(col)
-                src_hash = hashlib.sha256(src_row[idx]).hexdigest()
-                dst_hash = hashlib.sha256(dst_row[idx]).hexdigest()
-                if src_hash != dst_hash:
-                    sys.exit(f"BLOB checksum mismatch on {table}.{col} pk={pk_val!r}")
-            logger.info("BLOB checksum OK on %s pk=%r", table, pk_val)
-
-
-def _archive_legacy(duck_path: Path, ts: str, master_password: str) -> None:
-    """Age-encrypt + archive the legacy DuckDB, then secure-delete the source.
-
-    Atomic (Database H6): write ciphertext to ``.age.tmp`` → fsync → atomic
-    rename → fsync parent dir → ONLY THEN overwrite + unlink the source.
-    """
+    if not isinstance(blob, bytes) or type(version) is not int or version < 1:
+        raise MigrationRefused("invalid webhook ciphertext metadata")
     try:
-        import age  # noqa: PLC0415
-    except ModuleNotFoundError:  # pragma: no cover - env-dependent
-        sys.exit("archive requires the 'migration' extra (pyrage missing); uv sync --extra migration")
+        return decrypt_webhook_secret(blob, webhook_id, master_dek, version)
+    except (InvalidTag, ValueError):
+        if legacy_key is None:
+            raise MigrationRefused("webhook decryption failed; source retained") from None
+    # Normal Fernet tokens are base64, not a leading raw 0x80 byte.
+    token = base64.urlsafe_b64encode(blob) if blob[:1] == b"\x80" else blob
+    try:
+        return Fernet(legacy_key).decrypt(token)
+    except (InvalidToken, ValueError):
+        raise MigrationRefused("webhook decryption failed; source retained") from None
 
-    archive_dir = Path.home() / ".flinttrade" / "archive" / "migrations" / ts
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / f"{duck_path.name}.age"
-    tmp_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
 
-    payload = duck_path.read_bytes()
-    encrypted = age.encrypt(payload, passphrase=master_password)
+def _transcode_webhook_secrets(sqlite_path: Path, legacy_fernet_key: bytes | None, master_password: str) -> int:
+    """Authenticate every row and transcode verified Fernet in one transaction."""
+    from cryptography.exceptions import InvalidTag
 
-    tmp_path.write_bytes(encrypted)
-    tmp_path.chmod(0o600)
-    with tmp_path.open("rb") as f:
-        os.fsync(f.fileno())
-    os.replace(tmp_path, archive_path)
-    if hasattr(os, "O_DIRECTORY"):
-        dir_fd = os.open(str(archive_dir), os.O_DIRECTORY)
+    from flinttrade_webhooks.webhook_keys import decrypt_webhook_secret, encrypt_webhook_secret
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore, canonical_webhook_id
+
+    master_dek = WebhookSecretStore._derive_master_dek(master_password)
+    updates = []
+    with closing(sqlite_connection(sqlite_path)) as conn:
+        rows = conn.execute("SELECT webhook_id,path,key_version,secret_encrypted_aes_gcm_siv FROM webhooks").fetchall()
+        for webhook_id, path, version, blob in rows:
+            if not isinstance(path, str) or not path or canonical_webhook_id(path) != webhook_id:
+                raise MigrationRefused("webhook identity/path mismatch")
+            plaintext = _plaintext(blob, webhook_id, version, master_dek, legacy_fernet_key)
+            plaintext.decode("utf-8")  # actual get_secret contract
+            try:
+                decrypt_webhook_secret(blob, webhook_id, master_dek, version)
+            except (InvalidTag, ValueError):
+                encrypted = encrypt_webhook_secret(plaintext, webhook_id, master_dek, version)
+                if decrypt_webhook_secret(encrypted, webhook_id, master_dek, version) != plaintext:
+                    raise MigrationRefused("webhook transcode verification failed")
+                updates.append((encrypted, webhook_id))
+        # Do not reset versions, identities or rotation times during transcoding.
+        with conn:
+            conn.executemany("UPDATE webhooks SET secret_encrypted_aes_gcm_siv=? WHERE webhook_id=?", updates)
+    return len(updates)
+
+
+def _archive_legacy(source: Path | None, archive: Path, expected: str | None, master_password: str) -> None:
+    """Verify a durable real AGE archive before the coordinator unlinks source."""
+    from pyrage import passphrase
+
+    if source is not None and file_digest(source) != expected:
+        raise MigrationRefused("source changed before encrypted archival")
+    require_regular(archive)
+    temporary = archive.with_name(archive.name + ".tmp")
+    require_regular(temporary)
+
+    def verify(path: Path) -> None:
+        if hashlib.sha256(passphrase.decrypt(path.read_bytes(), master_password)).hexdigest() != expected:
+            raise MigrationRefused("encrypted archive does not match original")
+
+    if temporary.exists():
+        # Interrupted encryption is evidence, not permission to truncate a
+        # possibly unrelated archive. Reuse only an authenticated exact copy.
+        verify(temporary)
+    if not archive.exists():
+        if not temporary.exists():
+            if source is None:
+                raise MigrationRefused("source and archive both missing")
+            payload = source.read_bytes()
+            encrypted = passphrase.encrypt(payload, master_password)
+            if passphrase.decrypt(encrypted, master_password) != payload:
+                raise MigrationRefused("AGE encryption round-trip failed")
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(encrypted)
+                stream.flush()
+                os.fsync(stream.fileno())
+            harden(temporary)
+        verify(temporary)
+        fsync_file(temporary)
+        fsync_directory(temporary.parent)
+        publish_noreplace(temporary, archive)
+    verify(archive)
+    fsync_file(archive)
+    fsync_directory(archive.parent)
+    if temporary.exists():
+        temporary.unlink()
+        fsync_directory(archive.parent)
+
+
+def _source_rows(source: Path | None, target: Path) -> dict[str, tuple[list[str], list[tuple]]]:
+    if source is None:
+        return {}
+    import duckdb
+
+    with duckdb.connect(str(source), read_only=True, config={"threads": 1}) as duck:
+        actual = {r[0] for r in duck.execute("SHOW TABLES").fetchall()}
+        required, optional = set(_TABLES[:3]), set(_TABLES[3:])
+        if not required <= actual or actual - required - optional or (actual & optional not in (set(), optional)):
+            raise MigrationRefused("unsupported/incomplete auth schema; no tables may be discarded")
+        if duck.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema <> 'main' "
+                        "OR table_type <> 'BASE TABLE'").fetchone()[0]:
+            raise MigrationRefused("unsupported auth source objects")
+        result = {}
+        with closing(sqlite_connection(target, readonly=True)) as conn:
+            for table in _TABLES:
+                if table not in actual:
+                    continue
+                info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+                columns = [r[1] for r in info]
+                if {r[0] for r in duck.execute(f"DESCRIBE {table}").fetchall()} != set(columns):
+                    raise MigrationRefused("auth column set mismatch; no fields may be discarded")
+                affinities = {"VARCHAR": "TEXT", "DOUBLE": "REAL"}
+                rows = duck.execute(f"SELECT {','.join(columns)} FROM {table}").fetchall()
+                converted = [tuple(sqlite_value(value, affinities.get(info[i][2], info[i][2]))
+                                   for i, value in enumerate(row)) for row in rows]
+                if any(row[i] is None and (col[3] or col[5]) for row in converted for i, col in enumerate(info)):
+                    raise MigrationRefused("null auth key or required value")
+                result[table] = (columns, converted)
+        return result
+
+
+def _validate_rows(source: Path | None, target: Path, password: str | None, legacy_key: bytes | None) -> None:
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
+
+    tables = _source_rows(source, target)
+    database_digest(target)
+    with closing(sqlite_connection(target, readonly=True)) as conn:
+        for table in _TABLES:
+            columns, rows = tables.get(table, ([], []))
+            actual = conn.execute(f"SELECT {','.join(columns) if columns else '*'} FROM {table}").fetchall()
+            if table == "webhooks" and rows:
+                master_dek = WebhookSecretStore._derive_master_dek(password)
+                def plaintext_rows(values, key, columns=columns, master_dek=master_dek):
+                    converted = []
+                    for value in values:
+                        value = list(value)
+                        i = columns.index("secret_encrypted_aes_gcm_siv")
+                        value[i] = _plaintext(value[i], value[columns.index("webhook_id")],
+                                              value[columns.index("key_version")], master_dek, key)
+                        converted.append(tuple(value))
+                    return converted
+                rows, actual = plaintext_rows(rows, legacy_key), plaintext_rows(actual, None)
+            if rows_digest(actual) != rows_digest(rows):
+                raise MigrationRefused("auth data/crypto relationship mismatch")
+
+
+def _validate_current_readers(target: Path, password: str | None) -> None:
+    from flinttrade_core.auth_state import AuthState, _default_db_path
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
+
+    if _default_db_path().name != "auth_state.sqlite":
+        raise MigrationRefused("auth_state_reader_cutover_required; active DuckDB authority retained")
+    # Constructors can perform expiry GC. Test a backup, never change the stage.
+    probe = target.with_name("reader-probe.sqlite")
+    require_regular(probe)
+    probe.unlink(missing_ok=True)
+    with closing(sqlite_connection(target, readonly=True)) as conn, closing(sqlite3.connect(probe)) as copy:
+        conn.backup(copy)
+        jtis = conn.execute("SELECT jti FROM revoked_jtis").fetchall()
+        hooks = conn.execute("SELECT path,webhook_id,key_version,secret_encrypted_aes_gcm_siv FROM webhooks").fetchall()
+    try:
+        reader = AuthState(probe)
         try:
-            os.fsync(dir_fd)
+            if not all(reader.is_jti_revoked(row[0]) for row in jtis):
+                raise MigrationRefused("current AuthState reader lost revocation")
         finally:
-            os.close(dir_fd)
-    logger.info("archived legacy DuckDB to %s (%d bytes)", archive_path, len(encrypted))
-
-    with duck_path.open("r+b") as f:
-        f.write(b"\x00" * min(len(payload), 1024 * 1024))
-        f.flush()
-        os.fsync(f.fileno())
-    duck_path.unlink()
-    if hasattr(os, "O_DIRECTORY"):
-        dir_fd = os.open(str(duck_path.parent), os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+            reader.close()
+        if hooks:
+            store = WebhookSecretStore(probe, password)
+            for path, webhook_id, version, blob in hooks:
+                if store.get_secret(path).encode() != _plaintext(blob, webhook_id, version, store._master_dek, None):
+                    raise MigrationRefused("current webhook reader mismatch")
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            probe.with_name(probe.name + suffix).unlink(missing_ok=True)
 
 
 def migrate(workspace: Path, args: argparse.Namespace) -> int:
-    duck_path = workspace / "auth_state.duckdb"
-    sqlite_path = workspace / "auth_state.sqlite"
-    new_sqlite_path = workspace / "auth_state.sqlite.new"
-    parquet_dir = workspace / ".migration-tmp"
+    """Stage exact authority; publish only after real reader and crypto parity."""
+    password, legacy_key = None, None
 
-    if not duck_path.exists():
-        # Fresh install: nothing to migrate, but ensure the canonical schema exists.
-        if not sqlite_path.exists():
-            create_schema(sqlite_path)
-            logger.info("no auth_state.duckdb; created fresh auth_state.sqlite schema")
-        else:
-            logger.info("no auth_state.duckdb to migrate; nothing to do")
-        return 0
-    if sqlite_path.exists():
-        logger.info("auth_state.sqlite already exists; migration already complete")
-        return 0
+    def credentials():
+        nonlocal password, legacy_key
+        if password is None:
+            password = _read_master_password(args)
+            if args.legacy_fernet_key_path:
+                key_path = Path(args.legacy_fernet_key_path)
+                require_regular(key_path)
+                legacy_key = key_path.read_bytes()
+        return password
 
-    duckdb, _pq = _require_migration_deps()
+    def build(source, target):
+        if args.accept_unknown_tables:
+            raise MigrationRefused("discarding unknown auth tables is not supported")
+        _create_staging_schema(target)
+        tables = _source_rows(source, target)
+        with closing(sqlite_connection(target)) as conn:
+            conn.execute("PRAGMA synchronous=FULL")
+            with conn:
+                for table, (columns, rows) in tables.items():
+                    conn.executemany(f"INSERT INTO {table} ({','.join(columns)}) VALUES "
+                                     f"({','.join('?' for _ in columns)})", rows)
+        if tables.get("webhooks", ([], []))[1]:
+            credentials()
+            _transcode_webhook_secrets(target, legacy_key, password)
+        record_webhook_selection(workspace, target)
 
-    master_password = _read_master_password(args)
-    if not master_password:
-        sys.exit("master password required (empty input rejected)")
+    def validate(source, target):
+        if source is not None:
+            credentials()
+        _validate_rows(source, target, password, legacy_key)
+        _validate_current_readers(target, password)
+        validate_staged_selection(workspace, target)
+        if source is not None:
+            from pyrage import passphrase
 
-    parquet_dir.mkdir(exist_ok=True)
-    new_sqlite_path.unlink(missing_ok=True)
-    create_schema(new_sqlite_path)
+            # Import and check actual crypto BEFORE publication, not afterwards.
+            if not callable(passphrase.encrypt) or not callable(passphrase.decrypt):
+                raise MigrationRefused("incompatible pyrage dependency")
+            credentials()
 
-    duck = duckdb.connect(str(duck_path), read_only=True)
-    try:
-        _run_pre_flight(duck, accept_unknown_tables=args.accept_unknown_tables)
-        actual_tables = {row[0] for row in duck.execute("SHOW TABLES").fetchall()}
-        for table, durability in _EXPECTED_TABLES.items():
-            if table not in actual_tables:
-                logger.info("table %s absent in source; skipping", table)
-                continue
-            pq_path = parquet_dir / f"{table}.parquet"
-            src_count = _export_to_parquet(duck, table, pq_path)
-            dst_count = _import_from_parquet(new_sqlite_path, table, pq_path, durability)
-            _verify_row_counts(src_count, dst_count, table)
+    def archive(source, target, expected):
+        validate_staged_selection(workspace, workspace / "auth_state.sqlite")
+        _archive_legacy(source, target, expected, credentials())
 
-        if args.legacy_fernet_key_path:
-            _transcode_webhook_secrets(
-                new_sqlite_path, Path(args.legacy_fernet_key_path).read_bytes(), master_password
-            )
-
-        for table in _EXPECTED_TABLES:
-            if table in actual_tables and table in _BLOB_COLUMNS:
-                _verify_blob_checksums(duck, new_sqlite_path, table, _BLOB_COLUMNS[table])
-    finally:
-        duck.close()
-
-    os.replace(new_sqlite_path, sqlite_path)
-    if hasattr(os, "O_DIRECTORY"):
-        dir_fd = os.open(str(workspace), os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    logger.info("atomic rename: %s → %s", new_sqlite_path, sqlite_path)
-
-    _archive_legacy(duck_path, time.strftime("%Y-%m-%dT%H-%M-%S"), master_password)
-
-    for f in parquet_dir.iterdir():
-        f.unlink()
-    parquet_dir.rmdir()
+    with ExitStack() as fences:
+        standalone = workspace / "webhook_secrets.db"
+        require_regular(standalone)
+        if standalone.exists():
+            # Exclude standalone SQLite writers too, without changing their
+            # schema, credentials, nonces or journal mode.
+            fence = fences.enter_context(closing(sqlite_connection(standalone)))
+            fence.execute("BEGIN IMMEDIATE")
+        migrate_database(workspace, source_name="auth_state.duckdb", destination_name="auth_state.sqlite",
+                         build=build, validate=validate, archive_codec=archive, archive_suffix=".age")
     return 0
 
 
-def _transcode_webhook_secrets(sqlite_path: Path, legacy_fernet_key: bytes, master_password: str) -> int:
-    """Re-encrypt legacy Fernet webhook secrets → AES-GCM-SIV (Database M7)."""
-    from cryptography.fernet import Fernet, InvalidToken  # noqa: PLC0415
-
-    from flinttrade_core.auth_service import derive_master_dek  # noqa: PLC0415
-    from flinttrade_webhooks.webhook_keys import encrypt_webhook_secret  # noqa: PLC0415
-
-    master_dek = derive_master_dek(master_password)
-    fernet = Fernet(legacy_fernet_key)
-    transcoded = 0
-    with closing(open_sqlite(str(sqlite_path), durability="full")) as conn:
-        rows = conn.execute("SELECT webhook_id, secret_encrypted_aes_gcm_siv FROM webhooks").fetchall()
-        conn.execute("BEGIN")
-        try:
-            for webhook_id, blob in rows:
-                if not blob or blob[0] != 0x80:
-                    continue
-                try:
-                    plaintext = fernet.decrypt(bytes(blob))
-                except InvalidToken:
-                    logger.warning("webhook %s: Fernet decrypt failed; skipping", webhook_id)
-                    continue
-                new_blob = encrypt_webhook_secret(plaintext, webhook_id, master_dek)
-                conn.execute(
-                    "UPDATE webhooks SET secret_encrypted_aes_gcm_siv = ?, dek_id = ?, "
-                    "key_version = 1, last_rotated_at = ? WHERE webhook_id = ?",
-                    (new_blob, webhook_id, time.time(), webhook_id),
-                )
-                transcoded += 1
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
-    logger.info("transcoded %d webhook secrets Fernet → AES-GCM-SIV", transcoded)
-    return transcoded
-
-
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", default=str(Path.home() / ".flinttrade"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workspace", type=Path, default=None)
     parser.add_argument("--master-password-fd", type=int, default=None)
-    parser.add_argument("--accept-unknown-tables", action="store_true")
+    parser.add_argument("--accept-unknown-tables", action="store_true", help="Retired: unknown data is never discarded")
     parser.add_argument("--legacy-fernet-key-path", type=str, default=None)
     args = parser.parse_args()
-    return migrate(Path(args.workspace), args)
+    logging.basicConfig(level=logging.CRITICAL)
+    try:
+        migrate(args.workspace if args.workspace is not None else workspace_dir(), args)
+    except ArchivePending:
+        print("published/archive-pending: destination retained; rerun to resume encrypted archival")
+        return 3
+    except Exception as exc:
+        code = "auth_state_reader_cutover_required" if isinstance(exc, MigrationRefused) and str(exc).startswith(
+            "auth_state_reader_cutover_required") else type(exc).__name__
+        print(f"migration refused ({code}); originals retained; reconcile source/dependencies")
+        return 2
+    print("auth migration complete; destination and encrypted archive verified")
+    return 0
 
 
 if __name__ == "__main__":

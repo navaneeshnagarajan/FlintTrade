@@ -50,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { searchSymbol, placeOrder, getSymbol, OrderApiError } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+import { capturedOrderOriginDisclosure } from "@/lib/orderErrorPresentation";
 import { useMargin } from "@/hooks/useMargin";
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
@@ -64,6 +65,9 @@ import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErr
 import {
   checkLotMultiple,
   checkOrderEntryMode,
+  checkFreezeQuantity,
+  checkOrderQuantityLimit,
+  lotMultipleRefusal,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -88,7 +92,8 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { LAYA_EXIT_WHILE_DOWN, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, liveWritesMuted } from "@/lib/operatorIncident";
+import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
@@ -116,7 +121,6 @@ const DEBOUNCE_MS = 300;
 // Documentation describes native behaviour, not a quote or a readiness grant.
 const INDSTOCKS_MARKET_NOTICE = "INDstocks documents MARKET requests converting to LIMIT orders at the broker’s live price. The effective limit price is unknown until the broker reports it. Execution is not guaranteed.";
 const INDSTOCKS_GTT_UNAVAILABLE = "GTT creation is unavailable in this Order Pad. INDstocks currently ignores trailing-stop fields; active trailing requests are refused, not treated as protection.";
-const NATIVE_CLOSE_WHILE_DOWN = "Close requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.";
 
 function contractToken(value: string | undefined): string {
   return (value ?? "").trim().toUpperCase();
@@ -156,6 +160,9 @@ const orderSchema = z.object({
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
+
+/** Lot, freeze, exchange-ceiling, unverified-lot, and server quantity refusals. */
+const QUANTITY_CHECK_ERROR = "quantity-check";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -334,6 +341,8 @@ interface ToastMsg {
   text: string;
   scopeKey: string;
   retryable?: boolean;
+  /** Set for a quantity-check refusal so an edit can dismiss it without reading the text. */
+  kind?: typeof QUANTITY_CHECK_ERROR;
 }
 
 interface ToastProps {
@@ -493,6 +502,8 @@ function OrderPadWidget(props: WidgetProps) {
   // Whether the lot size was actually confirmed by a symbol lookup. Derivative
   // exchanges (NFO/BFO/MCX/CDS) refuse to submit while this is false.
   const [lotSizeKnown, setLotSizeKnown] = useState(false);
+  // Freeze from the selected contract. Null falls back to the NSE index table.
+  const [brokerFreezeQty, setBrokerFreezeQty] = useState<number | null>(null);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -600,6 +611,26 @@ function OrderPadWidget(props: WidgetProps) {
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
   const note = watch("note");
+
+  // Quantity-check refusals (lot multiple, freeze, exchange ceiling, unverified
+  // lot, server admission) are decided on Buy/Sell, not while the operator
+  // types. Any of them clears as soon as the quantity or the instrument
+  // changes; the next press runs the check again.
+  const quantityScopeRef = useRef({ qty, symbol, exchange });
+  useEffect(() => {
+    const previous = quantityScopeRef.current;
+    const changed = previous.qty !== qty
+      || previous.symbol !== symbol
+      || previous.exchange !== exchange;
+    quantityScopeRef.current = { qty, symbol, exchange };
+    if (!changed) return;
+    if (errors.qty?.type === QUANTITY_CHECK_ERROR) clearErrors("qty");
+    setToast((current) => {
+      if (current?.kind !== QUANTITY_CHECK_ERROR) return current;
+      clearTimeout(toastTimerRef.current);
+      return null;
+    });
+  }, [clearErrors, errors.qty, exchange, qty, symbol]);
   const appMode = useModeStore((s) => s.mode);
   const selectedNativeBroker = useBrokerStore((s) => {
     const selected = findBrokerAccountMatch(s.accounts, s.activeAccountId);
@@ -685,10 +716,14 @@ function OrderPadWidget(props: WidgetProps) {
   // Re-read on selection changes; an underlying-cache refresh is not evidence
   // of a change to this selected contract's metadata.
   useEffect(() => {
-    if (!symbol || !exchange) return;
+    if (!symbol || !exchange) {
+      setBrokerFreezeQty(null);
+      return;
+    }
     let cancelled = false;
     setLotSize(0);
     setLotSizeKnown(false);
+    setBrokerFreezeQty(null);
     const result = getSymbol(symbol, exchange);
     if (!result || typeof result.then !== "function") return;
     result.then((info) => {
@@ -702,6 +737,9 @@ function OrderPadWidget(props: WidgetProps) {
           setLotSizeKnown(true);
           setValue("qty", ls, { shouldValidate: true });
         }
+        const rawFreeze = info.freezeQty ?? info.freeze_qty;
+        const freeze = typeof rawFreeze === "number" ? rawFreeze : Number(rawFreeze);
+        if (Number.isInteger(freeze) && freeze > 0) setBrokerFreezeQty(freeze);
       })
       .catch(() => {
         // Symbol not found or API unavailable — lot size stays unknown, and
@@ -850,12 +888,12 @@ function OrderPadWidget(props: WidgetProps) {
     setSearchMiss(null);
   }, []);
 
-  const commitTypedSymbol = useCallback(async () => {
+  const commitTypedSymbol = useCallback(async (): Promise<boolean> => {
     const q = query.trim().toUpperCase();
     if (!q || q === symbol.trim().toUpperCase()) {
       setSearchMiss(null);
       setSearchOpen(false);
-      return;
+      return q.length > 0;
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     let list = suggestions;
@@ -877,15 +915,22 @@ function OrderPadWidget(props: WidgetProps) {
     if (exact) {
       handleSelect(exact);
       setSearchMiss(null);
-      return;
+      return true;
     }
     setSearchOpen(false);
     setSearchMiss(q);
+    return false;
   }, [handleSelect, query, suggestions, symbol]);
 
-  const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
+  const showToast = useCallback((
+    type: "success" | "error",
+    text: string,
+    ms = 4000,
+    retryable = false,
+    kind?: typeof QUANTITY_CHECK_ERROR,
+  ) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text, retryable, scopeKey: resolveDataScope({
+    setToast({ type, text, retryable, kind, scopeKey: resolveDataScope({
       ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
     }) });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
@@ -916,6 +961,7 @@ function OrderPadWidget(props: WidgetProps) {
     authority?: { mode: "practice" | "live" },
     options?: { exit?: boolean },
   ): Promise<boolean> => {
+    const incidentScope = captureOperatorIncidentScope();
     const submissionMode = useModeStore.getState().mode;
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
@@ -925,7 +971,7 @@ function OrderPadWidget(props: WidgetProps) {
       const result = options?.exit
         ? await placeOrder(params, authority, { exit: true })
         : await placeOrder(params, authority);
-      const scopeStillCurrent = submissionScope === resolveDataScope({
+      const scopeStillCurrent = isOperatorIncidentScopeCurrent(incidentScope) && submissionScope === resolveDataScope({
         ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
       });
       if (scopeStillCurrent) setAdmission(null);
@@ -946,7 +992,7 @@ function OrderPadWidget(props: WidgetProps) {
         ? visiblePracticeFill(result as PracticeFillResult)
         : "";
       const nativeAck = `${options?.exit ? "Close" : "Order"} requested${orderId ? ` · ID: ${orderId}` : ""}`;
-      const exitWhileDownText = placedMode === "live" ? NATIVE_CLOSE_WHILE_DOWN : LAYA_EXIT_WHILE_DOWN;
+      const exitWhileDownText = EXIT_REQUESTED;
       const successText = exitWhileDown
         ? exitWhileDownText
         : placedMode === "live" ? nativeAck : practiceFill || orderSuccessToast(placedMode, orderId);
@@ -956,6 +1002,9 @@ function OrderPadWidget(props: WidgetProps) {
       emitNotification({
         category: "order",
         accountScopeKey: submissionScope,
+        ...(submissionMode === "live" ? { originDisclosure: capturedOrderOriginDisclosure({
+          broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
+        }) } : {}),
         ...(scopeStillCurrent ? {} : { skipAccountRefresh: true }),
         title: exitWhileDown
           ? exitWhileDownText
@@ -975,12 +1024,16 @@ function OrderPadWidget(props: WidgetProps) {
       });
       return scopeStillCurrent;
     } catch (err) {
+      const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
+        ? err.status
+        : null;
       const presentation = submissionMode === "live" ? nativeOrderErrorPresentation(err, {
         broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
       }) : null;
-      if (submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
+      if (!isOperatorIncidentScopeCurrent(incidentScope) || submissionScope !== resolveDataScope({ ...useBrokerStore.getState(), mode: useModeStore.getState().mode })) {
         emitNotification({
           category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true,
+          originDisclosure: presentation?.originDisclosure ?? { version: 1, kind: "none" },
           title: presentation?.title ?? capturedOrderTitle("Order response", params),
           body: presentation?.body ?? "Order response unavailable. Reconcile the original account.",
         });
@@ -988,6 +1041,7 @@ function OrderPadWidget(props: WidgetProps) {
       }
       if (presentation) {
         setAdmission(null);
+        if (httpStatus === 403 || /mode changed/i.test(presentation.body)) setPracticeReview(null);
         // Reconciliation guidance and native reason observations are not
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
@@ -999,6 +1053,8 @@ function OrderPadWidget(props: WidgetProps) {
         suppressDeny: useModeStore.getState().mode === "live" && liveWritesMuted(readOperatorIncident()),
       });
       if (notice) {
+        // A 403 belongs on the pad. The review overlay would cover that refusal.
+        if (httpStatus === 403) setPracticeReview(null);
         setAdmission(notice);
         if (notice.kind === "clamp" && notice.appliedQuantity != null) {
           const nextQty = notice.appliedQuantity;
@@ -1024,15 +1080,25 @@ function OrderPadWidget(props: WidgetProps) {
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
       ), getValues("symbol"));
-      const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
-        ? err.status
-        : null;
-      noteObservedFailure({ message: msg, httpStatus, provenance: "order" });
+      if (httpStatus === 403 || /mode changed/i.test(msg) || code === "quantity_admission") {
+        setPracticeReview(null);
+        if (code === "quantity_admission") {
+          setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
+        }
+      }
+      noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
-      showToast("error", msg, 6000, retryable);
+      showToast(
+        "error",
+        msg,
+        6000,
+        retryable,
+        code === "quantity_admission" ? QUANTITY_CHECK_ERROR : undefined,
+      );
       emitNotification({
         category: "order",
         ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+        ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
         title: capturedOrderTitle("Order failed", params),
         body: msg,
         // A retryable failure (timeout, transient connection) sends the operator
@@ -1043,10 +1109,11 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [getValues, setValue, showToast]);
+  }, [getValues, setError, setValue, showToast]);
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
+  const layaPracticeStatus = useOperatorSignalStore((s) => s.layaPracticeStatus);
   // A denial belongs to the status and mode that produced it. When either
   // changes, the control is retryable. A clamp stays until the ticket changes.
   useEffect(() => {
@@ -1054,6 +1121,9 @@ function OrderPadWidget(props: WidgetProps) {
   }, [decisionStatus, appMode]);
   const liveMuted = appMode === "live" && liveWritesMuted(operatorIncident);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
+  const showPracticeLayaDown = isPracticeOrExplore
+    && layaPracticeStatus !== "ready"
+    && layaPracticeStatus !== "degraded";
   const currentIntentIdentity = practiceOrderIntentIdentity({
     symbol,
     exchange,
@@ -1085,6 +1155,12 @@ function OrderPadWidget(props: WidgetProps) {
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
+    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
+      ?? checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty);
+    if (qtyRefusal) {
+      setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
+      return;
+    }
 
     // Live-intent surfaces still use checkOrderEntryMode to refuse Explore.
     // Order Pad's Practice Buy is the paper path: Explore records a sample
@@ -1118,9 +1194,9 @@ function OrderPadWidget(props: WidgetProps) {
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
         ? missingLotRefusal(deskContractName(values.symbol))
-        : lotRefusal;
-      setError("qty", { type: "validate", message: msg });
-      showToast("error", msg, 6000);
+        : lotMultipleRefusal(lotSize);
+      setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
+      showToast("error", msg, 6000, false, QUANTITY_CHECK_ERROR);
       return;
     }
 
@@ -1168,6 +1244,8 @@ function OrderPadWidget(props: WidgetProps) {
         : {}),
       strategy: "FlintOrderPad",
       rationale: admissionRationale(values.note ?? ""),
+      ...(lotSizeKnown && lotSize > 0 ? { lotSize } : {}),
+      ...(brokerFreezeQty != null ? { freezeQty: brokerFreezeQty } : {}),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call
@@ -1313,7 +1391,7 @@ function OrderPadWidget(props: WidgetProps) {
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const btnColor = isBuy
-    ? "bg-profit hover:bg-profit/85 active:bg-profit/70 text-white"
+    ? "bg-profit-action enabled:hover:bg-profit-hover enabled:active:bg-profit-pressed text-profit-foreground motion-reduce:transition-none"
     : "bg-loss hover:bg-loss/85 active:bg-loss/70 text-white";
 
   return (
@@ -1346,7 +1424,10 @@ function OrderPadWidget(props: WidgetProps) {
           const typed = query.trim().toUpperCase();
           if (typed && typed !== symbol.trim().toUpperCase()) {
             e.preventDefault();
-            void commitTypedSymbol();
+            void (async () => {
+              const committed = await commitTypedSymbol();
+              if (committed) void handleSubmit(onSubmit)();
+            })();
             return;
           }
           void handleSubmit(onSubmit)(e);
@@ -1892,6 +1973,11 @@ function OrderPadWidget(props: WidgetProps) {
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
+        {showPracticeLayaDown ? (
+          <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
+            {LAYA_DOWN_REFUSAL}
+          </p>
+        ) : null}
         {liveMuted && operatorIncident ? (
           <p className="text-xs text-loss" data-testid="live-write-rectify">
             {operatorIncident.failureClass === "laya" ? operatorIncident.headline : operatorIncident.rectify}

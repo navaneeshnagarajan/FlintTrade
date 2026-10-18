@@ -48,11 +48,18 @@ test.describe('Smoke — app loads', () => {
   test('app chrome contains route navigation controls', async ({ page }) => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
-    const nav = page.getByRole('navigation', { name: 'Main navigation' });
-    await expect(nav.getByRole('button', { name: 'Home' })).toBeVisible({ timeout: 10_000 });
-    await expect(nav.getByRole('button', { name: 'Learn' })).toBeVisible({ timeout: 10_000 });
-    await expect(nav.getByRole('button', { name: 'Invest' })).toBeVisible({ timeout: 10_000 });
-    await expect(nav.getByRole('button', { name: 'Trade' })).toBeVisible({ timeout: 10_000 });
+    const nav = page.getByRole('navigation', { name: 'Apps', exact: true });
+    // Home and Trade share Terminal; Invest is Portfolio. Assert the actual
+    // canonical navigation, not retired sidebar buttons.
+    for (const [name, href] of [
+      ['Terminal', '/terminal'], ['Testing', '/testing'], ['Portfolio', '/portfolio'],
+      ['Automation', '/automation'], ['Reports', '/reports'], ['Learn', '/learn'],
+      ['Brokers', '/brokers'], ['Settings', '/settings'], ['System', '/system'],
+    ]) {
+      const link = nav.getByRole('link', { name, exact: true });
+      await expect(link).toBeVisible({ timeout: 10_000 });
+      await expect(link).toHaveAttribute('href', href);
+    }
   });
 
   test('/welcome renders without errors', async ({ page }) => {

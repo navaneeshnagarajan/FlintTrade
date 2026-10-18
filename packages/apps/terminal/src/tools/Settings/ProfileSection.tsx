@@ -15,6 +15,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
+import { logoutSession } from "@/services/sessionLogout";
 import { SectionTitle, FieldRow, TextInput } from "./shared";
 
 // ---------------------------------------------------------------------------
@@ -49,7 +50,6 @@ const MODE_META: Record<
 export function ProfileSection() {
   const name = useSettingsStore((s) => s.name);
   const setName = useSettingsStore((s) => s.setName);
-  const experience = useSettingsStore((s) => s.experience);
 
   const mode = useModeStore((s) => s.mode);
   const connectionStatus = useConnectionStore((s) => s.status);
@@ -58,7 +58,7 @@ export function ProfileSection() {
   const authStatus = useAuthStore((s) => s.status);
   const username = useAuthStore((s) => s.username);
   const lockSession = useAuthStore((s) => s.setPinRequired);
-  const signOut = useAuthStore((s) => s.setLoggedOut);
+  const signOut = () => { void logoutSession(); };
 
   const loggedIn = authStatus === "logged-in";
 
@@ -87,8 +87,7 @@ export function ProfileSection() {
             {loggedIn && username
               ? `Signed in as ${username}`
               : "Local operator · not signed in"}
-            {" · "}
-            <span className="capitalize">{{ beginner: "Getting Started", intermediate: "Confident", pro: "Expert", custom: "Custom" }[experience]}</span>
+
           </div>
         </div>
       </div>

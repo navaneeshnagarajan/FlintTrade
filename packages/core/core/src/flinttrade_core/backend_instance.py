@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import secrets
+import stat as stat_module
 import struct
 import threading
 from collections.abc import Callable
@@ -67,7 +68,7 @@ class BackendLeaseProof:
         self._pid = os.getpid()
         self._uid = os.getuid() if hasattr(os, "getuid") else None
         self._lease = lease
-        self._workspace_path = (lease._lock_path.parent if lease is not None else workspace_dir()).resolve()
+        self._workspace_path = (lease._lock_path.parent if lease is not None else workspace_dir(ensure_exists=False)).resolve()
         self._guardian_fd = guardian_fd
         self._revoked = threading.Event()
         self._watch_lock = threading.Lock()
@@ -130,7 +131,7 @@ def require_backend_lease_proof(proof: object) -> BackendLeaseProof:
     uid = os.getuid() if hasattr(os, "getuid") else None
     if proof._pid != os.getpid() or proof._uid != uid or proof._revoked.is_set():
         raise BackendLeaseUnavailable
-    if proof._workspace_path != workspace_dir().resolve():
+    if proof._workspace_path != workspace_dir(ensure_exists=False).resolve():
         raise BackendLeaseUnavailable
     if proof._lease is not None and not proof._lease._is_live():
         proof.revoke()
@@ -207,7 +208,7 @@ class BackendLeaseHandoff:
                 self._consumed
                 or os.getpid() == self._owner_pid
                 or os.getppid() != self._owner_pid
-                or workspace_dir().resolve() != self._workspace_path
+                or workspace_dir(ensure_exists=False).resolve() != self._workspace_path
             ):
                 raise BackendLeaseUnavailable
             self._consumed = True
@@ -277,10 +278,12 @@ class BackendInstanceLease:
         self._owner_pid = os.getpid() if owner_pid is None else int(owner_pid)
         self._guard = threading.Lock()
         self._released = False
+        self._created = False
         self._recovery_owner: Any | None = None
         self._proof: BackendLeaseProof | None = None
         self._lock_path = None
         self._lock_identity = None
+        self._exclusion_lease: BackendInstanceLease | None = None
         self._handoffs: list[BackendLeaseHandoff] = []
         _LIVE_BACKEND_LEASES.add(self)
 
@@ -293,6 +296,8 @@ class BackendInstanceLease:
 
     def _is_live(self) -> bool:
         if self._released or self._owner_pid != os.getpid() or self._lock_identity is None:
+            return False
+        if self._exclusion_lease is not None and not self._exclusion_lease._is_live():
             return False
         try:
             stat = self._lock_path.stat()
@@ -336,6 +341,8 @@ class BackendInstanceLease:
                 handoff.close()
             try:
                 self._raw_lease.release()
+                if self._exclusion_lease is not None:
+                    self._exclusion_lease.release()
             except BaseException:  # noqa: BLE001 - failed authority must remain reachable
                 retain_backend_instance_lease(self)
                 raise
@@ -386,27 +393,27 @@ def release_retained_backend_instance_lease(lease: BackendInstanceLease | Any) -
         _RETAINED_FAILED_LEASES[:] = [retained for retained in _RETAINED_FAILED_LEASES if retained is not lease]
 
 
-def acquire_backend_instance_lease() -> BackendInstanceLease:
-    """Acquire the process-lifetime backend lease without waiting.
-
-    Ownership comes exclusively from the operating system lock held by
-    :mod:`filelock`. Lock-file contents are never interpreted, so stale text
-    cannot create or revoke ownership.
-
-    Returns:
-        The acquired lease. Its owner must retain it for the complete backend
-        lifetime and call :meth:`~filelock.BaseFileLock.release` on exit.
-
-    Raises:
-        BackendInstanceAlreadyRunning: If another process owns this workspace.
-    """
-    lock_path = workspace_dir() / "backend_instance.lock"
+def _acquire_kernel_lease(
+    lock_path: Path, *, exclusion: BackendInstanceLease | None = None,
+) -> BackendInstanceLease:
+    """Claim the same kernel primitive for both backend and maintenance owners."""
+    if lock_path.is_symlink():
+        raise BackendInstanceAlreadyRunning("workspace ownership path is symbolic; retaining data")
     if os.name == "posix":
         raw_lease: BaseFileLock | Any = _PosixBackendFileLease(None)
         lease = BackendInstanceLease(raw_lease)
-        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+        try:
+            descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+            lease._created = True
+        except FileExistsError:
+            # Do not recreate an established inode if it disappears in this race.
+            descriptor = os.open(lock_path, flags)
         raw_lease._descriptor = descriptor
         try:
+            identity = os.fstat(descriptor)
+            if not stat_module.S_ISREG(identity.st_mode) or identity.st_nlink != 1 or identity.st_uid != os.getuid():
+                raise OSError(errno.EACCES, "ambiguous workspace ownership inode")
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             with suppress(OSError):
@@ -439,10 +446,59 @@ def acquire_backend_instance_lease() -> BackendInstanceLease:
         lease._lock_path = lock_path
         stat = lock_path.stat()
         lease._lock_identity = stat.st_dev, stat.st_ino
-        lease._proof = BackendLeaseProof(_PROOF_SEAL, lease=lease)
+        if not lease._is_live():
+            raise BackendInstanceAlreadyRunning("workspace ownership changed during acquisition")
     except BaseException:
         # The wrapper already owns the descriptor before any fallible proof
         # setup. release() retains that exact owner if cleanup itself fails.
+        lease._exclusion_lease = exclusion
+        with suppress(BaseException):
+            lease.release()
+        raise
+    return lease
+
+
+def _acquire_workspace_exclusion(workspace: Path, *, initialise: bool = False) -> BackendInstanceLease:
+    """Claim stable exclusion and the legacy backend inode, in that order.
+
+    Keep the stable inode outside the workspace and never unlink it: deleting
+    or recreating a workspace must not let a successor bypass a held owner.
+    The legacy inode also excludes independently started older backends.
+    Maintenance callers receive no backend write-admission capability.
+    """
+    workspace = workspace.expanduser().resolve(strict=not initialise)
+    fence = _acquire_kernel_lease(workspace.parent / f".{workspace.name}.backend-instance.lock")
+    try:
+        pending = workspace.parent / f".{workspace.name}.maintenance" / "pending.json"
+        # Refusal-only crash barrier for startup AND other maintenance (R18).
+        # Only the pinned client removes it after observed native exit and
+        # the requested complete transaction; missing process/PID is no proof.
+        if os.path.lexists(pending):
+            raise BackendInstanceAlreadyRunning("maintenance cleanup remains pending; explicit recovery required")
+        if initialise:
+            # No mkdir/chmod may occur before the stable sibling excludes purge.
+            workspace.mkdir(mode=0o700, exist_ok=True)
+        lease = _acquire_kernel_lease(workspace / "backend_instance.lock", exclusion=fence)
+    except BaseException:
+        with _RETAINED_FAILED_LEASES_LOCK:
+            retained = any(getattr(owner, "_exclusion_lease", None) is fence for owner in _RETAINED_FAILED_LEASES)
+        if not retained:
+            fence.release()
+        raise
+    lease._exclusion_lease = fence
+    return lease
+
+
+def acquire_backend_instance_lease() -> BackendInstanceLease:
+    """Acquire process-lifetime ownership, excluding workspace maintenance.
+
+    The existing guardian handoff and runtime proof are unchanged. Retain the
+    lease until every owned writer and cleanup handle has actually quiesced.
+    """
+    lease = _acquire_workspace_exclusion(workspace_dir(ensure_exists=False), initialise=True)
+    try:
+        lease._proof = BackendLeaseProof(_PROOF_SEAL, lease=lease)
+    except BaseException:
         with suppress(BaseException):
             lease.release()
         raise

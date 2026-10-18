@@ -4,30 +4,34 @@ version = "0.0.1"
 description = "Framework, native broker reader, config, workspace, models, exceptions, auth"
 requires-python = ">=3.12"
 dependencies = [
-    "filelock>=4.0.9",
-    "httpx>=0.27.0",
-    "pydantic>=2.0",
-    "python-dotenv>=1.2.4",
-    "flask>=3.0",
-    "flask-cors>=6.0.5",
-    "flask-limiter>=3.5",
-    "waitress>=3.0",
-    "argon2-cffi>=23.1.0",
-    "PyJWT>=2.15.0",
-    "cryptography>=50.0.0",
-    "pyotp>=2.9.0",
-    "structlog>=26.1.0",
-    "sentry-sdk[flask]>=2.71.0",
-    "numpy>=1.26.0",
-    "duckdb~=1.4",
-    "qrcode[svg]>=8.2",
+    "filelock==4.2.0",
+    "httpx==0.28.1",
+    "pydantic==2.14.1",
+    "python-dotenv==1.2.4",
+    "flask==3.1.3",
+    "flask-cors==6.0.5",
+    "flask-limiter==4.1.1",
+    "waitress==3.0.2",
+    "argon2-cffi==25.1.0",
+    "PyJWT==2.15.1",
+    "cryptography==50.0.2",
+    "pyotp==2.10.0",
+    "structlog==26.1.0",
+    "sentry-sdk[flask]==2.71.0",
+    "numpy==2.5.4",
+    "duckdb==1.5.6",
+    "qrcode[svg]==8.2",
     # health_monitor.check_thread_count + check_memory import psutil at
     # runtime. Without it those checks early-return "skipped" and the
     # _thread_baseline never gets set — see test_baseline_set_on_first_call.
-    "psutil>=5.9",
+    "psutil==7.2.2",
     # Official Ollama Linux archives are .tar.zst. Keep decompression in-process
     # so a first-run install does not depend on a system `zstd`/`tar` binary.
-    "zstandard>=0.23",
+    "zstandard==0.25.0",
+    # The auth DuckDB→SQLite CLI imports pyrage while migrating. It is not
+    # optional: a missing install exits 2 as ModuleNotFoundError. pyarrow
+    # stays in the migration extra.
+    "pyrage==1.4.0",
 ]
 
 [project.scripts]
@@ -41,9 +45,8 @@ flinttrade-desktop-backend = "flinttrade_core.desktop:main"
 # Heavy + migration-only, so kept out of the default install. Enable with:
 #   uv sync --extra migration
 migration = [
-    "duckdb>=1.1",
-    "pyarrow>=25.0.0",
-    "pyrage>=1.1",
+    "duckdb==1.5.6",
+    "pyarrow==26.0.0",
 ]
 
 [build-system]

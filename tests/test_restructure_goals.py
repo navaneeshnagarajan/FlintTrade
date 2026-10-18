@@ -7,6 +7,7 @@ import re
 import runpy
 import subprocess
 import sys
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -1001,12 +1002,19 @@ def test_dependency_provenance_gate_accepts_repo_local_cargo_patches() -> None:
 
 def test_desktop_release_does_not_require_numba_stack() -> None:
     """Native desktop packaging must not force llvmlite builds on macOS Intel."""
-    ditto_manifest = (ROOT / "packages" / "services" / "ditto" / "pyproject.toml").read_text(encoding="utf-8")
-    default_deps = ditto_manifest.split("[project.optional-dependencies]", 1)[0]
+    ditto_manifest = tomllib.loads(
+        (ROOT / "packages" / "services" / "ditto" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    from packaging.requirements import Requirement
+
+    project = ditto_manifest["project"]
+    default_deps = {Requirement(item).name.lower() for item in project["dependencies"]}
+    optional_numba = [Requirement(item) for item in project["optional-dependencies"]["numba"]]
     requirements = (ROOT / "requirements.lock").read_text(encoding="utf-8")
 
-    assert '"numba>=' not in default_deps
-    assert 'numba = ["numba>=' in ditto_manifest
+    assert not {"numba", "llvmlite"} & default_deps
+    assert len(optional_numba) == 1 and optional_numba[0].name == "numba"
+    assert optional_numba[0].specifier
     assert "llvmlite==" not in requirements
     assert "numba==" not in requirements
 

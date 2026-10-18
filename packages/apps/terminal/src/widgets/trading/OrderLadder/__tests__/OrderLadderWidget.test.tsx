@@ -564,7 +564,9 @@ describe("OrderLadderWidget derivative lot validation", () => {
       .find((b) => b.getAttribute("title")?.startsWith("BUY"));
     fireEvent.click(askBtn as HTMLElement);
 
-    expect(await screen.findByText(/unverified/i)).toBeTruthy();
+    expect(
+      await screen.findByText("Not placed. The lot size for BANKNIFTY isn't verified."),
+    ).toBeTruthy();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 });

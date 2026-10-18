@@ -62,6 +62,19 @@ function fixture(input: {
 }
 
 describe("backend runtime authority adapter", () => {
+  it("accepts exact guardian cleanup without claiming forced containment", async () => {
+    // Production POSIX containment is owned by the guardian: a token-bound
+    // cleanup ACK plus exact child exit is distinct from OS forced containment.
+    const backend = running({ ...CLEAN, containmentExited: false });
+    const test = fixture({ start: async () => backend });
+    await test.runtime.start();
+    const stopped = vi.fn();
+    await expect(test.runtime.sourceLifecycle.drainCurrent({
+      onBackendStopped: stopped, signal: new AbortController().signal,
+    })).resolves.toBeUndefined();
+    expect(stopped).toHaveBeenCalledOnce();
+    expect(test.runtime.getRunning()).toBeNull();
+  });
   it("publishes only a supervisor-health-proved loopback origin", async () => {
     const onReady = vi.fn();
     const test = fixture({ onReady });

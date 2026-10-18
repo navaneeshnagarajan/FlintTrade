@@ -192,14 +192,14 @@ def test_percentile_at_extremes() -> None:
 
 
 def test_build_result_perfect_score() -> None:
-    """Original metric beats every permutation → p_value = 0, significant."""
+    """Finite Monte Carlo sample cannot claim a zero p-value."""
     null = [0.1, 0.2, 0.3, 0.4, 0.5]
     # _build_result takes a raw null list — use minimum-valid config just for
     # confidence_level and n_permutations fields
     cfg = PermutationConfig(n_permutations=100, confidence_level=0.95)
     result = _build_result(1.0, null, cfg)
-    assert result.p_value == pytest.approx(0.0)
-    assert result.is_significant is True
+    assert result.p_value == pytest.approx(1 / 6)
+    assert result.is_significant is False
     assert result.percentile_rank == pytest.approx(100.0)
 
 
@@ -345,7 +345,7 @@ def test_test_trades_returns_permutation_result() -> None:
 
 
 def test_test_trades_net_pnl_fallback() -> None:
-    trades = [{"net_pnl": 500.0}, {"net_pnl": -200.0}, {"net_pnl": 300.0}]
+    trades = [{"net_pnl": v, "capital_at_risk": 100000} for v in (500.0, -200.0, 300.0)]
     all_returns = _random_returns(100)
     cfg = PermutationConfig(n_permutations=200, random_seed=6)
     result = PermutationTester(cfg).test_trades(trades, all_returns)
@@ -450,20 +450,20 @@ def test_extract_trade_returns_prefer_return_pct() -> None:
 
 
 def test_extract_trade_returns_fallback_to_net_pnl() -> None:
-    trades = [{"net_pnl": 1500.0}]
+    trades = [{"net_pnl": 1500.0, "capital_at_risk": 100000}]
     result = _extract_trade_returns(trades)
-    assert result == [pytest.approx(1500.0)]
+    assert result == [pytest.approx(0.015)]
 
 
 def test_extract_trade_returns_mixed_keys() -> None:
     trades = [
         {"return_pct": 0.01},
-        {"net_pnl": -200.0},
+        {"net_pnl": -200.0, "capital_at_risk": 100000},
     ]
     result = _extract_trade_returns(trades)
     assert len(result) == 2
     assert result[0] == pytest.approx(0.01)
-    assert result[1] == pytest.approx(-200.0)
+    assert result[1] == pytest.approx(-0.002)
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +479,7 @@ def test_permutation_result_as_dict_keys() -> None:
     expected_keys = {
         "original_metric", "permutation_mean", "permutation_std",
         "p_value", "is_significant", "confidence_level",
-        "n_permutations", "percentile_rank",
+        "n_permutations", "percentile_rank", "null_model", "assumptions",
     }
     assert expected_keys == set(d.keys())
 

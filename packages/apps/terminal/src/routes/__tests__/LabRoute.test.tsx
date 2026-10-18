@@ -140,6 +140,21 @@ describe("LabRoute", () => {
     expect(screen.getByRole("tab", { name: /forward test/i })).toBeInTheDocument();
   });
 
+  it("keeps its heading and active panel in one keyboard-reachable scroll region", () => {
+    renderLab("/testing");
+    const region = screen.getByRole("region", { name: "Strategy Lab" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveClass("overflow-y-auto");
+    expect(region).toContainElement(screen.getByRole("heading", { name: "Strategy Lab" }));
+    expect(region).toContainElement(screen.getByRole("tabpanel", { name: "Backtest" }));
+    expect(screen.getByRole("tabpanel", { name: "Backtest" })).not.toHaveClass("overflow-y-auto");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Pine Editor" }));
+    expect(region).toContainElement(screen.getByRole("tabpanel", { name: "Pine Editor" }));
+    expect(screen.getByRole("tabpanel", { name: "Pine Editor" })).not.toHaveClass("overflow-y-auto");
+    expect(screen.getByRole("heading", { name: "Strategy Lab" })).toBeInTheDocument();
+  });
+
   it("shows Pine Editor tab", () => {
     renderLab();
 

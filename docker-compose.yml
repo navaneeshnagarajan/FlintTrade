@@ -132,7 +132,7 @@ services:
   # Nginx — Reverse proxy and static file server (sole public entry point)
   # ---------------------------------------------------------------------------
   nginx:
-    image: nginx:alpine
+    image: nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
     platform: linux/amd64
     container_name: flinttrade-nginx
     # High-port defaults so a dev machine with a busy :80/:443 still comes up.
@@ -171,7 +171,7 @@ services:
   # Internal only (proxied via Nginx at /monitoring/)
   # ---------------------------------------------------------------------------
   uptime-kuma:
-    image: louislam/uptime-kuma:1
+    image: louislam/uptime-kuma:2.5.6@sha256:9912da7d7d9b6ddc0c2d904beb84d24689c1ed9c33b81419eb9008663a92a329
     platform: linux/amd64
     container_name: flinttrade-uptime-kuma
     profiles: ["monitoring"]
@@ -194,7 +194,7 @@ services:
   # Requires PostgreSQL for storage + Celery worker for async processing
   # ---------------------------------------------------------------------------
   glitchtip-redis:
-    image: redis:7-alpine
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     platform: linux/amd64
     container_name: flinttrade-glitchtip-redis
     profiles: ["monitoring"]
@@ -208,7 +208,7 @@ services:
       - flinttrade
 
   glitchtip:
-    image: glitchtip/glitchtip:latest
+    image: glitchtip/glitchtip:6.2.6@sha256:a3d8eb1b36c1e1603d55ab32711ea3dd8115874742a781a57391a62a16e0dff6
     platform: linux/amd64
     container_name: flinttrade-glitchtip
     profiles: ["monitoring"]
@@ -237,7 +237,7 @@ services:
       - flinttrade
 
   glitchtip-worker:
-    image: glitchtip/glitchtip:latest
+    image: glitchtip/glitchtip:6.2.6@sha256:a3d8eb1b36c1e1603d55ab32711ea3dd8115874742a781a57391a62a16e0dff6
     platform: linux/amd64
     container_name: flinttrade-glitchtip-worker
     profiles: ["monitoring"]
@@ -261,7 +261,7 @@ services:
       - flinttrade
 
   glitchtip-db:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     platform: linux/amd64
     container_name: flinttrade-glitchtip-db
     profiles: ["monitoring"]
@@ -290,7 +290,7 @@ services:
   # Internal only (proxied via Nginx at /logs/)
   # ---------------------------------------------------------------------------
   victorialogs:
-    image: victoriametrics/victoria-logs:latest
+    image: victoriametrics/victoria-logs:v1.53.0@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
     platform: linux/amd64
     container_name: flinttrade-victorialogs
     profiles: ["monitoring"]
@@ -315,7 +315,7 @@ services:
   # Internal only (proxied via Nginx at /metrics/)
   # ---------------------------------------------------------------------------
   netdata:
-    image: netdata/netdata:latest
+    image: netdata/netdata:v2.12.1@sha256:5cfa05a5fa5686b98e0c70e884f00685fb3c662e9c5d727cf46c96d8e37b7818
     platform: linux/amd64
     container_name: flinttrade-netdata
     profiles: ["monitoring"]

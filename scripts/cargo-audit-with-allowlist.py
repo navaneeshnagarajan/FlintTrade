@@ -64,7 +64,7 @@ def main() -> int:
     manifest_dir = (REPO / args.manifest_dir).resolve()
     report_path = (REPO / args.report).resolve()
     proc = subprocess.run(
-        ["cargo", "+stable", "audit", "--json"],
+        ["cargo", "+1.99.0", "audit", "--json"],
         cwd=manifest_dir,
         capture_output=True,
         text=True,

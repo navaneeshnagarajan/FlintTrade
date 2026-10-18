@@ -142,8 +142,12 @@ describe("AgentPanel", () => {
     renderPanel();
 
     await waitFor(() =>
-      expect(screen.getByText(/switch to Practice or Live/i)).toBeInTheDocument(),
+      expect(screen.getByText(
+        "Example data cannot run an agent. Switch to Practice or Live to start a session.",
+      )).toBeInTheDocument(),
     );
+    expect(screen.getByRole("status")).toHaveTextContent("Example");
+    expect(screen.queryByText(/\bExplore\b|\bExplorer\b/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start agent/i })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /start agent/i }));
     expect(startAgent).not.toHaveBeenCalled();

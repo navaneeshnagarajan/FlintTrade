@@ -14,9 +14,9 @@ import pytest
 from flask import Flask
 
 import flinttrade_core.agent_routes as routes
-import flinttrade_core.order_routes as order_routes
 from flinttrade_ai.autonomous_agent import AgentConfig, AgentState, AgentStatus, AutonomousTrader
 from flinttrade_core.models import Action, Order
+from flinttrade_core.knowledge_integration import install_knowledge_runtime, require_knowledge_runtime
 from flinttrade_core.smart_order_routes import _GatedDecision, _GatedOrderResponse
 from flinttrade_engine.action_center import ActionCenterError, PendingOrderQueue
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
@@ -46,12 +46,13 @@ def session(monkeypatch, tmp_path):
 
     for name in ("_build_vault", "_build_learning_memory", "_build_skills_workspace"):
         monkeypatch.setattr(routes, name, lambda: None)
-    monkeypatch.setattr(routes, "_agent_flag_enabled", lambda: True)
-    monkeypatch.setattr(routes, "_acl_grants_agent", lambda *_: True)
+    from flinttrade_core.workspace import Workspace
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    workspace = Workspace()
+    workspace.set("ai.autonomous_agent.enabled", True)
+    workspace.set("brokers.account_acls", {"dhan": {"primary": ["autonomous-trader"]}})
     monkeypatch.setattr(routes, "_build_llm", object)
     monkeypatch.setattr(routes, "_trader_factory", InertTrader)
-    monkeypatch.setattr(order_routes, "_decode_request_payload", lambda: {"mode": "live", "jti": "test"})
-    monkeypatch.setattr(order_routes, "_is_live_mode_unlocked", lambda: True)
     queue = PendingOrderQueue(tmp_path / "intent-identity.duckdb")
     app = Flask(__name__)
     app.config.update(
@@ -68,11 +69,19 @@ def session(monkeypatch, tmp_path):
         ),
     )
     app.register_blueprint(routes.agent_bp)
+    install_knowledge_runtime(app, tmp_path)
+    knowledge = require_knowledge_runtime(app)
+    from flinttrade_core.auth_routes import _create_token, verify_operator_session_token
+    with app.app_context():
+        token = _create_token("synthetic-intent-operator", mode="live", live_mode_unlocked=True)
+        principal = verify_operator_session_token(token)
     try:
         response = app.test_client().post(
-            "/api/v1/ai/agent/start", json={"symbols": ["RELIANCE"], "broker": "dhan", "account_id": "primary"}
+            "/api/v1/ai/agent/start", headers={"Authorization": "Bearer " + token},
+            json={"symbols": ["RELIANCE"], "broker": "dhan", "account_id": "primary"}
         )
         assert response.status_code == 202, response.get_json()
+        assert routes._RUNNER["knowledge_actor"] == principal.actor_ref
         yield SimpleNamespace(queue=queue, sink=captured["entry_intent_sink"], trader=captured["trader"])
     finally:
         stopped.set()
@@ -83,6 +92,7 @@ def session(monkeypatch, tmp_path):
             assert not thread.is_alive()
         routes._reset_runner_for_tests()  # noqa: SLF001
         queue.close()
+        knowledge.close()
 
 
 def _order(**changes):

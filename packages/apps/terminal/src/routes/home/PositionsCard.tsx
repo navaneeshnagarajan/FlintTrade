@@ -11,7 +11,7 @@ import {
   runGuardedAccountRefetch,
 } from "@/lib/accountQueryState";
 import { useModeStore } from "@/stores/modeStore";
-import { useTradingStore } from "@/stores/tradingStore";
+import { useCurrentTradingState } from "@/stores/tradingStore";
 import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { Loader2 } from "lucide-react";
@@ -75,7 +75,7 @@ export function PositionsCard() {
   const isExplore = useModeStore((s) => s.mode === "explore");
   const accountReadsEnabled = useAccountReadsEnabled();
   const query = usePositions({ enabled: accountReadsEnabled });
-  const storePnl = useTradingStore((s) => s.totalPnl);
+  const aggregate = useCurrentTradingState();
 
   // Demo mode shows simulated positions; the trading-store P&L mirror isn't fed
   // in explore, so derive the header total from the demo positions themselves.
@@ -92,12 +92,9 @@ export function PositionsCard() {
   });
   const totalPnl = isExplore
     ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
-    : storePnl;
+    : aggregate.totalPnl;
   const totalPnlPositive = totalPnl >= 0;
-  const showPnl =
-    isExplore ||
-    openPositions.length > 0 ||
-    (accountReadsEnabled && !queryUi.isPaused && query.isSuccess);
+  const showPnl = isExplore || aggregate.positionsStatus === "ready" || aggregate.positionsStatus === "stale";
 
   return (
     <BentoCard size="tall" label="Open Positions" data-testid="positions-card">
@@ -129,6 +126,10 @@ export function PositionsCard() {
               : "—"}
           </span>
         </div>
+
+        {!isExplore && aggregate.positionsStatus === "stale" && !isError && !queryUi.isFrozen && (
+          <p role="status" className="text-[10px] text-warning">P&L stale — last known value</p>
+        )}
 
         {isError && (
           <div

@@ -1484,7 +1484,7 @@ async def test_post_session_learning_does_not_retain_unstarted_worker(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_decide_includes_memory_lessons_in_the_prompt() -> None:
+async def test_decide_excludes_unvalidated_legacy_memory_lessons() -> None:
     memory = StubMemory(context="- Avoid chasing gap-ups after 10:30 IST")
     agent = make_agent(llm_response="HOLD", memory=memory)
 
@@ -1492,8 +1492,8 @@ async def test_decide_includes_memory_lessons_in_the_prompt() -> None:
 
     assert signal in ("BUY", "SELL", "HOLD")
     prompt = agent.llm.chat.call_args.args[0][1].content
-    assert "Lessons from previous sessions" in prompt
-    assert "Avoid chasing gap-ups" in prompt
+    assert "Lessons from previous sessions" not in prompt
+    assert "Avoid chasing gap-ups" not in prompt
 
 
 @pytest.mark.asyncio
@@ -1575,7 +1575,7 @@ async def test_compressed_full_session_trades_squares_off_and_learns() -> None:
 
 
 @pytest.mark.asyncio
-async def test_multi_symbol_lessons_are_stored_per_symbol_and_retrievable() -> None:
+async def test_multi_symbol_candidates_persist_but_require_validation_for_influence() -> None:
     """The HIGH round-trip bug: a session-wide lesson stored under symbol=""
     could never match decide()'s per-symbol retrieval. Lessons now store one
     copy per traded symbol — proven end-to-end against a REAL backend."""
@@ -1593,10 +1593,11 @@ async def test_multi_symbol_lessons_are_stored_per_symbol_and_retrievable() -> N
 
     await agent._run_post_session_learning()
 
-    # Both traded symbols can retrieve the session's lessons.
+    # Both traded symbols retain candidate history, but the direct-memory bypass
+    # is closed. Positive validated recall is covered at the KnowledgeMemory seam.
     for symbol in ("RELIANCE", "HDFCBANK"):
-        context = agent._memory_context(symbol)
-        assert context, f"no lessons retrievable for {symbol}"
+        assert memory.summarise_context(symbol, "trading lessons"), f"no candidate history for {symbol}"
+        assert agent._memory_context(symbol) == ""
 
 
 @pytest.mark.asyncio
@@ -1723,8 +1724,8 @@ async def test_no_skills_workspace_means_no_draft(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_decide_includes_only_approved_skills(tmp_path) -> None:
-    """Drafts must be invisible to the decision prompt; approved skills show."""
+async def test_legacy_manual_approval_cannot_replace_independent_skill_validation(tmp_path) -> None:
+    """A frontmatter status or old approve endpoint is not validation evidence."""
     from flinttrade_ai.skill_drafts import (
         approve_draft,
         draft_skill_from_reflection,
@@ -1742,16 +1743,18 @@ async def test_decide_includes_only_approved_skills(tmp_path) -> None:
     registry = SkillRegistry(skills_dir(tmp_path))
     agent = make_agent(llm_response="HOLD")
     agent.skill_registry = registry
+    agent.selected_skills = ("session-lessons-2026-07-19",)
 
     await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
     prompt = agent.llm.chat.call_args.args[0][1].content
     assert "session-lessons" not in prompt  # draft: invisible
 
-    approve_draft(tmp_path, "session-lessons-2026-07-19")
+    with pytest.raises(RuntimeError, match="KnowledgeRuntime"):
+        approve_draft(tmp_path, "session-lessons-2026-07-19")
     registry.reload()
     await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
     prompt = agent.llm.chat.call_args.args[0][1].content
-    assert "session-lessons-2026-07-19" in prompt  # approved: visible
+    assert "session-lessons-2026-07-19" not in prompt  # still lacks independent evidence
 
 
 @pytest.mark.asyncio

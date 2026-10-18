@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 
 SECRET = b"0123456789abcdef0123456789abcdef"
 _ORIGINAL_BUILD_VAULT = mod._build_vault  # noqa: SLF001
+_TEST_KNOWLEDGE_OWNERS = []
 
 
 class _FakeTrader:
@@ -66,7 +67,8 @@ class _FakeTrader:
 
 
 @pytest.fixture(autouse=True)
-def _reset(monkeypatch):
+def _reset(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
     set_safety_gate_secret(SECRET)
     mod._reset_runner_for_tests()  # noqa: SLF001
     _FakeTrader.instances = []
@@ -84,6 +86,9 @@ def _reset(monkeypatch):
     if thread is not None and thread.is_alive():
         thread.join(timeout=2.0)
     mod._reset_runner_for_tests()  # noqa: SLF001
+    for owner in _TEST_KNOWLEDGE_OWNERS:
+        owner.close()
+    _TEST_KNOWLEDGE_OWNERS.clear()
 
 
 @pytest.fixture()
@@ -119,6 +124,10 @@ def _make_app(broker_router: object | None = None) -> Flask:
         },
     )()
     app.register_blueprint(mod.agent_bp)
+    from flinttrade_core.knowledge_integration import install_knowledge_runtime
+    from flinttrade_core.workspace import workspace_dir
+    install_knowledge_runtime(app, workspace_dir())
+    _TEST_KNOWLEDGE_OWNERS.append(app.config["KNOWLEDGE_RUNTIME"])
     return app
 
 
@@ -146,86 +155,53 @@ def test_build_vault_uses_configured_path(monkeypatch, tmp_path):
     assert vault.root == tmp_path
 
 
-class _EnabledWorkspace:
-    def get(self, _key: str, default: Any = None) -> Any:
-        return True
-
-
-class _DisabledWorkspace:
-    def get(self, _key: str, default: Any = None) -> Any:
-        return False
-
-
-def test_learning_memory_uses_persistent_backend_without_chromadb(monkeypatch, tmp_path) -> None:
-    """Lessons persist on disk even when chromadb is not installed."""
+def test_learning_memory_uses_shared_scoped_owner_without_chromadb(monkeypatch) -> None:
     import sys
-
-    import flinttrade_core.workspace as workspace_mod
-    from flinttrade_ai.memory import TradedMemory
-
+    from flask import g
+    from flinttrade_ai.knowledge_store import KnowledgeMemory, KnowledgeScope
     monkeypatch.setitem(sys.modules, "chromadb", None)
-    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
-    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
-    mod._FALLBACK_LEARNING_MEMORY = None
-
-    memory = mod._build_learning_memory()
-
-    assert isinstance(memory, TradedMemory)
-
-
-def test_learning_memory_falls_back_to_hierarchical_when_persistent_fails(monkeypatch, tmp_path) -> None:
-    """In-process hierarchical memory remains the construction-time fallback."""
-    import importlib.util
-
-    import flinttrade_core.workspace as workspace_mod
-    from flinttrade_ai.memory import HierarchicalMemoryManager, MemoryBackendConfig, MemoryBackendKind
-
-    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
-    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
-    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
-    mod._FALLBACK_LEARNING_MEMORY = None
-
-    def _create(config: MemoryBackendConfig | None = None) -> Any:
-        resolved = config or MemoryBackendConfig()
-        if MemoryBackendKind(resolved.backend) is MemoryBackendKind.PERSISTENT:
-            raise RuntimeError("persistent store unavailable")
-        return HierarchicalMemoryManager()
-
-    monkeypatch.setattr("flinttrade_ai.memory.create_memory_backend", _create)
-
-    memory = mod._build_learning_memory()
-
-    assert isinstance(memory, HierarchicalMemoryManager)
+    app = _make_app()
+    with app.app_context():
+        g.agent_knowledge_scope = KnowledgeScope("native:dhan:default", "live", "backend-run")
+        memory = mod._build_learning_memory()
+    assert isinstance(memory, KnowledgeMemory)
+    assert memory.scope.run_id == "backend-run"
+    assert memory.ledger is app.config["KNOWLEDGE_RUNTIME"].ledger
 
 
-def test_learning_memory_falls_back_without_shadowing_legacy_chroma(monkeypatch, tmp_path) -> None:
-    """Legacy lessons stay untouched while the process uses explicit in-memory fallback."""
-    import flinttrade_core.workspace as workspace_mod
-    from flinttrade_ai.memory import HierarchicalMemoryManager
+def test_learning_memory_owner_failure_has_no_in_process_fallback() -> None:
+    from flask import g
+    from flinttrade_ai.knowledge_store import KnowledgeScope
+    from flinttrade_core.knowledge_integration import KnowledgeUnavailable
+    app = _make_app()
+    app.config["KNOWLEDGE_RUNTIME"] = None
+    with app.app_context():
+        g.agent_knowledge_scope = KnowledgeScope("native:dhan:default", "live", "backend-run")
+        with pytest.raises(KnowledgeUnavailable):
+            mod._build_learning_memory()
 
-    agent_memory = tmp_path / "agent_memory"
-    agent_memory.mkdir()
+
+def test_scoped_memory_leaves_legacy_chroma_untouched(tmp_path) -> None:
+    from flask import g
+    from flinttrade_ai.knowledge_store import KnowledgeMemory, KnowledgeScope
+    agent_memory = tmp_path / "workspace" / "agent_memory"
+    agent_memory.mkdir(parents=True)
     legacy_db = agent_memory / "chroma.sqlite3"
     legacy_db.write_bytes(b"legacy-agent-lessons")
-    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
-    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
-    mod._FALLBACK_LEARNING_MEMORY = None
-
-    memory = mod._build_learning_memory()
-
-    assert isinstance(memory, HierarchicalMemoryManager)
+    app = _make_app()
+    with app.app_context():
+        g.agent_knowledge_scope = KnowledgeScope("native:dhan:default", "live", "backend-run")
+        memory = mod._build_learning_memory()
+    assert isinstance(memory, KnowledgeMemory)
     assert legacy_db.read_bytes() == b"legacy-agent-lessons"
     assert not (agent_memory / "flinttrade_vectors.sqlite").exists()
 
 
-def test_learning_memory_disabled_returns_none(monkeypatch, tmp_path) -> None:
-    import flinttrade_core.workspace as workspace_mod
-
-    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
-    monkeypatch.setattr(workspace_mod, "Workspace", _DisabledWorkspace)
-    mod._FALLBACK_LEARNING_MEMORY = None
-
-    assert mod._build_learning_memory() is None
+def test_learning_memory_refuses_unscoped_construction() -> None:
+    from flinttrade_core.knowledge_integration import KnowledgeUnavailable
+    app = _make_app()
+    with app.app_context(), pytest.raises(KnowledgeUnavailable):
+        mod._build_learning_memory()
 
 
 # ---------------------------------------------------------------------------

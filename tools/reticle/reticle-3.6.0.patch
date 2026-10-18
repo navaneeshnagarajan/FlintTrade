@@ -1,0 +1,1117 @@
+--- a/adapters/realm/browser/src/connect-options.ts
++++ b/adapters/realm/browser/src/connect-options.ts
+@@ -1,4 +1,5 @@
+ import type { RedactionConfig } from '@reticlehq/core';
++import type { ObservationProfile } from './observation-profile.js';
+ 
+ /**
+  * What `reticle.connect()` accepts.
+@@ -8,6 +9,8 @@
+  * its own.
+  */
+ export interface ReticleConnectOptions {
++  /** Explicit bounded SDK capture capacity; omission preserves published limits. */
++  observationProfile?: ObservationProfile;
+   /** WS endpoint of the local bridge. Defaults to ws://localhost:<port><path>. */
+   url?: string;
+   /** Human-friendly session label so the agent can target the right tab. */
+--- /dev/null
++++ b/adapters/realm/browser/src/observation-profile.ts
+@@ -0,0 +1,20 @@
++/** Opt-in observation capacity; never an application assertion/request budget. */
++export interface ObservationProfile {
++  /** Semantic events per mutation batch, independently for additions/removals/changes. */
++  domMaxPerBatch: number;
++}
++
++/** Omission retains the published behaviour. Reject mistakes, never clamp or coerce. */
++export function observationProfile(value: unknown): Readonly<ObservationProfile> | undefined {
++  if (value === undefined) return undefined;
++  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
++      ![Object.prototype, null].includes(Object.getPrototypeOf(value) as object | null) ||
++      Reflect.ownKeys(value).length !== 1 || !Object.hasOwn(value, 'domMaxPerBatch')) {
++    throw new Error('invalid observationProfile');
++  }
++  const count = (value as Record<string, unknown>)['domMaxPerBatch'];
++  if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1 || count > 512) {
++    throw new Error('observationProfile.domMaxPerBatch must be an integer in 1..512');
++  }
++  return Object.freeze({ domMaxPerBatch: count });
++}
+--- a/adapters/realm/browser/src/observers/dom.ts
++++ b/adapters/realm/browser/src/observers/dom.ts
+@@ -1,3 +1,4 @@
++import { observationProfile, type ObservationProfile } from '../observation-profile.js';
+ import { readTestId, testIdSelector } from '@/dom/addressing/testid-attr.js';
+ import { EventType, TruncationChannel } from '@reticlehq/core';
+ import { getAccessibleName, getRole, isVisible } from '@/dom/a11y.js';
+@@ -114,7 +115,8 @@
+   return trimmed.length > 0 ? trimmed : undefined;
+ }
+ 
+-export function installDom(emit: Emit): Teardown {
++export function installDom(emit: Emit, profile?: Readonly<ObservationProfile>): Teardown {
++  const maxPerBatch = observationProfile(profile)?.domMaxPerBatch ?? MAX_PER_BATCH;
+   // Installed here rather than in the bootstrap list because this observer is the registry's reason
+   // for existing, and the ordering matters: a root attached between the two would be missed by both.
+   // It is also the only chance to capture a CLOSED root, which attachShadow returns exactly once.
+@@ -131,7 +133,7 @@
+       if ('attributes' === record.type) {
+         const target = record.target;
+         if (isElement(target) && record.attributeName !== null && !isReticleOverlay(target)) {
+-          if (changed >= MAX_PER_BATCH) {
++          if (changed >= maxPerBatch) {
+             dropped += 1;
+             continue;
+           }
+@@ -156,7 +158,7 @@
+         // childList-only would miss this.
+         const parent = record.target.parentElement;
+         if (parent !== null && !isReticleOverlay(parent)) {
+-          if (changed >= MAX_PER_BATCH) {
++          if (changed >= maxPerBatch) {
+             dropped += 1;
+             continue;
+           }
+@@ -182,7 +184,7 @@
+       if (textOf(record.addedNodes) !== undefined || textOf(record.removedNodes) !== undefined) {
+         const parent = isElement(record.target) ? record.target : null;
+         if (parent !== null && !isReticleOverlay(parent)) {
+-          if (changed >= MAX_PER_BATCH) dropped += 1;
++          if (changed >= maxPerBatch) dropped += 1;
+           else {
+             changed += 1;
+             // The element's text AFTER the mutation, so a cleared node reports '' rather than the
+@@ -199,7 +201,7 @@
+       }
+       for (const node of record.addedNodes) {
+         if (!isElement(node)) continue;
+-        if (added >= MAX_PER_BATCH) {
++        if (added >= maxPerBatch) {
+           dropped += 1;
+           continue;
+         }
+@@ -222,7 +224,7 @@
+       }
+       for (const node of record.removedNodes) {
+         if (!isElement(node)) continue;
+-        if (removed >= MAX_PER_BATCH) {
++        if (removed >= maxPerBatch) {
+           dropped += 1;
+           continue;
+         }
+--- a/adapters/realm/browser/src/observers/install-all.ts
++++ b/adapters/realm/browser/src/observers/install-all.ts
+@@ -7,6 +7,7 @@
+  * down with it — and silently, because the SDK's own catch blocks swallow it.
+  */
+ import { installDom } from './dom.js';
++import type { ObservationProfile } from '../observation-profile.js';
+ import { installStorage } from './storage.js';
+ import { installStoreState } from './state.js';
+ import { installFocus } from './focus.js';
+@@ -30,6 +31,7 @@
+ 
+ interface InstallOptions {
+   captureBodies: boolean;
++  observationProfile?: Readonly<ObservationProfile>;
+   captureErrorBodies?: boolean;
+ }
+ 
+@@ -97,7 +99,7 @@
+     guard(emit, SdkSite.CONSOLE_OBSERVER, () => installDialogs(emit)),
+     guard(emit, SdkSite.ANIMATION_OBSERVER, () => installAnimation(emit)),
+     guard(emit, SdkSite.DOM_OBSERVER, () => installScroll(emit)),
+-    guard(emit, SdkSite.DOM_OBSERVER, () => installDom(emit)),
++    guard(emit, SdkSite.DOM_OBSERVER, () => installDom(emit, options.observationProfile)),
+     guard(emit, SdkSite.STORE_ADAPTER, () => installStorage(emit)), // storage WRITES → STORAGE_CHANGE diffs (pull remains the fallback)
+     guard(emit, SdkSite.STORE_ADAPTER, () => installStoreState(emit)), // subscribed-store mutations → STATE_CHANGE path diffs
+     guard(emit, SdkSite.DOM_OBSERVER, () => installFocus(emit)), // element focus movement → FOCUS_CHANGE (focus-to-body = a regression)
+--- a/adapters/realm/browser/src/reticle.ts
++++ b/adapters/realm/browser/src/reticle.ts
+@@ -71,6 +71,7 @@
+ import { installRecorder, type RecorderHandle } from './recorder/recorder.js';
+ import { Annotator } from './review/annotator.js';
+ import type { Teardown } from './observers/types.js';
++import { observationProfile } from './observation-profile.js';
+ import type { ReticleConnectOptions } from './connect-options.js';
+ 
+ // Re-exported so every existing importer of the options type is unaffected by the file split.
+@@ -333,6 +334,7 @@
+   connect(options: ReticleConnectOptions = {}): void {
+     if (this.#connected) return;
+     if ('undefined' === typeof window || 'undefined' === typeof document) return;
++    const profile = observationProfile(options.observationProfile);
+ 
+     // Dev-only backstop: refuse to activate in a production build (SSR healthcheck, prod bundle opened
+     // on localhost). `process` may not exist in a raw browser, so read NODE_ENV off globalThis.
+@@ -468,6 +470,7 @@
+       'boolean' === typeof options.sourceMapping ? options.sourceMapping : undefined;
+     this.#teardowns = installAllObservers(emit, {
+       captureBodies: this.#captureBodies,
++      ...(profile === undefined ? {} : { observationProfile: profile }),
+       ...(options.captureErrorBodies === undefined
+         ? {}
+         : { captureErrorBodies: options.captureErrorBodies }),
+--- a/core/src/index.ts
++++ b/core/src/index.ts
+@@ -126,3 +126,5 @@
+ } from './identity/contract-fingerprint.js';
+ export { fingerprintFinding, type FindingIdentity } from './verdict/finding-fingerprint.js';
+ export * from './words/unreachable-notice.js'; // the page's unreachable warning, as a contract the daemon parses
++
++export * from './wire/capture.js';
+--- /dev/null
++++ b/core/src/wire/capture.ts
+@@ -0,0 +1,43 @@
++import { z } from 'zod';
++import { ReticleEventSchema } from './messages.js';
++import { URL_RAW } from './net.js';
++
++/** Independent agent-facing capture streams; wire telemetry is never application evidence. */
++export const CaptureStream = { LIVE: 'live', WIRE: 'wire' } as const;
++export const WireReceiptKind = { APPLICATION: 'application', INSTRUMENTER: 'instrumenter' } as const;
++export const CaptureProjection = { AGENT_SAFE: 'withoutUrlRaw' } as const;
++export const CaptureSequenceSchema = z.number().int().min(0).max(99999);
++const uint = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
++export const CaptureScopeSchema = z.object({
++  sessionId: z.string().min(1), incarnation: z.string().regex(/^[a-f0-9]{32}$/),
++  documentId: ReticleEventSchema.shape.documentId.unwrap(), editEpoch: uint.optional(),
++}).strict();
++export type CaptureScope = z.infer<typeof CaptureScopeSchema>;
++export const CaptureExportRequestSchema = z.object({
++  through_seq: CaptureSequenceSchema.optional(), stream: z.literal(CaptureStream.WIRE).optional(),
++  cursor: z.string().max(2048).optional(), max_bytes: z.number().int().min(256).max(1048576).optional(),
++}).strict();
++export type CaptureExportRequest = z.infer<typeof CaptureExportRequestSchema>;
++export const CaptureRetentionSchema = z.object({
++  maxEvents: z.number().int().min(1).max(100000), maxAgeMs: z.number().int().min(1).max(600000),
++  maxBytes: z.number().int().min(1).max(67108864),
++}).strict();
++/** Validate without defaulting data or discarding unknown native fields. */
++export const CaptureEventSchema = ReticleEventSchema.extend({
++  t: uint, seq: CaptureSequenceSchema, data: z.record(z.unknown()),
++}).passthrough();
++export const AgentCaptureEventSchema = CaptureEventSchema.refine(
++  event => !Object.hasOwn(event.data, URL_RAW), 'grader-only URL must stay private',
++);
++export const WireReceiptSchema = z.object({
++  kind: z.nativeEnum(WireReceiptKind), receipt: uint, receivedAt: uint,
++  event: AgentCaptureEventSchema,
++}).passthrough();
++export type WireReceipt = z.infer<typeof WireReceiptSchema>;
++export const CapturePageSchema = z.object({
++  id: z.string().regex(/^[a-f0-9]{32}$/), source: z.nativeEnum(CaptureStream), since: z.literal(0),
++  until: uint, offset: uint, total: uint.max(100000), count: uint.max(2000), complete: z.boolean(),
++  event_bytes: uint, dropped: uint, next_cursor: z.string().max(2048).optional(),
++  through_seq: CaptureSequenceSchema.optional(), retention: CaptureRetentionSchema,
++  scope: CaptureScopeSchema.optional(), projection: z.literal(CaptureProjection.AGENT_SAFE).optional(),
++}).passthrough();
+--- /dev/null
++++ b/server/docs/bounded-live-capture.md
+@@ -0,0 +1,35 @@
++# Bounded live capture (private candidate)
++
++The package/protocol version remains 3.6.0. This source delta adds opt-in retention and paginated live-buffer export; it does not certify a whole browser session, reconstruct SDK losses, or change ordinary observe budgets.
++
++## Daemon configuration
++
++`start` and `startDaemon` accept `captureRetention: {maxEvents, maxAgeMs, maxBytes}`. The CLI reads the same complete JSON object from `RETICLE_CAPTURE_RETENTION` **before startup**. The owned daemon applies the frozen budget to each new session. Omission preserves 2,000 events, 60,000 ms and 8 MiB. Every supplied field must be a positive safe integer. Unknown, missing, nonnumeric or excessive fields refuse startup.
++
++The explicit ceilings are 100,000 events, 600,000 ms and 64 MiB. They do not replace the existing session-count, transport-rate, message-size, redaction, origin or authentication limits. The existing bounded armed-wait allowance and single oversized-event retention behavior are unchanged. Full-capture export refuses a sole event exceeding the configured byte budget rather than calling that window complete.
++
++Use an owned daemon and explicit budget only for the capture needing it. Do not increase an application's accepted request counts or shorten its assertion window.
++
++## Export protocol
++
++Call the existing `reticle_observe` with `since: 0`, `max_events` (at most 2,000), and `export_page: {}`. No filters, `until`, action filter or alternate window may be combined with export. Each page returns the ordinary events/summary/cost envelope plus:
++
++- `capture.id`, `source: "live"`, `since`, `until`, `total` and `offset`;
++- `count`, `event_bytes`, frozen retention budget and `dropped`;
++- `next_cursor` if another page remains; `complete` only on the terminal page.
++
++Repeat the **same request** with `export_page.cursor` set to `next_cursor`. The default JSON event-array byte budget is 262,144; `max_bytes` may explicitly select 256–1,048,576. An event that cannot fit is refused, never trimmed. The envelope itself has additional bounded metadata overhead.
++
++The cursor authenticates an immutable live prefix, expires after 120 seconds and is tied to the session instance, document and page budgets. Appends do not extend that prefix. Eviction, idle age expiry, replacement/disconnection, end/revival, document round trips, tampering or mismatched budgets refuse continuation. No snapshot journal or per-export event copies are retained between requests. Restarting an export is not permission to discard an earlier failed capture.
++
++A terminal page alone is not a complete witness. Collect every offset from zero through total, preserve each exact page, and compare the complete unfiltered sequence with an independent producer witness. Keep output truncation, hot-buffer eviction, journal recovery and SDK observation/transport loss separate. Require both `verified: "yes"` and `pass: true`, plus a valid full capture. Default `observe` remains a bounded recent-events view.
++
++## Known qualification boundary
++
++The original whole-application replay remains rejected. The upstream SDK emits DOM truncation markers, the daemon intentionally omits `hud.used` from its evidence stream, and normal capability reannouncement sends a second HELLO on one socket. None is fixed or hidden by larger daemon retention. The strict application witness also rejects a producer event arriving after a frozen export prefix. Resolving these contracts requires a separate decision; do not filter events, suppress emissions, alter the presenter, relax the witness or report whole-app acceptance from this delta.
++
++## Local regression
++
++After the normal public package build, run `node --test server/test/full-window.test.mjs` from the repository root. Tests use owned loopback WebSockets, temporary state and no browser or account. Run with external egress denied, `RETICLE_CONNECT=0` and `RETICLE_TELEMETRY=0`. The separate exact-count honesty change retains the native predicate pass bit but refuses proof after loss; a genuinely proved independent `anyOf` branch remains valid.
++
++Server source remains FSL-1.1-ALv2. Engine/core licenses remain unchanged. No contributor identity, DCO certification or permission to publish is supplied by this document.
+--- a/server/src/index.ts
++++ b/server/src/index.ts
+@@ -40,6 +40,7 @@
+ import type { StartOptions } from './start-options.js';
+ export type { StartOptions } from './start-options.js';
+ import { Bridge } from './portal/bridge/bridge.js';
++import { resolveCaptureRetention } from './portal/session/capture-retention.js';
+ import { sdkFixForDirectory } from './command/version/sdk-fix.js';
+ import { connectionSkew } from './command/version/version-nudge.js';
+ import { SERVER_VERSION } from './command/version/identity/server-version.js';
+@@ -365,6 +366,8 @@
+ const loadHarnessConfig = async (root: string) => fetchPlatformConfig(await platformEnvFor(root)());
+ 
+ export async function start(options: StartOptions = {}): Promise<RunningServer> {
++  const captureRetention = resolveCaptureRetention(options.captureRetention, process.env['RETICLE_CAPTURE_RETENTION']);
++  const captureOptions = options.captureRetention === undefined && process.env['RETICLE_CAPTURE_RETENTION'] === undefined ? {} : { captureRetention };
+   const port = options.port ?? RETICLE_DEFAULT_PORT;
+   const configForRoot = harnessConfigsByRoot(loadHarnessConfig);
+   // Open the user's impact record before anything can connect. Not inside the MCP branch: a daemon
+@@ -384,7 +387,7 @@
+     readProjectId(process.cwd()),
+   );
+   const security = await resolveBridgeSecurityWithAutoToken(options);
+-  const bridge = new Bridge({ port, sdkFix: sdkFixForProject, ...security });
++  const bridge = new Bridge({ port, sdkFix: sdkFixForProject, ...security, ...captureOptions });
+   // Server-authoritative liveness: a Node-side reaper (immune to browser throttling) ends sessions
+   // whose agent has gone idle, so a forgotten/crashed agent never leaves the HUD "running" forever.
+   const reaper = new SessionReaper(bridge.sessions);
+@@ -530,6 +533,8 @@
+  * browser sessions persist in the daemon.
+  */
+ export async function startDaemon(options: StartOptions = {}): Promise<RunningServer> {
++  const captureRetention = resolveCaptureRetention(options.captureRetention, process.env['RETICLE_CAPTURE_RETENTION']);
++  const captureOptions = options.captureRetention === undefined && process.env['RETICLE_CAPTURE_RETENTION'] === undefined ? {} : { captureRetention };
+   const port = options.port ?? RETICLE_DEFAULT_PORT;
+   let pushHarnessConfig: (root: string) => void = () => undefined;
+   const configForRoot = harnessConfigsByRoot(loadHarnessConfig, (root) => pushHarnessConfig(root));
+@@ -552,6 +557,7 @@
+   const shared = createSharedServer(security.token === undefined ? {} : { token: security.token });
+   const bridge = new Bridge({
+     port,
++    ...captureOptions,
+     server: shared.httpServer,
+     sdkFix: sdkFixForProject,
+     ...security,
+--- a/server/src/portal/bridge/bridge.ts
++++ b/server/src/portal/bridge/bridge.ts
+@@ -26,6 +26,7 @@
+   CONTRACT_PARTS,
+ } from '@reticlehq/core';
+ import { Session } from '@/portal/session/session.js';
++import { captureRetention, type CaptureRetention } from '@/portal/session/capture-retention.js';
+ import { SessionManager, type RefusedPage } from '@/portal/session/session-manager.js';
+ import { tokensMatch } from './token-auth.js';
+ import { pairingTokenSource } from './pairing-token.js';
+@@ -195,6 +196,7 @@
+ }
+ 
+ interface BridgeOptions {
++  captureRetention?: CaptureRetention;
+   port: number;
+   host?: string;
+   token?: string;
+@@ -291,6 +293,7 @@
+  * COMMANDs.
+  */
+ export class Bridge {
++  readonly #captureRetention: Readonly<CaptureRetention> | undefined;
+   readonly sessions = new SessionManager();
+   /** Resolves with the actually-bound port once the server is listening. */
+   readonly ready: Promise<number>;
+@@ -343,6 +346,7 @@
+   #onSigninRequest: (() => void) | undefined;
+ 
+   constructor(options: BridgeOptions) {
++    this.#captureRetention = options.captureRetention === undefined ? undefined : captureRetention(options.captureRetention);
+     const host = options.host ?? LOOPBACK_HOST;
+     if ((options.token?.length ?? 0) > TRANSPORT_LIMITS.MAX_TOKEN_LENGTH) {
+       throw new Error(
+@@ -632,7 +636,7 @@
+           }
+           clearTimeout(helloTimer);
+           releasePending();
+-          session = new Session(parsed, socket, this.#clock);
++          session = new Session(parsed, socket, this.#clock, this.#captureRetention);
+           // Recorded on ACCEPTANCE, so it is evidence of what this daemon really serves.
+           if (parsed.projectId !== undefined) this.#servedProjects.add(parsed.projectId);
+           // Attach the durable journal (and anything else registered) before any events stream in.
+--- /dev/null
++++ b/server/src/portal/session/capture-assertion.ts
+@@ -0,0 +1,18 @@
++import { CaptureScopeSchema } from '@reticlehq/core';
++import type { SessionManager } from './session-manager.js';
++
++/** Resolve only the owned lifetime, never the ordinary successor convenience path. */
++export function bindCaptureAssertion(sessions: SessionManager, sessionId: unknown, input: unknown) {
++  const scope = CaptureScopeSchema.parse(input);
++  if (sessionId !== scope.sessionId) throw new Error('capture scope session mismatch');
++  const session = sessions.all().find(candidate => candidate.id === scope.sessionId);
++  if (session === undefined) throw new Error('capture scope original session departed');
++  // Legitimate idle revival on the SAME socket is not a replacement.
++  session.markAgentActivity();
++  const check = () => {
++    if (!sessions.all().includes(session)) throw new Error('capture scope session replaced');
++    session.assertCaptureScope(scope);
++  };
++  check();
++  return { session, scope, check };
++}
+--- /dev/null
++++ b/server/src/portal/session/capture-export.ts
+@@ -0,0 +1,84 @@
++import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
++import { CaptureSequenceSchema, CaptureStream, CaptureProjection, type CaptureExportRequest, type ReticleEvent } from '@reticlehq/core';
++import { withoutUrlRaw } from '@reticlehq/engine/window/event-filters.js';
++import type { CaptureRetention } from './capture-retention.js';
++
++export type ExportPage = CaptureExportRequest;
++interface Cursor {
++  id: string; offset: number; total: number; until: number; expires: number;
++  document: string | undefined; count: number; bytes: number;
++  through?: number;
++}
++interface CaptureView {
++  events: ReticleEvent[]; now: number; dropped: number; document: string | undefined;
++  open: boolean; retention: Readonly<CaptureRetention>;
++}
++const PAGE_BYTES = 262144;
++const MAX_PAGE_BYTES = 1048576;
++const CURSOR_LIFETIME_MS = 120000;
++
++/** No extra event journal or snapshot store. A signed immutable prefix is valid only while
++ * the live buffer remains lossless and its session/document lifetime has not changed.
++ * Appending does not change the prefix; any eviction refuses continuation, not a partial success.
++ */
++export class CaptureExport {
++  #key = randomBytes(32);
++  invalidate(): void { this.#key = randomBytes(32); }
++  #sign(body: string): Buffer { return createHmac('sha256', this.#key).update(body).digest(); }
++  #encode(cursor: Cursor): string {
++    const body = Buffer.from(JSON.stringify(cursor)).toString('base64url');
++    return `${body}.${this.#sign(body).toString('base64url')}`;
++  }
++  #decode(value: string): Cursor {
++    if (value.length > 2048 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid capture cursor');
++    const [body, signature] = value.split('.');
++    if (!body || !signature) throw new Error('invalid capture cursor');
++    const sig = Buffer.from(signature, 'base64url');
++    const expected = this.#sign(body);
++    if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) throw new Error('capture cursor belongs to another session or was altered');
++    return JSON.parse(Buffer.from(body, 'base64url').toString()) as Cursor;
++  }
++  page(view: CaptureView, count: number, request: ExportPage) {
++    const through = request.through_seq;
++    if (through !== undefined) CaptureSequenceSchema.parse(through);
++    if (through !== undefined) {
++      if (view.events.some(event => !Number.isSafeInteger(event.seq))) throw new Error('unsequenced application evidence in sealed capture');
++      view = {...view, events:view.events.filter(event => event.seq !== undefined && event.seq <= through)};
++    }
++    const bytes = request.max_bytes ?? PAGE_BYTES;
++    if (!Number.isSafeInteger(count) || count < 1 || count > 2000 || !Number.isSafeInteger(bytes) || bytes < 256 || bytes > MAX_PAGE_BYTES) throw new Error('invalid capture page budget');
++    if (!view.open) throw new Error('capture session is not live');
++    if (view.dropped !== 0) throw new Error('live capture lost events; journal recovery is not live retention');
++    const first = view.events[0];
++    if (first && first.t < view.now - view.retention.maxAgeMs) throw new Error('live capture exceeded age budget');
++    const cursor: Cursor = request.cursor === undefined ? {
++      id: randomBytes(16).toString('hex'), offset: 0, total: view.events.length,
++      until: view.now, expires: view.now + CURSOR_LIFETIME_MS, document: view.document, count, bytes,
++      ...(through === undefined ? {} : {through}),
++    } : this.#decode(request.cursor);
++    if (cursor.expires < view.now || cursor.document !== view.document || cursor.total > view.events.length || cursor.count !== count || cursor.bytes !== bytes || cursor.through !== through) throw new Error('capture cursor expired or window changed');
++    const events: unknown[] = [];
++    let used = 2;
++    for (let i = cursor.offset; i < cursor.total && events.length < count; i++) {
++      const source = view.events[i];
++      if (source === undefined) throw new Error('capture prefix missing');
++      const {sessionId: _sessionId, ...rest} = source;
++      const event = withoutUrlRaw(rest);
++      const size = Buffer.byteLength(JSON.stringify(event)) + (events.length ? 1 : 0);
++      if (used + size > bytes) {
++        if (!events.length) throw new Error('capture event exceeds page byte budget; no event was truncated');
++        break;
++      }
++      used += size; events.push(event);
++    }
++    const offset = cursor.offset + events.length;
++    return {events, capture: {
++      id: cursor.id, source: CaptureStream.LIVE, projection: CaptureProjection.AGENT_SAFE, since: 0, until: cursor.until,
++      offset: cursor.offset, total: cursor.total, count: events.length,
++      complete: offset === cursor.total, event_bytes: used, dropped: view.dropped,
++      retention: view.retention,
++      ...(through === undefined ? {} : {through_seq:through}),
++      ...(offset < cursor.total ? {next_cursor: this.#encode({...cursor, offset})} : {}),
++    }};
++  }
++}
+--- /dev/null
++++ b/server/src/portal/session/capture-retention.ts
+@@ -0,0 +1,45 @@
++import { RING_BUFFER_DEFAULTS } from '@reticlehq/core';
++
++/** Explicit per-session live-capture budgets. Omission retains published defaults. */
++export interface CaptureRetention {
++  maxEvents: number;
++  maxAgeMs: number;
++  maxBytes: number;
++}
++export const CAPTURE_RETENTION_LIMITS: Readonly<CaptureRetention> = Object.freeze({
++  maxEvents: 100000,
++  maxAgeMs: 600000,
++  maxBytes: 67108864,
++});
++export const DEFAULT_CAPTURE_RETENTION: Readonly<CaptureRetention> = Object.freeze({
++  maxEvents: RING_BUFFER_DEFAULTS.MAX_EVENTS,
++  maxAgeMs: RING_BUFFER_DEFAULTS.MAX_AGE_MS,
++  maxBytes: RING_BUFFER_DEFAULTS.MAX_BYTES,
++});
++
++/** Reject malformed/partial budgets; never silently fall back after an explicit request. */
++export function captureRetention(value: unknown): Readonly<CaptureRetention> {
++  if (value === undefined) return DEFAULT_CAPTURE_RETENTION;
++  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
++    throw new Error('captureRetention must be a complete bounded budget');
++  }
++  const record = value as Record<string, unknown>;
++  const keys = Object.keys(CAPTURE_RETENTION_LIMITS) as (keyof CaptureRetention)[];
++  if (Object.keys(record).length !== keys.length) throw new Error('captureRetention has unknown/missing fields');
++  for (const key of keys) {
++    const n = record[key];
++    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1 || n > CAPTURE_RETENTION_LIMITS[key]) {
++      throw new Error(`captureRetention.${key} must be a positive integer <= ${CAPTURE_RETENTION_LIMITS[key]}`);
++    }
++  }
++  return Object.freeze({maxEvents: record['maxEvents'] as number, maxAgeMs: record['maxAgeMs'] as number, maxBytes: record['maxBytes'] as number});
++}
++
++/** Read only at daemon startup, before any listener/state owner is opened. */
++export function resolveCaptureRetention(option: unknown, env: string | undefined): Readonly<CaptureRetention> {
++  if (option !== undefined) return captureRetention(option);
++  if (env === undefined) return captureRetention(undefined);
++  let parsed: unknown;
++  try { parsed = JSON.parse(env); } catch { throw new Error('RETICLE_CAPTURE_RETENTION must be JSON'); }
++  return captureRetention(parsed);
++}
+--- a/server/src/portal/session/session.ts
++++ b/server/src/portal/session/session.ts
+@@ -1,3 +1,4 @@
++import { CaptureScopeSchema, type CaptureScope } from '@reticlehq/core';
+ import type { WebSocket } from 'ws';
+ import { asProjectId, type ChannelId, type ImpactSnapshot, type ProjectId } from '@reticlehq/core';
+ import type { HandshakeFacts } from './facts/handshake-facts.js';
+@@ -43,6 +44,9 @@
+   type ReticleEvent,
+ } from '@reticlehq/core';
+ import { RingBuffer } from '@reticlehq/engine/window/ring-buffer.js';
++import { captureRetention, type CaptureRetention } from './capture-retention.js';
++import { CaptureExport, type ExportPage } from './capture-export.js';
++import { WireCapture } from './wire-capture.js';
+ import type { JournalReader, JournalRecorder } from '@/memory/journal/journal-recorder.js';
+ import {
+   readJournalWriteLoss,
+@@ -136,7 +140,11 @@
+   readonly #socket: WebSocket;
+   readonly #clock: Clock;
+   readonly #startedAt: number;
+-  readonly #buffer = new RingBuffer();
++  readonly #buffer: RingBuffer;
++  readonly retention: Readonly<CaptureRetention>;
++  readonly #captureExport = new CaptureExport();
++  readonly #wireCapture: WireCapture | undefined;
++  #captureByteExceeded = false;
+   readonly #pending = new PendingCommands();
+   readonly #listeners = new Set<(event: ReticleEvent) => void>();
+   readonly #disconnectListeners = new Set<() => void>();
+@@ -185,7 +193,10 @@
+   #editEpoch: number | undefined;
+   readonly #departureNote = new DepartureNote();
+ 
+-  constructor(hello: HelloMessage, socket: WebSocket, clock: Clock) {
++  constructor(hello: HelloMessage, socket: WebSocket, clock: Clock, retention?: CaptureRetention) {
++    this.retention = captureRetention(retention);
++    this.#buffer = new RingBuffer(this.retention);
++    this.#wireCapture = retention === undefined ? undefined : new WireCapture(this.retention);
+     this.id = hello.sessionId;
+     this.projectId = hello.projectId === undefined ? undefined : asProjectId(hello.projectId);
+     this.url = hello.url;
+@@ -349,6 +360,7 @@
+ 
+   /** Re-stamp an incoming event with server-relative time, buffer it, and fan out. */
+   pushEvent(event: ReticleEvent, byteSize?: number): void {
++    this.#wireCapture?.receive(event, this.elapsed());
+     // Telemetry about the HUD, not evidence about the app: taken off here, before the buffer, so no
+     // verdict, settle window or agent read can ever see a person's clicks on Reticle's own panel.
+     if (event.type === EventType.HUD_USED) {
+@@ -356,7 +368,10 @@
+       if (use.success) recordHudUse(use.data);
+       return;
+     }
+-    if (event.documentId !== undefined) this.#documentId = event.documentId;
++    if (event.documentId !== undefined) {
++      if (event.documentId !== this.#documentId) this.#captureExport.invalidate();
++      this.#documentId = event.documentId;
++    }
+     if (event.editEpoch !== undefined) this.#editEpoch = event.editEpoch;
+     if (event.type === EventType.PAGE_HEALTH) {
+       const r = readHealthEvent(event.data);
+@@ -409,6 +424,9 @@
+         ? { ...seen, actionId: fallback }
+         : seen;
+     this.#observed.observe(attributed);
++    if ((byteSize ?? Buffer.byteLength(JSON.stringify(attributed))) > this.retention.maxBytes) {
++      this.#captureByteExceeded = true;
++    }
+     this.#buffer.push(attributed, t, byteSize);
+     // Each subscriber is independent, and this runs inside the websocket's `message` handler — a
+     // NON-async callback, so a sync throw here escapes every try/catch the tool call is wrapped in
+@@ -492,6 +510,52 @@
+    */
+   async queryEvents(options: EventQueryOptions): Promise<ReticleEvent[]> {
+     return readQueryEvents(this.#journalReader, this.#buffer, options);
++  }
++
++  captureScope(): CaptureScope | undefined {
++    return this.#wireCapture?.scope(this.id);
++  }
++  assertCaptureScope(expected: CaptureScope): void {
++    const actual = this.captureScope();
++    if (!this.socketOpen() || this.getState() === SessionState.ENDED || !actual ||
++        !CaptureScopeSchema.safeParse(expected).success || actual.sessionId !== expected.sessionId ||
++        actual.incarnation !== expected.incarnation || actual.documentId !== expected.documentId ||
++        actual.editEpoch !== expected.editEpoch) throw new Error('capture scope lifecycle mismatch');
++    // Loss/age and sequence checks must still hold at the completion boundary.
++    this.exportWireCapture(1, {});
++    if (this.bufferHealth().dropped !== 0 || this.#captureByteExceeded) throw new Error('capture scope live evidence lost');
++  }
++
++  /** Raw server receipts, intentionally separate from every evidence/settle reader. */
++  async drainWireThrough(seq: number): Promise<void> {
++    if (!this.#wireCapture) throw new Error('wire capture requires explicit captureRetention');
++    // Wait for a SPECIFIC already witnessed receipt, never for event silence. No
++    // observer, clock or native predicate is paused and the admission budgets do not move.
++    for (let attempt=0; attempt<200; attempt++) {
++      if (!this.socketOpen() || this.getState() === SessionState.ENDED) throw new Error('capture session is not live');
++      if (this.#wireCapture.hasThrough(seq)) return;
++      await new Promise(resolve => setTimeout(resolve,10));
++    }
++    throw new Error('wire receipt sequence did not drain within bounded deadline');
++  }
++  exportWireCapture(count: number, page: ExportPage) {
++    if (!this.#wireCapture) throw new Error('wire capture requires explicit captureRetention');
++    const result = this.#wireCapture.page(this.elapsed(), this.socketOpen() && this.getState() !== SessionState.ENDED, count, page);
++    const scope = this.captureScope();
++    return {...result, capture:{...result.capture, ...(scope === undefined ? {} : {scope})}};
++  }
++
++  /** Complete live-buffer export, not journal fall-through or a new assertion window. */
++  exportCapture(count: number, page: ExportPage) {
++    if (page.through_seq !== undefined && (!this.#wireCapture || !this.#wireCapture.hasThrough(page.through_seq))) throw new Error('wire receipt sequence not received');
++    if (this.#captureByteExceeded && this.bufferHealth().dropped === 0) throw new Error('live capture exceeded byte budget');
++    const result = this.#captureExport.page({
++      events: this.eventsSince(0), now: this.elapsed(), dropped: this.bufferHealth().dropped,
++      document: this.currentDocumentId, retention: this.retention,
++      open: this.socketOpen() && this.getState() !== SessionState.ENDED,
++    }, count, page);
++    const scope = this.captureScope();
++    return {...result, capture:{...result.capture, ...(scope === undefined ? {} : {scope})}};
+   }
+ 
+   /** What the durable ledger could not WRITE — see `readJournalWriteLoss` for the rule and why. */
+@@ -786,6 +850,8 @@
+ 
+   /** End this transport without letting a stale socket remove its replacement session. */
+   disconnect(reason: string, replaced = false): void {
++    this.#captureExport.invalidate();
++    this.#wireCapture?.invalidate();
+     // "Longest run" means the longest SESSION, and it used to be fed a single tool call's duration
+     // - so the report's superlative was a number in milliseconds that never grew past a click.
+     recordImpact({}, { runMs: this.elapsed() }, this.artifactRoot);
+@@ -817,6 +883,7 @@
+    * summary) so a transition never emits two PRESENTER commands.
+    */
+   setState(next: SessionState, text?: string, tone?: PresenterTone): void {
++    if (next === SessionState.ENDED) { this.#captureExport.invalidate(); this.#wireCapture?.invalidateCursors(); }
+     this.#live.setState(next);
+     this.pushPresenter(next, text, tone);
+   }
+--- /dev/null
++++ b/server/src/portal/session/wire-capture.ts
+@@ -0,0 +1,88 @@
++import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
++import { EventType, CaptureSequenceSchema, CaptureStream, WireReceiptKind, CaptureProjection, WireReceiptSchema, type WireReceipt, type CaptureScope, type ReticleEvent } from '@reticlehq/core';
++import { withoutUrlRaw } from '@reticlehq/engine/window/event-filters.js';
++import type { CaptureRetention } from './capture-retention.js';
++import type { ExportPage } from './capture-export.js';
++
++/** A server receipt of accepted wire telemetry, NEVER an application observation. */
++type PrivateReceipt = Pick<WireReceipt, 'kind' | 'receipt' | 'receivedAt'> & {event: ReticleEvent};
++interface Cursor { incarnation: string; offset: number; total: number; until: number; expires: number; count: number; bytes: number; through?: number; }
++
++/** Opt-in, bounded and fail-closed. No journal fallback and no evidence-facing accessors. */
++export class WireCapture {
++  #key = randomBytes(32);
++  readonly #incarnation = randomBytes(16).toString('hex');
++  readonly #records: PrivateReceipt[] = [];
++  #bytes = 2;
++  #lost = 0;
++  #invalid = false;
++  constructor(readonly retention: Readonly<CaptureRetention>) {}
++  scope(sessionId: string): CaptureScope | undefined {
++    if (this.#invalid || this.#lost) throw new Error('capture scope lifecycle changed or lost receipts');
++    const first = this.#records[0]?.event;
++    if (first?.documentId === undefined) return undefined;
++    return {sessionId, incarnation: this.#incarnation, documentId: first.documentId,
++      ...(first.editEpoch === undefined ? {} : {editEpoch: first.editEpoch})};
++  }
++  invalidate(): void { this.#invalid = true; }
++  invalidateCursors(): void { this.#key = randomBytes(32); }
++  hasThrough(seq: number): boolean {
++    CaptureSequenceSchema.parse(seq);
++    if (this.#invalid || this.#lost) throw new Error('wire capture lifecycle changed or lost receipts');
++    if (this.#records.length <= seq) return false;
++    if (this.#records.slice(0,seq+1).some((record,i)=>record.event.seq!==i)) throw new Error('wire receipt sequence discontinuity');
++    return true;
++  }
++  receive(event: ReticleEvent, now: number): void {
++    const record: PrivateReceipt = { kind: event.type === EventType.HUD_USED ? WireReceiptKind.INSTRUMENTER : WireReceiptKind.APPLICATION, receipt: this.#records.length, receivedAt: now, event };
++    const serialised = JSON.stringify(record);
++    const bytes = Buffer.byteLength(serialised) + (this.#records.length ? 1 : 0);
++    const first = this.#records[0];
++    if (first && (first.event.documentId !== event.documentId || first.event.editEpoch !== event.editEpoch || first.event.sessionId !== event.sessionId)) this.#invalid = true;
++    if (this.#lost || this.#invalid || this.#records.length >= this.retention.maxEvents ||
++        this.#bytes + bytes > this.retention.maxBytes || (first && now - first.receivedAt > this.retention.maxAgeMs)) {
++      this.#lost = Math.min(Number.MAX_SAFE_INTEGER, this.#lost + 1);
++      return;
++    }
++    // A copy, before normal Session processing can restamp or attribute it.
++    this.#records.push(JSON.parse(serialised) as PrivateReceipt);
++    this.#bytes += bytes;
++  }
++  #signature(body: string): Buffer { return createHmac('sha256', this.#key).update(body).digest(); }
++  #encode(cursor: Cursor): string {
++    const body = Buffer.from(JSON.stringify(cursor)).toString('base64url');
++    return body + '.' + this.#signature(body).toString('base64url');
++  }
++  #decode(text: string): Cursor {
++    if (text.length > 2048 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(text)) throw new Error('invalid wire cursor');
++    const [body, signature] = text.split('.');
++    if (!body || !signature) throw new Error('invalid wire cursor');
++    const received = Buffer.from(signature, 'base64url'), expected = this.#signature(body);
++    if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw new Error('wire cursor identity/signature mismatch');
++    return JSON.parse(Buffer.from(body, 'base64url').toString()) as Cursor;
++  }
++  page(now: number, open: boolean, count: number, request: ExportPage) {
++    const through = request.through_seq;
++    if (through !== undefined && !this.hasThrough(through)) throw new Error('wire receipt sequence not received');
++    const bytes = request.max_bytes ?? 262144;
++    if (!Number.isSafeInteger(count) || count < 1 || count > 2000 || !Number.isSafeInteger(bytes) || bytes < 256 || bytes > 1048576) throw new Error('invalid wire page budget');
++    if (!open || this.#invalid) throw new Error('wire capture lifecycle ended/changed');
++    if (this.#lost) throw new Error('wire capture lost records: ' + String(this.#lost));
++    const first = this.#records[0];
++    if (first && now - first.receivedAt > this.retention.maxAgeMs) throw new Error('wire capture exceeded age budget');
++    const cursor: Cursor = request.cursor === undefined ? {incarnation:this.#incarnation, offset:0, total:through === undefined ? this.#records.length : through+1, until:now, expires:now+120000, count, bytes, ...(through === undefined ? {} : {through})} : this.#decode(request.cursor);
++    if (cursor.incarnation !== this.#incarnation || cursor.total > this.#records.length || cursor.expires < now || cursor.count !== count || cursor.bytes !== bytes || cursor.through !== through) throw new Error('wire cursor expired/budget changed');
++    const records: PrivateReceipt[] = [];let used = 2;
++    for (let i=cursor.offset;i<cursor.total && records.length<count;i++) {
++      const raw = this.#records[i];if (!raw) throw new Error('wire prefix missing');
++      // Raw receipt custody stays private; budget precisely the established agent projection.
++      const record = {...raw, event: withoutUrlRaw(raw.event) as ReticleEvent};
++      WireReceiptSchema.parse(record); // Validate; return the exact projected JSON, not a parsed rewrite.
++      const size = Buffer.byteLength(JSON.stringify(record)) + (records.length ? 1 : 0);
++      if (used + size > bytes) { if (!records.length) throw new Error('wire record exceeds page budget'); break; }
++      records.push(record);used+=size;
++    }
++    const offset = cursor.offset + records.length;
++    return {records, capture:{id:cursor.incarnation,source:CaptureStream.WIRE,projection:CaptureProjection.AGENT_SAFE,since:0 as const,until:cursor.until,offset:cursor.offset,total:cursor.total,count:records.length,complete:offset===cursor.total,event_bytes:used,dropped:this.#lost,retention:this.retention,...(through === undefined ? {} : {through_seq:through}),...(offset<cursor.total?{next_cursor:this.#encode({...cursor,offset})}:{})}};
++  }
++}
+--- a/server/src/start-options.ts
++++ b/server/src/start-options.ts
+@@ -7,8 +7,11 @@
+ 
+ import type { OwnedRealInputProvider } from './portal/input/real-input.js';
+ import type { InjectConnectOptions } from './portal/input/real-input.js';
++import type { CaptureRetention } from './portal/session/capture-retention.js';
+ 
+ export interface StartOptions {
++  /** Explicit bounded live retention for each owned session; defaults are unchanged. */
++  captureRetention?: CaptureRetention;
+   /**
+    * The panel's Sign in, supplied by the CLI door, which owns install-time code: given a repaint, it
+    * answers the handler the bridge runs on each press. An embedder of the library leaves it out, and
+--- a/server/src/surface/tools/assert/assert-buffer-honesty.test.ts
++++ b/server/src/surface/tools/assert/assert-buffer-honesty.test.ts
+@@ -273,9 +273,9 @@
+     expect(result.verified).toBe(Verified.YES);
+   });
+ 
+-  it('leaves a NON-zero count alone, which is a positive claim', async () => {
+-    // `count: 2` asserts calls were MADE. It found what it found, and events aged out elsewhere in
+-    // the buffer do not unmake them — the same reason a plain positive assertion is left alone.
++  it('nonzero exact count also requires a complete window', async () => {
++    // Two retained calls prove at least two, not exactly two: a third matching
++    // call may be the evidence that was evicted from this same window.
+     const twoCalls: ReticleEvent[] = [
+       {
+         t: 1,
+@@ -293,10 +293,11 @@
+     const result = (await tool(ReticleTool.ASSERT).handler(
+       depsWithBuffer(0, undefined, true, twoCalls),
+       { predicate: { kind: 'net', urlContains: '/api/save', count: 2 }, timeout_ms: 0 },
+-    )) as { pass?: boolean; verified?: string };
+-
+-    expect(result.pass).toBe(true);
+-    expect(result.verified).toBe(Verified.YES);
++    )) as { pass?: boolean; verified?: string; verifiedReason?: string };
++
++    expect(result.pass).toBe(true);
++    expect(result.verified).toBe(Verified.UNKNOWN);
++    expect(result.verifiedReason).toBe(VerifiedReason.UNCLEAN_CAPTURE);
+   });
+ 
+   it('covers a signal count of zero too, which is the same claim on the other channel', async () => {
+--- a/server/src/surface/tools/assert/assert-verdict.ts
++++ b/server/src/surface/tools/assert/assert-verdict.ts
+@@ -8,6 +8,7 @@
+ import type { InstrumentationGap, JournalVerdictEffect } from '@reticlehq/core/artifacts';
+ import {
+   provenExpectedLinks,
++  evaluatePredicate,
+   type Predicate,
+ } from '@reticlehq/engine/question/predicate/predicate.js';
+ import type { Session } from '@/portal/session/session.js';
+@@ -44,6 +45,23 @@
+ import { gradeOfPredicate } from './assert-grade.js';
+ import { assertSource } from './assert-source.js';
+ import { VerdictAttribution, verdictAttributionOf } from '@reticlehq/core';
++
++/** Whether a passing claim has a proof independent of missing window events.
++ * Unknown exact counts cannot discharge an OR, but a genuinely proven independent
++ * branch can. Never change the predicate's native pass bit or failure precedence.
++ */
++async function independentProof(session: Session, predicate: Predicate, since: number): Promise<boolean> {
++  if (predicate.kind === PredicateKind.ALL_OF) {
++    for (const child of predicate.predicates) if (!(await independentProof(session, child, since))) return false;
++    return true;
++  }
++  if (predicate.kind === PredicateKind.ANY_OF) {
++    for (const child of predicate.predicates) if (await independentProof(session, child, since)) return true;
++    return false;
++  }
++  if (restsOnCompleteWindow(predicate) || ('count' in predicate && predicate.count !== undefined)) return false;
++  return (await evaluatePredicate(session, predicate, since)).pass;
++}
+ 
+ /**
+  * The honesty verdict for a plain `reticle_assert`.
+@@ -191,7 +209,10 @@
+    * paid for once, when `unclean_capture` became the dominant cause of `unknown` in the field. A
+    * POSITIVE assertion that passed FOUND its evidence; things lost elsewhere do not unmake it.
+    */
+-  const restsOnComplete = restsOnCompleteWindow(predicate);
++  const windowLost = session.lostSince(since);
++  const restsOnComplete = (windowLost || ledgerClosed) && pass
++    ? !(await independentProof(session, predicate, since))
++    : restsOnCompleteWindow(predicate);
+   /**
+    * The buffer evicted scarce evidence from this window.
+    *
+@@ -201,7 +222,7 @@
+    * absence of evidence read as evidence of absence. The act path needs no `restsOnComplete` guard:
+    * its cursor is the action's own.
+    */
+-  const bufferLost = session.lostSince(since) && restsOnComplete;
++  const bufferLost = windowLost && restsOnComplete;
+   /** The durable ledger refused writes, on a query path that read from it. Same rule, other store. */
+   const ledgerLost = ledgerClosed && restsOnComplete;
+   const decision = decideVerified({
+--- a/server/src/surface/tools/observe-tools.ts
++++ b/server/src/surface/tools/observe-tools.ts
+@@ -1,3 +1,5 @@
++import { CaptureExportRequestSchema, CapturePageSchema, WireReceiptSchema, CaptureScopeSchema, CaptureStream } from '@reticlehq/core';
++import { bindCaptureAssertion } from '@/portal/session/capture-assertion.js';
+ /**
+  * Observe / wait / assert tools — reticle_observe, reticle_wait_for, reticle_assert, reticle_network,
+  * reticle_console, reticle_animations. Split out of tools.ts; assembled back via...OBSERVE_TOOLS.
+@@ -85,6 +87,7 @@
+ import { type ToolDef, intentArg, sessionIdShape, commandOrThrow } from './tool-kit.js';
+ import { gradeOfPredicate } from './assert/assert-grade.js';
+ import { captureAssertion } from '@/language/flows/replay.js';
++import type { ExportPage } from '@/portal/session/capture-export.js';
+ 
+ /**
+  * Evidence-completeness block: present on observe/network/console only when the ring buffer has
+@@ -167,13 +170,16 @@
+         .describe(
+           'Cap the timeline to the most recent N events. Older events are counted in cost.droppedOldest.',
+         ),
++      export_page: CaptureExportRequestSchema.optional().describe('Lossless live-buffer export with since:0 and no filters. Omit cursor for the first page; repeat the SAME request with next_cursor. Events are capped by max_events and a byte budget (default 262144). A page is not a complete export until every offset through total is collected. Loss, expired cursors or an oversized event refuse rather than truncate. Normal observe defaults are unchanged.'),
+       ...sessionIdShape,
+     },
+     outputSchema: {
+       // The observed window's duration — buildReactionReport returns it on every call; without it in
++      capture: CapturePageSchema.optional(),
+       // the schema, a validating profile stripped it and the agent lost "over how long" the counts hold.
+       window_ms: z.number(),
+       events: z.array(z.unknown()),
++      records: z.array(WireReceiptSchema).optional(),
+       summary: z.object({
+         total: z.number(),
+         network: z.number(),
+@@ -219,6 +225,26 @@
+     handler: async (deps, args) => {
+       const session = deps.sessions.resolve(asString(args['sessionId']));
+       const explicitSince = asNumber(args['since']);
++      if (args['export_page'] !== undefined) {
++        if (explicitSince !== 0 || ['filters','until','actionId','window_ms'].some(key => args[key] !== undefined)) {
++          throw new Error('capture export requires original unfiltered since:0');
++        }
++        const through = (args['export_page'] as ExportPage).through_seq;
++        if (through !== undefined) await session.drainWireThrough(through);
++        if ((args['export_page'] as ExportPage & {stream?: string}).stream === CaptureStream.WIRE) {
++          const page = session.exportWireCapture(asNumber(args['max_events']) ?? DEFAULT_OBSERVE_EVENT_LIMIT, args['export_page'] as ExportPage);
++          // No telemetry is passed to reaction, predicate, observed state or settle.
++          const report = buildReactionReport([], page.capture.until);
++          const captured = {...report, ...page, ...healthEnvelope(session), ...bufferEnvelope(session)};
++          return withControl(session, {...captured, cost:{events:0, bytes:Buffer.byteLength(JSON.stringify(captured))}});
++        }
++        const page = session.exportCapture(asNumber(args['max_events']) ?? DEFAULT_OBSERVE_EVENT_LIMIT, args['export_page'] as ExportPage);
++        const report = buildReactionReport(session.eventsSince(0).slice(page.capture.offset, page.capture.offset + page.events.length), page.capture.until);
++        return withControl(session, {
++          ...report, ...page, cost: costHint(report, page.events.length, 0),
++          ...healthEnvelope(session), ...bufferEnvelope(session),
++        });
++      }
+       const windowMs = asNumber(args['window_ms']) ?? 2000;
+       // Explicit since wins; else look back one window. Journal-backed so it survives buffer eviction.
+       const since = explicitSince ?? Math.max(0, session.elapsed() - windowMs);
+@@ -397,6 +423,7 @@
+     description:
+       'Evaluate a predicate (optionally waiting up to timeout_ms). Returns { pass, evidence, failureReason? }. The end of every verify loop. CHECKING SEVERAL THINGS? Put them in ONE call with { kind: "allOf", predicates: [...] } — it returns one verdict naming whichever member failed, and one call costs one round trip where N calls cost N. Prefer a { signal } or { net } consequence over { element }/{ text } presence — a passing presence-only assertion returns `advice` because a wrong/healed element can fake it. By default it only counts events since your last act, so a stale buffered signal can never fake a pass; pass `since` (an observe/act cursor) to set the window explicitly.',
+     inputSchema: {
++      capture_scope: CaptureScopeSchema.optional(),
+       predicate: PredicateSchema.optional().describe(
+         // Every kind, each with the field that carries its argument. Five of the nine were
+         // undocumented here, including `route` — and "did submitting the login form navigate away"
+@@ -424,6 +451,7 @@
+       ...sessionIdShape,
+     },
+     outputSchema: {
++      capture_scope: CaptureScopeSchema.optional(),
+       pass: z.boolean(),
+       evidence: z.unknown().optional(),
+       failureReason: z.string().optional(),
+@@ -497,7 +525,9 @@
+     handler: async (deps, args) => {
+       const timeout = asNumber(args['timeout_ms']) ?? 0;
+       // Spend the budget waiting for the APP as well as for the predicate. See resolve-within.
+-      let session = await resolveSessionWithin(
++      const owned = args['capture_scope'] === undefined ? undefined : bindCaptureAssertion(deps.sessions, args['sessionId'], args['capture_scope']);
++      if (owned && args['since'] !== 0) throw new Error('capture assertion requires original since:0');
++      let session = owned?.session ?? await resolveSessionWithin(
+         deps.sessions,
+         asString(args['sessionId']),
+         timeout,
+@@ -527,14 +557,16 @@
+       // UNCHANGED predicate after a manual reconnect. Re-asking is not fabricating: the consequence
+       // is evaluated on a live document, and where there is no unique successor to follow,
+       // `followLostObservation` refuses to guess and the honest lost verdict stands.
++      owned?.check();
+       const predicateStarted = session.elapsed();
+-      const followed = await followLostObservation({
++      const evaluated = timeout > 0
++        ? await waitForPredicate(session, predicate, timeout, since)
++        : await evaluatePredicate(session, predicate, since);
++      owned?.check();
++      const followed = owned ? {session, verdict: evaluated, followed: false} : await followLostObservation({
+         sessions: deps.sessions,
+         session,
+-        verdict:
+-          timeout > 0
+-            ? await waitForPredicate(session, predicate, timeout, since)
+-            : await evaluatePredicate(session, predicate, since),
++        verdict: evaluated,
+         timeout,
+         predicateStarted,
+         reevaluate: (next, budget) => waitForPredicate(next, predicate, budget, 0),
+@@ -570,6 +602,7 @@
+         verdict.observationLost,
+         changeUndeclared,
+       );
++      owned?.check();
+       // The assertion IS the proof attempt, so a green one discharges the intent it was drawn for. A
+       // red proved nothing, and an unbound intent refuses discharge anyway — see inline-intent.ts.
+       // The id is checked HERE rather than only inside the helper so a caller that declared no intent
+@@ -605,7 +638,9 @@
+       if (Verified.YES === decision['verified'] && args['since'] === undefined) {
+         captureAssertion(deps.recordings, predicate, session.id);
+       }
++      owned?.check();
+       return withControl(session, {
++        ...(owned ? {capture_scope: owned.scope} : {}),
+         ...decision,
+         ...annotateStarvedFailure(session, verdict),
+         ...(followed.followed ? { sessionId: session.id } : {}),
+--- /dev/null
++++ b/server/test/full-window.test.mjs
+@@ -0,0 +1,163 @@
++import {test} from 'node:test';
++import assert from 'node:assert/strict';
++import {once} from 'node:events';
++import fs from 'node:fs/promises';
++import {createRequire} from 'node:module';
++import {rmSync} from 'node:fs';
++const ownedDirectories=[];
++// Cleanup at process exit, after asynchronous journal writes have relinquished
++// the event loop. Closing the socket alone is not a file-writer drain boundary.
++process.once('exit',()=>{for(const dir of ownedDirectories)rmSync(dir,{recursive:true,force:true});});
++import {tmpdir} from 'node:os';
++import {join} from 'node:path';
++process.env.RETICLE_CONNECT='0';
++process.env.RETICLE_TELEMETRY='0';
++const require=createRequire(import.meta.url);
++const {WebSocket}=require('ws');
++const {startDaemon,TOOLS}=await import('../dist/index.js');
++const {z}=require('zod');
++async function observe(server,args){const tool=TOOLS.find(t=>t.name==='reticle_observe');const parsed=z.object(tool.inputSchema).parse(args);return tool.handler({sessions:server.bridge.sessions},parsed);}
++const {RETICLE_PROTOCOL_VERSION,RETICLE_WS_PATH}=await import('@reticlehq/core');
++const budget={maxEvents:10000,maxAgeMs:120000,maxBytes:33554432};
++const {Session}=await import('../dist/portal/session/session.js');
++const {evaluatePredicate}=await import('@reticlehq/engine/question/predicate/predicate.js');
++const {assertVerdict}=await import('../dist/surface/tools/assert/assert-verdict.js');
++function localSession(retention){let now=0;let seq=0;const socket={readyState:1,send(){},close(){}};const session=new Session({kind:'hello',protocolVersion:RETICLE_PROTOCOL_VERSION,sessionId:'local',url:'http://localhost/',title:'synthetic',adapters:[]},socket,()=>now,retention);return {session,socket,time:t=>now=t,push:(type,data,byteSize)=>session.pushEvent({seq:seq++,t:now,sessionId:'local',documentId:'doc',type,data},byteSize)};}
++async function judge(session,predicate){const result=await evaluatePredicate(session,predicate,0);const verdict=await assertVerdict(session,predicate,result.pass,result.evidence,0);return {...verdict.decision,pass:result.pass};}
++const pause=()=>new Promise(r=>setTimeout(r,5));
++async function wait(f){for(let i=0;i<1000;i++){if(f())return;await pause();}throw Error('fixture deadline');}
++async function fixture(options,run){
++  const dir=await fs.mkdtemp(join(tmpdir(),'reticle-capture-'));ownedDirectories.push(dir);
++  const server=await startDaemon({port:0,token:'synthetic-retention-fixture',reticleRoot:dir,pairingTokenDir:dir,...options});
++  let ws;
++  try{
++    const port=await server.bridge.ready;
++    ws=new WebSocket(`ws://127.0.0.1:${port}${RETICLE_WS_PATH}`,{origin:'http://localhost'});
++    await once(ws,'open');
++    ws.send(JSON.stringify({kind:'hello',protocolVersion:RETICLE_PROTOCOL_VERSION,sessionId:'capture',url:'http://localhost/',title:'synthetic',adapters:[],token:'synthetic-retention-fixture',sdkVersion:'3.6.0'}));
++    await wait(()=>server.bridge.sessions.all().length===1);
++    const session=server.bridge.sessions.all()[0];
++    const send=async(n,start=0)=>{
++      for(let i=start;i<start+n;i++)ws.send(JSON.stringify({kind:'event',event:{sessionId:'[REDACTED]',documentId:'doc',seq:i,t:i,type:'console.info',data:{args:['record '+i]}}}));
++      await wait(()=>session.eventsSince(0).at(-1)?.seq===start+n-1);
++    };
++    await run({session,send,server,ws});
++  }finally{if(ws && ws.readyState!==WebSocket.CLOSED){const closed=once(ws,'close');ws.close();await closed;}await server.close();}
++}
++test('owned daemon passes explicit bounded retention to the actual session',async()=>{
++  await fixture({captureRetention:budget},async({session,send})=>{
++    await send(2101);
++    assert.deepEqual(session.bufferHealth(),{total:2101,dropped:0});
++    assert.deepEqual(session.eventsSince(0).map(e=>e.seq),Array.from({length:2101},(_,i)=>i));
++  });
++});
++test('unfiltered export paginates the complete frozen prefix without narrowing since',async()=>{
++  await fixture({captureRetention:budget},async({session,send,server})=>{
++    await send(2101);
++    const ordinary=await observe(server,{since:0,max_events:2000});
++    assert.equal(ordinary.events.length,2000);assert.equal(ordinary.cost.droppedOldest,101);
++    const first=await observe(server,{since:0,max_events:1000,export_page:{}});
++    assert.equal(first.capture?.total,2101);
++    assert.equal(first.capture.complete,false);
++    const all=[...first.events];let next=first.capture.next_cursor;
++    await send(3,2101); // concurrent appends must not extend this export or move its offsets
++    while(next){const page=await observe(server,{since:0,max_events:1000,export_page:{cursor:next}});assert.equal(page.capture.offset,all.length);all.push(...page.events);next=page.capture.next_cursor;if(!next)assert.equal(page.capture.complete,true);}
++    assert.deepEqual(all.map(e=>e.seq),Array.from({length:2101},(_,i)=>i));
++    assert.equal(session.bufferHealth().dropped,0);
++  });
++});
++test('lost exact count cannot prove itself; an independent anyOf branch still can',async()=>{
++  const s=localSession();
++  const exact={kind:'net',method:'GET',urlContains:'/record',count:1};
++  s.push('net.request',{id:'old',method:'GET',url:'/record',status:200,ok:true});
++  s.time(1);s.push('net.request',{id:'new',method:'GET',url:'/record',status:200,ok:true});
++  assert.equal((await judge(s.session,exact)).verified,'no');
++  s.time(60001);s.push('signal',{name:'independent',payload:{}});
++  assert.equal(s.session.bufferHealth().dropped,1);
++  const result=await judge(s.session,exact);
++  assert.equal(result.pass,true);assert.equal(result.verified,'unknown');
++  assert.equal((await judge(s.session,{kind:'allOf',predicates:[exact,{kind:'signal',name:'independent'}]})).verified,'unknown');
++  assert.equal((await judge(s.session,{kind:'anyOf',predicates:[exact,{kind:'signal',name:'independent'}]})).verified,'yes');
++  assert.equal((await judge(s.session,{kind:'anyOf',predicates:[exact,{kind:'signal',name:'missing'}]})).verified,'unknown');
++});
++
++for(const [name,config] of [
++ ['null',null],['array',[]],['missing',{}],['extra',{...budget,unbounded:true}],
++ ...['maxEvents','maxAgeMs','maxBytes'].flatMap(k=>[0,-1,1.5,Infinity,NaN,true,'10000'].map(v=>[k+' '+String(v),{...budget,[k]:v}])),
++ ['count ceiling',{...budget,maxEvents:100001}],['age ceiling',{...budget,maxAgeMs:600001}],['bytes ceiling',{...budget,maxBytes:67108865}],
++]) test('reject invalid explicit retention '+name,async()=>{
++  assert.throws(()=>localSession(config),/captureRetention/);
++  await assert.rejects(startDaemon({port:0,captureRetention:config}),/captureRetention/);
++});
++test('daemon defaults and ordinary output budgets are unchanged',async()=>{
++  await fixture({},async({session,send,server})=>{
++    await send(2101);assert.deepEqual(session.bufferHealth(),{total:2000,dropped:101});
++    assert.deepEqual(session.retention,{maxEvents:2000,maxAgeMs:60000,maxBytes:8388608});
++    assert.equal((await observe(server,{since:0})).events.length,200);
++    await assert.rejects(observe(server,{since:0,max_events:10000}));
++    await assert.rejects(observe(server,{since:0,export_page:{}}),/lost events/);
++  });
++});
++test('supported daemon environment reaches real retained sessions',async()=>{
++  process.env.RETICLE_CAPTURE_RETENTION=JSON.stringify(budget);
++  try{await fixture({},async({session,send})=>{await send(2101);assert.equal(session.bufferHealth().dropped,0);assert.deepEqual(session.retention,budget);});}
++  finally{delete process.env.RETICLE_CAPTURE_RETENTION;}
++  for(const value of ['not JSON','{}','null','{"maxEvents":false}']){
++    process.env.RETICLE_CAPTURE_RETENTION=value;
++    try{await assert.rejects(startDaemon({port:0}),/captureRetention|RETICLE_CAPTURE_RETENTION/);}
++    finally{delete process.env.RETICLE_CAPTURE_RETENTION;}
++  }
++});
++test('age and byte retention remain bounded; loss refuses complete export',()=>{
++  for(const config of [undefined,budget]){
++    const s=localSession(config);s.push('console.info',{args:['before']});
++    s.time(60001);s.push('console.info',{args:['after']});
++    assert.equal(s.session.bufferHealth().dropped,config?0:1);
++    if(config){assert.equal(s.session.exportCapture(2000,{}).capture.total,2);s.time(120001);s.push('console.info',{args:['tail']});}
++    assert.throws(()=>s.session.exportCapture(2000,{}),/lost events/);
++  }
++  const s=localSession({...budget,maxBytes:300});
++  for(let i=0;i<10;i++)s.push('console.info',{args:['x'.repeat(300)]});
++  assert.equal(s.session.bufferHealth().total,1);assert.equal(s.session.bufferHealth().dropped,9);
++  assert.throws(()=>s.session.exportCapture(2000,{}),/lost events/);
++});
++test('all emitted bytes must fit the explicit capture even for sole oversized survivor',()=>{
++  const s=localSession({...budget,maxBytes:256});s.push('console.info',{args:['x'.repeat(1000)]});
++  assert.equal(s.session.bufferHealth().total,1); // preserve the published soft-cap sole survivor
++  assert.throws(()=>s.session.exportCapture(2000,{}),/byte budget/);
++});
++test('paged output respects bytes and refuses oversized events without truncation',()=>{
++  const s=localSession(budget);for(let i=0;i<10;i++)s.push('console.info',{args:['x'.repeat(100)]});
++  const page=s.session.exportCapture(2000,{max_bytes:512});assert.ok(page.events.length<10);assert.ok(page.capture.event_bytes<=512);
++  assert.equal(page.capture.complete,false);assert.equal(s.session.bufferHealth().dropped,0);
++  const big=localSession(budget);big.push('console.info',{args:['x'.repeat(2000)]});
++  assert.throws(()=>big.session.exportCapture(2000,{max_bytes:256}),/no event was truncated/);
++  assert.equal(big.session.exportCapture(2000,{}).events.length,1);
++});
++test('cursor is session and scope bound, expiring and tamper evident',async()=>{
++  const a=localSession(budget),b=localSession(budget);for(const s of [a,b])for(let i=0;i<5;i++)s.push('console.info',{args:[i]});
++  const first=a.session.exportCapture(2,{}),cursor=first.capture.next_cursor;
++  assert.throws(()=>b.session.exportCapture(2,{cursor}),/another session/);
++  assert.throws(()=>a.session.exportCapture(2,{cursor:cursor+'x'}),/altered/);
++  assert.throws(()=>a.session.exportCapture(3,{cursor}),/window changed/);
++  assert.throws(()=>a.session.exportCapture(2,{cursor,max_bytes:1024}),/window changed/);
++  a.time(120001);assert.throws(()=>a.session.exportCapture(2,{cursor}),/age budget|expired/);
++  const c=localSession({...budget,maxAgeMs:600000});for(let i=0;i<3;i++)c.push('console.info',{args:[i]});const cc=c.session.exportCapture(1,{}).capture.next_cursor;c.time(120001);assert.throws(()=>c.session.exportCapture(1,{cursor:cc}),/expired/);
++});
++test('cursor does not revive after an ended session or document round trip',()=>{
++  const a=localSession(budget);for(let i=0;i<4;i++)a.push('console.info',{args:[i]});
++  const cursor=a.session.exportCapture(1,{}).capture.next_cursor;
++  a.session.setState('ended');assert.throws(()=>a.session.exportCapture(1,{cursor}),/not live/);
++  a.session.setState('active');assert.throws(()=>a.session.exportCapture(1,{cursor}),/another session/);
++  const b=localSession(budget);for(let i=0;i<4;i++)b.push('console.info',{args:[i]});const cb=b.session.exportCapture(1,{}).capture.next_cursor;
++  b.session.pushEvent({seq:4,t:0,type:'console.info',sessionId:'local',documentId:'next',data:{args:[]}});
++  b.push('console.info',{args:[]});
++  assert.throws(()=>b.session.exportCapture(1,{cursor:cb}),/another session/);
++});
++test('export rejects filtered or narrowed scope and invalid page arguments',async()=>{
++  await fixture({captureRetention:budget},async({send,server})=>{
++    await send(5);
++    for(const change of [{since:1},{until:5},{filters:[]},{actionId:'a1'},{window_ms:3}])await assert.rejects(observe(server,{since:0,export_page:{},...change}),/original unfiltered/);
++    for(const page of [null,[],{extra:true},{max_bytes:0},{max_bytes:1048577},{cursor:8}])await assert.rejects(observe(server,{since:0,export_page:page}));
++  });
++});

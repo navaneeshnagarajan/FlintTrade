@@ -14,6 +14,29 @@ import { safeParse } from "@/lib/safeParse";
 const LS_KEY = "flinttrade:notifications";
 const MAX_STORED = 200;
 
+const visibleAccount = z.string().min(1).max(1024)
+  .regex(/^[^\u0000-\u001f\u007f-\u009f\p{Bidi_Control}]+$/u);
+const originDisclosureSchema = z.discriminatedUnion("kind", [
+  z.object({ version: z.literal(1), kind: z.literal("none") }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal("captured"), account: visibleAccount }).strict(),
+]);
+export type NotificationOriginDisclosure = z.infer<typeof originDisclosureSchema>;
+
+function validatedDisclosure(value: unknown): NotificationOriginDisclosure {
+  const parsed = originDisclosureSchema.safeParse(value);
+  return parsed.success ? parsed.data : { version: 1, kind: "none" };
+}
+
+/** Absent metadata is the legacy contract; malformed/new metadata never falls back. */
+export function notificationAccountOrigin(notification: Notification): string | null {
+  if (Object.hasOwn(notification, "originDisclosure")) {
+    const disclosure = validatedDisclosure(notification.originDisclosure);
+    return disclosure.kind === "captured" ? disclosure.account : null;
+  }
+  const legacy = visibleAccount.safeParse(notification.accountScopeKey);
+  return legacy.success ? legacy.data : null;
+}
+
 // ---------------------------------------------------------------------------
 // Zod schema for persistence validation
 // ---------------------------------------------------------------------------
@@ -33,6 +56,7 @@ const notificationSchema = z.object({
   title: z.string(),
   body: z.string(),
   accountScopeKey: z.string().optional(),
+  originDisclosure: z.unknown().optional(),
   timestamp: z.string(),
   read: z.boolean(),
   action: notificationActionSchema.optional(),
@@ -61,6 +85,8 @@ export interface Notification {
   body: string;
   /** Captured origin scope; never derive a historical notification's account from current selection. */
   accountScopeKey?: string;
+  /** Producer-owned presentation, separate from routing; omission preserves legacy notices. */
+  originDisclosure?: NotificationOriginDisclosure;
   /** ISO timestamp string. */
   timestamp: string;
   read: boolean;
@@ -82,7 +108,12 @@ function load(): Notification[] {
   // gateway connected" entry every poll. Collapse those to the newest one; a
   // genuine reconnect keeps its most recent notification.
   let seenGatewayConnected = false;
-  return items.filter((item) => {
+  return items.map((item): Notification => {
+    const { originDisclosure, ...rest } = item;
+    return Object.hasOwn(item, "originDisclosure")
+      ? { ...rest, originDisclosure: validatedDisclosure(originDisclosure) }
+      : rest;
+  }).filter((item) => {
     if (item.title !== "Broker gateway connected") return true;
     if (seenGatewayConnected) return false;
     seenGatewayConnected = true;
@@ -127,6 +158,9 @@ export function addNotification(payload: CreateNotificationPayload): Notificatio
     timestamp: new Date().toISOString(),
     read: false,
     ...payload,
+    ...(Object.hasOwn(payload, "originDisclosure")
+      ? { originDisclosure: validatedDisclosure(payload.originDisclosure) }
+      : {}),
   };
   _notifications = [n, ..._notifications].slice(0, MAX_STORED);
   save(_notifications);

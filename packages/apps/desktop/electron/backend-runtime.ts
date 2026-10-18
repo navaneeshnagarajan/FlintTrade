@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import type { BackendDrainResult } from "./backend-drain";
+import type { BootstrapResult } from "./bootstrap";
 import { SourceOperationLeaseRetentionError } from "./source-operation";
 import type { createBackendState } from "./state";
 
@@ -249,6 +250,18 @@ export function createBackendRuntime(options: BackendRuntimeOptions) {
         : undefined);
     },
     sourceLifecycle,
+    async startAfterBootstrap(result: BootstrapResult): Promise<RuntimeRunningBackend> {
+      if (!result.ok) throw new Error("Cannot start a backend after failed bootstrap.");
+      if (result.backendDisposition !== "adopt-recovered") return start();
+      const snapshot = options.state.getSnapshot();
+      if (starting || !current || snapshot.status !== "ready"
+        || result.recoveredBackend?.attempt !== current.backend.attempt
+        || result.recoveredBackend?.launchToken !== current.backend.launchToken
+        || snapshot.port !== current.backend.port || snapshot.url !== current.backend.url) {
+        throw new Error("Recovered backend no longer has exact ready authority; explicit recovery is required.");
+      }
+      return current.backend;
+    },
     start,
   };
 }

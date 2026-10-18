@@ -3,9 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import AxeBuilder from "@axe-core/playwright";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 
 import { expect } from "../fixture-registry";
+import { verifyHelpKeyboard, verifyHelpPlacement } from "./help-placement";
 
 /**
  * Fixed clock for every visual check. The runner timezone is UTC, matching
@@ -64,6 +65,12 @@ export async function installDeterminism(page: Page): Promise<void> {
   // the one-second Example feed and IST hand, which the clock would otherwise
   // keep moving under the screenshot.
   await page.clock.install({ time: FIXED_CLOCK });
+  // Installation starts wall-running time. Hold Date at the target while
+  // pausing, before navigation can create any application timers; otherwise
+  // pauseAt(FIXED_CLOCK) can try to travel into the past after the awaits below.
+  await page.clock.setFixedTime(FIXED_CLOCK);
+  await page.clock.pauseAt(FIXED_CLOCK);
+  await page.clock.setSystemTime(FIXED_CLOCK);
   await page.addInitScript(() => {
     let seed = 0x6d2b79f5;
     Math.random = () => {
@@ -107,7 +114,6 @@ export async function installDeterminism(page: Page): Promise<void> {
     else document.addEventListener("DOMContentLoaded", apply);
   });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
-  await page.clock.pauseAt(FIXED_CLOCK);
 }
 
 export async function settle(page: Page, ready: () => Promise<boolean>): Promise<void> {
@@ -188,19 +194,22 @@ function writeKnown(known: KnownFile): void {
   fs.writeFileSync(KNOWN_PATH, `${JSON.stringify(ordered, null, 2)}\n`);
 }
 
-function writeObservation(screenKey: string, snap: ScreenSnap): void {
-  const dir = path.resolve("test-results", "axe");
-  fs.mkdirSync(dir, { recursive: true });
+async function writeObservation(testInfo: TestInfo, screenKey: string, snap: ScreenSnap): Promise<void> {
   const safe = screenKey.replace(/[^a-z0-9@_-]+/gi, "-");
-  fs.writeFileSync(path.join(dir, `${safe}.json`), `${JSON.stringify(snap, null, 2)}\n`);
+  const output = testInfo.outputPath("axe", `${safe}.json`);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, `${JSON.stringify(snap, null, 2)}\n`);
+  await testInfo.attach(`axe-${safe}`, { path: output, contentType: "application/json" });
 }
 
 export async function reviewScreen(
   page: Page,
   screenKey: string,
   screenshotName: string,
+  testInfo: TestInfo,
   target: Page | Locator = page,
 ): Promise<void> {
+  await verifyHelpPlacement(page, screenKey, testInfo);
   // Axe needs live timers. The clock stays paused for the screenshot so a
   // widescreen frame can settle.
   await page.clock.resume();
@@ -211,7 +220,7 @@ export async function reviewScreen(
     violations: normaliseViolations(analysis.violations),
     focus: await focusOrder(page),
   };
-  writeObservation(screenKey, snap);
+  await writeObservation(testInfo, screenKey, snap);
 
   const update = process.env["UPDATE_AXE_SNAPSHOT"] === "1";
   const known = readKnown();
@@ -227,4 +236,5 @@ export async function reviewScreen(
     caret: "hide",
     mask: dynamicMasks(page),
   });
+  await verifyHelpKeyboard(page, screenKey);
 }

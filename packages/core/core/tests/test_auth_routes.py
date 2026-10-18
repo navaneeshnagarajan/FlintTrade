@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 import pytest
+
 from unittest.mock import patch
 from flinttrade_core.app import create_flask_app
+
+pytestmark = pytest.mark.usefixtures("owned_flask_apps")
 
 
 @pytest.fixture()

@@ -26,14 +26,14 @@ describe("practicePrice", () => {
 
   it("rebuilds a last-close fill and ignores an unmarked number", () => {
     expect(visiblePracticeFill({
-      message: "Paper order executed: BUY 1 SBIN @ 812.40",
+      message: "Practice order filled: BUY 1 SBIN @ 812.40",
       price: 812.4,
       price_source: "last_close",
       price_age_s: 2 * 86_400,
     })).toBe("Simulated at last close ₹812.40 (2 days old)");
     expect(visiblePracticeFill({
-      message: "Paper order executed",
+      message: "Practice order filled",
       price: 812.4,
-    })).toBe("Paper order executed");
+    })).toBe("Practice order filled");
   });
 });

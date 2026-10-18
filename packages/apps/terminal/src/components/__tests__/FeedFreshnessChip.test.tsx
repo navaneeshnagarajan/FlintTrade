@@ -105,7 +105,7 @@ describe("FT-CORE-002 FeedFreshnessChip", () => {
     const chip = screen.getByTestId("feed-freshness-chip");
     expect(chip).toHaveTextContent("Stale · 12s");
     expect(chip).toHaveAttribute("data-state", "stale");
-    expect(chip).toHaveClass("text-text-muted");
+    expect(chip).toHaveClass("text-[12px]", "text-text-primary");
   });
 
   it("Practice with no feed reads No live feed (Practice)", () => {
@@ -116,6 +116,6 @@ describe("FT-CORE-002 FeedFreshnessChip", () => {
     expect(chip).toHaveTextContent("No live feed (Practice)");
     expect(chip).not.toHaveTextContent("Unknown");
     expect(chip).toHaveAttribute("data-state", "unknown");
-    expect(chip).toHaveClass("text-text-muted");
+    expect(chip).toHaveClass("text-[12px]", "text-text-primary");
   });
 });

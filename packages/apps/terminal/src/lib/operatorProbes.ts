@@ -12,6 +12,7 @@
  * network_local. Chat uses the advisor chrome, not a background LLM test.
  */
 
+import { isPublicDemoBuild } from "./demoSession";
 import { getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { transportReasonFromError } from "@/lib/operatorTransport";
@@ -31,7 +32,7 @@ export {
 };
 
 export function operatorProbesEnabled(): boolean {
-  return import.meta.env.MODE !== "test";
+  return !isPublicDemoBuild() && import.meta.env.MODE !== "test";
 }
 
 export type LayaHeartbeat = "ready" | "degraded" | "down";

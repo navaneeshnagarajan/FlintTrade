@@ -498,7 +498,7 @@ describe("PositionsWidget", () => {
     );
     await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Exit requested. Exits are allowed while Laya is Down.",
+        title: "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
       }),
     ));
   });

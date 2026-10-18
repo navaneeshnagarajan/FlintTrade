@@ -6,7 +6,10 @@ import {
   checkLotSizeVerified,
   checkLotMultiple,
   resolveLotQuantity,
+  checkFreezeQuantity,
+  checkOrderQuantityLimit,
   checkPriceForOrderType,
+  orderQuantityLimit,
   parseWholeNumber,
   parsePriceValue,
   extractBrokerOrderId,
@@ -49,15 +52,15 @@ describe("checkLotSizeVerified", () => {
   it("fails closed on a derivative with an unverified lot size", () => {
     expect(
       checkLotSizeVerified("NFO", { lotSize: 75, verified: false }, "NIFTY25JUL22000CE"),
-    ).toContain("unverified");
+    ).toBe("Not placed. The lot size for NIFTY25JUL22000CE isn't verified.");
   });
 
   it("fails closed when the lot size is missing entirely", () => {
-    expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toContain(
-      "unverified",
+    expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toBe(
+      "Not placed. The lot size for X isn't verified.",
     );
-    expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toContain(
-      "unverified",
+    expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toBe(
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 
@@ -79,7 +82,9 @@ describe("checkLotMultiple", () => {
   });
 
   it("rejects a non-multiple", () => {
-    expect(checkLotMultiple("NFO", 100, verified, "X")).toContain("multiple of the lot size (75)");
+    expect(checkLotMultiple("NFO", 100, verified, "X")).toBe(
+      "Quantity must be a multiple of the lot size (75).",
+    );
   });
 
   it("rejects a zero or negative quantity", () => {
@@ -88,8 +93,8 @@ describe("checkLotMultiple", () => {
   });
 
   it("reports the unverified lot size before the multiple check", () => {
-    expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toContain(
-      "unverified",
+    expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toBe(
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 
@@ -147,6 +152,51 @@ describe("checkPriceForOrderType", () => {
 
   it("imposes no price rule on MARKET orders", () => {
     expect(checkPriceForOrderType("MARKET", 0, 0)).toBeNull();
+  });
+});
+
+describe("checkOrderQuantityLimit", () => {
+  it("matches the L1 ceilings", () => {
+    expect(orderQuantityLimit("NSE")).toBe(50_000);
+    expect(orderQuantityLimit("nse")).toBe(50_000);
+    expect(orderQuantityLimit("MCX")).toBe(1_000);
+    expect(orderQuantityLimit("NFO")).toBe(5_000);
+    expect(orderQuantityLimit("UNKNOWN")).toBe(50_000);
+  });
+
+  it("refuses a quantity above the exchange ceiling", () => {
+    expect(checkOrderQuantityLimit("NSE", 9999999)).toBe(
+      "Quantity 9999999 exceeds NSE limit of 50000",
+    );
+    expect(checkOrderQuantityLimit("MCX", 1001)).toBe(
+      "Quantity 1001 exceeds MCX limit of 1000",
+    );
+  });
+
+  it("accepts a quantity on the ceiling and leaves minimum checks alone", () => {
+    expect(checkOrderQuantityLimit("NSE", 50_000)).toBeNull();
+    expect(checkOrderQuantityLimit("NSE", 1)).toBeNull();
+    expect(checkOrderQuantityLimit("NSE", 0)).toBeNull();
+  });
+});
+
+describe("checkFreezeQuantity", () => {
+  it("uses NSE/FAOP/76693 when the broker does not send a freeze quantity", () => {
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 3510)).toBeNull();
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 3575)).toBe(
+      "Max 3510 per order for NIFTY 24500 CE. Place smaller orders.",
+    );
+    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 1126)).toBe(
+      "Max 1125 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
+    );
+    expect(checkFreezeQuantity("BANKNIFTY", 1440)).toBeNull();
+    expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
+  });
+
+  it("uses the broker freeze quantity ahead of the circular", () => {
+    expect(checkFreezeQuantity("NIFTY", 130, 100)).toBe(
+      "Max 100 per order for NIFTY. Place smaller orders.",
+    );
   });
 });
 

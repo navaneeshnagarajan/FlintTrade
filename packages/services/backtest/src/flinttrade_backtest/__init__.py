@@ -63,6 +63,11 @@ globals().update(_try_import(".optimizer", "optimizer", [
     "MonteCarloResult", "ParamGrid", "WalkForwardOptimizer", "WalkForwardResult",
 ]))
 
+# Preserve the optimiser result under an unambiguous name; the historical
+# WalkForwardResult / WFResult exports continue to denote the analyser result.
+if "WalkForwardResult" in globals():
+    OptimizerWalkForwardResult = globals()["WalkForwardResult"]
+
 # --- Data connectors ---
 globals().update(_try_import(".data_connector", "data_connector", [
     "CSVConnector", "DataConnector", "DataResult",
@@ -156,7 +161,7 @@ __all__ = [
     "SimOrder", "SimTrade", "EquityPoint",
     "PerformanceMetrics", "PerformanceReport", "TradeStats",
     "DrawdownInfo", "RiskMetrics", "MonthlyReturn",
-    "WalkForwardOptimizer", "WalkForwardResult", "MonteCarloResult", "ParamGrid",
+    "WalkForwardOptimizer", "WalkForwardResult", "OptimizerWalkForwardResult", "MonteCarloResult", "ParamGrid",
     "DataConnector", "DataResult", "DuckDBConnector", "CSVConnector",
     "JSONConnector", "YFinanceConnector",
     "BUILTIN_STRATEGIES", "EMACrossover", "SupertrendStrategy",

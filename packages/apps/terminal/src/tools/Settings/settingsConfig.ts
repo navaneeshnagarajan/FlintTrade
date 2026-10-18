@@ -16,7 +16,6 @@ import {
   HardDrive,
   ShieldCheck,
   Activity,
-  GraduationCap,
   Info,
   Scale,
   FlaskConical,
@@ -50,7 +49,6 @@ export type SectionId =
   | "dataPaths"
   | "security"
   | "monitoring"
-  | "skill"
   | "presets"
   | "updates"
   | "support"
@@ -113,7 +111,6 @@ export function buildSections(desktopShell: boolean, publicDemo: boolean = isPub
     { id: "appearance", label: "Appearance",         icon: Palette,        group: "preferences" },
     { id: "ticker",     label: "Ticker Bar",         icon: Rss,            group: "preferences" },
     { id: "keyboard",   label: "Keyboard Shortcuts", icon: Keyboard,       group: "preferences" },
-    { id: "skill",      label: "Skill & Experience", icon: GraduationCap,  group: "preferences" },
     { id: "brokers",    label: "Broker",            icon: Landmark,       group: "trading" },
     { id: "trading",    label: "Trading Defaults",   icon: TrendingUp,     group: "trading" },
     { id: "risk",       label: "Risk & Safety",        icon: ShieldAlert,    group: "trading" },

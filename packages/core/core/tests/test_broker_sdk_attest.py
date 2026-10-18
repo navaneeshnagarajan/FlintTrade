@@ -175,25 +175,21 @@ def test_kotak_attestation_requires_exact_git_origin_and_exclusive_namespace(
 ):
     from flinttrade_core import broker_sdk_attest as attestation
 
-    lock = tmp_path / "brokers.lock"
-    lock.write_text(
-        '[[broker]]\nname = "kotakneoapi"\nversion = "3.0.7"\n'
-        'source_commit = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"\n',
-        encoding="utf-8",
+    from packages.core.core.tests.test_broker_sdk_source_policy import make_source_install, write_pin
+
+    pin, dist, _ = make_source_install(
+        tmp_path, monkeypatch, "kotakneoapi", commit="5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
     )
-    dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
-    dist.mkdir()
-    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.7\n")
-    (dist / "top_level.txt").write_text("neo_api_client\n")
+    lock = write_pin(tmp_path, pin)
     if direct_url is not None:
-        (dist / "direct_url.json").write_text(json.dumps(direct_url))
+        (dist / "direct_url.json").write_text(json.dumps(direct_url), encoding="utf-8")
+    else:
+        (dist / "direct_url.json").unlink()
     if include_v2:
         v2 = tmp_path / "neo_api_client-2.0.0.dist-info"
         v2.mkdir()
         (v2 / "METADATA").write_text("Metadata-Version: 2.3\nName: neo-api-client\nVersion: 2.0.0\n")
         (v2 / "top_level.txt").write_text("neo_api_client\n")
-    real_distributions = metadata.distributions
-    monkeypatch.setattr(attestation.metadata, "distributions", lambda: real_distributions(path=[str(tmp_path)]))
 
     result = attestation.attest_all(lock)[0]
 
@@ -205,30 +201,21 @@ def test_kotak_attestation_requires_exact_git_origin_and_exclusive_namespace(
 def test_kotak_requires_positive_namespace_ownership(tmp_path, monkeypatch, owner_evidence, expected):
     from flinttrade_core import broker_sdk_attest as attestation
 
-    lock = tmp_path / "brokers.lock"
-    lock.write_text(
-        '[[broker]]\nname = "kotakneoapi"\nversion = "3.0.7"\n'
-        'source_commit = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"\n',
-        encoding="utf-8",
+    import shutil
+    from packages.core.core.tests.test_broker_sdk_source_policy import make_source_install, write_pin
+
+    pin, dist, package = make_source_install(
+        tmp_path, monkeypatch, "kotakneoapi", commit="5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
     )
-    dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
-    dist.mkdir()
-    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.7\n")
-    (dist / "direct_url.json").write_text(
-        json.dumps(
-            {
-                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
-            }
-        )
-    )
-    if owner_evidence == "record":
-        (dist / "RECORD").write_text("neo_api_client/__init__.py,,\n")
-        package = tmp_path / "neo_api_client"
-        package.mkdir()
-        (package / "__init__.py").write_text("", encoding="utf-8")
-    real_distributions = metadata.distributions
-    monkeypatch.setattr(attestation.metadata, "distributions", lambda: real_distributions(path=[str(tmp_path)]))
+    # Keep RECORD-only ownership positive; an absent package still conflicts
+    # with the actual import origin rather than reaching a weaker legacy check.
+    top_level = dist / "top_level.txt"
+    del pin["build_files"][top_level.relative_to(tmp_path).as_posix()]
+    top_level.unlink()
+    if owner_evidence == "none":
+        (dist / "RECORD").unlink()
+        shutil.rmtree(package)
+    lock = write_pin(tmp_path, pin)
 
     result = attestation.attest_all(lock)[0]
 
@@ -236,29 +223,38 @@ def test_kotak_requires_positive_namespace_ownership(tmp_path, monkeypatch, owne
     assert (result in required_failures([result])) is (expected != "ok")
 
 
-@pytest.mark.parametrize(("installed_version", "expected"), [("3.0.8", "ok"), ("3.0.7", "version_mismatch")])
+@pytest.mark.parametrize(("installed_version", "expected"), [("3.0.9", "ok"), ("3.0.7", "version_mismatch")])
 def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
     tmp_path, monkeypatch, installed_version, expected
 ):
+    import shutil
+    import sys
     from flinttrade_core import broker_sdk_attest as attestation
 
-    dist = tmp_path / f"kotakneoapi-{installed_version}.dist-info"
-    dist.mkdir()
-    (dist / "METADATA").write_text(f"Metadata-Version: 2.3\nName: kotakneoapi\nVersion: {installed_version}\n")
-    (dist / "top_level.txt").write_text("neo_api_client\n")
-    (dist / "direct_url.json").write_text(
-        json.dumps(
-            {
-                "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "9a37488d77dc96442ee2a90ef78462e688cf4856"},
-            }
+    # A matching version and a self-asserted direct URL are no longer enough:
+    # retain the real selected build bytes for the positive source control.
+    selected = metadata.distribution("kotakneoapi")
+    pin = next(row for row in load_pins() if row["name"] == "kotakneoapi")
+    for relative in pin["build_files"]:
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(selected.locate_file(relative), destination)
+    info = next(tmp_path.glob("kotakneoapi-*.dist-info"))
+    (info / "direct_url.json").write_text(selected.read_text("direct_url.json"))
+    metadata_path = info / "METADATA"
+    if installed_version != "3.0.9":
+        metadata_path.write_bytes(
+            metadata_path.read_bytes().replace(b"Version: 3.0.9", f"Version: {installed_version}".encode("ascii"), 1)
         )
-    )
+    package_files = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file())
+    (info / "RECORD").write_text("".join(f"{path},,\n" for path in package_files))
     real_distributions = metadata.distributions
     monkeypatch.setattr(attestation.metadata, "distributions", lambda: real_distributions(path=[str(tmp_path)]))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "neo_api_client", raising=False)
 
     result = next(row for row in attestation.attest_all() if row.broker == "kotakneoapi")
 
-    assert result.pinned_version == "3.0.8"
+    assert result.pinned_version == "3.0.9"
     assert result.status == expected
     assert (result in required_failures([result])) is (expected != "ok")

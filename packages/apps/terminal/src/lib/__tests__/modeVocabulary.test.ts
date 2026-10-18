@@ -58,7 +58,7 @@ describe("FT-UX-001 mode vocabulary", () => {
     expect(optionPremiumHint("explore", 623.45)).toMatch(/Example premium ₹623.45/);
     expect(optionPremiumHint("explore", 623.45)).not.toMatch(/Live|Practice/i);
     expect(optionPremiumHint("explore", 0)).toMatch(/Example premium unavailable/);
-    expect(optionPremiumHint("practice", 623.45)).toMatch(/Sandbox premium/);
+    expect(optionPremiumHint("practice", 623.45)).toMatch(/Practice premium/);
     expect(optionPremiumHint("live", 623.45)).toMatch(/Live premium ₹623.45/);
   });
 });

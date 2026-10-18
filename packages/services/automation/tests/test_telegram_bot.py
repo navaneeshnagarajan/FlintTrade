@@ -614,7 +614,9 @@ class TestPollingLoop:
         return TelegramBot(config=BotConfig(token="T", chat_id="999", enabled=True), **kw)
 
     def _msg(self, text, chat=999, user="owner", uid=10):
-        return {"update_id": uid, "message": {"text": text, "chat": {"id": chat}, "from": {"username": user}}}
+        return {"update_id": uid, "message": {
+            "text": text, "date": int(time.time()) + 1, "chat": {"id": chat}, "from": {"username": user},
+        }}
 
     def test_start_background_no_op_when_unconfigured(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
