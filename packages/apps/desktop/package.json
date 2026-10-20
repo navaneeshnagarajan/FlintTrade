@@ -44,12 +44,12 @@
     "@types/node": "26.6.5",
     "@types/snappyjs": "0.7.1",
     "@types/yauzl": "3.4.0",
-    "electron": "44.7.0",
+    "electron": "44.9.0",
     "electron-builder": "26.17.0",
     "electron-builder-squirrel-windows": "26.17.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
-    "vitest": "5.0.3",
+    "vitest": "5.0.5",
     "@noble/hashes": "2.4.0"
   },
   "build": {
