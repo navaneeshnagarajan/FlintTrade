@@ -10,11 +10,11 @@ The installed `app-builder-lib` 26.17.0 accepts `ElectronGetOptions`. Configure 
 - `ElectronFramework.createDownloadOpts` passes these fields through when `mirrorOptions` is absent. Adding even an empty `mirrorOptions` selects a different branch that drops the checksums.
 - `@electron/get` 3.1.0 validates a cache hit. Without explicit hashes, it bypasses the checksum-file cache and attempts a fresh request. Pinning hashes prevents that request; it does not disable validation.
 
-`electron-v44.7.0-SHASUMS256.txt` is the exact published release list from:
+`electron-v44.9.3-SHASUMS256.txt` is the exact published release list from:
 
-`https://github.com/electron/electron/releases/download/v44.7.0/SHASUMS256.txt`
+`https://github.com/electron/electron/releases/download/v44.9.3/SHASUMS256.txt`
 
-Its SHA-256 is `ae1159fdb6d008ca267c267edb6dd82ded692529c9a930386452511aaaddb7b1`. It was retained from the already-acquired, reviewed input set, not synthesized from the local ZIP. This unsigned checksum list is not a detached publisher signature. When upgrading Electron, refresh the original published list and configured target hashes together, then rerun both test classes below.
+Its SHA-256 is `700028090148758e3c2b9c53bd0403499c9867168302fa14fa28ace1bfdae303`. It was retained from the already-acquired, reviewed input set, not synthesized from the local ZIP. This unsigned checksum list is not a detached publisher signature. When upgrading Electron, refresh the original published list and configured target hashes together, then rerun both test classes below.
 
 ## Explicit real-archive regression
 
