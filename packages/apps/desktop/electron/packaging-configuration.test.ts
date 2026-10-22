@@ -15,7 +15,7 @@ const { getConfig, validateConfiguration } = libraryRequire("./out/util/config/c
 const { DebugLogger } = libraryRequire("builder-util");
 
 // Published bytes, not checksums recomputed from a potentially poisoned cache.
-const checksumFile = readFileSync(path.join(import.meta.dirname, "fixtures/electron-v44.7.0-SHASUMS256.txt"));
+const checksumFile = readFileSync(path.join(import.meta.dirname, "fixtures/electron-v44.9.3-SHASUMS256.txt"));
 const published = Object.fromEntries(checksumFile.toString("utf8").trim().split(/\r?\n/).map((line) => {
   const match = /^([a-f0-9]{64}) [ *](\S+)$/.exec(line);
   if (!match) throw new Error("Malformed published Electron checksum record");
@@ -29,7 +29,7 @@ const targets = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win3
 describe("packaging configuration integrity", () => {
   it("pins published Electron checksums through the real reader's cache-preserving options", async () => {
     expect(createHash("sha256").update(checksumFile).digest("hex")).toBe(
-      "ae1159fdb6d008ca267c267edb6dd82ded692529c9a930386452511aaaddb7b1",
+      "700028090148758e3c2b9c53bd0403499c9867168302fa14fa28ace1bfdae303",
     );
     const config = await getConfig(desktop);
     expect(config.electronVersion).toBe(metadata.devDependencies.electron);
