@@ -19,7 +19,7 @@ def _write_brokers_lock(
     root: Path,
     *,
     version: str = checker.KOTAK_VERSION,
-    release_version: str = "3.0.7",
+    release_version: str = checker.RELEASE_TAG.removeprefix("v"),
     main_commit: str = checker.RUNTIME_MAIN_COMMIT,
     release_tag: str = checker.RELEASE_TAG,
     release_commit: str = checker.RELEASE_COMMIT,
@@ -195,7 +195,7 @@ def test_actual_probe_loop_refuses_io_stalls_and_unbounded_progress() -> None:
         ),
         (
             lambda row: row["distributions"]["kotakneoapi"]["direct_url"]["vcs_info"].update(
-                requested_revision=checker.RELEASE_COMMIT
+                requested_revision="b" * 40
             ),
             "requested revision",
         ),
@@ -230,10 +230,11 @@ def test_validate_probe_rejects_unattested_or_ambiguous_install(mutate, message:
 
 
 def test_release_track_requires_the_peeled_release_commit() -> None:
-    checker.validate_probe_result(_snapshot(checker.RELEASE_COMMIT, version="3.0.7"), checker.TRACKS[1])
+    release_version = checker.TRACKS[1].version
+    checker.validate_probe_result(_snapshot(checker.RELEASE_COMMIT, version=release_version), checker.TRACKS[1])
 
     with pytest.raises(checker.ContractError, match="commit"):
-        checker.validate_probe_result(_snapshot(checker.RUNTIME_MAIN_COMMIT, version="3.0.7"), checker.TRACKS[1])
+        checker.validate_probe_result(_snapshot("a" * 40, version=release_version), checker.TRACKS[1])
 
 
 def test_contract_config_is_derived_from_the_authoritative_broker_lock(tmp_path: Path) -> None:
@@ -244,7 +245,7 @@ def test_contract_config_is_derived_from_the_authoritative_broker_lock(tmp_path:
     assert config == checker.ContractConfig(
         repo_url=checker.KOTAK_REPO,
         version=checker.KOTAK_VERSION,
-        release_version="3.0.7",
+        release_version=checker.RELEASE_TAG.removeprefix("v"),
         runtime_main_commit=checker.RUNTIME_MAIN_COMMIT,
         release_tag=checker.RELEASE_TAG,
         release_commit=checker.RELEASE_COMMIT,
@@ -253,7 +254,7 @@ def test_contract_config_is_derived_from_the_authoritative_broker_lock(tmp_path:
 
 
 def test_contract_keeps_runtime_and_release_versions_independent(tmp_path: Path) -> None:
-    _write_brokers_lock(tmp_path, version="3.0.8", release_version="3.0.7")
+    _write_brokers_lock(tmp_path, version="3.0.8", release_version="3.0.7", release_tag="v3.0.7")
 
     runtime, release = checker.build_tracks(checker.load_contract_config(tmp_path))
 
@@ -277,7 +278,7 @@ def test_contract_rejects_nonstable_release_versions(tmp_path: Path, release_ver
 def test_contract_requires_explicit_release_version(tmp_path: Path) -> None:
     _write_brokers_lock(tmp_path)
     path = tmp_path / "brokers.lock"
-    path.write_text(path.read_text().replace('release_version = "3.0.7"\n', ""))
+    path.write_text(path.read_text().replace(f'release_version = "{checker.RELEASE_TAG.removeprefix("v")}"\n', ""))
 
     with pytest.raises(checker.ContractError, match="release version"):
         checker.load_contract_config(tmp_path)
@@ -405,15 +406,16 @@ def test_release_contract_preserves_source_with_exact_release_dependency(tmp_pat
         if "--editable" in command:
             gateway = Path(command[-1])
             metadata = (gateway / "pyproject.toml").read_text()
-            assert '"kotakneoapi==3.0.7"' in metadata
-            assert metadata.replace('"kotakneoapi==3.0.7"', f'"kotakneoapi=={checker.KOTAK_VERSION}"') == original_metadata
+            release_pin = f'"kotakneoapi=={track.version}"'
+            assert release_pin in metadata
+            assert metadata.replace(release_pin, f'"kotakneoapi=={checker.KOTAK_VERSION}"') == original_metadata
             assert gateway.is_relative_to(tmp_path)
             assert {path.relative_to(gateway) for path in gateway.rglob("*") if path.is_file()} == tracked
             for relative in tracked - {Path("pyproject.toml")}:
                 assert (gateway / relative).read_bytes() == (source / relative).read_bytes()
             release_projects.append(gateway)
         if "-c" in command:
-            state = _snapshot(track.revision, version="3.0.7")
+            state = _snapshot(track.revision, version=track.version)
             state["environment_root"] = str(target)
             state["module_path"] = str(target / "lib/neo_api_client/__init__.py")
             return subprocess.CompletedProcess(command, 0, json.dumps(state), "")
@@ -470,7 +472,7 @@ def test_release_copy_excludes_untracked_local_data_and_preserves_source(tmp_pat
         Path("pyproject.toml"),
         Path("src/example/__init__.py"),
     }
-    assert (target / "pyproject.toml").read_text().replace("3.0.7", checker.KOTAK_VERSION) == metadata
+    assert (target / "pyproject.toml").read_text().replace(checker.TRACKS[1].version, checker.KOTAK_VERSION) == metadata
     assert (target / "src/example/__init__.py").read_bytes() == code
     assert (source / "pyproject.toml").read_text() == metadata
     assert (source / "src/example/__init__.py").read_bytes() == code

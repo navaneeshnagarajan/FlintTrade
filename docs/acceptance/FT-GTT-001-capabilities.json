@@ -26,7 +26,7 @@
   "sdk_pins": {
     "dhan": {
       "package": "dhanhq",
-      "version": "2.3.0rc1",
+      "version": "2.3.0",
       "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
       "pinned_public_sdk_inspection": "current declared pin metadata only; prior source/schema inspection does not qualify this revision"
@@ -44,7 +44,7 @@
       "source": "https://github.com/navaneeshnagarajan/FlintTrade/blob/076f446775f0ca59ec8e80a2c2d1c43b6189833b/brokers.lock",
       "historical_activation_is_current_verification": false,
       "source_commit": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3",
-      "release_version": "3.0.7",
+      "release_version": "3.0.9",
       "pinned_public_sdk_inspection": "current declared pin metadata only; prior source/schema inspection does not qualify this revision"
     },
     "groww": {

@@ -31,14 +31,14 @@ until a real SDK distribution can be pinned.
 Broker SDK source/artifact mirrors can be refreshed into the gitignored
 `.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
-Kotak Neo uses exact Git provenance: upstream `main`
-`9a37488d77dc96442ee2a90ef78462e688cf4856` is the runtime and `v3.0.7`
-peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538` is the release baseline.
-The runtime exposes `kotakneoapi` 3.0.8; `release_version` 3.0.7 remains the stable
+Kotak Neo uses exact Git provenance: `v3.0.9` peeled to
+`0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3` is the pinned runtime and the
+release baseline. Freshness compares that release, not default-branch HEAD.
+The runtime exposes `kotakneoapi` 3.0.9; `release_version` 3.0.9 remains the stable
 compatibility baseline. Both retain the `neo_api_client` import
 namespace; the old `neo-api-client` distribution is forbidden. Closed-market/
 no-funds verification does not prove funded live order execution.
-The 3.0.8 runtime update is verified offline only; the retained activation date
+The 3.0.9 runtime update is verified offline only; the retained activation date
 and earlier real-account read evidence remain historical, not new SDK proof.
 
 ## Legend
@@ -140,7 +140,7 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); coming-soon selectors (Groww, INDmoney, and Delta Exchange) and any selector without a published connected session do not schedule false refresh work. |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, Groww, and Delta Exchange native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (runtime `kotakneoapi` 3.0.9; release baseline 3.0.7). Earlier read-smoke evidence remains historical, not validation of this selected SDK revision; funded Live place stays fail-closed. INDmoney, Groww, and Delta Exchange remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Delta Exchange remains disabled until Live order safety and unattended deadman flattening are proven, and its configured authentication method uses an API key and secret for one venue (India or Global, production or testnet). Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, Groww, and Delta Exchange native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (runtime `kotakneoapi` 3.0.9; release baseline 3.0.9 at `0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3`). Earlier read-smoke evidence remains historical, not validation of this selected SDK revision; funded Live place stays fail-closed. INDmoney, Groww, and Delta Exchange remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Delta Exchange remains disabled until Live order safety and unattended deadman flattening are proven, and its configured authentication method uses an API key and secret for one venue (India or Global, production or testnet). Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---
