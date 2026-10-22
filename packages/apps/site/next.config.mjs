@@ -25,6 +25,14 @@ const nextConfig = {
     ],
     remotePatterns: [],
   },
+  async redirects() {
+    // Page-level permanentRedirect() is served as 307 by `next start`.
+    // A config redirect with permanent: true is HTTP 308 before the page runs.
+    return [
+      { source: '/demo', destination: '/demo-app/welcome', permanent: true },
+      { source: '/explore', destination: '/demo-app/welcome', permanent: true },
+    ];
+  },
   async rewrites() {
     return {
       // SPA fallback for the full-page terminal demo build under

@@ -185,7 +185,6 @@ def test_public_site_labels_demo_as_exploration_not_live() -> None:
     """The hosted demo is a no-install exploration and should not be labelled live."""
     site_sources = [
         ROOT / "packages/apps/site/src/app/page.tsx",
-        ROOT / "packages/apps/site/src/app/demo/page.tsx",
         ROOT / "packages/apps/site/src/components/site-header.tsx",
     ]
     combined = "\n".join(_read(path) for path in site_sources)
