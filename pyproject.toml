@@ -1,7 +1,14 @@
 [tool.uv]
 no-build-package = ["growwapi"]
 
-constraint-dependencies = ["plotly==6.9.0"]
+constraint-dependencies = [
+    "pillow==13.0.0",
+    "plotly==6.9.0",
+]
+# growwapi 1.5.0 declares certifi<2026. The patched bundle is 2026.10.19
+# (PYSEC-2026-4320). certifi is only a CA bundle, so the upper bound is
+# overridden rather than left on the vulnerable release.
+override-dependencies = ["certifi==2026.10.19"]
 
 # Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
 # retained as separate release-compatibility evidence in brokers.lock.
