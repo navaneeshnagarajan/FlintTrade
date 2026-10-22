@@ -219,7 +219,12 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     expect(capabilitySource).toContain("NEXT_PUBLIC_FLINTTRADE_SITE_SCROLL_WORLD === '1'");
     expect(webglSource).toContain("from 'three'");
     expect(sitePackage.dependencies?.three).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(sitePackage.devDependencies?.['@types/three']).toBe(sitePackage.dependencies?.three);
+    expect(sitePackage.devDependencies?.['@types/three']).toMatch(/^\d+\.\d+\.\d+$/);
+    // DefinitelyTyped publishes @types/three on the three major.minor line, not every patch.
+    const releaseLine = (version: string | undefined) => version?.split('.').slice(0, 2).join('.');
+    expect(releaseLine(sitePackage.devDependencies?.['@types/three'])).toBe(
+      releaseLine(sitePackage.dependencies?.three),
+    );
   });
 
   it('re-evaluates live capability changes and fails open after sustained slow rendering', () => {
