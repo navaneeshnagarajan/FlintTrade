@@ -321,7 +321,10 @@ describe("OrderPadWidget", () => {
   });
 
   it("refuses a quantity above the NSE ceiling before opening a review", async () => {
-    render(<OrderPadWidget {...defaultProps} />);
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "RELIANCE", exchange: "NSE", action: "BUY" },
+    })} />);
+    await screen.findByDisplayValue("RELIANCE");
     await screen.findByText("Lot: 1");
     const qty = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qty, { target: { value: "9999999" } });
@@ -332,6 +335,35 @@ describe("OrderPadWidget", () => {
       "Quantity 9999999 exceeds NSE limit of 50000",
     );
     expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows one inline freeze line for 9999999 and keeps that line's height", async () => {
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY28MAR2422000CE", exchange: "NFO", action: "BUY" },
+    })} />);
+    const line = await screen.findByTestId("orderpad-qty-message");
+    expect(line).toHaveTextContent("");
+    expect(line).toHaveClass("h-12");
+    expect(line).not.toHaveAttribute("role");
+    const qty = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const price = document.getElementById("orderpad-price") as HTMLElement;
+    expect(qty.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(price.compareDocumentPosition(qty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeFalsy();
+
+    fireEvent.change(qty, { target: { value: "9999999" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const message = "Max 3,510 per order for NIFTY. Place smaller orders.";
+    expect(await screen.findByRole("alert")).toBe(line);
+    expect(line).toHaveTextContent(message);
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByText(/exceeds NFO limit of 5000/)).not.toBeInTheDocument();
+    expect(line).toHaveClass("h-12");
+
+    fireEvent.change(qty, { target: { value: "1" } });
+    await waitFor(() => expect(line).toHaveTextContent(""));
+    expect(line).toHaveClass("h-12");
+    expect(document.getElementById("orderpad-price")).toBe(price);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -985,8 +1017,10 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const messages = await screen.findAllByText("Quantity must be a multiple of the lot size (75).");
-    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quantity must be a multiple of the lot size (75).",
+    );
+    expect(screen.getAllByText("Quantity must be a multiple of the lot size (75).")).toHaveLength(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -997,8 +1031,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
     const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
-    const messages = await screen.findAllByText(refusal);
-    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+    expect(screen.getAllByText(refusal)).toHaveLength(1);
     expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1051,7 +1085,10 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(qtyInput).toHaveValue(65);
     fireEvent.change(qtyInput, { target: { value: "75" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    expect((await screen.findAllByText("Quantity must be a multiple of the lot size (65).")).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quantity must be a multiple of the lot size (65).",
+    );
+    expect(screen.getAllByText("Quantity must be a multiple of the lot size (65).")).toHaveLength(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -1063,7 +1100,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     renderNfoPad();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
-    expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+    expect(screen.getAllByText(refusal)).toHaveLength(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -1080,7 +1118,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
-    expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+    expect(screen.getAllByText(refusal)).toHaveLength(1);
     expect(screen.queryByText("Lot: 75")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1101,7 +1140,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(lotMessage);
+    expect(screen.getAllByText(lotMessage)).toHaveLength(1);
     expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
 
@@ -1125,7 +1165,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot: 65");
 
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
-    const freezeMessage = "Max 3510 per order for NIFTY-OCT2026-FUT. Place smaller orders.";
+    const freezeMessage = "Max 3,510 per order for NIFTY. Place smaller orders.";
     fireEvent.change(qtyInput, { target: { value: "3575" } });
     expect(screen.queryByText(freezeMessage)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
@@ -1153,7 +1193,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     const lotMessage = "Quantity must be a multiple of the lot size (65).";
-    expect((await screen.findAllByText(lotMessage)).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(lotMessage);
+    expect(screen.getAllByText(lotMessage)).toHaveLength(1);
 
     act(() => {
       window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
@@ -1180,7 +1221,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "3525" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+      "Max 3,510 per order for NIFTY. Place smaller orders.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1199,7 +1240,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "120" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max 90 per order for BANKNIFTY-OCT2026-FUT. Place smaller orders.",
+      "Max 90 per order for BANKNIFTY. Place smaller orders.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1216,10 +1257,10 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot: 75");
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "3525" } });
-    expect(screen.queryByText(/Max 3510 per order/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Max 3,510 per order/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+      "Max 3,510 per order for NIFTY. Place smaller orders.",
     );
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });

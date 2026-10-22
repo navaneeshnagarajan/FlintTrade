@@ -165,17 +165,17 @@ function EditableShortcutRow({
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-text-secondary">{binding.action}</span>
           {!binding.customizable && (
-            <span className="text-[10px] font-medium text-text-muted bg-surface-base border border-border-default rounded px-1 py-px leading-none">
+            <span className="text-[12px] font-medium text-text-muted bg-surface-base border border-border-default rounded px-1 py-px leading-none">
               System
             </span>
           )}
           {!isDefault && binding.customizable && (
-            <span className="text-[10px] font-medium text-accent bg-accent/10 border border-accent/20 rounded px-1 py-px leading-none">
+            <span className="text-[12px] font-medium text-accent bg-accent/10 border border-accent/20 rounded px-1 py-px leading-none">
               Custom
             </span>
           )}
           {conflictWith && (
-            <span className="text-[10px] font-medium text-yellow-400 flex items-center gap-0.5">
+            <span className="text-[12px] font-medium text-yellow-400 flex items-center gap-0.5">
               <AlertTriangle size={9} />
               Conflicts with: {conflictWith}
             </span>

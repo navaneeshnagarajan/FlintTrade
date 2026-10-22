@@ -409,9 +409,11 @@ describe("StraddleWidget", () => {
       render(<ScopeAudit />);
       expect(await screen.findByText("200")).toBeInTheDocument();
       expect(screen.getByText("25,000")).toBeInTheDocument();
-      expect(chartMocks.createdLineSeries.some((series) => series.setData.mock.calls.some(
-        ([points]) => (points as Array<{ value: number }>).some((point) => point.value === 200),
-      ))).toBe(true);
+      await waitFor(() => {
+        expect(chartMocks.createdLineSeries.some((series) => series.setData.mock.calls.some(
+          ([points]) => (points as Array<{ value: number }>).some((point) => point.value === 200),
+        ))).toBe(true);
+      });
 
       act(() => { marketScopeState.current = `${mode}:native:upstox:B2`; });
 

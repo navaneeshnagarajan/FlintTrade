@@ -472,7 +472,9 @@ describe("splash and recovery behaviour", () => {
     test.emitBackend(backend({ status: "failed" }));
     expect(test.body.classList.contains("errored")).toBe(true);
     expect(test.elements.get("phase")?.textContent).toBe("Trading engine unavailable");
-    expect(test.elements.get("error-message")?.textContent).toContain("could not start or became unavailable");
+    expect(test.elements.get("error-message")?.textContent).toContain(
+      "FlintTrade could not start the trading engine. Choose Retry to try again, or Quit to close the app.",
+    );
     expect(test.elements.get("error-message")?.textContent).not.toContain("stopped");
     expect(test.elements.get("retry")?.classList.contains("visible")).toBe(true);
     expect(test.elements.get("quit")?.classList.contains("visible")).toBe(true);
@@ -502,7 +504,9 @@ describe("splash and recovery behaviour", () => {
 
     expect(test.body.classList.contains("errored")).toBe(true);
     expect(test.elements.get("phase")?.textContent).toBe("Trading engine stopped");
-    expect(test.elements.get("error-message")?.textContent).toContain("startup was cancelled and stopped");
+    expect(test.elements.get("error-message")?.textContent).toContain(
+      "Trading engine startup was cancelled. Choose Retry to try again, or Quit to close the app.",
+    );
     expect(test.elements.get("action-status")?.textContent).toBe("");
     expect(test.elements.get("retry")?.classList.contains("visible")).toBe(true);
     expect(test.elements.get("quit")?.classList.contains("visible")).toBe(true);
@@ -543,7 +547,9 @@ describe("splash and recovery behaviour", () => {
     await flushPromises();
     test.emitBackend(backend({ status: "failed" }));
 
-    expect(test.elements.get("error-message")?.textContent).toContain("failed while cancellation was settling");
+    expect(test.elements.get("error-message")?.textContent).toContain(
+      "FlintTrade is still stopping the trading engine. Wait a moment, then choose Retry or Quit.",
+    );
     expect(test.elements.get("error-message")?.textContent).not.toContain("cancelled and stopped");
     expect(test.elements.get("retry")?.disabled).toBe(true);
     expect(test.elements.get("quit")?.disabled).toBe(true);
@@ -579,7 +585,9 @@ describe("splash and recovery behaviour", () => {
     cancellation.reject(new Error("private cancellation detail"));
     await cancelling;
 
-    expect(test.elements.get("error-message")?.textContent).toContain("could not start or became unavailable");
+    expect(test.elements.get("error-message")?.textContent).toContain(
+      "FlintTrade could not start the trading engine. Choose Retry to try again, or Quit to close the app.",
+    );
     expect(test.elements.get("error-message")?.textContent).not.toContain("cancellation was settling");
     expect(test.elements.get("action-status")?.textContent).toContain("Cancellation could not be requested");
     expect(test.elements.get("action-status")?.textContent).not.toContain("private cancellation detail");

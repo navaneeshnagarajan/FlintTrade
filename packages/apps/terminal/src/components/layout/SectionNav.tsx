@@ -144,7 +144,9 @@ export function SectionNav<T extends string>({
               <div
                 role="presentation"
                 className={cn(
-                  "ft-text-overline px-2.5 pb-1 text-text-muted",
+                  idPrefix === "settings"
+                    ? "px-2.5 pb-1 text-[12px] font-semibold uppercase tracking-wide text-text-muted"
+                    : "ft-text-overline px-2.5 pb-1 text-text-muted",
                   groupIndex === 0 ? "pt-1" : "pt-4",
                 )}
               >

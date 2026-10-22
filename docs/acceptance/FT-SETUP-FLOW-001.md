@@ -23,16 +23,16 @@ When the vault is already secured, the total is fixed before step 1.
 The titles are **Step 1 of 2 - Create operator** and **Step 2 of 2 -
 Practice desk**. That path never shows "of 3". On that Practice step
 only, **Your vault is set up and secured on this machine.** appears
-above **Open Practice desk**.
+above **Open Terminal**.
 
 When the vault is not yet secured, the titles are **Step 1 of 3 -
 Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 -
 Practice desk**. The vault step asks for a master password and **Open
 vault**.
 
-The Practice step is the affirm only. It offers **Open Practice desk**
+The Practice step is the affirm only. It offers **Open Terminal**
 and does not render the optional cards, Monitoring, or Risk. Opening
-the desk mints a Practice session and leaves setup for `/trade`.
+Terminal mints a Practice session and leaves setup for `/terminal`.
 
 A failed setup-status check stays on that failure, with **Retry**, and
 does not open the fresh-install form.
@@ -86,7 +86,7 @@ primary button and opens `/welcome`.
 Implemented. When the vault is already secured, required progress is
 **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk**,
 and the Practice step shows **Your vault is set up and
-secured on this machine.** above **Open Practice desk**. When the vault
+secured on this machine.** above **Open Terminal**. When the vault
 is not yet secured, required progress is **Step 1 of 3 - Create
 operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice
 desk**. The Practice desk is Step 2 or 3. With no operator yet, Setup

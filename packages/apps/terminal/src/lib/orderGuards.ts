@@ -19,6 +19,7 @@
  * inline field error, status line).
  */
 
+import { underlyingOfDisplayedSymbol } from "@/lib/instrumentLots";
 import type { AppMode } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
@@ -260,10 +261,23 @@ export function indexUnderlying(symbol: string): string | null {
   return null;
 }
 
-/** Symbol named in the freeze refusal. */
+const COMPACT_FUTURE = /^([A-Z][A-Z0-9&]*?)(\d{0,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})?FUT$/;
+
+/** Underlying named in the freeze refusal. Blank input uses a neutral label. */
 export function orderSymbolLabel(symbol: string): string {
-  const text = symbol.trim().replace(/\s+/g, " ");
-  return text || "this contract";
+  const listed = indexUnderlying(symbol);
+  if (listed) return listed;
+  const text = symbol.trim();
+  if (!text) return "this contract";
+  const underlying = underlyingOfDisplayedSymbol(text).toUpperCase();
+  const future = COMPACT_FUTURE.exec(underlying.replace(/\s+/g, ""));
+  if (future?.[1]) return future[1];
+  return underlying || "this contract";
+}
+
+/** Whole quantity grouped the Indian way (en-IN), so 3510 is 3,510. */
+export function formatFreezeQuantity(freeze: number): string {
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(freeze);
 }
 
 /** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
@@ -273,7 +287,7 @@ export function lotMultipleRefusal(lotSize: number): string {
 
 /** Same freeze sentence as order admission. The number is the broker freeze when one was sent. */
 export function freezeQuantityRefusal(symbol: string, freeze: number): string {
-  return `Max ${freeze} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
+  return `Max ${formatFreezeQuantity(freeze)} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
 }
 
 /**

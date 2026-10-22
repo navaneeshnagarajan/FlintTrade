@@ -143,7 +143,7 @@ function WidgetSelector({ selected, onChange, readOnly = false }: WidgetSelector
             const widgets = widgetCatalog.filter((w) => w.category === cat);
             return (
               <div key={cat}>
-                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted bg-surface-base border-b border-border-default sticky top-0">
+                <p className="px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wider text-text-muted bg-surface-base border-b border-border-default sticky top-0">
                   {cat}
                 </p>
                 <div className="grid grid-cols-2 gap-0">
@@ -191,7 +191,7 @@ function WidgetSelector({ selected, onChange, readOnly = false }: WidgetSelector
             return (
               <span
                 key={`${id}-${index}`}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] bg-accent/10 text-accent border border-accent/20"
               >
                 {name}
                 {!readOnly && <button
@@ -372,14 +372,14 @@ function PresetCard({
         {isBuiltin ? (
           <Badge
             variant="secondary"
-            className="text-[10px] shrink-0 bg-surface-hover text-text-muted border-border-default"
+            className="text-[12px] shrink-0 bg-surface-hover text-text-muted border-border-default"
           >
             Built-in
           </Badge>
         ) : (
           <Badge
             variant="secondary"
-            className="text-[10px] shrink-0 bg-profit/10 text-profit border-profit/20"
+            className="text-[12px] shrink-0 bg-profit/10 text-profit border-profit/20"
           >
             Custom
           </Badge>
@@ -388,13 +388,13 @@ function PresetCard({
 
       {/* Description */}
       {preset.description && (
-        <p className="text-[11px] text-text-muted leading-relaxed line-clamp-2">
+        <p className="text-[12px] text-text-muted leading-relaxed line-clamp-2">
           {preset.description}
         </p>
       )}
 
       {/* Widget count (derived — backend returns widgets as an ID list) */}
-      <p className="text-[10px] text-text-muted">
+      <p className="text-[12px] text-text-muted">
         {preset.widgets.length}{" "}
         {preset.widgets.length === 1 ? "widget" : "widgets"}
       </p>
@@ -406,7 +406,7 @@ function PresetCard({
             type="button"
             onClick={() => onFork(preset)}
             title="Create a customisable copy of this preset"
-            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
             aria-label={`Fork ${preset.name}`}
           >
             <Copy size={11} aria-hidden="true" />
@@ -418,7 +418,7 @@ function PresetCard({
               type="button"
               onClick={() => onEdit(preset)}
               title="Edit this preset"
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
               aria-label={`Edit ${preset.name}`}
             >
               <Pencil size={11} aria-hidden="true" />
@@ -428,7 +428,7 @@ function PresetCard({
               type="button"
               onClick={() => onDelete(preset)}
               title="Delete this preset"
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-text-secondary hover:text-loss hover:bg-loss/5 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-text-secondary hover:text-loss hover:bg-loss/5 transition-colors"
               aria-label={`Delete ${preset.name}`}
             >
               <Trash2 size={11} aria-hidden="true" />
@@ -440,7 +440,7 @@ function PresetCard({
           type="button"
           onClick={() => onExport(preset)}
           title="Download preset as JSON"
-          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors ml-auto"
+          className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors ml-auto"
           aria-label={`Export ${preset.name}`}
         >
           <Download size={11} aria-hidden="true" />

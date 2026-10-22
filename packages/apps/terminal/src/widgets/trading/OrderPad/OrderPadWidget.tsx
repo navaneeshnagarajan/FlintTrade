@@ -1088,13 +1088,9 @@ function OrderPadWidget(props: WidgetProps) {
       }
       noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
-      showToast(
-        "error",
-        msg,
-        6000,
-        retryable,
-        code === "quantity_admission" ? QUANTITY_CHECK_ERROR : undefined,
-      );
+      if (code !== "quantity_admission") {
+        showToast("error", msg, 6000, retryable);
+      }
       emitNotification({
         category: "order",
         ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
@@ -1155,8 +1151,8 @@ function OrderPadWidget(props: WidgetProps) {
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
-    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
-      ?? checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty);
+    const qtyRefusal = checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty)
+      ?? checkOrderQuantityLimit(values.exchange, values.qty);
     if (qtyRefusal) {
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
       return;
@@ -1196,7 +1192,6 @@ function OrderPadWidget(props: WidgetProps) {
         ? missingLotRefusal(deskContractName(values.symbol))
         : lotMultipleRefusal(lotSize);
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
-      showToast("error", msg, 6000, false, QUANTITY_CHECK_ERROR);
       return;
     }
 
@@ -1686,12 +1681,12 @@ function OrderPadWidget(props: WidgetProps) {
 
         {/* Qty mode: manual quantity + price row */}
         {inputMode === "qty" && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-start">
             <Controller
               control={control}
               name="qty"
               render={({ field }) => (
-                <>
+                <div className="flex flex-col">
                   <StepInput
                     id="orderpad-qty"
                     label="Quantity"
@@ -1705,12 +1700,16 @@ function OrderPadWidget(props: WidgetProps) {
                     invalid={!!errors.qty}
                     errorId={errors.qty ? "orderpad-qty-error" : undefined}
                   />
-                  {errors.qty && (
-                    <span id="orderpad-qty-error" role="alert" className="text-xs text-loss col-span-2 -mt-2">
-                      {errors.qty.message}
-                    </span>
-                  )}
-                </>
+                  {/* Reserved height: the refusal appears and clears without moving Price. */}
+                  <p
+                    id="orderpad-qty-error"
+                    data-testid="orderpad-qty-message"
+                    role={errors.qty ? "alert" : undefined}
+                    className="h-12 overflow-hidden text-xs leading-4 text-loss"
+                  >
+                    {errors.qty?.message ?? ""}
+                  </p>
+                </div>
               )}
             />
             <Controller

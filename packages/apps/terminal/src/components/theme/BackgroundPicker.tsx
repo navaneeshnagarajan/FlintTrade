@@ -88,7 +88,7 @@ function parseGradient(value: string): {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[10px] uppercase tracking-wide text-text-muted">{children}</span>
+    <span className="text-[12px] uppercase tracking-wide text-text-muted">{children}</span>
   );
 }
 
@@ -205,7 +205,7 @@ function GradientConfig({ value, onChange }: GradientConfigProps) {
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <SectionLabel>Angle</SectionLabel>
-            <span className="text-[10px] font-mono text-text-secondary">{parsed.angle}°</span>
+            <span className="text-[12px] font-mono text-text-secondary">{parsed.angle}°</span>
           </div>
           <input
             type="range"
@@ -252,7 +252,7 @@ function ImageConfig({ value, onChange }: ImageConfigProps) {
         placeholder="https://example.com/background.jpg"
         className="w-full px-3 py-1.5 text-xs bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
       />
-      <p className="text-[11px] text-text-muted">
+      <p className="text-[12px] text-text-muted">
         Use a dark, low-contrast image for best readability.
       </p>
     </div>
@@ -344,7 +344,7 @@ export function BackgroundPicker() {
 
       {/* Type selector */}
       <div>
-        <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Type</p>
+        <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Type</p>
         <div className="flex flex-wrap items-center gap-1.5">
           {BG_TYPE_OPTIONS.map(({ value, label }) => (
             <button

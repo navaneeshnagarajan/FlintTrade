@@ -184,10 +184,16 @@ describe("checkFreezeQuantity", () => {
   it("uses NSE/FAOP/76693 when the broker does not send a freeze quantity", () => {
     expect(checkFreezeQuantity("NIFTY 24500 CE", 3510)).toBeNull();
     expect(checkFreezeQuantity("NIFTY 24500 CE", 3575)).toBe(
-      "Max 3510 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 3,510 per order for NIFTY. Place smaller orders.",
     );
     expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 1126)).toBe(
-      "Max 1125 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
+      "Max 1,125 per order for NIFTYNXT50. Place smaller orders.",
+    );
+    expect(checkFreezeQuantity("RELIANCE26APRFUT", 501, 250)).toBe(
+      "Max 250 per order for RELIANCE. Place smaller orders.",
+    );
+    expect(checkFreezeQuantity("SBIN", 100001, 100000)).toBe(
+      "Max 1,00,000 per order for SBIN. Place smaller orders.",
     );
     expect(checkFreezeQuantity("BANKNIFTY", 1440)).toBeNull();
     expect(checkFreezeQuantity("SBIN", 100)).toBeNull();

@@ -510,7 +510,7 @@ const storeImpl: StateCreator<
       style.setProperty("--popover",            "0 0% 98%");
       style.setProperty("--popover-foreground", "240 10% 10%");
       style.setProperty("--muted",              "240 5% 94%");
-      style.setProperty("--muted-foreground",   "240 4% 46%");
+      style.setProperty("--muted-foreground",   "240 4% 42%");
       style.setProperty("--border",             "240 6% 90%");
       style.setProperty("--input",              "240 6% 90%");
     } else {

@@ -66,8 +66,9 @@ describe("SectionNav", () => {
       "aria-orientation",
       "vertical",
     );
-    expect(screen.getByText("Account")).toBeInTheDocument();
-    expect(screen.getByText("Preferences")).toBeInTheDocument();
+    expect(screen.getByText("Account")).toHaveClass("text-[12px]");
+    expect(screen.getByText("Account")).not.toHaveClass("ft-text-overline");
+    expect(screen.getByText("Preferences")).toHaveClass("text-[12px]");
     expect(screen.getByTestId("dot")).toBeInTheDocument();
   });
 
