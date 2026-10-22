@@ -718,6 +718,16 @@ def test_validate_owner_owned_regular_file_detects_open_path_replacement(tmp_pat
     assert swapped is True
 
 
+def _descriptor_is_source(descriptor: int, source: Path) -> bool:
+    """True when *descriptor* is the open file under test, not another thread's read."""
+    try:
+        current = os.fstat(descriptor)
+        target = source.stat()
+    except OSError:
+        return False
+    return current.st_dev == target.st_dev and current.st_ino == target.st_ino
+
+
 def test_digest_owner_owned_regular_file_detects_read_path_replacement(tmp_path, monkeypatch) -> None:
     source = tmp_path / "source"
     source.write_bytes(b"original")
@@ -731,7 +741,7 @@ def test_digest_owner_owned_regular_file_detects_read_path_replacement(tmp_path,
     def swapping_read(descriptor: int, count: int) -> bytes:
         nonlocal swapped
         payload = real_read(descriptor, count)
-        if not swapped:
+        if not swapped and _descriptor_is_source(descriptor, source):
             swapped = True
             os.replace(replacement, source)
         return payload
@@ -753,13 +763,17 @@ def test_digest_owner_owned_regular_file_detects_in_place_change_during_stream(t
     def mutating_read(descriptor: int, count: int) -> bytes:
         nonlocal mutated
         payload = real_read(descriptor, count)
-        if payload and not mutated:
+        if payload and not mutated and _descriptor_is_source(descriptor, source):
             mutated = True
             with source.open("r+b") as writer:
                 writer.seek(-1, os.SEEK_END)
                 writer.write(b"B")
                 writer.flush()
                 os.fsync(writer.fileno())
+            # A same-size overwrite can share the previous timestamp when the
+            # clock does not advance. The digest notices mtime, so move it.
+            observed = source.stat()
+            os.utime(source, ns=(observed.st_atime_ns, observed.st_mtime_ns + 1))
         return payload
 
     monkeypatch.setattr(secure_file.os, "read", mutating_read)

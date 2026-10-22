@@ -201,13 +201,18 @@ class TestAdminSystemRoute:
         app = create_flask_app()
         app.config["TESTING"] = True
 
-        # The route uses a lazy import so we patch at the source module level.
-        with app.test_client() as c:
-            with patch(
-                "flinttrade_core.system_metrics.get_system_metrics",
-                return_value=fake_metrics,
-            ):
-                resp = c.get("/v1/admin/system", headers=_auth_headers())
+        try:
+            # The route uses a lazy import so we patch at the source module level.
+            with app.test_client() as c:
+                with patch(
+                    "flinttrade_core.system_metrics.get_system_metrics",
+                    return_value=fake_metrics,
+                ):
+                    resp = c.get("/v1/admin/system", headers=_auth_headers())
+        finally:
+            owner = app.config.pop("SYSTEM_INCIDENTS", None)
+            if owner is not None:
+                owner.close()
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -227,12 +232,17 @@ class TestAdminSystemRoute:
         app = create_flask_app()
         app.config["TESTING"] = True
 
-        with app.test_client() as c:
-            with patch(
-                "flinttrade_core.system_metrics.get_system_metrics",
-                return_value=empty,
-            ):
-                resp = c.get("/v1/admin/system", headers=_auth_headers())
+        try:
+            with app.test_client() as c:
+                with patch(
+                    "flinttrade_core.system_metrics.get_system_metrics",
+                    return_value=empty,
+                ):
+                    resp = c.get("/v1/admin/system", headers=_auth_headers())
+        finally:
+            owner = app.config.pop("SYSTEM_INCIDENTS", None)
+            if owner is not None:
+                owner.close()
 
         assert resp.status_code == 200
         data = resp.get_json()

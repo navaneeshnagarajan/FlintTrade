@@ -366,18 +366,25 @@ def _backend_order_route_leaves() -> set[str]:
     from flinttrade_core.app import create_flask_app  # noqa: PLC0415
 
     app = create_flask_app()
-    leaves: set[str] = set()
-    for rule in app.url_map.iter_rules():
-        path = str(rule.rule)
-        if path.startswith("/api/v1/orders/"):
-            leaf = path[len("/api/v1/orders/") :]
-            # Skip routes with URL parameters (e.g. /bracket/<id>) — those
-            # are not the kind of static leaf the frontend addresses via
-            # a literal order-helper call.
-            if "<" in leaf or not leaf:
-                continue
-            leaves.add(leaf)
-    return leaves
+    try:
+        leaves: set[str] = set()
+        for rule in app.url_map.iter_rules():
+            path = str(rule.rule)
+            if path.startswith("/api/v1/orders/"):
+                leaf = path[len("/api/v1/orders/") :]
+                # Skip routes with URL parameters (e.g. /bracket/<id>) — those
+                # are not the kind of static leaf the frontend addresses via
+                # a literal order-helper call.
+                if "<" in leaf or not leaf:
+                    continue
+                leaves.add(leaf)
+        return leaves
+    finally:
+        # The module workspace is shared. Incident delivery keeps an exclusive
+        # owner lock until it is closed, so a later route scan can start.
+        owner = app.config.pop("SYSTEM_INCIDENTS", None)
+        if owner is not None:
+            owner.close()
 
 
 # ---------------------------------------------------------------------------

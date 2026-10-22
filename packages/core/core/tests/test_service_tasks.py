@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -63,16 +66,41 @@ def mounted(tmp_path, monkeypatch):
 
     app.config["SERVICE_TASK_TRANSPORT"] = httpx.MockTransport(transport)
     yield app, app.test_client(), store, calls
+    _release_mounted_runtime(app)
+
+
+def _release_mounted_runtime(app: Any) -> None:
+    """Stop workers the proofless factory starts, including incident delivery.
+
+    ``create_flask_app`` starts the incident delivery thread even when the
+    caller has no backend lease. Leaving that daemon running keeps its
+    file lock and log records alive for later tests on the same worker.
+    """
     for key in (
         "MODEL_RUN_SERVICES",
         "DATA_RUNTIME",
         "LEARNING_CONSENT_LEDGER",
         "KNOWLEDGE_RUNTIME",
         "SERVICE_TASK_DISPATCHER",
+        "SYSTEM_INCIDENTS",
     ):
         owner = app.config.pop(key, None)
         if owner is not None:
             owner.close()
+
+
+def test_mounted_release_stops_the_incident_delivery_thread(tmp_path) -> None:
+    """A mounted app must not leave incident delivery running after teardown."""
+    from flinttrade_core.system_incidents import IncidentTimeline
+
+    timeline = IncidentTimeline(tmp_path / "operational" / "incidents.sqlite")
+    timeline.start()
+    worker = timeline._thread
+    assert isinstance(worker, threading.Thread)
+    assert worker.is_alive()
+    _release_mounted_runtime(SimpleNamespace(config={"SYSTEM_INCIDENTS": timeline}))
+    assert timeline.closed is True
+    assert worker.is_alive() is False
 
 
 def create(client, provider="openrouter", model="test-model-v1", auth="api_key"):
