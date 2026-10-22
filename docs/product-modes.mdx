@@ -29,7 +29,7 @@ Live stays locked while any of these reasons apply, in this order:
 
 ## Example data
 
-Example is sample data, not a Mode. The chip reads **Example**. The signed-in name is **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
+Example is sample data, not a Mode. The chip reads **Example**. The signed-in name is **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**. The public site paths `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`.
 
 On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). **Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`. The server refusal `Orders are not available for Example. Switch to Practice or Live to trade.` is the HTTP path. Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
 
