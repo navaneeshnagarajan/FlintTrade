@@ -1,5 +1,21 @@
 /** About component/browser coverage only: all backend responses are synthetic. */
+import { createRequire } from "node:module";
 import { test, expect } from "./fixture-registry";
+
+function installedReactVersion(): string {
+  const require = createRequire(import.meta.url);
+  const manifest: unknown = require("react/package.json");
+  if (
+    typeof manifest !== "object"
+    || manifest === null
+    || !("version" in manifest)
+    || typeof manifest.version !== "string"
+    || manifest.version.length === 0
+  ) {
+    throw new Error("Installed React package version is missing");
+  }
+  return manifest.version;
+}
 
 const inventory = {
   app_version: "0.0.1", runtimes: [{ name: "Python", version: "3.12.9" }],
@@ -17,7 +33,7 @@ test("About separates observed versions and pins without runtime mutations", asy
   syntheticApi.register({ name: "pure Ollama versions", method: "GET", path: "/ft-api/api/v1/versions/ollama", expectedCalls: 1, handler: () => ({ json: { configured: "v0.35.0", reported: "0.32.0", status: "reported" } }) });
   await page.goto("/e2e/about-versions.fixture.html");
   await expect(page.getByRole("table", { name: "Backend runtimes" })).toContainText("3.12.9");
-  await expect(page.getByRole("table", { name: "Frontend libraries" }).getByRole("row", { name: /^React / })).toContainText("19.3.0");
+  await expect(page.getByRole("table", { name: "Frontend libraries" }).getByRole("row", { name: /^React / })).toContainText(installedReactVersion());
   await expect(page.getByRole("table", { name: "Broker SDKs" })).toContainText("Not installed / unavailable");
   await expect(page.getByText(/kotakneoapi release compatibility baseline/)).toContainText("3.0.7");
   await expect(page.getByText("a".repeat(40), { exact: true })).toBeVisible();

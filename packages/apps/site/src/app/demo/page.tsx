@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
+import { permanentRedirect } from 'next/navigation';
 
 export const metadata: Metadata = {
   title: 'Demo (example data)',
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function DemoPage() {
-  redirect('/demo-app/welcome');
+  permanentRedirect('/demo-app/welcome');
 }
