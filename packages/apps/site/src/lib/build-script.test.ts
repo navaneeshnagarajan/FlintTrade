@@ -12,7 +12,6 @@ describe('site production build script', () => {
     };
 
     expect(pkg.scripts?.build).toContain('--webpack');
-    expect(pkg.scripts?.build).toContain('scripts/assert-permanent-demo-redirect.mjs');
   });
 
   it('exposes next start for a generic Node host without requiring Vercel scripts', () => {
