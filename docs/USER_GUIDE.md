@@ -252,7 +252,8 @@ The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
 **Connected (read)**, and **Live**. Practice and Live are the session Modes.
 **Connected (read)** is a broker status on a Practice session, not a separate
 Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
-**Demo (example data)**.
+**Demo (example data)**. The public site paths `/demo` and `/explore` permanently
+redirect (HTTP 308) to `/demo-app/welcome`.
 
 | Label | What it means |
 |---|---|

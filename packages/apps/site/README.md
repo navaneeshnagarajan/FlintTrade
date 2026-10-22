@@ -9,6 +9,7 @@
 ## Public surface
 
 - `src/app/page.tsx — public landing page`
+- `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`
 - `scripts/generate-content.mjs — docs/package/release content generator`
 - `src/lib/mcp/capabilities.ts — docs MCP tools and prompts`
 
