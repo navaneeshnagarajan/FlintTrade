@@ -103,7 +103,7 @@ jobs:
           rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
         id: pip_audit
@@ -111,7 +111,7 @@ jobs:
           FLINTTRADE_PIP_AUDIT_REPORT: ${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: python scripts/pip-audit-with-allowlist.py
       - name: Upload newly generated pip-audit evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && steps.pip_audit.outcome != 'skipped' }}
         with:
           name: pip-audit-report
@@ -150,7 +150,7 @@ jobs:
       - run: cargo install cargo-audit --locked --version 0.22.2
       - name: cargo audit (tick engine)
         run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/core/ticks --report packages/core/ticks/cargo-audit-report.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cargo-audit-reports
@@ -168,7 +168,7 @@ jobs:
         with: { python-version: "3.12.8" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: pnpm
@@ -178,7 +178,7 @@ jobs:
         run: node --test scripts/__tests__/http-cache-semantics.test.mjs
       - name: pnpm audit (allowlist)
         run: python scripts/pnpm-audit-with-allowlist.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: { name: pnpm-audit-report, path: pnpm-audit-report.json }
 
@@ -198,7 +198,7 @@ jobs:
       - run: pip-licenses --from=mixed --order=license --format=json --output-file=supply-chain/transitive-licences.json
       - run: python scripts/check-transitive-licences.py
         continue-on-error: true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: { name: transitive-licences-report, path: supply-chain/transitive-licences.json }
 
@@ -217,7 +217,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync --frozen
       - name: ACL test
         run: uv run python -m pytest tests/test_secure_file_windows_acl.py -v
@@ -235,7 +235,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 
