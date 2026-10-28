@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Framework, native broker reader, config, workspace, models, exceptions, auth"
 requires-python = ">=3.12"
 dependencies = [
-    "filelock==4.2.0",
+    "filelock==4.2.4",
     "httpx==0.28.1",
     "pydantic==2.14.1",
     "python-dotenv==1.2.4",
