@@ -1,0 +1,1502 @@
+{
+  "dependencies": [
+    {
+      "name": "aiohappyeyeballs",
+      "version": "2.7.1",
+      "vulns": []
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.5",
+      "vulns": []
+    },
+    {
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "vulns": []
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "vulns": []
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "vulns": []
+    },
+    {
+      "name": "appdirs",
+      "version": "1.4.4",
+      "vulns": []
+    },
+    {
+      "name": "apscheduler",
+      "version": "3.11.3",
+      "vulns": []
+    },
+    {
+      "name": "argon2-cffi",
+      "version": "25.1.0",
+      "vulns": []
+    },
+    {
+      "name": "argon2-cffi-bindings",
+      "version": "26.1.0",
+      "vulns": []
+    },
+    {
+      "name": "args",
+      "version": "0.1.0",
+      "vulns": []
+    },
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "vulns": []
+    },
+    {
+      "name": "beautifulsoup4",
+      "version": "4.15.0",
+      "vulns": []
+    },
+    {
+      "name": "blinker",
+      "version": "1.9.0",
+      "vulns": []
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.0",
+      "vulns": [
+        {
+          "id": "PYSEC-2026-4322",
+          "fix_versions": [
+            "1.2.1"
+          ],
+          "aliases": [
+            "BIT-dotnet-sdk-2026-111497",
+            "CVE-2026-111497",
+            "BIT-brotli-2026-111497",
+            "GHSA-9v8h-qqgm-4m35",
+            "BIT-node-2026-111497",
+            "BIT-powershell-2026-111497",
+            "PYSEC-2026-4323",
+            "BIT-dotnet-2026-111497",
+            "BIT-node-min-2026-111497"
+          ],
+          "description": "Brotli: Out-of-bounds write in the Brotli decoder (\"Node2Shell\") also affects the PyPI Brotli package"
+        },
+        {
+          "id": "PYSEC-2026-4322",
+          "fix_versions": [
+            "1.2.1"
+          ],
+          "aliases": [
+            "BIT-dotnet-sdk-2026-111497",
+            "CVE-2026-111497",
+            "BIT-brotli-2026-111497",
+            "GHSA-9v8h-qqgm-4m35",
+            "BIT-node-2026-111497",
+            "BIT-powershell-2026-111497",
+            "PYSEC-2026-4323",
+            "BIT-dotnet-2026-111497",
+            "BIT-node-min-2026-111497"
+          ],
+          "description": "Out-of-bounds write in the Brotli decoder (\"Node2Shell\") also affects the PyPI Brotli package"
+        }
+      ]
+    },
+    {
+      "name": "catboost",
+      "version": "1.2.10",
+      "vulns": []
+    },
+    {
+      "name": "certifi",
+      "version": "2025.11.12",
+      "vulns": [
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        },
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        }
+      ]
+    },
+    {
+      "name": "cffi",
+      "version": "2.1.1",
+      "vulns": []
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.2",
+      "vulns": []
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "vulns": []
+    },
+    {
+      "name": "clint",
+      "version": "0.5.1",
+      "vulns": []
+    },
+    {
+      "name": "cloudpickle",
+      "version": "3.1.2",
+      "vulns": []
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "vulns": []
+    },
+    {
+      "name": "contourpy",
+      "version": "1.4.0",
+      "vulns": []
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "vulns": []
+    },
+    {
+      "name": "curl-cffi",
+      "version": "0.16.3",
+      "vulns": []
+    },
+    {
+      "name": "cycler",
+      "version": "0.12.1",
+      "vulns": []
+    },
+    {
+      "name": "deprecated",
+      "version": "3.0.0",
+      "vulns": []
+    },
+    {
+      "name": "dhanhq",
+      "version": "2.3.0rc1",
+      "vulns": []
+    },
+    {
+      "name": "duckdb",
+      "version": "1.5.6",
+      "vulns": []
+    },
+    {
+      "name": "filelock",
+      "version": "4.2.0",
+      "vulns": [
+        {
+          "id": "CVE-2026-112906",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-2g95-wg33-c5x2"
+          ],
+          "description": "filelock: SoftFileLock evicts a fresh lock file whose watched age another local user's pre-dated file passed on through inode reuse"
+        },
+        {
+          "id": "CVE-2026-112907",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-567q-5qvw-pf92"
+          ],
+          "description": "filelock: On Windows an oplock on a soft lock's marker holds SoftFileLock.acquire() past its timeout and blocks the stale break"
+        },
+        {
+          "id": "CVE-2026-112908",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-6627-m3xw-93mp"
+          ],
+          "description": "filelock: StrictSoftFileLock creates its claim directories without the lock mode, so another local user with a write bit on them can end a live hold"
+        },
+        {
+          "id": "CVE-2026-112909",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-69hj-f68j-2879"
+          ],
+          "description": "filelock: UnixFileLock truncates and chmods any regular file another user renames or hard-links onto the lock path"
+        },
+        {
+          "id": "CVE-2026-112910",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-8mx5-7m5m-r77g"
+          ],
+          "description": "filelock: WindowsFileLock ignores mode: a 0o600 lock file and the ReadWriteLock database inherit the directory ACL"
+        },
+        {
+          "id": "CVE-2026-112911",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-9c4x-gm8v-wgc4"
+          ],
+          "description": "filelock: StrictSoftFileLock and SoftReadWriteLock adopt a protocol directory another user created first, losing mutual exclusion"
+        },
+        {
+          "id": "CVE-2026-112912",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-9j6q-wvj5-jgjg"
+          ],
+          "description": "filelock: Symlink swap during SoftFileLock's writability check leaks whether a path exists and is writable by the lock taker"
+        },
+        {
+          "id": "CVE-2026-112913",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-9vhv-jxww-xfm5"
+          ],
+          "description": "filelock: ReadWriteLock on Windows acts on SQLite side files another local user places beside its database"
+        },
+        {
+          "id": "CVE-2026-112914",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-crv4-6mhj-j5jh"
+          ],
+          "description": "filelock: SoftFileLock stale-break restore follows a swapped-in symbolic link and hard-links a file of the user running the lock into the lock directory"
+        },
+        {
+          "id": "CVE-2026-112915",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-cwqr-hh33-gh44"
+          ],
+          "description": "filelock ReadWriteLock: a crafted lock database makes every acquire stall or hang regardless of timeout"
+        },
+        {
+          "id": "CVE-2026-112934",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-fj95-fr6c-h845"
+          ],
+          "description": "filelock: SoftReadWriteLock holder refresh writes through a hard link and hangs on a named pipe that another local user renames over its record"
+        },
+        {
+          "id": "CVE-2026-112935",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-fq56-3cx3-fjxp"
+          ],
+          "description": "filelock: SoftFileLock stale-lock break removes a live lock file on a reused inode number and admits two holders"
+        },
+        {
+          "id": "CVE-2026-112937",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-jqc4-5cvw-7w85"
+          ],
+          "description": "filelock: ReadWriteLock on the hard-link route deletes any directory another user renames onto its .filelock-* link directory name"
+        },
+        {
+          "id": "CVE-2026-112938",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-m462-7rxw-wvpg"
+          ],
+          "description": "filelock: StrictSoftFileLock follows a symbolic link swapped in at <path>.filelock and creates claim files in a directory another local user chooses"
+        },
+        {
+          "id": "CVE-2026-112939",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-rfpc-qcw5-3pc4"
+          ],
+          "description": "filelock: SoftFileLock removes a live holder's marker when another user forges the PID in a writable marker"
+        },
+        {
+          "id": "CVE-2026-112940",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-v4x8-3wr5-3wq8"
+          ],
+          "description": "filelock ReadWriteLock: SQLite reopens the lock database by name, so a planted symlink or journal file makes the lock user's process overwrite or unlink its own files"
+        },
+        {
+          "id": "CVE-2026-112941",
+          "fix_versions": [
+            "4.2.1"
+          ],
+          "aliases": [
+            "GHSA-wfhq-q4j2-c37m"
+          ],
+          "description": "filelock: SoftReadWriteLock follows a lock tree swapped in after its first acquire and writes lock records into directories of the user running the lock"
+        }
+      ]
+    },
+    {
+      "name": "flask",
+      "version": "3.1.3",
+      "vulns": []
+    },
+    {
+      "name": "flask-cors",
+      "version": "6.0.5",
+      "vulns": []
+    },
+    {
+      "name": "flask-limiter",
+      "version": "4.1.1",
+      "vulns": []
+    },
+    {
+      "name": "fonttools",
+      "version": "4.66.1",
+      "vulns": []
+    },
+    {
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "vulns": []
+    },
+    {
+      "name": "google",
+      "version": "3.0.0",
+      "vulns": []
+    },
+    {
+      "name": "graphviz",
+      "version": "0.21",
+      "vulns": []
+    },
+    {
+      "name": "growwapi",
+      "version": "1.5.0",
+      "vulns": []
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "vulns": []
+    },
+    {
+      "name": "h2",
+      "version": "4.4.1",
+      "vulns": []
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "vulns": []
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "vulns": []
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "vulns": []
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "vulns": []
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "vulns": []
+    },
+    {
+      "name": "itsdangerous",
+      "version": "2.2.0",
+      "vulns": []
+    },
+    {
+      "name": "jinja2",
+      "version": "3.1.6",
+      "vulns": []
+    },
+    {
+      "name": "joblib",
+      "version": "1.6.0",
+      "vulns": []
+    },
+    {
+      "name": "jugaad-data",
+      "version": "0.35.10",
+      "vulns": []
+    },
+    {
+      "name": "kiwisolver",
+      "version": "1.5.1",
+      "vulns": []
+    },
+    {
+      "name": "lightgbm",
+      "version": "4.7.0",
+      "vulns": []
+    },
+    {
+      "name": "limits",
+      "version": "5.8.0",
+      "vulns": []
+    },
+    {
+      "name": "lxml",
+      "version": "6.1.3",
+      "vulns": []
+    },
+    {
+      "name": "markupsafe",
+      "version": "3.0.4",
+      "vulns": []
+    },
+    {
+      "name": "matplotlib",
+      "version": "3.11.2",
+      "vulns": []
+    },
+    {
+      "name": "multidict",
+      "version": "7.1.0",
+      "vulns": []
+    },
+    {
+      "name": "multitasking",
+      "version": "0.0.13",
+      "vulns": []
+    },
+    {
+      "name": "narwhals",
+      "version": "2.27.1",
+      "vulns": []
+    },
+    {
+      "name": "nats-py",
+      "version": "2.16.0",
+      "vulns": []
+    },
+    {
+      "name": "nkeys",
+      "version": "0.2.1",
+      "vulns": []
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "vulns": []
+    },
+    {
+      "name": "openchart",
+      "version": "0.2.0",
+      "vulns": []
+    },
+    {
+      "name": "ordered-set",
+      "version": "4.1.0",
+      "vulns": []
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "vulns": []
+    },
+    {
+      "name": "pandas",
+      "version": "2.3.3",
+      "vulns": []
+    },
+    {
+      "name": "peewee",
+      "version": "4.5.3",
+      "vulns": []
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "vulns": [
+        {
+          "id": "PYSEC-2026-4326",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112392",
+            "CVE-2026-112392",
+            "GHSA-27h8-gf7j-v5hc"
+          ],
+          "description": "Pillow: NULL dereference in ImagingExpand via rank filters on zero-size images"
+        },
+        {
+          "id": "PYSEC-2026-4341",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-96642",
+            "BIT-pillow-2026-96642",
+            "GHSA-3j72-p6qg-6xp7"
+          ],
+          "description": "Pillow: TarIO negative size field causes infinite CPU-spin loop"
+        },
+        {
+          "id": "PYSEC-2026-4327",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112394",
+            "GHSA-4558-3h8r-v8xp",
+            "BIT-pillow-2026-112394"
+          ],
+          "description": "Pillow: P;2L and P;4L decoders may read 1 to 3 bytes past the passed buffer size"
+        },
+        {
+          "id": "PYSEC-2026-4340",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96641",
+            "CVE-2026-96641",
+            "GHSA-4rm8-3hmm-39fg"
+          ],
+          "description": "Pillow: Reachable undefined behavior in native integer operations, potentially leading to denial of service or logic integrity compromise"
+        },
+        {
+          "id": "PYSEC-2026-4328",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112396",
+            "CVE-2026-112396",
+            "GHSA-4rr5-89j8-mwwm"
+          ],
+          "description": "Pillow: Heap use-after-free when encoding TIFF to an in-memory buffer"
+        },
+        {
+          "id": "PYSEC-2026-4329",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112397",
+            "GHSA-58r4-6rv3-gfh8",
+            "BIT-pillow-2026-112397"
+          ],
+          "description": "Pillow: Out-of-bounds access in _imagingmorph on a zero-width image"
+        },
+        {
+          "id": "PYSEC-2026-4330",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112398",
+            "GHSA-5x8w-8jj5-q52h",
+            "BIT-pillow-2026-112398"
+          ],
+          "description": "Pillow: Heap buffer overflow in FlashPix (FPX) JPEG decoding leads to code execution"
+        },
+        {
+          "id": "PYSEC-2026-4336",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-654x-cwwv-5j9c",
+            "CVE-2026-114501",
+            "BIT-pillow-2026-114501"
+          ],
+          "description": "Pillow: Arrow export leaks stale heap memory when PILLOW_ALIGNMENT > 1"
+        },
+        {
+          "id": "PYSEC-2026-4331",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112402",
+            "GHSA-7mwm-ghpf-9vrm",
+            "BIT-pillow-2026-112402"
+          ],
+          "description": "Pillow: Double free in ImagingScaleAffine on calloc failure via Image.transform"
+        },
+        {
+          "id": "PYSEC-2026-4332",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112403",
+            "GHSA-8g5g-8vmr-9782",
+            "CVE-2026-112403"
+          ],
+          "description": "Pillow: Heap buffer overflow in ImagingJpegDecode"
+        },
+        {
+          "id": "PYSEC-2026-4343",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96644",
+            "GHSA-9v9v-9qvf-h2hj",
+            "CVE-2026-96644"
+          ],
+          "description": "Pillow: Heap over-read in WMF/EMF rendering via 16-bit dimension truncation (Windows builds)"
+        },
+        {
+          "id": "PYSEC-2026-4333",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-cp9v-662q-vvx9",
+            "BIT-pillow-2026-112405",
+            "CVE-2026-112405"
+          ],
+          "description": "Pillow: NULL pointer dereference in Image.merge via an unvalidated band 0"
+        },
+        {
+          "id": "PYSEC-2026-4342",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-g4qv-2jxx-769h",
+            "BIT-pillow-2026-96643",
+            "CVE-2026-96643"
+          ],
+          "description": "Pillow: PNG eXIf chunk makes EXIF parsing run in quadratic time"
+        },
+        {
+          "id": "PYSEC-2026-4338",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-96637",
+            "GHSA-g842-9rc4-69pw",
+            "BIT-pillow-2026-96637"
+          ],
+          "description": "Pillow: Decompression bomb check bypass in SpiderImagePlugin.seek() leads to unbounded allocation DoS"
+        },
+        {
+          "id": "PYSEC-2026-4337",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-96636",
+            "BIT-pillow-2026-96636",
+            "GHSA-p8hx-v2p6-rp84"
+          ],
+          "description": "Pillow: Decompression-bomb protection bypass via multi-frame seek() in MPO and DCX (MpoImageFile.seek / DcxImageFile.seek)"
+        },
+        {
+          "id": "PYSEC-2026-4334",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-pchr-8j38-3x4p",
+            "BIT-pillow-2026-112896",
+            "CVE-2026-112896"
+          ],
+          "description": "Pillow: TIFF encoder ColorMap plane-size mismatch causes a heap out-of-bounds read"
+        },
+        {
+          "id": "PYSEC-2026-4339",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96639",
+            "CVE-2026-96639",
+            "GHSA-v9pv-5gc8-w2m6"
+          ],
+          "description": "Pillow multi-frame loaders can reuse stale native image storage after mode transitions"
+        },
+        {
+          "id": "PYSEC-2026-4335",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-xgh8-jp6q-p5x8",
+            "CVE-2026-112901",
+            "BIT-pillow-2026-112901"
+          ],
+          "description": "Pillow: ReDoS in XbmImagePlugin: 512-byte file stalls Image.open() for minutes"
+        },
+        {
+          "id": "PYSEC-2026-4326",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112392",
+            "CVE-2026-112392",
+            "GHSA-27h8-gf7j-v5hc"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's rank-based filters can dereference invalid image storage for a zero-size image. ImagingExpand() allocates a non-empty output and then faults while replicating edges by reading the first pixel from empty input storage; ImagingRankFilter is never reached. An attacker can supply or cause creation of a zero-size image to an application that applies a rank, median, minimum, or maximum filter. This causes a native process crash. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4327",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-4558-3h8r-v8xp",
+            "CVE-2026-112394",
+            "BIT-pillow-2026-112394"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's P;2L and P;4L raw decoders can read past the end of an input buffer. ImagingRawDecode calculates a packed-pixel row size, while the unpackers read separately padded bit planes. A caller can supply a buffer and image dimensions whose accepted size is smaller than the unpacker's actual footprint. This can disclose up to three adjacent heap bytes in output pixels or crash the process. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4328",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-4rr5-89j8-mwwm",
+            "CVE-2026-112396",
+            "BIT-pillow-2026-112396"
+          ],
+          "description": "Pillow is a Python imaging library. From 11.3.0 until 13.0.0, Pillow has a heap use-after-free when libtiff rejects a tag while encoding TIFF data to an in-memory buffer. When an application saves attacker-influenced TIFF tags to BytesIO, libtiff can reject a tag during encoding in ImagingLibTiffEncode; the error path then frees the output buffer without closing or clearing the TIFF handle, and later cleanup flushes through the write callback into freed memory, which can crash the process and may enable code execution. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4329",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-58r4-6rv3-gfh8",
+            "CVE-2026-112397",
+            "BIT-pillow-2026-112397"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's ImageMorph.MorphOp.apply() can access memory before a row buffer for a zero-width image. PPM and PGM input can create an image with width zero, and the native morphology routine indexes outrow[width - 1] without rejecting that geometry. An attacker can supply such an image to an application that applies a morphology operation. This can crash the process. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4330",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112398",
+            "CVE-2026-112398",
+            "GHSA-5x8w-8jj5-q52h"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's FlashPix JPEG-tile decoder can write decoded scanlines beyond the allocated tile buffer. FlashPix (FPX) JPEG decoding selects raw mode LA with two bytes per pixel, while an unrecognized JPEG mode can be decoded as JCS_UNKNOWN with four components, causing ImagingJpegDecode to write four-component scanlines into the two-byte tile buffer. An attacker can supply a crafted OLE2 FlashPix file to an application with the optional olefile dependency installed that opens or thumbnails untrusted input. This can corrupt heap memory and may allow arbitrary code execution. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4331",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112402",
+            "GHSA-7mwm-ghpf-9vrm",
+            "BIT-pillow-2026-112402"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow can double free image memory when ImagingScaleAffine encounters a selective allocation failure. The affected fast path handles Transform.EXTENT or pure scale-and-translate Transform.AFFINE operations with the default NEAREST resampling. The output image allocation must succeed while the additional per-column lookup allocation fails, after which the error path deletes image storage that later cleanup releases again. An attacker who can drive such a large Image.transform() operation under memory pressure may trigger the failure. This can crash the process and may corrupt memory. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4332",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112403",
+            "GHSA-8g5g-8vmr-9782",
+            "CVE-2026-112403"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's JPEG decoder can write a full-width scanline into a buffer sized for a requested draft scale. ImagingJpegDecode does not verify libjpeg's actual output width and component count after scaling is requested, and an 8-bit lossless SOF3 JPEG decoded by a build linked to libjpeg-turbo 3.x can ignore the requested downscaling geometry. An attacker can supply such a JPEG to an application that uses draft() or thumbnail() to request downscaling. This can corrupt heap memory, crash the process, or potentially allow code execution. Older libjpeg-turbo 2.x and IJG builds reject the SOF3 input. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4333",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-cp9v-662q-vvx9",
+            "CVE-2026-112405",
+            "BIT-pillow-2026-112405"
+          ],
+          "description": "Pillow is a Python imaging library. From 12.0.0 until 13.0.0, Pillow's Image.merge() can dereference a null image8 plane. Validation skips the first input band, allowing a 32-bit integer or floating-point image backed by image32 storage to be merged as a narrower multiband image. A crafted IPTC file can reach this path when an application opens and loads it, or a caller can invoke Image.merge() directly with such a first band. This causes a native process crash. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4334",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-pchr-8j38-3x4p",
+            "CVE-2026-112896",
+            "BIT-pillow-2026-112896"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's TIFF encoder can read beyond a ColorMap buffer when retained TIFF metadata has a plane size inconsistent with BitsPerSample. A small TIFF can be opened normally and then retain a crafted ColorMap that is reused when the image is saved. An application that re-encodes the attacker's TIFF with libtiff can trigger the out-of-bounds read. This can disclose heap memory in the output or crash the process. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4335",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-112901",
+            "BIT-pillow-2026-112901",
+            "GHSA-xgh8-jp6q-p5x8"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, Pillow's XBM header parser is vulnerable to regular-expression denial of service. In XbmImageFile._open, when an application calls Image.open() on a small crafted XBM file, XbmImagePlugin applies a backtracking expression to the attacker-controlled header before image dimensions are accepted, stalling a worker for minutes and denying service. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4336",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-114501",
+            "GHSA-654x-cwwv-5j9c",
+            "BIT-pillow-2026-114501"
+          ],
+          "description": "Pillow is a Python imaging library. From 11.2.1 until 13.0.0, Arrow export assumes that an image's rows are tightly contiguous and exports from im->blocks[0].ptr even when PILLOW_ALIGNMENT makes aligned_linesize include row padding or an aligned offset before the first row. The resulting Arrow buffer can include uninitialized padding, bytes preceding the first row, or stale heap contents from previously freed images. Applications that configure alignment and export images to Arrow can therefore disclose one user's pixels or other process memory to another user. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4337",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96636",
+            "CVE-2026-96636",
+            "GHSA-p8hx-v2p6-rp84"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, MpoImageFile.seek() and DcxImageFile.seek() reparse later MPO or DCX frames and replace self._size without rerunning Image._decompression_bomb_check(). A crafted multi-frame image can use a tiny first frame to pass Image.open() and then declare an over-limit later frame. Normal frame iteration through seek(), load(), or ImageSequence.Iterator can decode that frame and commit hundreds of megabytes or more, causing memory-exhaustion denial of service. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4338",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-96637",
+            "GHSA-g842-9rc4-69pw",
+            "BIT-pillow-2026-96637"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, SpiderImageFile.seek() in src/PIL/SpiderImagePlugin.py reparses a later SPIDER stack frame and replaces self._size without rerunning Image._decompression_bomb_check(). A tiny file can use a safe first frame to pass Image.open() and then declare very large dimensions in a later mode F frame. Loading that frame allocates approximately four bytes per attacker-declared pixel and can consume multiple gigabytes of memory. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4339",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96639",
+            "CVE-2026-96639",
+            "GHSA-v9pv-5gc8-w2m6"
+          ],
+          "description": "Pillow is a Python imaging library. From 11.0.0 until 13.0.0, multi-frame loaders can retain an ImagingCore allocation created for a narrow frame mode while a later frame of the same dimensions changes the logical mode and decoder tiles to wider RGB or CMYK data. ImageFile.load_prepare() reuses the stale native storage because _im is non-null without verifying that its mode and size still match. Crafted PSD, MPO, DCX, or MIC frame transitions can then write wider pixels into the narrow allocation, causing native out-of-bounds writes and crashes. The MPO path can also cause a native over-read and, in demonstrated runtime-specific profiles, command execution. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4340",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-4rm8-3hmm-39fg",
+            "BIT-pillow-2026-96641",
+            "CVE-2026-96641"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, PILfont text-width accumulation in src/_imaging.c checks positive glyph advances against INT_MAX but does not check negative advances against INT_MIN. Repeating a signed 16-bit advance of -32768 can therefore execute a signed C integer overflow in xsize += dx, producing a large positive width from a negative mathematical result. Applications that use getlength(), getsize(), or derived layout, quota, serialization, or allocation calculations can experience logic-integrity errors or resource consumption, while the high-level mask path commonly retains a decompression-bomb check. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4341",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "CVE-2026-96642",
+            "BIT-pillow-2026-96642",
+            "GHSA-3j72-p6qg-6xp7"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0, the TarIO initializer in src/PIL/TarIO.py accepts a negative octal member size and computes a backward seek that returns to the same 512-byte header. When the requested member name does not match, the parser repeatedly reads that header, consumes a full CPU core, and never returns. TarIO is reached only when an application directly uses PIL.TarIO.TarIO rather than the default Image.open() path. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4342",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-g4qv-2jxx-769h",
+            "BIT-pillow-2026-96643",
+            "CVE-2026-96643"
+          ],
+          "description": "Pillow is a Python imaging library. From 11.0.0 until 13.0.0, Exif.load() in src/PIL/Image.py repeatedly slices the remaining EXIF data while it begins with the six-byte Exif header. src/PIL/PngImagePlugin.py accepts an uncapped PNG eXIf chunk, so a file filled with repeated headers causes a new shrinking copy on every iteration and quadratic CPU work. The condition is reachable through Image.getexif(), Image._getexif(), and ImageOps.exif_transpose(), including common photo-upload rotation workflows. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "PYSEC-2026-4343",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96644",
+            "CVE-2026-96644",
+            "GHSA-9v9v-9qvf-h2hj"
+          ],
+          "description": "Pillow is a Python imaging library. Prior to 13.0.0 on Windows, src/PIL/WmfImagePlugin.py passes unchecked 32-bit WMF or EMF dimensions to the native drawwmf handler in src/display.c. The handler sizes a DIB allocation from 16-bit-truncated bcWidth and bcHeight fields but copies pixel data using the original full dimensions. A crafted wide, short metafile can pass the pixel-count decompression-bomb check and make the Windows-only renderer read beyond the heap buffer, potentially disclosing memory or crashing the process. This issue is fixed in version 13.0.0."
+        },
+        {
+          "id": "CVE-2026-112390",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-22hg-r758-rrw9",
+            "BIT-pillow-2026-112390"
+          ],
+          "description": "Pillow: Infinite loop in MIC n_frames when the embedded TIFF"
+        },
+        {
+          "id": "CVE-2026-96638",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-24rc-8hj2-v98c",
+            "BIT-pillow-2026-96638"
+          ],
+          "description": "Pillow: BMP RLE decoder memory-amplification DoS via unbounded delta escape / absolute mode"
+        },
+        {
+          "id": "CVE-2026-112391",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112391",
+            "GHSA-254f-3936-288h"
+          ],
+          "description": "Pillow: PdfParser can recurse without limit in get_value() and linearize_page_tree()"
+        },
+        {
+          "id": "CVE-2026-112393",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-332p-7hrc-92wf",
+            "BIT-pillow-2026-112393"
+          ],
+          "description": "Pillow: Heap buffer overflow in _tiffWriteProc when saving TIFF to BytesIO"
+        },
+        {
+          "id": "CVE-2026-112395",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-462x-pgg6-55fp",
+            "BIT-pillow-2026-112395"
+          ],
+          "description": "Pillow tiled-TIFF decoder reads past tile buffer in copy4 (Unpack.c:1290)"
+        },
+        {
+          "id": "CVE-2026-112399",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112399",
+            "GHSA-5xm2-6676-qcp9"
+          ],
+          "description": "Pillow: APNG background disposal allocates full canvas before decompression bomb check"
+        },
+        {
+          "id": "CVE-2026-112400",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112400",
+            "GHSA-65qm-jvmh-6pqg"
+          ],
+          "description": "Pillow: GIF seek keeps rejected size after DecompressionBombError, allowing DoS"
+        },
+        {
+          "id": "CVE-2026-112401",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112401",
+            "GHSA-74r2-7ff9-mjj2"
+          ],
+          "description": "Pillow: Quadratic GIF comment concatenation allows DoS in Image.open()"
+        },
+        {
+          "id": "GHSA-78g4-xqwv-q3g8",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [],
+          "description": "Pillow: Bundled libopenjp2 2.5.4 in all wheels since 11.1.0 carries OSV-2025-219 heap-buffer-overflow write reachable from Image.open().load()"
+        },
+        {
+          "id": "CVE-2026-112404",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112404",
+            "GHSA-c6hw-5grf-ff96"
+          ],
+          "description": "Pillow: OOB read in TiffDecode.c tile and RGBA paths leaks heap memory into pixels"
+        },
+        {
+          "id": "CVE-2026-112406",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-f2g6-542v-9j58",
+            "BIT-pillow-2026-112406"
+          ],
+          "description": "Pillow: Infinite loop in PdfParser.rewrite_pages on page tree Parent cycle"
+        },
+        {
+          "id": "CVE-2026-112891",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-fc9g-5qg7-mf45",
+            "BIT-pillow-2026-112891"
+          ],
+          "description": "Pillow: Quadratic GIF comment copying during save"
+        },
+        {
+          "id": "CVE-2026-96778",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-g7cr-3p24-7wf7",
+            "BIT-pillow-2026-96778"
+          ],
+          "description": "Pillow: Heap buffer overflow writing JPEG comment after ICC profile fills buffer"
+        },
+        {
+          "id": "CVE-2026-112892",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-gg2r-wvfm-q9rx",
+            "BIT-pillow-2026-112892"
+          ],
+          "description": "Pillow: MSP RLE decoder expands a tiny file into unbounded memory"
+        },
+        {
+          "id": "CVE-2026-112893",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-j4m9-6w36-pw47",
+            "BIT-pillow-2026-112893"
+          ],
+          "description": "Pillow: Invalid free in FreeType glyph rendering when a stroker is active"
+        },
+        {
+          "id": "CVE-2026-112894",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112894",
+            "GHSA-jg86-v3jv-hrpm"
+          ],
+          "description": "Pillow: Quadratic-time DoS in PDF save_all (PdfParser.next_object_id)"
+        },
+        {
+          "id": "CVE-2026-96640",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-96640",
+            "GHSA-mrfp-p49p-3hf2"
+          ],
+          "description": "Pillow PDF append accepts malformed shared page-tree DAG causing resource exhaustion"
+        },
+        {
+          "id": "CVE-2026-112895",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "BIT-pillow-2026-112895",
+            "GHSA-p4wg-p73j-c528"
+          ],
+          "description": "Pillow: Unbounded recursion parsing a PDF page tree or trailer chain (incomplete fix for CVE-2026-42310)"
+        },
+        {
+          "id": "CVE-2026-112897",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-q45j-58j2-45rg",
+            "BIT-pillow-2026-112897"
+          ],
+          "description": "Pillow: TiffDecode returns uninitialized memory as pixels for short JPEG strips"
+        },
+        {
+          "id": "CVE-2026-112898",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-rfgq-q3w2-pmv2",
+            "BIT-pillow-2026-112898"
+          ],
+          "description": "Pillow: Image.quantize() with empty palette leaks uninitialized stack memory"
+        },
+        {
+          "id": "CVE-2026-112899",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-vx6w-vv9f-6gvg"
+          ],
+          "description": "Pillow: EPS load(scale) lets Ghostscript render past the decompression bomb limit"
+        },
+        {
+          "id": "CVE-2026-112900",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-w889-685w-c8fh",
+            "BIT-pillow-2026-112900"
+          ],
+          "description": "Pillow: Argument Injection in Ghostscript call, potentially leading into RCE"
+        },
+        {
+          "id": "CVE-2026-112902",
+          "fix_versions": [
+            "13.0.0"
+          ],
+          "aliases": [
+            "GHSA-xvh5-g6gv-559v"
+          ],
+          "description": " Pillow: Memory disclosure and segfault in libtiff encoder via crafted TIFF tags"
+        }
+      ]
+    },
+    {
+      "name": "platformdirs",
+      "version": "4.13.0",
+      "vulns": []
+    },
+    {
+      "name": "plotly",
+      "version": "6.9.0",
+      "vulns": []
+    },
+    {
+      "name": "propcache",
+      "version": "0.5.4",
+      "vulns": []
+    },
+    {
+      "name": "protobuf",
+      "version": "5.29.6",
+      "vulns": []
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "vulns": []
+    },
+    {
+      "name": "pycparser",
+      "version": "3.11",
+      "vulns": []
+    },
+    {
+      "name": "pydantic",
+      "version": "2.14.1",
+      "vulns": []
+    },
+    {
+      "name": "pydantic-core",
+      "version": "2.50.1",
+      "vulns": []
+    },
+    {
+      "name": "pyjwt",
+      "version": "2.15.1",
+      "vulns": []
+    },
+    {
+      "name": "pynacl",
+      "version": "1.6.2",
+      "vulns": []
+    },
+    {
+      "name": "pyopenssl",
+      "version": "26.4.0",
+      "vulns": []
+    },
+    {
+      "name": "pyotp",
+      "version": "2.10.0",
+      "vulns": []
+    },
+    {
+      "name": "pyparsing",
+      "version": "3.3.3",
+      "vulns": []
+    },
+    {
+      "name": "pyrage",
+      "version": "1.4.0",
+      "vulns": []
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "vulns": []
+    },
+    {
+      "name": "python-decouple",
+      "version": "3.8",
+      "vulns": []
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.4",
+      "vulns": []
+    },
+    {
+      "name": "pytz",
+      "version": "2026.5",
+      "vulns": []
+    },
+    {
+      "name": "pyyaml",
+      "version": "6.0.3",
+      "vulns": []
+    },
+    {
+      "name": "qrcode",
+      "version": "8.2",
+      "vulns": []
+    },
+    {
+      "name": "quantstats",
+      "version": "0.0.86",
+      "vulns": []
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "vulns": []
+    },
+    {
+      "name": "scipy",
+      "version": "1.18.1",
+      "vulns": []
+    },
+    {
+      "name": "seaborn",
+      "version": "0.13.2",
+      "vulns": []
+    },
+    {
+      "name": "sentry-sdk",
+      "version": "2.71.0",
+      "vulns": []
+    },
+    {
+      "name": "setuptools",
+      "version": "84.0.0",
+      "vulns": [
+        {
+          "id": "GHSA-xmj3-9gf7-h52w",
+          "fix_versions": [
+            "84.1.0"
+          ],
+          "aliases": [],
+          "description": "setuptools: Windows path escape via namespace_packages.txt during legacy wheel installation  Description"
+        }
+      ]
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "vulns": []
+    },
+    {
+      "name": "soupsieve",
+      "version": "3.0.1",
+      "vulns": []
+    },
+    {
+      "name": "structlog",
+      "version": "26.1.0",
+      "vulns": []
+    },
+    {
+      "name": "tabulate",
+      "version": "0.10.0",
+      "vulns": []
+    },
+    {
+      "name": "tenacity",
+      "version": "9.2.1",
+      "vulns": []
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "vulns": []
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "vulns": []
+    },
+    {
+      "name": "tzdata",
+      "version": "2026.5",
+      "vulns": []
+    },
+    {
+      "name": "tzlocal",
+      "version": "5.4.4",
+      "vulns": []
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "vulns": []
+    },
+    {
+      "name": "uuid",
+      "version": "1.30",
+      "vulns": []
+    },
+    {
+      "name": "waitress",
+      "version": "3.0.2",
+      "vulns": []
+    },
+    {
+      "name": "watchdog",
+      "version": "6.0.0",
+      "vulns": []
+    },
+    {
+      "name": "websocket-client",
+      "version": "1.9.2",
+      "vulns": []
+    },
+    {
+      "name": "websockets",
+      "version": "17.2",
+      "vulns": []
+    },
+    {
+      "name": "werkzeug",
+      "version": "3.1.9",
+      "vulns": []
+    },
+    {
+      "name": "wheel",
+      "version": "0.48.0",
+      "vulns": []
+    },
+    {
+      "name": "wrapt",
+      "version": "2.5.0",
+      "vulns": []
+    },
+    {
+      "name": "yarl",
+      "version": "1.25.1",
+      "vulns": []
+    },
+    {
+      "name": "yfinance",
+      "version": "1.7.0",
+      "vulns": []
+    },
+    {
+      "name": "zstandard",
+      "version": "0.25.0",
+      "vulns": []
+    }
+  ],
+  "fixes": [],
+  "_meta": {
+    "schema": "flinttrade-pip-audit-v1",
+    "source": "online-osv-snapshot",
+    "generated_at": "2026-11-01T11:01:47.889024Z",
+    "audited_at": "2026-11-01T11:01:47.889024Z",
+    "requirements_lock_sha256": "1e99883ac70da5449fe96e497794b0a3d58262b4171a76ed0abf8d9489b2b034",
+    "pip_audit_exit_code": 1
+  }
+}
