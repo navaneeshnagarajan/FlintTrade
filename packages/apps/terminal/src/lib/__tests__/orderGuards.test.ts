@@ -7,6 +7,9 @@ import {
   checkLotMultiple,
   resolveLotQuantity,
   checkFreezeQuantity,
+  maxPlaceableQuantity,
+  sliceOrderQuantities,
+  NSE_INDEX_FREEZE_QUANTITY,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -181,16 +184,46 @@ describe("checkOrderQuantityLimit", () => {
 });
 
 describe("checkFreezeQuantity", () => {
-  it("uses NSE/FAOP/76693 when the broker does not send a freeze quantity", () => {
-    expect(checkFreezeQuantity("NIFTY 24500 CE", 3510)).toBeNull();
-    expect(checkFreezeQuantity("NIFTY 24500 CE", 3575)).toBe(
-      "Max 3510 per order for NIFTY 24500 CE. Place smaller orders.",
+  it("uses NSE/FAOP/77189 when the broker does not send a freeze quantity", () => {
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 1800)).toBeNull();
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 1820)).toBe(
+      "Max 1800 per order for NIFTY 24500 CE. Place smaller orders.",
     );
-    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 1126)).toBe(
-      "Max 1125 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
+    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 601)).toBe(
+      "Max 600 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
     );
-    expect(checkFreezeQuantity("BANKNIFTY", 1440)).toBeNull();
+    expect(checkFreezeQuantity("BANKNIFTY", 900)).toBeNull();
     expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
+  });
+
+  it("rounds the NIFTY maximum placeable quantity down to 1755 at lot 65", () => {
+    expect(maxPlaceableQuantity("NIFTY", 65)).toBe(1755);
+    expect(maxPlaceableQuantity("NIFTY-OCT2026-FUT", 65)).toBe(1755);
+    expect(checkFreezeQuantity("NIFTY", 1755)).toBeNull();
+    expect(1755 % 65).toBe(0);
+  });
+
+  it("slices each index at its NSE/FAOP/77189 freeze quantity", () => {
+    const published: Readonly<Record<string, number>> = {
+      NIFTY: 1800,
+      BANKNIFTY: 900,
+      FINNIFTY: 1800,
+      MIDCPNIFTY: 2800,
+      NIFTYNXT50: 600,
+      NIFTYFPI: 8500,
+    };
+    expect(NSE_INDEX_FREEZE_QUANTITY).toEqual(published);
+    const lot = 50;
+    for (const [symbol, freeze] of Object.entries(published)) {
+      expect(freeze % lot).toBe(0);
+      expect(sliceOrderQuantities(symbol, freeze * 2 + lot, lot)).toEqual([
+        freeze,
+        freeze,
+        lot,
+      ]);
+    }
+    expect(sliceOrderQuantities("NIFTY", 1755 * 2 + 65, 65)).toEqual([1755, 1755, 65]);
+    expect(sliceOrderQuantities("NIFTYNXT50-OCT2026-FUT", 1200, lot)).toEqual([600, 600]);
   });
 
   it("uses the broker freeze quantity ahead of the circular", () => {

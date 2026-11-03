@@ -2,7 +2,7 @@
  * Offline F&O contracts for Example and Practice.
  *
  * Lot sizes follow the screener fallback table (NIFTY 65, BANKNIFTY 30).
- * Freeze quantities follow NSE/FAOP/76693 (NIFTY 3510, BANKNIFTY 1440).
+ * Freeze quantities follow NSE/FAOP/77189 (NIFTY 1800, BANKNIFTY 900).
  * The order pad can then refuse both a quantity that is not a whole lot
  * and a lot multiple above the freeze, without a broker instrument master.
  */
@@ -13,7 +13,7 @@ export interface ExampleFoInstrument {
   exchange: "NFO";
   instrumenttype: "FUTIDX" | "OPTIDX";
   lotsize: number;
-  /** NSE/FAOP/76693 freeze quantity for this underlying. */
+  /** NSE/FAOP/77189 freeze quantity for this underlying. */
   freezeQty: number;
   tick_size: number;
 }
@@ -25,7 +25,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "FUTIDX",
     lotsize: 65,
-    freezeQty: 3510,
+    freezeQty: 1800,
     tick_size: 0.05,
   },
   {
@@ -34,7 +34,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 65,
-    freezeQty: 3510,
+    freezeQty: 1800,
     tick_size: 0.05,
   },
   {
@@ -43,7 +43,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 65,
-    freezeQty: 3510,
+    freezeQty: 1800,
     tick_size: 0.05,
   },
   {
@@ -52,7 +52,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "FUTIDX",
     lotsize: 30,
-    freezeQty: 1440,
+    freezeQty: 900,
     tick_size: 0.05,
   },
   {
@@ -61,7 +61,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 30,
-    freezeQty: 1440,
+    freezeQty: 900,
     tick_size: 0.05,
   },
   {
@@ -70,7 +70,7 @@ export const EXAMPLE_FO_INSTRUMENTS: readonly ExampleFoInstrument[] = [
     exchange: "NFO",
     instrumenttype: "OPTIDX",
     lotsize: 30,
-    freezeQty: 1440,
+    freezeQty: 900,
     tick_size: 0.05,
   },
 ];

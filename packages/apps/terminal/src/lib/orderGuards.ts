@@ -233,17 +233,19 @@ export function checkOrderQuantityLimit(exchange: string, quantity: number): str
 /**
  * NSE index quantity freeze limits.
  *
- * NSE/FAOP/76693 (1 October 2026, effective 5 October 2026). These apply
- * when the broker does not send `freeze_qty`. An order above the limit is
- * refused whole. It is not split.
+ * NSE/FAOP/77189, effective 2 November 2026. These apply when the broker
+ * does not send `freeze_qty`. The circular does not publish lot sizes. An
+ * order above the limit is refused whole. It is not split.
+ * `sliceOrderQuantities` only proposes the slices a caller may send as
+ * separate orders.
  */
 export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
-  NIFTY: 3510,
-  BANKNIFTY: 1440,
-  FINNIFTY: 3240,
-  MIDCPNIFTY: 5760,
-  NIFTYNXT50: 1125,
-  NIFTYFPI: 53900,
+  NIFTY: 1800,
+  BANKNIFTY: 900,
+  FINNIFTY: 1800,
+  MIDCPNIFTY: 2800,
+  NIFTYNXT50: 600,
+  NIFTYFPI: 8500,
 };
 
 const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
@@ -278,7 +280,7 @@ export function freezeQuantityRefusal(symbol: string, freeze: number): string {
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE/FAOP/76693 index table.
+ * NSE/FAOP/77189 index table.
  */
 export function resolveFreezeQuantity(
   symbol: string,
@@ -290,6 +292,50 @@ export function resolveFreezeQuantity(
   const underlying = indexUnderlying(symbol);
   if (!underlying) return null;
   return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
+}
+
+/**
+ * Largest lot multiple that does not exceed the freeze quantity.
+ *
+ * The exchange ceiling is not always a whole number of lots. NIFTY's freeze
+ * of 1,800 at a lot of 65 places at most 1,755. Returns null when no freeze
+ * or lot size applies, and 0 when the freeze is smaller than one lot.
+ */
+export function maxPlaceableQuantity(
+  symbol: string,
+  lotSize: number,
+  brokerFreezeQty?: number | null,
+): number | null {
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || !Number.isInteger(lotSize) || lotSize <= 0) return null;
+  return Math.floor(limit / lotSize) * lotSize;
+}
+
+/**
+ * Split a lot-aligned quantity into orders at the placeable freeze.
+ *
+ * Each full slice is the index freeze quantity rounded down to a whole
+ * number of lots. The last slice is the remainder. Admission does not call
+ * this: an oversized single order is still refused. Returns an empty list
+ * when the quantity cannot be sliced.
+ */
+export function sliceOrderQuantities(
+  symbol: string,
+  quantity: number,
+  lotSize: number,
+  brokerFreezeQty?: number | null,
+): number[] {
+  const cap = maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty);
+  if (cap == null || cap < 1 || !Number.isInteger(lotSize) || lotSize <= 0) return [];
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity % lotSize !== 0) return [];
+  const slices: number[] = [];
+  let remaining = quantity;
+  while (remaining > 0) {
+    const piece = Math.min(remaining, cap);
+    slices.push(piece);
+    remaining -= piece;
+  }
+  return slices;
 }
 
 /**

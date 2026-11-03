@@ -3,9 +3,10 @@
 
 NSE and BSE publish quantity freeze limits (QF limits) that cap the
 maximum quantity allowed in a single order for F&O instruments.
-NSE/FAOP/76693 (1 October 2026, effective 5 October 2026) sets the
-index limits used when a broker does not supply ``freeze_qty``.
-An order above that limit is refused. It is not split.
+NSE/FAOP/77189 (effective 2 November 2026) sets the index limits used
+when a broker does not supply ``freeze_qty``. An order above that limit
+is refused. It is not split. ``slice_order_quantities`` only proposes
+the slices a caller may send as separate orders.
 
 This module enforces QF limits *pre-placement* in the FlintTrade engine,
 providing a clear error message before the order hits the exchange.
@@ -17,9 +18,9 @@ restarts.
 CSV format (NSE freeze CSV)::
 
     SYMBOL,EXCHANGE,MAX_QTY
-    NIFTY,NFO,3510
-    BANKNIFTY,NFO,1440
-    FINNIFTY,NFO,3240
+    NIFTY,NFO,1800
+    BANKNIFTY,NFO,900
+    FINNIFTY,NFO,1800
 
 Usage::
 
@@ -28,7 +29,7 @@ Usage::
 
     valid, reason = manager.validate("NIFTY25APRFUT", "NFO", 2000)
     if not valid:
-        print(reason)  # "Quantity 4000 exceeds freeze limit 3510 for NIFTY on NFO"
+        print(reason)  # "Quantity 4000 exceeds freeze limit 1800 for NIFTY on NFO"
 
 Admin routes::
 
@@ -104,16 +105,17 @@ def _default_db_path() -> Path:
     return target
 
 
-# Index quantity freeze limits from NSE/FAOP/76693.
-# The circular replaces the earlier computation method for these indices.
-# SENSEX and BANKEX are BSE names and are not in that circular.
+# Index quantity freeze limits from NSE/FAOP/77189, effective 2 November 2026.
+# The circular does not publish lot sizes. A placeable order is this ceiling
+# rounded down to a whole number of lots. SENSEX and BANKEX are BSE names
+# and are not in that circular.
 _NSE_INDEX_FREEZE: dict[str, int] = {
-    "NIFTY": 3_510,
-    "BANKNIFTY": 1_440,
-    "FINNIFTY": 3_240,
-    "MIDCPNIFTY": 5_760,
-    "NIFTYNXT50": 1_125,
-    "NIFTYFPI": 53_900,
+    "NIFTY": 1_800,
+    "BANKNIFTY": 900,
+    "FINNIFTY": 1_800,
+    "MIDCPNIFTY": 2_800,
+    "NIFTYNXT50": 600,
+    "NIFTYFPI": 8_500,
 }
 
 # Well-known defaults seeded when no CSV is loaded.
@@ -156,7 +158,7 @@ def order_symbol_label(symbol: str) -> str:
 
 
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
-    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/76693 index table.
+    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/77189 index table.
 
     Returns:
         The maximum quantity for one order, or ``None`` when no freeze applies.
@@ -168,6 +170,60 @@ def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -
     if underlying is None:
         return None
     return _NSE_INDEX_FREEZE[underlying]
+
+
+def max_placeable_quantity(
+    symbol: str,
+    lot_size: int,
+    broker_freeze_qty: int | None = None,
+) -> int | None:
+    """Largest lot multiple that does not exceed the freeze quantity.
+
+    The exchange ceiling is not always a whole number of lots. NIFTY's
+    freeze of 1,800 at a lot of 65 places at most 1,755.
+
+    Returns:
+        That quantity, or ``None`` when no freeze or lot size applies.
+        ``0`` means the freeze is smaller than one lot.
+    """
+    limit = resolve_freeze_quantity(symbol, broker_freeze_qty)
+    lot = _positive_int(lot_size)
+    if limit is None or lot is None:
+        return None
+    return (limit // lot) * lot
+
+
+def slice_order_quantities(
+    symbol: str,
+    quantity: int,
+    lot_size: int,
+    broker_freeze_qty: int | None = None,
+) -> list[int]:
+    """Split a lot-aligned quantity into orders at the placeable freeze.
+
+    Each full slice is the index freeze quantity rounded down to a whole
+    number of lots. The last slice is the remainder. Admission does not
+    call this: an oversized single order is still refused.
+
+    Returns:
+        Slice quantities in order, or an empty list when the quantity
+        cannot be sliced.
+    """
+    cap = max_placeable_quantity(symbol, lot_size, broker_freeze_qty)
+    lot = _positive_int(lot_size)
+    if cap is None or lot is None or cap < lot:
+        return []
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        return []
+    if quantity % lot != 0:
+        return []
+    slices: list[int] = []
+    remaining = quantity
+    while remaining > 0:
+        piece = min(remaining, cap)
+        slices.append(piece)
+        remaining -= piece
+    return slices
 
 
 def quantity_admission_refusal(
@@ -422,8 +478,8 @@ class QuantityFreezeManager:
         Expected CSV format::
 
             SYMBOL,EXCHANGE,MAX_QTY
-            NIFTY,NFO,3510
-            BANKNIFTY,NFO,1440
+            NIFTY,NFO,1800
+            BANKNIFTY,NFO,900
 
         Rows with missing or non-numeric MAX_QTY are skipped with a warning.
 

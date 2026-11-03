@@ -1180,7 +1180,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(qtyInput, { target: { value: "3525" } });
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+      "Max 1800 per order for NIFTY28MAR2422000CE. Place smaller orders.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1216,10 +1216,10 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot: 75");
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "3525" } });
-    expect(screen.queryByText(/Max 3510 per order/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Max 1800 per order/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max 3510 per order for NIFTY28MAR2422000CE. Place smaller orders.",
+      "Max 1800 per order for NIFTY28MAR2422000CE. Place smaller orders.",
     );
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
