@@ -151,7 +151,7 @@ while `VISUAL_AXE_GATE` is `"0"`. Change that one value to `"1"` to make
 the job fail on a regression. It is not a required check, and it should
 stay advisory until it has run quiet on a few pull requests.
 
-Screenshot baselines are generated only by that workflow on `ubuntu-latest`
+Screenshot baselines are generated only by that workflow on `ubuntu-26.04`
 (the same hosted image as the terminal Playwright job). Dispatch **Visual
 and accessibility** with **Regenerate screenshot baselines** enabled, on
 the branch that should receive the files. The job commits the
@@ -246,7 +246,7 @@ release CI can use complete Apple distribution-signing and notarisation secret
 sets.
 
 First launch uses system Git or the official HTTPS archive fallback, verifies
-pinned tool distributions, provisions Python 3.12 with `uv`, installs from the
+pinned tool distributions, provisions Python 3.14 with `uv`, installs from the
 frozen Python and pnpm locks, builds the terminal, and starts the source guardian
 only after candidate promotion succeeds. Rust is not a desktop build
 prerequisite; it remains optional for `core/ticks`.
@@ -390,8 +390,8 @@ without presenting them as ready to connect.
   `python scripts/ft.py lint` (POSIX alias: `make lint`) before committing —
   that target lints the terminal as well, see [TypeScript](#typescript) below.
 - **Type hints** on every public function. We write to the `python_requires`
-  floor in `flint.toml` — currently 3.12 — so `list[int]` not `List[int]`,
-  `X | None` not `Optional[X]`. CI runs `python_target` (3.14).
+  floor in `flint.toml` — currently 3.14 — so `list[int]` not `List[int]`,
+  `X | None` not `Optional[X]`. CI runs that same 3.14 series.
 - **Google-style docstrings** for every public function and class.
 - **Absolute imports** for anything cross-package or top-level
   (`flinttrade_<pkg>....`). Intra-package relative imports

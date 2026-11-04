@@ -218,9 +218,9 @@ def test_docker_repairs_broker_sdk_before_copying_builder_environment() -> None:
     assert "COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py" in dockerfile
     assert "apt-get install -y --no-install-recommends git" in dockerfile
     assert dockerfile.index("python scripts/broker_sdk_environment.py repair") < dockerfile.index(
-        "FROM python:3.12-slim-bookworm AS runtime"
+        "FROM python:3.14-slim-trixie AS runtime"
     )
-    runtime = dockerfile.split("FROM python:3.12-slim-bookworm AS runtime", 1)[1]
+    runtime = dockerfile.split("FROM python:3.14-slim-trixie AS runtime", 1)[1]
     assert "COPY VERSION pyproject.toml pnpm-workspace.yaml brokers.lock ./" in runtime
 
 
