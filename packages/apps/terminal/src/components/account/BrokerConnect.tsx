@@ -913,11 +913,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
               const canSetPrimary = canPromotePrimaryAccount(a);
-              const monday = isConnectedReadBroker(a.broker);
+              const connectedReadBroker = isConnectedReadBroker(a.broker);
               const honest = honestBrokerStatus({
                 connected,
                 connectedRead: connected && connectedReadChrome(a) !== null,
-                nativeConnectedRead: monday,
+                nativeConnectedRead: connectedReadBroker,
                 incident: operatorIncident,
               });
               const moneyPathChrome = honest !== null
@@ -943,7 +943,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {monday
+                      {connectedReadBroker
                         ? ""
                         : a.read_only
                           ? " · read-only"

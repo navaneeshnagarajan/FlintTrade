@@ -61,7 +61,7 @@ function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["in
   );
 }
 
-// Locked FT-LEARN-003 copy (USER_GUIDE Learn → Resource Hub).
+// Locked copy (USER_GUIDE Learn → Resource Hub).
 const DOC_LOADING = "Loading document…";
 const DOC_SOFT_FAIL = "Document isn’t ready yet.";
 const DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";

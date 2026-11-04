@@ -248,7 +248,7 @@ const RESOURCES: ResourceCard[] = [
   { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "DEVELOPER_GUIDE.md" },
 ];
 
-/** Locked Resource Hub local-doc load copy (FT-LEARN-003). */
+/** Locked Resource Hub local-doc load copy. */
 export const RESOURCE_HUB_DOC_LOADING = "Loading document…";
 export const RESOURCE_HUB_DOC_SOFT_FAIL = "Document isn’t ready yet.";
 export const RESOURCE_HUB_DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";

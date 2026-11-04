@@ -633,40 +633,40 @@ def test_concrete_dhan_context_records_native_depth_and_exact_account_inputs(run
     assert runtime.audit.verify_chain()["ok"]
 
 
-def _stamp_monday_dhan(runtime) -> None:
+def _stamp_connected_dhan(runtime) -> None:
     from flinttrade_gateway.connected_read_smoke import stamp_connected_read_smoke
 
     stamp_connected_read_smoke(runtime.sessions[BrokerSelector("dhan", "Quotes")], True)
     stamp_connected_read_smoke(runtime.sessions[BrokerSelector("dhan", "Execution")], True)
 
 
-def test_monday_feeds_require_admin_accounts_read(runtime):
+def test_connected_read_feeds_require_admin_accounts_read(runtime):
     """P1: JWT mode alone is not enough — missing account-read scope never binds."""
     from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
 
-    _stamp_monday_dhan(runtime)
+    _stamp_connected_dhan(runtime)
     headers = {"Authorization": "Bearer " + runtime.token(scopes=[])}
     with runtime.app.test_request_context(headers=headers):
         assert collect_authorised_connected_read_feeds("RELIANCE", "NSE") == []
     assert runtime.adapter.calls == []
 
 
-def test_monday_feeds_respect_account_acl(runtime):
+def test_connected_read_feeds_respect_account_acl(runtime):
     """P1: another operator cannot borrow the quote-account ACL."""
     from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
 
-    _stamp_monday_dhan(runtime)
+    _stamp_connected_dhan(runtime)
     headers = {"Authorization": "Bearer " + runtime.token(sub="another-operator")}
     with runtime.app.test_request_context(headers=headers):
         assert collect_authorised_connected_read_feeds("RELIANCE", "NSE") == []
     assert runtime.adapter.calls == []
 
 
-def test_monday_feeds_use_authorised_read_port_and_include_depth(runtime, monkeypatch):
+def test_connected_read_feeds_use_authorised_read_port_and_include_depth(runtime, monkeypatch):
     """Authorised Connected (read) quotes + depth reach the advisor rows."""
     from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
 
-    _stamp_monday_dhan(runtime)
+    _stamp_connected_dhan(runtime)
 
     async def depth(session, request):
         await runtime.adapter._read(session, "depth")
@@ -689,11 +689,11 @@ def test_monday_feeds_use_authorised_read_port_and_include_depth(runtime, monkey
     assert all(op != "place_order" for op, _, _ in runtime.adapter.calls)
 
 
-def test_monday_feeds_preserve_healthy_when_one_broker_fails(runtime, monkeypatch):
+def test_connected_read_feeds_preserve_healthy_when_one_broker_fails(runtime, monkeypatch):
     """P2: one adapter timeout must not wipe the other authorised feed."""
     from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
 
-    _stamp_monday_dhan(runtime)
+    _stamp_connected_dhan(runtime)
     original = runtime.adapter.quotes
 
     async def flaky(session, symbols):

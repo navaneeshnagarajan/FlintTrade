@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(process.cwd(), "src");
 
-/** Weekday names and pack-calendar labels. Identifiers such as isConnectedReadBroker do not match. */
+/** Weekday names and pack-calendar labels. Camel-case identifiers do not match. */
 const PACK_DAY =
   /\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b|pack[ -]?day/gi;
 
@@ -19,7 +19,7 @@ function stripComments(source: string): string {
 
 /**
  * A weekday token is operator copy when it is not a code identifier.
- * `monday` variables and `isConnectedReadBroker` stay; "Monday path" does not.
+ * Connected-read identifiers stay; a weekday used as a product path does not.
  */
 function isOperatorCopy(source: string, index: number, length: number): boolean {
   const prev = source[index - 1] ?? "";

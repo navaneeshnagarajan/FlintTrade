@@ -433,7 +433,7 @@ def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
 
 
 def test_list_read_smoke_sessions_requires_stamped_connected_session(authority):
-    """FT-MONDAY-003: AI reads only Connected (read) sessions, never writes."""
+    """AI reads only Connected (read) sessions, never writes."""
     from flinttrade_gateway.connected_read_smoke import stamp_connected_read_smoke
 
     registry, owner = api.create_owned_registry()

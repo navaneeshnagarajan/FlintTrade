@@ -2374,7 +2374,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
   });
 
   it("serves sample symbols from the Explore catalogue instead of erroring", async () => {
-    // Regression FT-CMD-001: search had no Explore fallback, so Ctrl+K
+    // Regression: search had no Explore fallback, so Ctrl+K
     // Symbols errored with "native broker API key is not configured" instead of
     // returning sample instruments such as NIFTY.
     mockConnectionState.apiKey = "";

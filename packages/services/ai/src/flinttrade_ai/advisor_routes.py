@@ -122,7 +122,7 @@ def _practice_sandbox_book_context() -> str:
 
     Desk/AI read the same paper fills that ``orders/place`` recorded. Explore
     stays sample-only. Live never receives this paper book — native
-    Connected (read) feeds are a separate path (FT-MONDAY-003).
+    Connected (read) feeds are a separate path.
     """
     if _jwt_mode() != "practice":
         return ""
@@ -145,7 +145,7 @@ def _practice_sandbox_book_context() -> str:
 
 
 def _native_live_read_symbols(raw: Any) -> list[str]:
-    """Prefer the request symbol; otherwise the Monday smoke default."""
+    """Prefer the request symbol; otherwise the connected-read smoke default."""
     symbol, exchange = "RELIANCE", "NSE"
     if isinstance(raw, dict):
         requested = str(raw.get("symbol") or "").strip()
@@ -171,7 +171,7 @@ def _native_live_read_context(raw: Any = None) -> str:
         from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
         from flinttrade_gateway.connected_read_smoke import format_connected_ai_read_context
 
-        hook = current_app.config.get("MONDAY_AI_READ_FEED_COLLECTOR")
+        hook = current_app.config.get("CONNECTED_AI_READ_FEED_COLLECTOR")
         if callable(hook):
             rows = hook()
             if not isinstance(rows, list):

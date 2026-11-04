@@ -1,5 +1,5 @@
 /**
- * FT-SITE-001: marketing primary nav must stay usable on narrow phones.
+ * marketing primary nav must stay usable on narrow phones.
  * Source-based contract (site Vitest is Node, no layout engine).
  */
 
@@ -28,7 +28,7 @@ function rule(css: string, selector: string): string {
   return match?.[0] ?? '';
 }
 
-describe('marketing primary nav (FT-SITE-001)', () => {
+describe('marketing primary nav on narrow phones', () => {
   const header = readSite('src/components/site-header.tsx');
   const css = readSite('src/app/globals.css');
 
@@ -67,7 +67,7 @@ describe('marketing primary nav (FT-SITE-001)', () => {
   });
 });
 
-describe('marketing primary nav (FT-SITE-003)', () => {
+describe('marketing primary nav phone chips', () => {
   const css = readSite('src/app/globals.css');
 
   it('compacts to two-across chips at phone widths so the demo link is not cramped', () => {
@@ -84,7 +84,7 @@ describe('marketing primary nav (FT-SITE-003)', () => {
     expect(nav).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it('keeps the tablet wrap from FT-SITE-001 and does not reintroduce overflow-x auto', () => {
+  it('keeps the tablet wrap from the narrow-phone layout and does not reintroduce overflow-x auto', () => {
     const tablet = mediaBlock(css, 'max-width: 900px', 'max-width: 620px');
     const mobileNav = rule(tablet, '\\.main-nav');
 

@@ -522,7 +522,7 @@ const EXPLORE_NSE_TIMINGS = [
 ];
 
 describe("getNseCashSessionStatus IST session window", () => {
-  it("is Continuous at Thursday mid-session with Explore HHMM timings (FT-TRADE-004)", () => {
+  it("is Continuous at Thursday mid-session with Explore HHMM timings", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
     const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
     expect(session.status).toBe("continuous");

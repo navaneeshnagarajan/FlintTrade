@@ -1,5 +1,5 @@
 /**
- * Position Mirror Start external-action gate (FT-DITTO-002).
+ * Position Mirror Start external-action gate.
  *
  * Same honesty class as Telegram Send Test / Explore Scalper: the Start CTA
  * never looks armed when mirroring is unavailable. Explore is always

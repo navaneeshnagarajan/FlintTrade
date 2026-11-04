@@ -34,7 +34,7 @@ export type MarketHoursTarget = string | MarketHoursInstrument;
 
 const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
   // Cash session activity (Continuous + CAS book) through 15:30. Green "open"
-  // UI must use resolveNseCashSession — never this flat close (FT-CORE-001).
+  // UI must use resolveNseCashSession — never this flat close.
   NSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
   BSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
   NFO:          { open: 9 * 60 + 15, close: NSE_FO_CLOSE_MIN },
@@ -265,7 +265,7 @@ function sessionBoundToEpochMs(value: number): number | null {
 }
 
 /**
- * NSE cash session chip in Asia/Kolkata (FT-CORE-001).
+ * NSE cash session chip in Asia/Kolkata.
  *
  * Trustworthy timings confirm the calendar is usable. Phase and windows come
  * from the CAS clock, not a flat 15:30 close. Timing bounds may be epoch

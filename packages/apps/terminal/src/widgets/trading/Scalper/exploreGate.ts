@@ -1,5 +1,5 @@
 /**
- * Explore Scalper external-action gate (FT-TRADE-009).
+ * Explore Scalper external-action gate.
  *
  * Same honesty class as Automate Telegram Send Test: Explore never opens
  * Confirm Order and never places. Practice / Live keep the Confirm path.

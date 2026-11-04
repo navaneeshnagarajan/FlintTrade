@@ -117,7 +117,7 @@ async def probe_connected_session_reads(
 
 
 def connected_read_chrome(broker_id: str, *, connected: bool, reads_ok: bool) -> str | None:
-    """Honest chrome for the Monday Dhan + Neo path.
+    """Honest chrome for the Dhan and Kotak Neo Connected (read) path.
 
     A failed read never paints Connected. Success is Connected (read) / API
     smoke — never a live-order claim.
@@ -172,7 +172,7 @@ def list_connected_ai_read_handles(registry: Any) -> list[tuple[str, str, Any]]:
     return handles
 
 
-async def collect_monday_ai_read_snapshot(
+async def collect_connected_ai_read_snapshot(
     broker_id: str,
     account_id: str,
     adapter: Any,

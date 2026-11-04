@@ -1,4 +1,4 @@
-"""FT-MONDAY-002 — native Dhan + Neo Connected (read) smoke + fail-closed Live.
+"""— native Dhan + Neo Connected (read) smoke + fail-closed Live.
 
 Acceptance lock (2026-09-20):
 
@@ -87,7 +87,7 @@ class _SmokeAdapter:
 
     async def place_order(self, *_a: object, **_k: object) -> None:
         self.calls.append("place_order")
-        raise AssertionError("Monday read-smoke must not place")
+        raise AssertionError("Connected-read smoke must not place")
 
     async def logout(self, _session: object) -> None:
         self.calls.append("logout")
@@ -107,7 +107,7 @@ class _LivePathSentinel:
 
 
 def _live_token(*, unlocked: bool = False) -> str:
-    return _create_token("ft-monday-002", mode="live", live_mode_unlocked=unlocked)
+    return _create_token("connected-read", mode="live", live_mode_unlocked=unlocked)
 
 
 def _live_headers(*, unlocked: bool = False) -> dict[str, str]:
@@ -117,7 +117,7 @@ def _live_headers(*, unlocked: bool = False) -> dict[str, str]:
     }
 
 
-def _monday_app(db_path: Path) -> Flask:
+def _practice_app(db_path: Path) -> Flask:
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["DATA_SANDBOX_ENGINE"] = SandboxEngine(
@@ -227,7 +227,7 @@ async def test_cancelled_smoke_logs_out_once_and_does_not_leave_session_stamped_
 
 @pytest.mark.unit
 def test_live_place_stays_fail_closed_without_funded_unlock(tmp_path: Path) -> None:
-    app = _monday_app(tmp_path / "monday-002.sqlite3")
+    app = _practice_app(tmp_path / "connected-read.sqlite3")
     client = app.test_client()
     body = {
         "symbol": "RELIANCE",

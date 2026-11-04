@@ -1,4 +1,4 @@
-"""FT-MONDAY-003 — AI Chat Practice + native Connected (read) context.
+"""AI Chat Practice + native Connected (read) context.
 
 Acceptance lock (2026-09-20):
 
@@ -7,7 +7,7 @@ Acceptance lock (2026-09-20):
 - Suggest stays labelled illustrative
 - Chat never shows green Connected without a real LLM
 - AI does not place Live orders
-- Profitable alphas are not a Monday ship criterion
+- Profitable alphas are not a release criterion
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from flinttrade_gateway.connected_read_smoke import (
     CHROME_CONNECTED_READ,
     NEO_OPERATOR_COPY,
     WRITE_VERBS,
-    collect_monday_ai_read_snapshot,
+    collect_connected_ai_read_snapshot,
     format_connected_ai_read_context,
     list_connected_ai_read_handles,
     stamp_connected_read_smoke,
@@ -42,7 +42,7 @@ class _ReadAdapter:
 
     async def place_order(self, *_a: object, **_k: object) -> None:
         self.calls.append("place_order")
-        raise AssertionError("Monday AI reads must not place")
+        raise AssertionError("Connected-read AI reads must not place")
 
 
 def _session(*, smoke_ok: bool = True) -> Session:
@@ -54,27 +54,27 @@ def _session(*, smoke_ok: bool = True) -> Session:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_monday_ai_snapshot_reads_without_writes() -> None:
+async def test_connected_ai_snapshot_reads_without_writes() -> None:
     """Stamped Connected (read) sessions yield quotes; write verbs stay dark."""
     adapter = _ReadAdapter()
     session = _session()
-    row = await collect_monday_ai_read_snapshot("dhan", "Main", adapter, session)
+    row = await collect_connected_ai_read_snapshot("dhan", "Main", adapter, session)
     assert row["ok"] is True
     assert row["chrome"] == CHROME_CONNECTED_READ
     assert row["quotes"] == [{"symbol": "NSE:RELIANCE", "ltp": 1400.0}]
     assert adapter.calls == ["quotes", "depth"]
     assert "place_order" not in adapter.calls
     for verb in WRITE_VERBS:
-        assert not hasattr(collect_monday_ai_read_snapshot, verb)
+        assert not hasattr(collect_connected_ai_read_snapshot, verb)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_monday_ai_snapshot_refuses_unstamped_session() -> None:
+async def test_connected_ai_snapshot_refuses_unstamped_session() -> None:
     """Login-only (no read_smoke_ok) never fabricates quotes."""
     adapter = _ReadAdapter()
     session = _session(smoke_ok=False)
-    row = await collect_monday_ai_read_snapshot("dhan", "Main", adapter, session)
+    row = await collect_connected_ai_read_snapshot("dhan", "Main", adapter, session)
     assert row["ok"] is False
     assert row["quotes"] is None
     assert adapter.calls == []
@@ -82,14 +82,13 @@ async def test_monday_ai_snapshot_refuses_unstamped_session() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_monday_ai_snapshot_rejects_non_monday_broker() -> None:
-    """Upstox / others are not the Monday AI live-read path."""
+async def test_connected_ai_snapshot_rejects_other_brokers() -> None:
+    """Upstox / others are not on the Connected (read) AI path."""
     adapter = _ReadAdapter()
     session = _session()
     with pytest.raises(ValueError, match="Dhan \\+ Neo") as raised:
-        await collect_monday_ai_read_snapshot("upstox", "Main", adapter, session)
-    assert "Monday" not in str(raised.value)
-    assert "Connected (read)" in str(raised.value)
+        await collect_connected_ai_read_snapshot("upstox", "Main", adapter, session)
+    assert str(raised.value) == "Connected (read) / API smoke reads are Dhan + Neo only, not upstox"
     assert adapter.calls == []
 
 
@@ -100,7 +99,7 @@ async def test_neo_snapshot_keeps_live_read_only_copy() -> None:
     adapter = _ReadAdapter()
     session = Session("synthetic-neo", 1e12, "Neo", "kotakneo")
     stamp_connected_read_smoke(session, True)
-    row = await collect_monday_ai_read_snapshot("kotakneo", "Neo", adapter, session)
+    row = await collect_connected_ai_read_snapshot("kotakneo", "Neo", adapter, session)
     assert row["ok"] is True
     assert row["operator_copy"] == NEO_OPERATOR_COPY
     formatted = format_connected_ai_read_context([row])
@@ -137,7 +136,7 @@ def test_format_includes_collected_depth() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_monday_ai_snapshot_keeps_peer_when_one_quote_fails() -> None:
+async def test_connected_ai_snapshot_keeps_peer_when_one_quote_fails() -> None:
     """A failed quote is ok=False — callers can keep other sessions."""
 
     class _Flaky:
@@ -145,12 +144,12 @@ async def test_monday_ai_snapshot_keeps_peer_when_one_quote_fails() -> None:
             raise TimeoutError("transient")
 
         async def place_order(self, *_a: object, **_k: object) -> None:
-            raise AssertionError("Monday AI reads must not place")
+            raise AssertionError("Connected-read AI reads must not place")
 
-    row = await collect_monday_ai_read_snapshot("dhan", "Main", _Flaky(), _session())
+    row = await collect_connected_ai_read_snapshot("dhan", "Main", _Flaky(), _session())
     assert row["ok"] is False
     assert row["quotes"] is None
-    healthy = await collect_monday_ai_read_snapshot("dhan", "Main", _ReadAdapter(), _session())
+    healthy = await collect_connected_ai_read_snapshot("dhan", "Main", _ReadAdapter(), _session())
     formatted = format_connected_ai_read_context([row, healthy])
     assert "1400.0" in formatted
     assert "depth:" in formatted

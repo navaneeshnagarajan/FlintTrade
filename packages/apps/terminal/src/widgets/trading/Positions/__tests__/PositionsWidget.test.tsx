@@ -1913,7 +1913,7 @@ describe("PositionsWidget", () => {
       });
     });
 
-    // ── FT-TRADE-005: labelled group bands, not a silent re-sort ──────────
+    // ── labelled group bands, not a silent re-sort ──────────
 
     it("shows labelled exchange group bands, not a silent re-sort", () => {
       mockUsePositions.mockReturnValue(

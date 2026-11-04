@@ -3568,7 +3568,7 @@ def test_neo_connect_is_not_rejected_as_coming_soon(client, monkeypatch):
         return {}
 
     # Neo login authenticates immediately, then activation probes liveness and
-    # Monday read-smoke. Stub every provider boundary; the synthetic session has
+    # Connected-read smoke. Stub every provider boundary; the synthetic session has
     # no SDK client, so an unmocked provider read also fails closed locally.
     monkeypatch.setattr(KotakNeoAdapter, "login", _login)
     monkeypatch.setattr(KotakNeoAdapter, "liveness", _liveness)

@@ -300,8 +300,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
-- **First-run Setup resume, Start over, and a fixed vault step count
- .** Reloading `/setup` mid-flow resumes the
+- **First-run Setup resume, Start over, and a fixed vault step count.**
+  Reloading `/setup` mid-flow resumes the
   unfinished setup session. **Start over (deletes this unfinished
   operator)** deletes that unfinished operator and restarts at step 1.
   A workspace data wipe is not required for either path. When the vault
@@ -337,7 +337,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   then the route body.
   Trade ships first; the same shell then rolls to Invest,
   Automate, Learn, and Ditto. Not a silent widen of
-   Compact-only-on-Trade, and not a big-bang
+  Compact-only-on-Trade, and not a big-bang
   rewrite.
 
 - **Mode vocabulary and Trade desk density.**
@@ -662,8 +662,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   date and a Verify on NSE link to circular NSE/FAOP/70616
   (3 Oct 2025). Stale `NIFTY=25` / `BANKNIFTY=15` copy is
   gone. Learn market facts that exchanges revise must ship
-  dated, not as forever hardcodes. Independent of #213
- .
+  dated, not as forever hardcodes. Independent of #213.
 
 - **Performance follows the Review date range.**
   Trade Review **Performance** uses the same date range as
@@ -702,7 +701,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   `Enter premium to model payoff` instead of modelling ₹0.
   The Long Call template seeds the Example sample-chain ATM CE
   LTP, labelled `Sample premium — edit to model`, so Max Loss
-  and breakeven follow  maths on a non-zero cost.
+  and breakeven follow maths on a non-zero cost.
   Typing an explicit ₹0 still uses that maths and warns
   `Premium is ₹0 — payoff treats cost as free`.
 

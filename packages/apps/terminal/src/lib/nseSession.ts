@@ -1,7 +1,7 @@
 /**
  * NSE cash session clock — SEBI Closing Auction Session (CAS).
  *
- * Single source of truth for TopBar chips and Market Clock (FT-CORE-001).
+ * Single source of truth for TopBar chips and Market Clock.
  * Hours are as of Aug 2026 (CAS live from 3 Aug 2026 for F&O underlyings).
  * The September 2026 consultation is not product UI.
  */

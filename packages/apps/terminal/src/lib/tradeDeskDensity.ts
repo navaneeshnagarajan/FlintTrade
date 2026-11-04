@@ -1,5 +1,5 @@
 /**
- * FT-UX-001 — Compact / Comfortable Trade desk disclosure.
+ * Compact / Comfortable Trade desk disclosure.
  *
  * Comfortable is the new-install default (full labels). Compact on a desk
  * viewport (≥1280) collapses ticker, dock labels, and watchlist/advanced
@@ -9,7 +9,7 @@
 
 export type UiDensity = "compact" | "comfortable";
 
-/** Desk-first floor from the FT-UX-001 verify scenario (1280×800). */
+/** Desk-first floor from the verify scenario (1280×800). */
 export const DESK_MIN_WIDTH = 1280;
 
 /** Tight Compact band called out in the acceptance checklist. */

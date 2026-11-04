@@ -1,5 +1,5 @@
 /**
- * Tester path for FT-SETUP-002: Set up later → session → Sign Out
+ * Tester path for Set up later → session → Sign Out
  * (no refresh) → daily Sign In must be password-only.
  *
  * LoginRoute is real (not mocked). Welcome's leftover totpRequired prop

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "spec_id": "FT-GTT-001",
+  "spec_id": "native-order-capabilities",
   "checked_on": "2026-10-06",
   "evidence_policy": {
     "documented": "yes/no/unknown refers to the reviewed API contract for this family/operation/scope. Temporary availability is retained as a limitation, not rewritten as API nonexistence.",
