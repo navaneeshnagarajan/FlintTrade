@@ -29,6 +29,7 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
   const mode = await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:mode") ?? "{}").state.mode);
   expect(mode).toBe("explore");
   // Review is the Reports app's docked widget, not a Terminal modal.
+  await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app", exact: true }).click();
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Reports", exact: true }).click();
   await expect(page).toHaveURL(/\/reports$/);
   const reports = page.getByRole("region", { name: "Reports app", exact: true });

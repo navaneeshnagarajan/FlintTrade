@@ -63,29 +63,38 @@ export function AppNavigation() {
   useLayoutEffect(() => {
     if (!restoreFocus.current) return;
     restoreFocus.current = false;
-    const target = compact ? trigger.current : navigation.current?.querySelector<HTMLAnchorElement>('a[aria-current="page"]');
-    target?.focus({ preventScroll: true });
+    trigger.current?.focus({ preventScroll: true });
   }, [compact]);
   useEffect(() => { setExpanded(false); }, [pathname]);
+  useEffect(() => {
+    if (!expanded) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !navigation.current?.contains(event.target)) setExpanded(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [expanded]);
 
   function onNavigate(event: MouseEvent<HTMLAnchorElement>) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     setExpanded(false);
     // A same-route link does not run the shell's route-focus effect.
-    if (compact && event.currentTarget.pathname === pathname) trigger.current?.focus();
+    if (event.currentTarget.pathname === pathname) trigger.current?.focus();
   }
 
-  return <nav ref={navigation} aria-label="Apps" className="ft-app-nav" data-compact={compact} onKeyDown={event => {
-    if (event.key !== "Escape" || !compact || !expanded) return;
+  return <nav ref={navigation} aria-label="Apps" className="ft-app-nav" data-compact={compact} onBlur={event => {
+    if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setExpanded(false);
+  }} onKeyDown={event => {
+    if (event.key !== "Escape" || !expanded) return;
     event.preventDefault();
     event.stopPropagation();
     setExpanded(false);
     trigger.current?.focus();
   }}>
-    {compact ? <Button ref={trigger} type="button" variant="ghost" className="ft-app-nav-toggle justify-start" aria-label="Choose app" aria-expanded={expanded} aria-controls={groupsId} onClick={() => setExpanded(value => !value)}>
+    <Button ref={trigger} type="button" variant="ghost" className="ft-app-nav-toggle justify-start" aria-label="Choose app" aria-expanded={expanded} aria-controls={groupsId} onClick={() => setExpanded(value => !value)}>
       <PanelsTopLeft aria-hidden="true" /><span>{current?.name ?? "Apps"}</span><ChevronDown aria-hidden="true" />
-    </Button> : <div className="ft-app-nav-heading">Workspace</div>}
-    <div id={groupsId} className="ft-app-nav-groups" hidden={compact && !expanded}>
+    </Button>
+    <div id={groupsId} className="ft-app-nav-groups" hidden={!expanded}>
       {developer && <p className="px-2 text-xs text-warning">Developer</p>}
       {GROUPS.map(group => <div className="ft-app-nav-group" key={group}>
         <h2>{group}</h2><AppLinks group={group} onNavigate={onNavigate} />

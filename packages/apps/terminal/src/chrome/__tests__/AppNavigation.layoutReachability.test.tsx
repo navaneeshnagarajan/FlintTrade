@@ -78,10 +78,13 @@ function renderShell(path = "/settings") {
 }
 
 describe("compact app navigation and layout ownership", () => {
-  it("groups every app exactly once beside the content and focuses the newly selected app", async () => {
+  it("groups every app exactly once in the header switcher and focuses the newly selected app", async () => {
     renderShell();
     await screen.findByLabelText("Settings navigation canary");
     const nav = screen.getByRole("navigation", { name: "Apps" });
+    const choose = within(nav).getByRole("button", { name: "Choose app" });
+    expect(choose).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(choose);
     for (const [group, names] of [
       ["Trading", ["Terminal", "Portfolio", "Brokers"]],
       ["Studio", ["Testing", "Automation", "Learn"]],
@@ -91,11 +94,14 @@ describe("compact app navigation and layout ownership", () => {
       expect(within(within(nav).getByRole("list", { name: group })).getAllByRole("link").map(link => link.textContent)).toEqual(names);
     }
     expect(within(nav).getAllByRole("link").map(link => [link.textContent, link.getAttribute("href")]).sort()).toEqual([...expectedApps].sort());
-    expect(within(screen.getByRole("banner")).queryByRole("navigation", { name: "Apps" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("banner")).getByRole("navigation", { name: "Apps" })).toBe(nav);
     for (const link of within(nav).getAllByRole("link")) expect(link).toBeVisible();
     expect(within(nav).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(within(nav).getByRole("link", { name: "Learn" }));
     await screen.findByLabelText("Learn navigation canary");
+    expect(screen.getByRole("main", { name: "Learn" })).toHaveFocus();
+    expect(choose).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(choose);
     expect(within(nav).getByRole("link", { name: "Learn" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Settings" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("main", { name: "Learn" })).toHaveFocus();
@@ -157,13 +163,16 @@ describe("compact app navigation and layout ownership", () => {
     renderShell();
     const draft = await screen.findByLabelText("Settings navigation canary");
     const nav = within(screen.getByRole("navigation", { name: "Apps" }));
+    fireEvent.click(nav.getByRole("button", { name: "Choose app" }));
     nav.getByRole("link", { name: "Learn" }).focus();
     act(() => { media.matches = true; media.dispatchEvent(new Event("change")); });
     const choose = nav.getByRole("button", { name: "Choose app" });
     expect(choose).toHaveFocus();
     expect(choose).toHaveAttribute("aria-expanded", "false");
     act(() => { media.matches = false; media.dispatchEvent(new Event("change")); });
-    expect(nav.getByRole("link", { name: "Settings" })).toHaveFocus();
+    expect(choose).toHaveFocus();
+    expect(choose).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(choose);
     expect(nav.getAllByRole("link")).toHaveLength(9);
     expect(screen.getByLabelText("Settings navigation canary")).toBe(draft);
   });
@@ -359,6 +368,7 @@ describe("compact app navigation and layout ownership", () => {
     renderShell();
     await screen.findByLabelText("Settings navigation canary");
     const nav = within(screen.getByRole("navigation", { name: "Apps" }));
+    fireEvent.click(nav.getByRole("button", { name: "Choose app" }));
     fireEvent.click(nav.getByRole("link", { name: "Learn" }));
     const draft = await screen.findByLabelText("Learn navigation canary");
     fireEvent.change(draft, { target: { value: "Retained hidden learning draft" } });
@@ -385,6 +395,7 @@ describe("compact app navigation and layout ownership", () => {
     expect(screen.getByRole("combobox", { name: "Settings preset" })).toHaveValue("");
     expect(draft.isConnected).toBe(true);
     expect(draft).not.toBeVisible();
+    fireEvent.click(nav.getByRole("button", { name: "Choose app" }));
     fireEvent.click(nav.getByRole("link", { name: "Learn" }));
     expect(await screen.findByLabelText("Learn navigation canary")).toBe(draft);
     expect(draft).toHaveValue("Retained hidden learning draft");

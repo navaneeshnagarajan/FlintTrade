@@ -49,6 +49,7 @@ test.describe('Smoke — app loads', () => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
     const nav = page.getByRole('navigation', { name: 'Apps', exact: true });
+    await nav.getByRole('button', { name: 'Choose app', exact: true }).click();
     // Home and Trade share Terminal; Invest is Portfolio. Assert the actual
     // canonical navigation, not retired sidebar buttons.
     for (const [name, href] of [

@@ -203,15 +203,21 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     closeFromSearchRef.current = false;
     event.preventDefault();
   }
-  return <section className="ft-app flex h-full min-h-0 min-w-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
+  return <section className="ft-app flex h-full min-h-0 min-w-0 flex-col" aria-label={`${meta.name} app`} data-app={app} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
     <div className="ft-app-toolbar">
       <div className="ft-app-title"><h1 className="font-heading text-sm font-semibold">{meta.name}</h1><span className="text-xs text-text-muted">{tabs.length} panels</span></div>
+      <div className="ft-layout-shortcuts" role="group" aria-label={`${meta.name} layouts`}>
+        {APP_PRESETS[app].map(preset => <Button key={preset.id} type="button" variant="ghost" size="sm" aria-label={`Apply ${preset.name} layout`} onClick={() => applyPreset(preset.id)}>{preset.name}</Button>)}
+      </div>
       {/* Presets are repeatable actions, not identities for custom compositions. */}
       <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
       <Button variant="outline" size="sm" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" />Widget</Button>
-    </div>
-    <details className="ft-layout-management">
+    <details className="ft-layout-management" onKeyDown={event => {
+      if (event.key !== "Escape") return;
+      event.currentTarget.open = false;
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
       <summary><SlidersHorizontal aria-hidden="true" /><span>Layout actions</span><span className="ft-layout-hint" aria-hidden="true">Save, restore or transfer</span></summary>
       <div className="ft-layout-management-body">
         <div className="ft-layout-save" role="group" aria-label="Save a named layout">
@@ -235,11 +241,14 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
         <p className="ft-layout-explanation">Presentation only. Saved named layouts and all non-layout records are retained.</p>
       </div>
     </details>
+    </div>
+    <div className="ft-app-scope-row">
     <p className="ft-app-context" data-testid="app-execution-scope">
       {app === "testing" ? "Testing · Practice research scope only. Terminal account and Live authority are unchanged." : `${mode === "live" ? "Live" : mode === "practice" ? "Practice" : "Example"} · ${account || "No execution account selected"}`}
       {app === "terminal" ? " · Linking changes selections, never execution authority." : ""}
     </p>
     <InstrumentLinks app={app} />
+    </div>
     {app === "terminal" && <PracticeLaterSetup />}
     {error && <p role="alert" className="shrink-0 px-3 py-2 text-xs text-warning">{error}</p>}
     {notice && <p role="status" className="shrink-0 px-3 text-xs text-text-secondary">{notice}</p>}

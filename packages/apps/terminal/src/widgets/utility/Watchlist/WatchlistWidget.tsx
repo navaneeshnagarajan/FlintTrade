@@ -25,7 +25,7 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react";
-import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
+import { Plus, Search, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { instrumentContext } from "@/services/fdc3/contexts";
@@ -314,14 +314,14 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
   return (
     <div
-      className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
+      className="ft-watchlist h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
       data-tour-target="watchlist"
     >
       {/* HEADER */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
-        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
-          Watchlist
-        </span>
+      <div className="ft-watchlist-header flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
+        <Button variant="ghost" className="ft-watchlist-search" onClick={() => setShowSearch(true)} aria-label="Add symbol" title="Add symbol">
+          <Search size={14} aria-hidden="true" /><span>Search &amp; add items</span>
+        </Button>
 
         {count > 0 && (
           <span className="text-xxs font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1 leading-4">
@@ -334,19 +334,6 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         {fetchError && (
           <span title={fetchError} className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
         )}
-
-        <div className="flex-1" />
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowSearch(true)}
-          className="h-5 w-5 p-0 text-text-muted hover:text-text-primary hover:bg-surface-hover"
-          aria-label="Add symbol"
-          title="Add symbol"
-        >
-          <Plus size={11} />
-        </Button>
 
         <div className="relative" ref={menuRef}>
           <Button
@@ -468,7 +455,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
       {/* TAB BAR */}
       <div
-        className="flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
+        className="ft-watchlist-tabs flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
       >
         <div role="tablist" aria-label="Watchlist tabs" className="contents">
         {tabs.map((tab, idx) => renamingIdx === idx ? null : (

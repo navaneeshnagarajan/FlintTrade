@@ -35,9 +35,10 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { isPublicDemoBuild } from "@/lib/demoSession";
 import { PublicPreviewHeader } from "@/chrome/PublicPreviewHeader";
 import { loadInstrumentLotRows } from "@/lib/instrumentLots";
+import "@/styles/trading-workspace.css";
 
 
-/** Landmark names match the sidebar label and each page's H1. */
+/** Landmark names match the app catalogue label and each page's H1. */
 const ROUTE_TITLES: Record<string, string> = {
   "/home": "Home",
   "/trade": "Trade",
@@ -257,18 +258,20 @@ export default function AppLayout() {
       </a>
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
-        {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
+        <div className="ft-product-bar">
+          {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
+          <AppNavigation />
+        </div>
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
         {!isPublicDemoBuild() && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
-      {/* One navigation owner beside the retained app host. */}
+      {/* Navigation is chrome only; the retained host stays in its owner. */}
       {/* Issue #54: aria-label on main landmark mirrors the route title. Each
           route renders its own single H1 (PageHeader, or Trade's sr-only H1). */}
       <div className="ft-workspace-body relative z-10 min-h-0 flex-1">
-        <AppNavigation />
         <main
           id="main-content"
           ref={mainRef}

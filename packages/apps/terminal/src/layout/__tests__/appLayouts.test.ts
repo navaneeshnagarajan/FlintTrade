@@ -18,6 +18,39 @@ it("keeps presentation layouts per app, ignores old layouts and never deletes ot
   expect(APP_LAYOUT_NAMESPACE).not.toBe("flinttrade:layouts");
 });
 describe("purpose-safe presets", () => {
+  it("starts a fresh Terminal with the captured watchlist-left geometry and retains the overview tab", () => {
+    const json = buildAppPreset("terminal", "default");
+    expect(json.layout.children).toMatchObject([
+      { type: "tabset", weight: 28, children: [{ component: "watchlist" }, { component: "overview:WelcomeCard" }] },
+      { type: "tabset", weight: 72, active: true, selected: 0, children: [
+        { component: "chart", config: { channel: "none" } },
+        { component: "positions" }, { component: "orders" },
+      ] },
+    ]);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+  });
+  it("offers the captured watchlist-left geometry as an explicit repeatable preset", () => {
+    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist driven" });
+    const json = buildAppPreset("terminal", "watchlist-driven");
+    expect(json.layout.children).toMatchObject([
+      { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
+      { type: "tabset", weight: 72, active: true, children: [{ component: "chart" }, { component: "positions" }, { component: "orders" }] },
+    ]);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+    const model = Model.fromJson(json);
+    expect(model.getActiveTabset()?.getSelectedNode()?.getName()).toBe("Chart");
+  });
+  it("does not rewrite a saved Current or named layout when building the fresh default", () => {
+    localStorage.clear();
+    const saved = buildAppPreset("terminal", "overview");
+    saveAppLayout("terminal", "Current", saved);
+    saveAppLayout("terminal", "My overview", saved);
+    const before = localStorage.getItem(`${APP_LAYOUT_NAMESPACE}:terminal`);
+    buildAppPreset("terminal", "default");
+    expect(localStorage.getItem(`${APP_LAYOUT_NAMESPACE}:terminal`)).toBe(before);
+    expect(readAppLayouts("terminal").Current).toEqual(saved);
+    expect(readAppLayouts("terminal")["My overview"]).toEqual(saved);
+  });
   it("offers Trader and Option Scalper as layouts, never personas", () => {
     expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option Scalper"]));
     expect(validateAppLayout("terminal", buildAppPreset("terminal", "trader"))).toBe(true);

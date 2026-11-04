@@ -77,7 +77,7 @@ import type { OptionType } from "@/lib/optionSymbols";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useMarketDataScope } from "@/hooks/useDataScope";
 import type { LogicalRange, Time } from "lightweight-charts";
-import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { readLightweightChartTheme, useLightweightChartTheme } from "@/hooks/useChartTheme";
 import { applyCandleSpan } from "./spanCandles";
 import {
   Search,
@@ -844,12 +844,12 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     applyFlintCandlestickTheme(
       chart,
       candle,
-      chartTheme,
+      readLightweightChartTheme(containerRef.current ?? undefined),
       createFlintChartDisplaySettingsOptions(chartDisplaySettings),
     );
     // Repainting must preserve the user's zoom/pan. Candle spanning belongs
     // to data/geometry initialisation, not a theme or display-settings refresh.
-  }, [chartDisplaySettings, chartTheme, chartRef, candleRef]);
+  }, [chartDisplaySettings, chartTheme, chartRef, candleRef, containerRef]);
 
   const handleDrawingCreated = useCallback((drawingId: string) => {
     setSelectedDrawingId(drawingId);
@@ -1471,7 +1471,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   return (
     <div
       ref={workspaceRef}
-      className="flex flex-col h-full w-full bg-surface-base overflow-hidden focus:outline-none focus:ring-1 focus:ring-accent/30"
+      className="ft-chart flex flex-col h-full w-full bg-surface-base overflow-hidden focus:outline-none focus:ring-1 focus:ring-accent/30"
       data-tour-target="chart"
       data-chart-layout={workspaceLayout.compact ? "compact" : "standard"}
       tabIndex={0}
@@ -1480,8 +1480,9 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     >
 
       {/* Header */}
-      <div className="flex flex-col gap-1 px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
-        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+      <div className="ft-chart-chrome">
+      <div className="ft-chart-header flex flex-col gap-1 px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
+        <div className="ft-chart-symbol-line flex items-center gap-2 min-w-0 overflow-hidden">
           <SymbolSearch dataScope={dataScope} onSelect={handleSymbolSelect} />
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{displayedSymbol}</span>
@@ -1505,7 +1506,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
             )}
           </div>
         </div>
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden pb-0.5">
+        <div className="ft-chart-interval-line flex min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden pb-0.5">
           {legend && <FlintChartLegend legend={legend} />}
           <FlintChartIntervalPills
             intervals={intervals}
@@ -1517,7 +1518,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-0.5 bg-surface-base border-b border-border-default shrink-0 flex-wrap min-h-7">
+      <div className="ft-chart-toolbar flex items-center gap-1 px-2 py-0.5 bg-surface-base border-b border-border-default shrink-0 flex-wrap min-h-7">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="h-6 px-2 text-xs font-sans gap-1 text-text-secondary hover:text-text-primary">
@@ -1889,6 +1890,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       </div>
 
       {/* Chart area — DrawingToolbar on left, canvas on right */}
+      </div>
       <div
         className={`flex flex-1 min-h-0 overflow-hidden ${
           workspaceLayout.compact ? "flex-col" : "flex-row"

@@ -879,6 +879,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(beforeLifetime.inputLineage.length).toBeGreaterThan(beforeLifetime.controlsLineage.length);
   await settings.getByLabel("Layout name", { exact: true }).fill("Activity retained Settings draft");
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
+  await apps.getByRole("button", { name: "Choose app", exact: true }).click();
   await apps.getByRole("link", { name: "Learn", exact: true }).click();
   await expect(settings).not.toBeVisible();
   expect(await retainedControls!.evaluate(element => element.isConnected)).toBe(true);
@@ -953,6 +954,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
     { kind: "state", store: "mode", path: "mode", equals: "practice" },
   ];
   await declaredReticle(info, [...leasePredicates, { kind: "text", scope: '[aria-label="Canonical datasets and leases"]', contains: "Release confirmed by exact readback.", visible: true }], "history-lease-reticle");
+  await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app", exact: true }).click();
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Testing", exact: true }).click();
   await page.getByRole("tab", { name: "Experiment evidence", exact: true }).click();
   for (const [label, value] of Object.entries({ "History manifest ID": snapshot_id, "History instrument": "test-equity", "History venue": "XNAS", "History interval": "1m", "Backtest strategy": "EMACrossover" })) await page.getByLabel(label, { exact: true }).fill(value);
@@ -980,6 +982,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.goto("/learn");
   await core.retireNative(nativeShellReads);
   core.nativePhase("first Terminal chart mount", nativeTerminalReads);
+  await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app", exact: true }).click();
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Terminal", exact: true }).click();
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal).toBeVisible();
@@ -1002,6 +1005,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   let incidents: Awaited<ReturnType<typeof core.incidentInspection>> | undefined;
   for (const name of ["Testing", "Portfolio", "Automation", "Reports", "Learn", "Brokers", "Settings", "System"]) {
     if (name === "System") incidents = await core.incidentInspection();
+    await apps.getByRole("button", { name: "Choose app", exact: true }).click();
     await apps.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp("/" + name.toLowerCase() + "$"));
     await expect(page.getByRole("region", { name: name + " app", exact: true })).toBeVisible();
@@ -1029,6 +1033,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await checkpoint(page, info, "local-no-model-help");
   await page.keyboard.press("Escape");
   core.nativePhase("Terminal Activity return", nativeTerminalReads);
+  await apps.getByRole("button", { name: "Choose app", exact: true }).click();
   await apps.getByRole("link", { name: "Terminal", exact: true }).click();
   await expect(terminal).toBeVisible();
   await expect(terminal.getByLabel("Layout name", { exact: true })).toHaveValue("Unsubmitted retained draft");
@@ -1060,6 +1065,7 @@ test("learning and training actions refuse without fabricated authority", async 
   const learning = core.rows.find(row => row.path.endsWith("/permissions/preview"));
   expect(learning?.status).toBe(400); expect(learning?.response).toEqual({ error: "invalid_request" });
   await checkpoint(page, info, "learning-refused");
+  await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app", exact: true }).click();
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Testing", exact: true }).click();
   await expect(page).toHaveURL(/\/testing$/);
   await page.getByRole("region", { name: "Testing app", exact: true }).getByRole("tab", { name: "Experiment evidence", exact: true }).click();

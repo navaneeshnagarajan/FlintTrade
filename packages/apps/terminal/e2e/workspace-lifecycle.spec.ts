@@ -202,8 +202,10 @@ for (const draftMode of ["new", "edit"] as const) {
     // A different app and chrome overlay replace the old manager's views.
     // Preserve the unsaved name/composition and the exact saved source bytes.
     const apps = page.getByRole("navigation", { name: "Apps", exact: true });
+    await apps.getByRole("button", { name: "Choose app", exact: true }).click();
     await apps.getByRole("link", { name: "Learn", exact: true }).click();
     await expect(workspace).not.toBeVisible();
+    await apps.getByRole("button", { name: "Choose app", exact: true }).click();
     await apps.getByRole("link", { name: "Terminal", exact: true }).click();
     await expectDraft();
     await page.keyboard.press("Control+,");

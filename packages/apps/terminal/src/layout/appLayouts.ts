@@ -11,7 +11,7 @@ export const DEFAULT_APP_WIDGETS: Record<AppId, string[]> = {
   settings: ["preferences"], system: ["core-diagnostics"],
 };
 export const APP_PRESETS: Record<AppId, readonly { id: string; name: string }[]> = {
-  terminal: [{ id: "overview", name: "Overview" }, { id: "trader", name: "Trader" }, { id: "market-watch", name: "Market watch" }, { id: "options-scalper", name: "Option Scalper" }, { id: "multi-chart", name: "Multi chart" }],
+  terminal: [{ id: "watchlist-driven", name: "Watchlist driven" }, { id: "chart-focus", name: "Chart focus" }, { id: "overview", name: "Overview" }, { id: "trader", name: "Trader" }, { id: "market-watch", name: "Market watch" }, { id: "options-scalper", name: "Option Scalper" }, { id: "multi-chart", name: "Multi chart" }],
   testing: [{ id: "default", name: "Research" }, { id: "data", name: "Data library" }],
   portfolio: [{ id: "default", name: "Investments" }, { id: "allocation", name: "Allocation" }],
   automation: [{ id: "default", name: "Operations" }, { id: "ai", name: "AI and knowledge" }],
@@ -20,6 +20,19 @@ export const APP_PRESETS: Record<AppId, readonly { id: string; name: string }[]>
   settings: [{ id: "default", name: "Preferences" }], system: [{ id: "default", name: "Health" }, { id: "diagnostics", name: "Diagnostics" }],
 };
 export function buildAppPreset(app: AppId, preset: string): IJsonModel {
+  // Fresh desks follow the captured watchlist-left, chart-right composition.
+  // Persisted Current/named compositions are read before this fallback; no
+  // migration, reset or account/channel mutation. Chart focus is an opt-in mirror.
+  if (app === "terminal" && ["default", "chart-focus", "watchlist-driven"].includes(preset)) {
+    const tab = (id: string) => tabJson(id, APP_WIDGETS.find(widget => widget.id === id)!.name, {
+      id: `${app}:${id}`, params: { channel: "none" },
+    });
+    const chart = { ...tabsetJson(72, [tab("chart"), tab("positions"), tab("orders")]), active: true, selected: 0 };
+    const watchlist = tabsetJson(28, preset === "watchlist-driven"
+      ? [tab("watchlist")]
+      : [tab("watchlist"), tab("overview:WelcomeCard")]);
+    return workspaceJson(rowJson(100, preset === "chart-focus" ? [chart, watchlist] : [watchlist, chart]));
+  }
   if (app === "terminal" && ["market-watch", "options-scalper", "multi-chart"].includes(preset)) {
     const built = buildPresetJsonById(preset);
     if (built && validateAppLayout(app, built)) return built;

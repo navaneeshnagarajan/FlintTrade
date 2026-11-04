@@ -90,7 +90,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect(app).toBeVisible();
     await anonymous();
     const frozenTime = await page.evaluate(() => Date.now());
-    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Watchlist driven", "Chart focus", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
     await app.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(4);
     await expect.poll(chartIds).toHaveLength(4);
@@ -135,7 +135,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     const nonLayouts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     const named = Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"));
     await app.getByRole("button", { name: "Reset app layout", exact: true }).click();
-    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["overview:WelcomeCard", "watchlist", "chart", "positions", "orders"]);
+    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["watchlist", "overview:WelcomeCard", "chart", "positions", "orders"]);
     expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
     const afterReset = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     // Newly mounted default charts may add presentation preferences; the real
@@ -188,6 +188,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     document = 2;
     await page.goto("settings");
     await expect(page.getByText("The frozen preview cannot configure providers, change security or grant Live authority.", { exact: true })).toBeVisible();
+    await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app" }).click();
     await page.getByRole("link", { name: "Terminal", exact: true }).click();
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/terminal");
     await anonymous();
