@@ -5,6 +5,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CANONICAL_SITE_ORIGIN } from '@/lib/site-origin';
+
 import HomePage from './page';
 import DownloadPage from './download/page';
 import ApiReferencePage from './api-reference/page';
@@ -77,6 +79,7 @@ describe('public website journey', () => {
       expect(caption).not.toMatch(/earlier version|verified returns|guaranteed/i);
       expect(figure.querySelector('img')?.getAttribute('alt')).toMatch(/example data/i);
     }
+    expect(container.textContent).toContain('manual orders, automation, and AI-assisted workflows');
     expect(container.textContent).toContain('A conversation is not trading permission.');
     expect(container.textContent).toContain('No broker is connected and no orders are sent.');
   });
@@ -115,7 +118,7 @@ describe('public website journey', () => {
     expect(container.textContent).toContain('Desktop release status temporarily unavailable');
     expect(container.textContent).not.toContain('Electron installer release pending');
     expect(container.textContent).toContain('web-install.sh | bash');
-    expect(container.textContent).not.toContain('https://flinttrade.vercel.app/install.sh | bash');
+    expect(container.textContent).not.toContain(`${CANONICAL_SITE_ORIGIN}/install.sh | bash`);
     expect(container.textContent).toContain('If this site is unreachable');
     expect(container.textContent).toContain('Uninstall');
     await act(async () => root.render(React.createElement(NotFound)));

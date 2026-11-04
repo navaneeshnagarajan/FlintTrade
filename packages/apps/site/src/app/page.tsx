@@ -112,7 +112,7 @@ export default async function HomePage() {
       <section className="section product-section permission-section" aria-labelledby="permissions-heading">
         <header className="product-heading">
           <h2 id="permissions-heading">Choose the mode. Keep the limits.</h2>
-          <p>Example data is not a Mode. Connection status, account permissions and execution mode remain separate decisions.</p>
+          <p>Self-hosted trading software for manual orders, automation, and AI-assisted workflows. Example data is not a Mode. Connection status, account permissions and execution mode remain separate decisions.</p>
         </header>
         <dl className="mode-list">
           <div>
