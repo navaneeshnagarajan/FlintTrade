@@ -3,12 +3,12 @@ pandas>=2.0.0
 httpx>=0.27.0
 pydantic>=2.13.5
 python-dotenv>=1.2.4
-websockets>=17.1
+websockets>=17.4
 duckdb>=1.5.6
 flask>=3.0
-ruff>=0.16.10
-pytest>=9.1.1
-pytest-asyncio>=0.23.0
+ruff>=0.17.3
+pytest>=9.2.0
+pytest-asyncio>=1.4.1
 # Parallel test execution (CI uses `-n auto`); harmless locally
 pytest-xdist>=3.5.0
 # Randomised test order — exposes order-dependent flakes
@@ -21,7 +21,7 @@ qrcode[svg]>=8.2
 argon2-cffi>=23.1.0
 PyJWT>=2.15.0
 apscheduler>=3.11.3
-jugaad-data>=0.35.9
+jugaad-data>=0.37.0
 Pillow>=12.1.1
 cryptography>=50.0.2
 sentence-transformers>=6.1.0
