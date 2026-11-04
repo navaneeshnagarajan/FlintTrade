@@ -24,6 +24,24 @@ _fixture_spec.loader.exec_module(_fixture_module)
 seed_credentials = _fixture_module.seed_credentials
 
 
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    path = _FixturePath(__file__).resolve().parents[4] / "tests" / "lot_clock.py"
+    spec = _fixture_import.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = _fixture_import.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _clocked_index_master(monkeypatch: pytest.MonkeyPatch):
+    """Index lots follow the test clock, not the shipped expiries."""
+    with _lot_clock().open_clocked_master(monkeypatch):
+        yield
+
+
 # ======================================================================
 # Helpers
 # ======================================================================

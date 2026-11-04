@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import errno
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -747,6 +748,9 @@ def test_digest_owner_owned_regular_file_detects_in_place_change_during_stream(t
     source = tmp_path / "source"
     source.write_bytes(b"A" * ((1 << 20) + 1))
     source.chmod(0o600)
+    # Creation and the in-place write must not share one timestamp. A fast
+    # filesystem can otherwise report the same mtime_ns and hide the change.
+    time.sleep(0.05)
     real_read = secure_file.os.read
     mutated = False
 

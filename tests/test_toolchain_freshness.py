@@ -48,6 +48,9 @@ def module() -> ModuleType:
 def _schedule(end: str) -> dict[str, dict[str, str]]:
     """Return a two-line Node schedule where line 22 ends on *end*.
 
+    The following line stays unpublished. A fixture date that the wall clock
+    can pass would pull that line into the N-1 band and fail an unrelated pin.
+
     Args:
         end: The ISO end-of-life date for Node 22.
 
@@ -57,7 +60,7 @@ def _schedule(end: str) -> dict[str, dict[str, str]]:
     return {
         "v22": {"lts": "2024-10-29", "maintenance": "2025-10-21", "end": end},
         "v24": {"lts": "2025-10-28", "maintenance": "2026-10-20", "end": "2028-04-30"},
-        "v26": {"lts": "2026-10-28", "maintenance": "2027-10-20", "end": "2029-04-30"},
+        "v26": {"lts": "2099-10-28", "maintenance": "2100-10-20", "end": "2101-04-30"},
     }
 
 

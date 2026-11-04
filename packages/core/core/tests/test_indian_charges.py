@@ -28,6 +28,27 @@ _ON = date(2026, 4, 2)
 _TWO = Decimal("0.01")
 _ROOT = Path(__file__).resolve().parents[4]
 
+
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    import importlib.util
+
+    path = _ROOT / "tests" / "lot_clock.py"
+    spec = importlib.util.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _clocked_index_master(monkeypatch: pytest.MonkeyPatch):
+    """The NIFTY example follows the test clock, not the shipped expiries."""
+    with _lot_clock().open_clocked_master(monkeypatch):
+        yield
+
+
 _FORBIDDEN = (
     "0.0000325",
     "1.73e-5",

@@ -22,7 +22,8 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => mockAuthState },
 }));
 
-import { lotSizeFromMaster } from "@/lib/instrumentLots";
+import { lotSizeFromMaster, setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows, lotTestClock } from "@/test-utils/futureIndexLotRows";
 import { getLotSize } from "../ftApi.screener";
 
 function makeJsonResponse(body: unknown, status = 200): Response {
@@ -38,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -60,6 +62,9 @@ describe("getLotSize — is_sample_data flag survives end-to-end", () => {
 
   it("labels demo lots as Example and reads the instrument master", async () => {
     mockAuthState.token = "demo-user";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(lotTestClock());
+    setInstrumentLotRows(futureIndexLotRows());
 
     const nifty = await getLotSize("NIFTY", "NFO");
     const bank = await getLotSize("BANKNIFTY", "NFO");
