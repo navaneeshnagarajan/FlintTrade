@@ -13,7 +13,9 @@ in the Dhan and Neo masters.
 There is no built-in NIFTY / BANKNIFTY / SENSEX table. A missing contract
 returns ``None``. A live session reads the disk cache written from the
 public masters; otherwise the shipped excerpt is used. Contracts whose
-expiry is before today (IST) are dropped.
+expiry is before today (IST) are dropped. A month with no unexpired row
+stays unverified for orders. The index line may name the last listed size
+when every retained contract agrees, and stays ``—`` when they do not.
 """
 
 from __future__ import annotations
@@ -428,6 +430,44 @@ def _underlying_contracts(underlying: str, contracts: tuple[ContractLot, ...]) -
     return chosen
 
 
+def _loaded_contracts(
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None,
+) -> tuple[ContractLot, ...]:
+    loaded = active_rows() if rows is None else rows
+    return contracts_from_rows(tuple(loaded))
+
+
+def last_listed_lot(
+    underlying: str,
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None = None,
+    *,
+    as_of: date | None = None,
+) -> tuple[int, str] | None:
+    """Last listed lot when the current month is absent and the old lots agree.
+
+    Returns ``(lot size, month label)`` for the latest expired contract when
+    every expired contract of this underlying carries that same size. A
+    revision inside the retained rows, or an underlying with no row, returns
+    ``None``. The size is not invented, and it does not make an expired
+    security id placeable: :func:`lot_size_for_contract` still refuses it.
+    """
+    day = _resolve_as_of(as_of)
+    expired = [
+        contract
+        for contract in _underlying_contracts(underlying, _loaded_contracts(rows))
+        if contract.expiry is not None and contract.expiry < day
+    ]
+    if not expired:
+        return None
+    sizes = {contract.lot_size for contract in expired}
+    if len(sizes) != 1:
+        return None
+    month = expired[-1].month_label
+    if month is None:
+        return None
+    return expired[-1].lot_size, month
+
+
 def lot_size_from_master(
     underlying: str,
     rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None = None,
@@ -438,7 +478,8 @@ def lot_size_from_master(
 
     This is the front contract only. A later expiry can carry a different
     size; callers that price or validate one contract use
-    :func:`lot_size_for_contract`.
+    :func:`lot_size_for_contract`. An expired contract is not a current size:
+    :func:`last_listed_lot` is display-only.
     """
     contracts = _source(rows, as_of=as_of)
     dated = _underlying_contracts(underlying, contracts)
@@ -493,10 +534,12 @@ def index_lot_line(
 
     ``NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)``. Each name keeps
     its lot, so the line is never a bare list of numbers. An underlying with
-    no dated master row is ``—``. When the Scalper names a second month
-    because the size changes, that underlying keeps the Scalper's own
-    wording. The parenthetical lists the expiry months of the rows that
-    supplied a lot, in calendar order.
+    no dated master row is ``—``. A month the master does not list, when every
+    retained contract agrees, is ``65 (last listed Oct)``. Disagreeing old
+    sizes stay ``—``. When the Scalper names a second month because the size
+    changes, that underlying keeps the Scalper's own wording. The parenthetical
+    lists the expiry months of the unexpired rows that supplied a lot, in
+    calendar order.
     """
     parts: list[str] = []
     months: list[str] = []
@@ -504,7 +547,12 @@ def index_lot_line(
     for underlying in underlyings:
         label = scalper_lot_label(underlying, rows, as_of=as_of)
         if label is None:
-            parts.append(f"{underlying} {_MISSING_LOT}")
+            agreed = last_listed_lot(underlying, rows, as_of=as_of)
+            if agreed is None:
+                parts.append(f"{underlying} {_MISSING_LOT}")
+            else:
+                lot, month = agreed
+                parts.append(f"{underlying} {lot} (last listed {month})")
             continue
         segments = [segment.strip() for segment in label.split(",") if segment.strip()]
         lots: list[str] = []
