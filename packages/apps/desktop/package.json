@@ -44,7 +44,7 @@
     "@types/node": "26.6.5",
     "@types/snappyjs": "0.7.1",
     "@types/yauzl": "3.4.0",
-    "electron": "44.9.3",
+    "electron": "44.10.0",
     "electron-builder": "26.17.0",
     "electron-builder-squirrel-windows": "26.17.0",
     "esbuild": "0.28.2",
@@ -53,15 +53,15 @@
     "@noble/hashes": "2.4.0"
   },
   "build": {
-    "electronVersion": "44.9.3",
+    "electronVersion": "44.10.0",
     "electronDownload": {
       "force": false,
       "checksums": {
-        "electron-v44.9.3-darwin-arm64.zip": "4af51382278d00291dfcda265eddd9bab6e98cebb09f46aadc8438bf606de162",
-        "electron-v44.9.3-darwin-x64.zip": "451363b59bb7d2c1c9e0c4baa99106004eaabe724aa21a0c6b4c87469293531a",
-        "electron-v44.9.3-linux-arm64.zip": "8e70d53d920d84db869023280e5a1fbda82ecc58fea4443748e58309a3c80238",
-        "electron-v44.9.3-linux-x64.zip": "6e7fd2d450d442507b846ace4ae6e2bd17e1b1653e86a033b5231abfc23e6df4",
-        "electron-v44.9.3-win32-x64.zip": "41a1ffa0541cb0f2c9b9fe920dd2cef1793ad0ea2ada1a9582958880f4d1b23c"
+        "electron-v44.10.0-darwin-arm64.zip": "8e9f6041d3aa62229332b033d0390fd213a9b10cd078163f3f5fe988ee91baf7",
+        "electron-v44.10.0-darwin-x64.zip": "0d52465c24865981a9a68621c7068f124ef9f2a4caf5119afde62b04fffea66d",
+        "electron-v44.10.0-linux-arm64.zip": "558ae899d98b70236325d81da44bb6b2c988dd9a7bd16be17cea25f06e56cc14",
+        "electron-v44.10.0-linux-x64.zip": "62df9375ef035f2835a18cd7f9bff1959a185da22f2ecba1daa37cd9caee1dc5",
+        "electron-v44.10.0-win32-x64.zip": "64c2d874fea1bd4c8d2e1f2df3a547497044159a6b853dee7fcdff357ff0e3cd"
       }
     },
     "appImage": {
