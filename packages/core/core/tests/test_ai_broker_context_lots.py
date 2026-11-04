@@ -44,6 +44,22 @@ def test_exact_derivative_lot_is_receipted_with_quote_authority(runtime, monkeyp
         "exchange": exchange,
         "lot_size": 65,
         "instrument_id": "contract-1",
+        "tick_size": None,
+        "tick_unit": None,
+        "raw_tick_size": None,
+        "raw_tick_unit": None,
+        "source_revision": None,
+        "source_digest": None,
+        "observed_at": None,
+        "valid_until": None,
+        "expiry": None,
+        "strike_price": None,
+        "option_type": None,
+        "underlying": None,
+        "raw_observation_json": json.dumps(
+            {"symbol": _SYMBOL, "exchange": exchange, "lot_size": 65, "instrument_id": "contract-1"},
+            sort_keys=True, separators=(",", ":"),
+        ),
     }
     assert record["provenance"] == result.market_data["quote"]["provenance"]
     assert record["observed_at"] and record["source_as_of"] is None
