@@ -67,7 +67,7 @@ jobs:
   toolchain-eol:
     name: Declared and pinned toolchain versions are supported
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Five small HTTP fetches and some date arithmetic. The cap is the runaway
     # guard against a hung connection the per-request timeout somehow survives.
     timeout-minutes: 10

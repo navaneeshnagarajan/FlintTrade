@@ -151,7 +151,7 @@ while `VISUAL_AXE_GATE` is `"0"`. Change that one value to `"1"` to make
 the job fail on a regression. It is not a required check, and it should
 stay advisory until it has run quiet on a few pull requests.
 
-Screenshot baselines are generated only by that workflow on `ubuntu-latest`
+Screenshot baselines are generated only by that workflow on `ubuntu-24.04`
 (the same hosted image as the terminal Playwright job). Dispatch **Visual
 and accessibility** with **Regenerate screenshot baselines** enabled, on
 the branch that should receive the files. The job commits the

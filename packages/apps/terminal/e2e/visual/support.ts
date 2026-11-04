@@ -10,7 +10,7 @@ import { verifyHelpKeyboard, verifyHelpPlacement } from "./help-placement";
 
 /**
  * Fixed clock for every visual check. The runner timezone is UTC, matching
- * GitHub-hosted ubuntu-latest. Product clocks that name Asia/Kolkata stay on
+ * GitHub-hosted ubuntu-24.04. Product clocks that name Asia/Kolkata stay on
  * that zone; this instant is only the frozen browser clock.
  */
 export const FIXED_CLOCK = new Date("2026-01-15T09:30:00.000Z");

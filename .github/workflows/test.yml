@@ -66,7 +66,7 @@ jobs:
   # select everything; protected-branch pushes and weekly/manual runs are full.
   changed-surfaces:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -112,7 +112,7 @@ jobs:
   python-invariants:
     # Repository and documentation contracts run even on docs-only PRs.
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Runaway guard. The whole suite finishes well inside this; the cap stops
     # a hung job from idling up to the 6-hour runner default (the over-usage
     # signal that tripped Actions in the first place).
@@ -217,7 +217,7 @@ jobs:
   python-shards:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       OMP_NUM_THREADS: '1'
@@ -250,7 +250,7 @@ jobs:
   python-tests:
     needs: [changed-surfaces, python-invariants, python-shards]
     if: always() && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every selected Python check
@@ -291,7 +291,7 @@ jobs:
   node-core-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -322,7 +322,7 @@ jobs:
   node-widget-tests-1:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -342,7 +342,7 @@ jobs:
   node-widget-tests-2a:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -362,7 +362,7 @@ jobs:
   node-widget-tests-2b:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -402,7 +402,7 @@ jobs:
   node-widget-tests-3:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,7 +420,7 @@ jobs:
 
   secrets-check:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Scan only tracked/unignored sources and never print matched values.
     timeout-minutes: 10
     steps:
@@ -435,7 +435,7 @@ jobs:
   rust-ticks-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -443,7 +443,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: packages/core/ticks
-      - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+      # PyO3 links these tests to libpython3.12. The shared-library package
+      # ships only the versioned soname; python3.12-dev adds the linker name
+      # in the interpreter library directory.
+      - name: Install the Python 3.12 linker library
+        run: sudo apt-get install -y --no-install-recommends python3.12-dev
+      - name: Test the ticks crate
+        run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+        env:
+          PYO3_PYTHON: python3.12
 
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
@@ -498,7 +506,7 @@ jobs:
   terminal-e2e-infra-self-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

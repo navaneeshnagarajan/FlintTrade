@@ -78,9 +78,9 @@ jobs:
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 -k "not resource_module"
 
-  # Canary for the newest-Ubuntu user base (maintainer develops on 26.04).
-  # The ubuntu-26.04 hosted runner is still a GitHub preview image, so this
-  # leg is fail-soft; promote test.yml only when ubuntu-latest moves.
+  # Canary for Ubuntu 26.04. Per-push lanes stay on ubuntu-24.04 because
+  # 26.04 does not provide the pinned Python 3.12.8 builds or libpython3.12.
+  # This leg stays fail-soft until those pins run there.
   python-tests-ubuntu-2604:
     runs-on: ubuntu-26.04
     continue-on-error: true
@@ -108,7 +108,7 @@ jobs:
   # tests/test_minimum_requirements_single_source.py asserts these versions match
   # flint.toml, so raising a target without exercising it fails CI.
   python-target-version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     timeout-minutes: 45
     steps:
@@ -120,7 +120,7 @@ jobs:
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20
 
   node-target-version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     timeout-minutes: 30
     steps:
@@ -140,7 +140,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [macos-latest, windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

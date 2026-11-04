@@ -716,7 +716,7 @@ def test_ci_runs_electron_desktop_build_and_cross_platform_package_smoke() -> No
     assert "packages/apps/desktop/src-tauri" not in test_workflow
 
     assert "desktop-electron-package-smoke:" in nightly
-    for runner in ("macos-latest", "windows-latest", "ubuntu-latest"):
+    for runner in ("macos-latest", "windows-latest", "ubuntu-24.04"):
         assert runner in nightly
     for command in (
         "electron-builder --dir --mac",

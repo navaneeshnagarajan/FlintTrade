@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
@@ -46,7 +46,7 @@ jobs:
   propagate-version:
     needs: release-please
     if: needs.release-please.outputs.prs_created == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,7 +87,7 @@ jobs:
   approve-release-pr-ci:
     needs: [release-please, propagate-version]
     if: needs.release-please.outputs.prs_created == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Approve current-head CI, delete superseded stubs
@@ -126,7 +126,7 @@ jobs:
   dispatch-installers:
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Build installers for the new tag

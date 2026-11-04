@@ -64,7 +64,7 @@ jobs:
   # guard scripts and build workflows; unknown paths select all checks.
   changed-surfaces:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       dependencies: ${{ steps.classify.outputs.dependencies }}
@@ -91,7 +91,7 @@ jobs:
   # ordered steps sharing a single checkout/setup. Previously eight separate jobs.
   python-audit:
     name: Python audit (pip-audit + lock/licence/provenance/install gates)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -137,7 +137,7 @@ jobs:
 
   rust-audit:
     name: Rust audit (cargo audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -158,7 +158,7 @@ jobs:
 
   node-audit:
     name: Node audit (pnpm audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -184,7 +184,7 @@ jobs:
 
   transitive-licences:
     name: transitive dependency licence sweep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -229,7 +229,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -241,7 +241,7 @@ jobs:
 
   cla-gpg-binding:
     name: CLA GPG fingerprint binding (Identity H8)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # External-fork pull requests only. On push/schedule/dispatch,
     # github.event.pull_request is empty, so the old "not our repo" comparison

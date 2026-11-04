@@ -225,6 +225,20 @@ def test_workflows_exist_and_parse() -> None:
     assert _WORKFLOWS, f"no workflow files found under {_WORKFLOW_DIR}"
 
 
+def test_linux_jobs_do_not_use_the_floating_ubuntu_label() -> None:
+    """Hosted Linux jobs pin an Ubuntu image.
+
+    ``ubuntu-latest`` now resolves to 26.04, which does not provide the
+    pinned Python 3.12.8 toolchain or ``libpython3.12``. Versioned labels
+    such as ``ubuntu-24.04``, ``ubuntu-22.04`` and ``ubuntu-26.04`` stay.
+    """
+    offenders: list[str] = []
+    for path in sorted(_WORKFLOW_DIR.glob("*.yml")) + sorted(_WORKFLOW_DIR.glob("*.yaml")):
+        if "ubuntu-latest" in path.read_text(encoding="utf-8"):
+            offenders.append(path.relative_to(_REPO_ROOT).as_posix())
+    assert offenders == []
+
+
 @pytest.mark.parametrize(("rel", "doc"), _WORKFLOWS, ids=_WORKFLOW_IDS)
 def test_workflow_declares_top_level_permissions(rel: str, doc: dict[str, Any]) -> None:
     """Policy 3: every workflow pins the token with a top-level permissions block."""
