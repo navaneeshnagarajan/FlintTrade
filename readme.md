@@ -55,14 +55,21 @@ disagrees with that table.
 |---|---|---|
 | Python | `>=3.14` | 3.14 |
 | Node | `>=22.22.2` | 24 |
-| OS | Ubuntu 26.04 LTS | 26.04 |
+| Linux | Ubuntu 26.04 LTS | 26.04 |
+| macOS | macOS 13+ | universal `.dmg` |
+| Windows | Windows 10/11 x64 | `.exe` and PowerShell installers |
 
-Python's floor and target are the same 3.14 series. The OS floor follows from
-that: Ubuntu 26.04 LTS is the release that ships Python 3.14. Node's floor
-comes from jsdom 30, and its target stays ahead at 24.
+Python's floor and target are the same 3.14 series. Node's floor comes from
+jsdom 30, and its target stays ahead at 24.
+
+Ubuntu 26.04 LTS is the Linux floor because that release ships Python 3.14.
+The Ubuntu floor applies only to Linux source installs. macOS 13+ ships as a
+universal `.dmg`. Windows 10/11 x64 ships as an `.exe` and through the
+PowerShell installer, with ARM supported through emulation.
 
 The one-line installer provisions its own Python, Node and pnpm under
-`~/.flinttrade/tools`. The floors apply to source installs and contributors.
+`~/.flinttrade/tools`. The Python and Node floors apply to source installs
+and contributors on every platform.
 
 ## Quickstart
 
