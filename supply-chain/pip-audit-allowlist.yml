@@ -11,7 +11,7 @@
 #       package: "some-transitive-dep"
 #       affected_version: "1.2.3"
 #       reason: "vuln only triggers when feature X is enabled; flinttrade never enables it"
-#       accepted_by: "navaneesh"
+#       accepted_by: "maintainers"
 #       expires: "2026-08-23"
 allowlist:
   - vuln_id: "PYSEC-2026-4320"
@@ -25,5 +25,5 @@ allowlist:
       which then fails with ResolutionImpossible. 2025.11.12 is the newest
       certifi growwapi accepts. Drop this waiver when growwapi allows
       certifi>=2026.10.18.
-    accepted_by: "navaneesh"
+    accepted_by: "maintainers"
     expires: "2027-02-02"

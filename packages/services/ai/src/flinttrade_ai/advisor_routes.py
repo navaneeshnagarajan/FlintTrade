@@ -168,20 +168,20 @@ def _native_live_read_context(raw: Any = None) -> str:
     if _jwt_mode() not in {"practice", "live"}:
         return ""
     try:
-        from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
-        from flinttrade_gateway.monday_read_smoke import format_monday_ai_read_context
+        from flinttrade_core.ai_broker_context import collect_authorised_connected_read_feeds
+        from flinttrade_gateway.connected_read_smoke import format_connected_ai_read_context
 
         hook = current_app.config.get("MONDAY_AI_READ_FEED_COLLECTOR")
         if callable(hook):
             rows = hook()
             if not isinstance(rows, list):
                 return ""
-            return format_monday_ai_read_context(rows)
+            return format_connected_ai_read_context(rows)
 
         pair = _native_live_read_symbols(raw)[0]
         exchange, _, symbol = pair.partition(":")
-        rows = collect_authorised_monday_read_feeds(symbol, exchange)
-        return format_monday_ai_read_context(rows)
+        rows = collect_authorised_connected_read_feeds(symbol, exchange)
+        return format_connected_ai_read_context(rows)
     except Exception:  # noqa: BLE001 - advisor must never 500 on a read feed
         logger.debug("Native live-read AI context failed", exc_info=True)
         return ""

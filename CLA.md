@@ -26,9 +26,9 @@ following terms:
 5. **Acknowledgement.** By opening a pull request, you acknowledge that you
    have read and agree to these terms.
 
-The Project maintainer (Navaneesh V N) accepts contributions under AGPL-3.0-or-later
-in line with this CLA. The maintainer's own contributions are governed by the
-same terms as the Contributor's, applied to themself.
+The FlintTrade project accepts contributions under AGPL-3.0-or-later
+in line with this CLA. Contributions from the project itself are governed by the
+same terms as the Contributor's.
 
 If you are submitting on behalf of an organisation, please confirm that you
 have authority to bind the organisation to this CLA.

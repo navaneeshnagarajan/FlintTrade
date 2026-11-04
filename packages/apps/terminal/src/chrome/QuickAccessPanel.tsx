@@ -153,7 +153,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
     ? honestBrokerStatus({
       connected: true,
       connectedRead: false,
-      nativeMonday: false,
+      nativeConnectedRead: false,
       incident: operatorIncident,
     })
     : null;

@@ -132,7 +132,7 @@ const BASICS_SECTIONS: BasicsSection[] = [
     readingTime: 2,
     difficulty: "Beginner",
     content:
-      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is personal-use software and does not make a regulatory-compliance guarantee.",
+      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is self-hosted software and does not make a regulatory-compliance guarantee.",
   },
 ];
 

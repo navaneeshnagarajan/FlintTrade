@@ -275,7 +275,7 @@ class DataRuntime:
 
     def acquire_native_history(self, *, identity: dict[str, Any], query: Any,
                                policy: dict[str, Any], token: str) -> dict[str, Any]:
-        """Share an existing internal native read grant, not an HTTP cutover bypass.
+        """Share an existing internal native read grant, not an HTTP session bypass.
 
         Instrument crosswalk, units and calendar facts must already be qualified
         by the caller. No ticker-derived metadata, default account or new broker
