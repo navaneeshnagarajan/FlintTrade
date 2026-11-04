@@ -990,5 +990,5 @@ screen-reader list, `Positions without a heat map tile`.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
 
-The public roadmap is [ROADMAP.md](../../ROADMAP.md). Shipped behaviour
+The public roadmap is [ROADMAP.md](../ROADMAP.md). Shipped behaviour
 belongs in the changelog.
