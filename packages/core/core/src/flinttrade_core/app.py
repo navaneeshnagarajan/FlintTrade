@@ -1724,6 +1724,20 @@ def _cleanup_stale_duckdb_wals() -> None:
         # A read-only probe can replay the WAL in memory without checkpointing
         # it, after which deleting the file loses the recovered transaction.
         # Let DuckDB own recovery and WAL retirement through a read-write open.
+        # A live Action Centre queue already owns this file. Close that writer
+        # first: a second connection's checkpoint closes the shared descriptor
+        # and the write fails with "Bad file descriptor", which invalidates
+        # the database for the rest of the process.
+        try:
+            from flinttrade_engine.action_center import release_live_queue  # noqa: PLC0415
+
+            release_live_queue(db_file)
+        except Exception as exc:
+            logger.warning(
+                "Could not release the live Action Centre queue before WAL recovery for %s: %s",
+                db_file.name,
+                exc,
+            )
         try:
             with duckdb.connect(str(db_file)) as conn:
                 conn.execute("CHECKPOINT")
