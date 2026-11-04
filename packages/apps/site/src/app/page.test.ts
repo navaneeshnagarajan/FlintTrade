@@ -69,7 +69,7 @@ describe('public website journey', () => {
       expect(link?.getAttribute('rel')).toContain('noopener');
     }
     const figures = [...container.querySelectorAll('figure')];
-    expect(figures).toHaveLength(3);
+    expect(figures).toHaveLength(4);
     for (const figure of figures) {
       const caption = figure.querySelector('figcaption')?.textContent;
       expect(caption).toContain('example data');
@@ -89,7 +89,7 @@ describe('public website journey', () => {
     await act(async () => menu?.querySelector('summary')?.click());
     expect(menu?.open).toBe(true);
     const links = [...(menu?.querySelectorAll('a') ?? [])].map((link) => link.getAttribute('href'));
-    expect(links).toEqual(['/download', '/demo-app/welcome', '/docs', '/api-reference', '/mcp', '/contribute']);
+    expect(links).toEqual(['/explore', '/download', '/demo-app/welcome', '/docs', '/api-reference', '/mcp', '/contribute']);
     const skip = container.querySelector<HTMLAnchorElement>('a[href="#site-content"]');
     expect(skip?.textContent).toBe('Skip to content');
     expect(container.querySelector('#site-content')?.tagName).toBe('MAIN');

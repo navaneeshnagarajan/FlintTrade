@@ -5,6 +5,7 @@ import { GithubIcon } from '@/components/github-icon';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navItems = [
+  { href: '/explore', label: 'Explore' },
   { href: '/download', label: 'Download' },
   { href: '/demo-app/welcome', label: 'Demo (example data)', newWindow: true },
   { href: '/docs', label: 'Docs' },

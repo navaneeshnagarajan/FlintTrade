@@ -591,6 +591,8 @@ async function main() {
       title: 'FlintTrade Docs',
       pages: [
         'index',
+        'inventory',
+        'desktop',
         'disclaimer',
         'user-guide',
         'developer-guide',

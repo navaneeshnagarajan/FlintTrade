@@ -4,6 +4,8 @@ import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
 import { ProductOverview } from '@/components/product-overview';
+import { ProductIntroduction } from '@/components/product-introduction';
+import { IntroHandoff } from '@/components/intro-handoff';
 import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
@@ -44,6 +46,7 @@ export default async function HomePage() {
       <SiteHeader />
       <main id="site-content" tabIndex={-1}>
 
+      <IntroHandoff product={<ProductIntroduction />}>
       <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
           <div className="hero-logo-stage" aria-hidden="true">
@@ -97,6 +100,7 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+      </IntroHandoff>
 
       <aside className="product-notice" aria-label="Software status">
         <p>v0.0.1 is not production ready. Use Practice and example data first; Live mode remains your own risk.</p>

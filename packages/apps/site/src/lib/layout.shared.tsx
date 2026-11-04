@@ -14,6 +14,7 @@ export function baseOptions(): BaseLayoutProps {
       url: '/',
     },
     links: [
+      { text: 'Explore', url: '/explore', active: 'url' },
       { text: 'Docs', url: '/docs', active: 'nested-url' },
       { text: 'API', url: '/api-reference', active: 'url' },
       { text: 'MCP', url: '/mcp', active: 'url' },

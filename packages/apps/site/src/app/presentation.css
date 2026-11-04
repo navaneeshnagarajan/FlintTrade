@@ -549,3 +549,58 @@ html {
     padding-top: 32px;
   }
 }
+
+/* The intro boundary creates no box and never alters signature geometry.
+   It is retired only after its actual finite animations have settled. */
+.site-intro-boundary,
+.site-product-boundary { display: contents; }
+.site-intro-boundary[hidden],
+.site-product-boundary[hidden] { display: none; }
+
+.product-introduction {
+  position: relative;
+  z-index: 1;
+  padding: 64px 0 48px;
+  text-align: center;
+}
+.product-eyebrow { margin: 0 0 22px; color: var(--site-text-secondary); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.product-introduction h1 { max-width: 960px; margin: 0 auto; font-size: clamp(40px, 6vw, 78px); line-height: 1.08; font-weight: 650; letter-spacing: -.045em; text-wrap: balance; }
+.product-introduction h1 span { color: var(--site-accent); }
+.product-introduction-copy { max-width: 620px; margin: 24px auto; color: var(--site-text-secondary); line-height: 1.7; font-size: 17px; text-wrap: pretty; }
+.product-entry-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin: 28px 0 48px; }
+.product-entry-actions .button { border-radius: 999px; min-height: 48px; }
+.product-monitor { width: min(100%, 1080px); margin: 0 auto 56px; perspective: 1600px; }
+.product-monitor-screen { overflow: hidden; border: 10px solid #101819; border-bottom-width: 18px; border-radius: 14px; background: #101819; transform: rotateY(-7deg) rotateX(2deg); box-shadow: 14px 22px 70px #0004; }
+.product-monitor-screen img { display: block; width: 100%; height: auto; border-radius: 3px; }
+.product-monitor-stand { width: 140px; height: 52px; margin: 0 auto; background: linear-gradient(105deg, #304044, #182427); clip-path: polygon(22% 0, 78% 0, 88% 90%, 100% 95%, 100% 100%, 0 100%, 0 95%, 12% 90%); }
+.product-monitor figcaption { max-width: 760px; margin: 18px auto 0; color: var(--site-text-secondary); font-size: 12px; line-height: 1.6; }
+@media (max-width: 768px) { .product-monitor-screen { transform: none; border-width: 5px; border-bottom-width: 10px; border-radius: 8px; } .product-monitor-stand { height: 30px; width: 88px; } }
+.workspace-entry-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; text-align: left; }
+.workspace-entry-grid > a { display: flex; flex-direction: column; min-width: 0; gap: 18px; padding: 28px; border: 1px solid var(--site-border); border-radius: 24px; background: var(--site-surface-card); }
+.workspace-entry-grid > a:hover { border-color: var(--site-accent); }
+.workspace-entry-grid .entry-number { font-size: 11px; color: var(--site-accent); letter-spacing: .12em; }
+.workspace-entry-grid strong { font-size: 25px; letter-spacing: -.025em; line-height: 1.2; }
+.workspace-entry-grid span:not(.entry-number) { color: var(--site-text-secondary); font-size: 14px; line-height: 1.65; }
+.workspace-entry-grid em { display: flex; align-items: center; gap: 8px; margin-top: auto; color: var(--site-accent); font-style: normal; font-size: 12px; line-height: 1.5; }
+.product-example-note { max-width: 790px; margin: 22px auto 0; color: var(--site-text-secondary); font-size: 12px; line-height: 1.6; }
+.product-section > .product-heading { margin-inline: auto; text-align: center; }
+.product-section > .product-heading p { margin-inline: auto; }
+.product-figure img { border-radius: 20px; }
+.journey-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding: 0; list-style: none; }
+.journey-steps li { border-top: 2px solid var(--site-accent); padding-top: 22px; }
+.journey-steps strong { font-size: 20px; }
+.journey-steps p { color: var(--site-text-secondary); line-height: 1.7; font-size: 14px; margin: 16px 0; }
+.journey-steps a { color: var(--site-accent); font-size: 14px; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 12px 24px; max-width: 700px; }
+.site-shell .subpage { max-width: 1180px; }
+.site-shell .subpage .feature-card { border-radius: 20px; padding: 28px; }
+.site-shell .subpage .feature-card h2 { margin-top: 16px; }
+.site-shell .subpage .code-panel { border-radius: 16px; }
+@media (max-width: 768px) {
+  .workspace-entry-grid,
+  .journey-steps { grid-template-columns: minmax(0, 1fr); }
+  .product-introduction { padding-top: 38px; }
+  .product-entry-actions { margin-bottom: 30px; }
+  .workspace-entry-grid > a { padding: 24px; }
+  .product-introduction-copy { font-size: 15px; }
+}
