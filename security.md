@@ -8,6 +8,9 @@ FlintTrade is pre-1.0 (`v0.0.1` on `main`). Only the current `0.0.x` line
 receives patches. The earlier `v0.1.0`…`v0.6.0-beta.13` tags were deleted in
 the 2026-07-23 clean-slate reset and are not supported.
 
+Runtime support is the `flint.toml` `[requirements]` table: Python `>=3.14`
+(target 3.14), Node `>=22.22.2` (target 24), and Ubuntu 26.04 LTS (target 26.04).
+
 | Version | Supported |
 |---------|-----------|
 | 0.0.x (latest on `main`) | Yes |

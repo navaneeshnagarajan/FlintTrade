@@ -233,7 +233,7 @@ def _write_executable(path: Path, body: str) -> None:
 
 @pytest.mark.unit
 def test_python_floor_rejects_interpreter_below_3_12(tmp_path: Path) -> None:
-    """setup-production must refuse Python < 3.12 before creating the unit venv."""
+    """setup-production must refuse Python < 3.14 before creating the unit venv."""
     fake = tmp_path / "python3"
     _write_executable(fake, "#!/bin/bash\nexit 1\n")
     result = _bash(
@@ -241,12 +241,12 @@ def test_python_floor_rejects_interpreter_below_3_12(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     combined = result.stdout + result.stderr
-    assert "3.12" in combined
+    assert "3.14" in combined
 
 
 @pytest.mark.unit
 def test_python_floor_accepts_interpreter_at_or_above_3_12() -> None:
-    """The live interpreter (CI/dev is 3.12+) must pass the Ubuntu floor."""
+    """The live interpreter must meet the Python 3.14 floor."""
     result = _bash(
         f"source {_CONTRACT.as_posix()} && flinttrade_assert_python_floor {shlex.quote(sys.executable)}",
     )
@@ -268,7 +268,7 @@ def test_production_scripts_parse_under_bash_n() -> None:
 
 @pytest.mark.unit
 def test_production_installer_checks_python_floor_before_venv() -> None:
-    """The Ubuntu installer must run the 3.12 floor before ``python3 -m venv``."""
+    """The Ubuntu installer must run the 3.14 floor before ``python3 -m venv``."""
     installer = _INSTALLER.read_text(encoding="utf-8")
     assert "production-contract.sh" in installer
     match = _VENV_CREATE_RE.search(installer)
@@ -501,15 +501,15 @@ def _server_section(text: str) -> str:
 
 @pytest.mark.unit
 def test_pi_docs_preserve_bookworm_and_supported_install_paths() -> None:
-    """#155: Bookworm is 3.11; one-line/native stay the Pi path; production is Ubuntu 24.04."""
+    """Bookworm is 3.11; one-line/native stay the Pi path; production is Ubuntu 26.04."""
     pi = _PI_DOC.read_text(encoding="utf-8")
     assert "Bookworm" in pi
     assert "Python 3.11" in pi
     assert "web-install.sh" in pi
     assert "install-native.sh" in pi or "native installer" in pi.lower()
-    assert "Ubuntu 24.04" in pi
+    assert "Ubuntu 26.04" in pi
     assert "setup-production" in pi
-    assert ">=3.12" in pi or "3.12" in pi
+    assert ">=3.14" in pi or "3.14" in pi
     assert "FLINTTRADE_DIR" not in pi
     assert "gunicorn" not in pi.lower()
     assert "chowns the tree" not in pi

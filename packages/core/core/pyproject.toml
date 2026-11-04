@@ -2,7 +2,7 @@
 name = "flinttrade-core"
 version = "0.0.1"
 description = "Framework, native broker reader, config, workspace, models, exceptions, auth"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "filelock==4.2.1",
     "httpx==0.28.1",

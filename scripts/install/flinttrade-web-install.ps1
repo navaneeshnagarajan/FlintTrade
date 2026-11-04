@@ -1629,7 +1629,7 @@ function Invoke-FlintTradeWebInstall {
         Say "  node : will download $($nodeAsset.url)"
     }
     Say "  pnpm : provided by Corepack from the verified Node install (no separate download)"
-    Say "  python 3.12 : installed by uv into $(Join-Path $ToolsRoot 'python')"
+    Say "  python 3.14 : installed by uv into $(Join-Path $ToolsRoot 'python')"
     # A dry run mutates nothing, so it never needs the download confirmation —
     # this keeps non-interactive -DryRun usable without -Yes.
     if (-not $DryRun) {

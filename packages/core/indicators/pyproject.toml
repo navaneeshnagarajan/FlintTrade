@@ -2,7 +2,7 @@
 name = "flinttrade-indicators"
 version = "0.0.1"
 description = "Technical analysis indicators — pure-NumPy batch (110 exports), streaming classes, Pine Script conversion"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "numpy==2.5.4",
     "pydantic==2.14.1",

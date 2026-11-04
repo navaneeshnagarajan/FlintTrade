@@ -80,7 +80,7 @@ launch it:
    archive fallback when Git is unavailable;
 4. provisions checksum-verified pinned `uv` and Node 22 distributions into the
    managed tools directory regardless of system Node availability; `uv` then
-   provisions Python 3.12 and Corepack activates the repository-pinned pnpm
+   provisions Python 3.14 and Corepack activates the repository-pinned pnpm
    10.34.5;
 5. runs the frozen Python and JavaScript installs, then builds the terminal;
 6. promotes the completed candidate only after all build steps pass;

@@ -284,7 +284,7 @@ def resolve_python() -> str:
             return found
 
     fail("No usable Python interpreter found.")
-    fail("Install Python 3.12+ from https://python.org (tick 'Add python.exe to PATH' on Windows),")
+    fail("Install Python 3.14+ from https://python.org (tick 'Add python.exe to PATH' on Windows),")
     fail("or create the repo virtualenv with: uv sync --frozen --all-packages")
     raise SystemExit(1)
 

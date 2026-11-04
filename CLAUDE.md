@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and uses native broker adapters. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Electron desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12` (no upper bound; the repo currently runs 3.14), Node `>=22.22.2` (jsdom 30's engine floor). The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
+FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and uses native broker adapters. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Electron desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.14`, Node `>=22.22.2` (jsdom 30's engine floor). The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
 
 Version: **v0.0.1** (clean-slate pre-1.0 baseline after the 2026-07-23 release reset; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
 
@@ -127,7 +127,7 @@ These cause real failures, not just style nits:
 
 ## CI shape (so you know what's running)
 
-`test.yml` runs a change classifier and ten verification jobs on pushes to `main`/`dev` and non-draft PRs. The Python, node-core, secrets and terminal E2E infrastructure jobs always run; four widget shards, Rust and Electron use the classifier to skip inert changes. Electron packaging runs on Ubuntu 24.04. `docs/CI.md` and the workflow files are authoritative for job names, triggers, coverage guards and required checks. Cross-platform verification belongs in `nightly-cross-platform.yml`; installer publication follows the separate `desktop-release.yml` gates. Diagnose failures with `gh run view <id> --log-failed`.
+`test.yml` runs a change classifier and ten verification jobs on pushes to `main`/`dev` and non-draft PRs. The Python, node-core, secrets and terminal E2E infrastructure jobs always run; four widget shards, Rust and Electron use the classifier to skip inert changes. Electron packaging runs on Ubuntu 26.04. `docs/CI.md` and the workflow files are authoritative for job names, triggers, coverage guards and required checks. Cross-platform verification belongs in `nightly-cross-platform.yml`; installer publication follows the separate `desktop-release.yml` gates. Diagnose failures with `gh run view <id> --log-failed`.
 
 ## Working style (this repo)
 
