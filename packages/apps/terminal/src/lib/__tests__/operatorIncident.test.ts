@@ -284,7 +284,7 @@ describe("operator incident classifier", () => {
     expect(incident?.nativeHttpFreeze).toBe(true);
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
-    expect(incident?.rectify.toLowerCase()).toContain("cutover");
+    expect(incident?.rectify.toLowerCase()).toContain("not available in the terminal");
     expect(
       honestBrokerStatus({
         connected: true,

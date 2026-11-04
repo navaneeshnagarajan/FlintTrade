@@ -859,8 +859,9 @@ def _wait_dev_backend_exit(
 ) -> None:
     """Observe POSIX exit without reaping the group leader and releasing its PID.
 
-    Python 3.12 on macOS lacks ``waitid``; kqueue provides the same non-reaping
-    notification. Polling lets recorded signals request cleanup without raising
+    Python 3.14 is the supported floor, and it exposes ``waitid`` on macOS.
+    kqueue provides the same non-reaping notification when ``waitid`` is
+    absent. Polling lets recorded signals request cleanup without raising
     asynchronously inside Popen, before we have recorded ownership of a child.
     Windows retains Popen's wait and taskkill tree handling.
     """

@@ -97,5 +97,5 @@ contributor guidance.
 
 ## Licence
 
-AGPL-3.0, with retained third-party notices and the Hermes-derived MIT
+AGPL-3.0, with retained third-party notices and a retained MIT
 attribution under `resources/licenses/`.

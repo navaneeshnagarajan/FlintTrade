@@ -31,7 +31,7 @@ export function connectedReadChrome(
   return CONNECTED_READ_LABEL;
 }
 
-export function connectedReadAccountStatusLine(account: BrokerAccount): string {
+export function connectedAccountStatusLine(account: BrokerAccount): string {
   const chrome = connectedReadChrome(account);
   if (chrome) {
     const parts = [account.broker, chrome];

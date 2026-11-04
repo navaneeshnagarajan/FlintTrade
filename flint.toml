@@ -53,11 +53,16 @@ python_target = "3.14"
 # the target runs ahead of the floor rather than dragging it up.
 node_requires = ">=22.22.2"
 node_target = "24"
-# Derived from the Python floor: Ubuntu 26.04 LTS is the release that ships
-# Python 3.14. The one-line installer still provisions its own interpreter, so
-# this constrains source installs only.
+# Ubuntu 26.04 LTS ships Python 3.14. os_requires is the Linux source-install
+# floor only. The one-line installer still provisions its own interpreter.
+# os_macos and os_windows are the other platforms this repo ships. Nightly
+# cross-platform runs macOS, Windows, and Ubuntu 26.04. Desktop release builds
+# a universal macOS dmg, a Windows x64 exe, and Linux AppImages. Windows on
+# ARM uses the x64 build through emulation.
 os_requires = "Ubuntu 26.04 LTS"
 os_target = "26.04"
+os_macos = "macOS 13+"
+os_windows = "Windows 10/11 x64"
 
 [packages]
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, native broker boundary, config, models, logging" }

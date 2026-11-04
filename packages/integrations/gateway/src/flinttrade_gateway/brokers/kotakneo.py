@@ -635,7 +635,7 @@ class KotakNeoAdapter(BrokerAdapter):
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
             extra={},
-            # Live place stays fail-closed: Neo stays read-only until funded unlock.
+            # Kotak Neo stays read-only until funded Live placement is unlocked.
             read_only_until_at=expires_at,
         )
         client = (

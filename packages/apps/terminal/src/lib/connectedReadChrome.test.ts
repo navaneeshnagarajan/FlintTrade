@@ -5,7 +5,7 @@ import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isConnectedReadBroker,
-  connectedReadAccountStatusLine,
+  connectedAccountStatusLine,
   connectedReadChrome,
   connectedReadConnectable,
 } from "./connectedReadChrome";
@@ -27,7 +27,7 @@ describe("connectedReadChrome", () => {
   });
 
   it("never implies live order capability and never offers Neo Practice", () => {
-    const neo = connectedReadAccountStatusLine({
+    const neo = connectedAccountStatusLine({
       account_id: "N1",
       broker: "kotakneo",
       label: "Neo",

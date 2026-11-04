@@ -223,7 +223,7 @@ Never use `git add -A` or `git add .`. Stage the files you actually changed.
 
 **Never commit personal infrastructure or secrets.** This means no IP addresses,
 hostnames, VPN configs or endpoints, broker account names or IDs, fund amounts,
-order IDs, API keys, or `.env`. FlintTrade is personal-use open-source: anything
+order IDs, API keys, or `.env`. FlintTrade is self-hosted open-source software: anything
 that points at *your* machine, network, or accounts stays out of the repo. Use
 placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
 values in your private, gitignored `.env` only for dev/server fallback paths, and store secrets as keyring/env
@@ -243,6 +243,16 @@ staging the file. There is no tracked pre-commit secret hook.
 8. **Merge.** Maintainers will squash and merge once CI is green and review is approved.
 
 Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to `main` — but only while we're pre-1.0.
+
+## Issue labels
+
+| Label | Meaning |
+| --- | --- |
+| `needs-triage` | Needs evaluation |
+| `needs-info` | Waiting on the reporter |
+| `ready-for-agent` | Specified enough for an automated change |
+| `ready-for-human` | Needs a human implementation |
+| `wontfix` | Will not be actioned |
 
 ## Code style and lint
 

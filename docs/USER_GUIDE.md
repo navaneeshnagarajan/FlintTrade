@@ -199,17 +199,13 @@ Native broker access is **not usable on this unreleased line**: native broker UX
 Do not treat catalogue metadata as a working operator path.
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
-**Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
+**Broker HTTP.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
-callback) return `503` with `broker_account_cutover_unavailable` until Task 9D
-migrates the handlers. Native HTTP account and market-data reads return `409`
-with zero provider calls until the Task 7C.2 / 8B cutover onto the in-process
-`BrokerReadPort`. Exact broker reads that already exist are that in-process
+callback) return `503` with `broker_account_cutover_unavailable`. Native HTTP
+account and market-data reads return `409` with zero provider calls. Exact
+reads use the in-process `BrokerReadPort`. Exact broker reads that already exist are that in-process
 port, not a working terminal Brokers screen. Service connections are an inert
 control plane only.
 
@@ -229,10 +225,8 @@ Exchange stays disabled until Live order safety and unattended deadman
 flattening are proven. Its configured authentication method uses an API key and secret for one venue
 (India or Global, production or testnet): `india_prod`, `india_testnet`,
 `global_prod`, or `global_testnet`. India and Global keys are not
-interchangeable, and the venue has no default. Native HTTP
-remains frozen until Task 9D / Task 7C.2 — Setup → Brokers still fails on the
-frozen routes; MSI static-IP host native read smoke uses the in-process
-native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+interchangeable, and the venue has no default. Setup → Brokers still fails on those routes. Read smoke on a static-IP host
+uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 ### Why two layers?
@@ -1425,7 +1419,7 @@ same open pad.
 
 Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
-09:15–15:30 "open" window (as of Aug 2026). When F&O
+09:15–15:30 "open" window. When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
@@ -1730,7 +1724,7 @@ Chat does not show a green **Connected (suggest only)** badge. The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
 Composer input and Send stay disabled until the runtime is installed
-and configured — the same bar as an unconfigured model. A provider string of
+and configured — the same bar as Settings. A provider string of
 ollama is not Connected while the managed runtime is absent.
 
 When unconfigured or not installed, the warning badge is **Not configured**
@@ -1805,7 +1799,7 @@ card.
 
 Rule-based and ML-derived software outputs. Includes an executor that runs
 multiple generators in parallel and aggregates diagnostics. These outputs are
-educational and are not financial advice.
+and are not financial advice.
 
 ### Sentiment
 
@@ -1872,7 +1866,7 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), a local OpenAI-compatible host, and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives in Settings → Telegram (**Test Send**); example data keeps that control disarmed. |
 | **Risk & Safety** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 

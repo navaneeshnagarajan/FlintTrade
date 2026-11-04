@@ -1,4 +1,4 @@
-"""— AI Chat Practice + native Connected (read) context.
+"""AI Chat Practice + native Connected (read) context.
 
 Acceptance lock (2026-09-20):
 
@@ -88,8 +88,7 @@ async def test_connected_ai_snapshot_rejects_other_brokers() -> None:
     session = _session()
     with pytest.raises(ValueError, match="Dhan \\+ Neo") as raised:
         await collect_connected_ai_read_snapshot("upstox", "Main", adapter, session)
-    assert "Monday" not in str(raised.value)
-    assert "Connected (read)" in str(raised.value)
+    assert str(raised.value) == "Connected (read) / API smoke reads are Dhan + Neo only, not upstox"
     assert adapter.calls == []
 
 

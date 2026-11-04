@@ -1,7 +1,7 @@
 /**
  * ConnectionStep — optional broker step in the setup wizard.
  *
- * Practice path: continue without a broker. Practice
+ * Continue without a broker. Practice
  * fills use FlintTrade's native SandboxEngine. Native brokers
  * stay Settings/fallback only — never the primary connect CTA.
  *

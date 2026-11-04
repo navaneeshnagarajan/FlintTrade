@@ -1,8 +1,8 @@
-"""native Dhan + Kotak Neo read-smoke (non-funded).
+"""In-process Dhan and Kotak Neo read smoke (non-funded).
 
-In-process login + ticks / depth / latency (+ hist / chain where the SDK
-allows). Never places, modifies, or cancels an order. Successful smoke is
-``Connected (read)`` / ``API smoke`` — never placeable Live orders.
+Login plus ticks, depth, and latency (history and chain where the SDK
+allows). Never places, modifies, or cancels an order. A successful smoke is
+``Connected (read)`` / ``API smoke``, not a placeable Live order.
 
 Neo has no sandbox. Operator copy is ``Live read only until funded unlock.``
 """

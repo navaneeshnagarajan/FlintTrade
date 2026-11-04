@@ -6,11 +6,11 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.0.1` is not production ready. The native adapter code for six
+`v0.0.1` is pre-release software and is not production ready. The native adapter code for six
 adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange) is present and
 mock-tested. Dhan, Upstox, and Kotak Neo are the current connectable native set
-(Kotak Neo for Connected (read) / API smoke on Live place stays
-fail-closed; Neo has no sandbox). INDmoney is read-verified with a locally
+(Kotak Neo for Connected (read) / API smoke only. Live placement stays
+disabled. Neo has no sandbox). INDmoney is read-verified with a locally
 verified fail-closed planner, but remains disabled until restart-time
 regular/smart-parent cancellation can be resolved authoritatively and a
 broker-atomic reduce-only close primitive plus funded/live-market order-safety
@@ -18,9 +18,8 @@ proof exist. Groww stays `connectable=false` and retains its remaining live
 blockers. Groww's official `growwapi` SDK is pinned for attestation/reference
 parity while the adapter keeps using FlintTrade's tested REST transport; the
 latest key-secret probe proves login/account reads but still lacks broker-side
-market-data/API permission, static IP, and order-safety evidence. Native HTTP
-UX remains frozen (Task 9D / Task 7C.2); MSI static-IP host native read smoke is the in-process
-read path, not a restored Setup → Brokers HTTP session.
+market-data/API permission, static IP, and order-safety evidence. Broker sessions are not available in the terminal. Writes return 503 and reads return 409.
+Read smoke on a static-IP host uses the in-process read path, not a Setup → Brokers HTTP session.
 INDmoney is a REST-native adapter with no SDK pin; its dashboard token resets
 at the daily 06:00 IST cycle. Delta Exchange is also REST-native with no SDK pin.
 It stays disabled until Live order safety and unattended deadman flattening are
@@ -28,8 +27,7 @@ proven, and its configured authentication method uses an API key and secret for 
 production or testnet). INDstocks' own FAQ advertises `indstocks-sdk`, but
 PyPI and npm currently have no matching package, so the adapter stays REST-native
 until a real SDK distribution can be pinned.
-Broker SDK source/artifact mirrors can be refreshed into the gitignored
-`.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
+Broker SDK source mirrors can be checked with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
 Kotak Neo uses exact Git provenance: upstream `main`
 `9a37488d77dc96442ee2a90ef78462e688cf4856` is the runtime and `v3.0.7`
@@ -75,8 +73,8 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Item | Status | Notes |
 |---|---|---|
 | Connect to any model — cloud providers | ✅ | OpenAI/Anthropic/Gemini/Groq/Mistral/Cerebras/… via `LLMProvider` + `LLMSection` |
-| Local models - managed Ollama, Hermes, custom endpoints | ✅ | Ollama runtime is installed on demand with a pinned hash and controlled from Settings; external endpoints remain available through generic providers |
-| AI agent backends | ✅ | `agent_backends` registry + AI Backends widget — Claude Code (API/OAuth), Cerebras, Codex (streaming), Hermes/Antigravity (catalogued); replaced the OpenClaw bridge |
+| Local models - managed Ollama and custom endpoints | ✅ | Ollama runtime is installed on demand with a pinned hash and controlled from Settings; external endpoints remain available through generic providers |
+| AI agent backends | ✅ | `agent_backends` registry + AI Backends widget — Claude Code (API/OAuth), Cerebras, Codex (streaming), additional catalogued hosts |
 | Obsidian vault | ✅ | Read-only browser widget + agent vault context |
 | Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) — Lab "Options Builder" tab; loads templates from the StrategyTemplates widget via explicit strike offsets |
 | Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs (132 runnable by name; 41 selectable in the Lab picker) |
@@ -111,7 +109,7 @@ and earlier real-account read evidence remain historical, not new SDK proof.
 | Live order-flow footprint | ✅ | Aggregator fed from the tick stream (Lee-Ready side classification); honest synthetic fallback |
 | Latency observability (per-broker p50/p95/p99) | ✅ | In-memory `LatencyTracker` fed by the live order path → `/api/v1/latency/stats` → MonitoringSection `LatencyPanel` + ObservabilityDashboard; regression-tested |
 | Gated-order-path latency benchmark | ✅ | Tripwire test measures `gate_order → BrokerRouter` overhead against a mocked broker (real measured ms, generous ceiling) |
-| Persisted DuckDB latency store (histogram + slowest-N) | 🟡 | `LatencyMonitor` built + unit-tested, admin endpoints dev-only; not yet fed by the production order path (two-store dedup tracked in the maintainer's working plan) |
+| Persisted DuckDB latency store (histogram + slowest-N) | 🟡 | `LatencyMonitor` built + unit-tested, admin endpoints dev-only; not yet fed by the production order path |
 
 ## System Components
 

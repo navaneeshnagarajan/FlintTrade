@@ -1,10 +1,7 @@
 # FlintTrade Architecture
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 
 > Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React
@@ -177,17 +174,16 @@ duplicated:
 
 ### Market session clock
 
-TopBar market status and the Market Clock widget are CAS-aware (as of
-Aug 2026). Phases are Continuous, CAS, Matching, Post-close, and Closed
+TopBar market status and the Market Clock widget are CAS-aware. Phases are Continuous, CAS, Matching, Post-close, and Closed
 — one TopBar chip active; tooltip/title is the window (for example
-`CAS · 15:15–15:35 (as of Aug 2026)`). Cash is never green "open" after
+`CAS · 15:15–15:35`). Cash is never green "open" after
 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears.
 Non-CAS cash still trades continuous to 15:30. The clock helpers
 (`packages/apps/terminal/src/lib/market.ts` and
 `packages/core/ticks/src/session.rs`) must not treat a flat NSE
 09:15–15:30 window as "open until 15:30". Closing-price copy is not
-"VWAP last 30 min". The September 2026 consultation stays out of the UI.
+"VWAP last 30 min".
 
 ### Frontend stack
 
@@ -363,8 +359,7 @@ The native account foundation provides immutable transaction contracts, an
 encrypted vault participant, a workspace commit witness and one app-lifetime
 runtime owner. Its coordinator is exercised with synthetic drivers. Production
 native account mutations still return `503` and native HTTP reads still return
-`409`; this foundation does not install a provider driver or complete the
-Task 9D / Task 7C.2 cutovers.
+`409`; this foundation does not install a provider driver or complete broker sessions in the terminal.
 
 Vault schema 4 retains credential incarnation and operation evidence while
 anchoring the current ledger and audit outbox in an authenticated head digest.

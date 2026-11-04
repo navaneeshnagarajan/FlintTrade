@@ -4,17 +4,6 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-<!--
-Release history was reset to a clean v0.0.1 baseline on 2026-07-23. The earlier
-v0.1.0…v0.6.0-beta.13 tags and releases (the retired Tauri/PyInstaller line, plus
-the updater-beta channel manifest) were deleted so the project could restart with
-honest, pre-release-marked 0.0.x semantic versioning while it is still pre-usable.
-
-No history was lost: every commit and its detailed message remains in git.
-release-please regenerates the sections below from Conventional Commits, so the
-changelog rebuilds itself from the first release cut after this baseline.
--->
-
 ## [Unreleased]
 
 ### Added
@@ -44,17 +33,17 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Native broker HTTP freeze (accepted product decision).** Merging this work
-  onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
-  is accepted. Broker-account mutations — `/v1` account and auth writes, native
-  connect / login / set-primary / delete, OAuth start and callback, and the
-  other guarded account-authority routes — return a stable `503` with
-  `{error: broker_account_cutover_unavailable}` until Task 9D migrates the
-  handlers and removes `guard_broker_account_http` atomically. Native HTTP
-  account and market-data reads return `409` with zero provider calls until
-  the Task 7C.2 / 8B read-port cutover. The terminal still calls those routes,
-  so Setup → Brokers and Settings → Brokers will show the freeze rather than a
-  working native session. Service connections remain inert only.
+- **Broker sessions are not available in the terminal.** Broker-account
+  mutations — `/v1` account and auth writes, native connect / login /
+  set-primary / delete, OAuth start and callback, and the other guarded
+  account-authority routes — return a stable `503` with
+  `{error: broker_account_cutover_unavailable}`. Native HTTP account and
+  market-data reads return `409` with zero provider calls. The terminal still
+  calls those routes, so Setup → Brokers and Settings → Brokers show that
+  response rather than a working native session. Practice mode and example
+  data work without a broker. Live order placement stays disabled unless it
+  is explicitly unlocked and every safety layer passes. Service connections
+  remain inert only.
 
 - **Desk routes, one Practice place path, and desk polling.** `/positions`,
   `/holdings`, `/monitoring`, `/schedules`, and `/glossary` open the screen
@@ -311,8 +300,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
-- **First-run Setup resume, Start over, and a fixed vault step count
-  .** Reloading `/setup` mid-flow resumes the
+- **First-run Setup resume, Start over, and a fixed vault step count.**
+  Reloading `/setup` mid-flow resumes the
   unfinished setup session. **Start over (deletes this unfinished
   operator)** deletes that unfinished operator and restarts at step 1.
   A workspace data wipe is not required for either path. When the vault
@@ -401,7 +390,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   `SandboxEngine`. Example placement is `mode_blocked`;
   Example Buy is a local fill.
 
-- **Restore Connected honesty on `/ai` (regression).**
+- **Restore Connected honesty on `/ai`.**
   LLM readiness is global config truth (stored Settings
   `#llm` plus explicit `advisor/status`), not Mode-derived.
   Example and Practice share one source. A blank stored
@@ -422,7 +411,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   CTA to `/settings#llm`. Unconfigured stays
   **Not configured**. Composer input and Send stay
   disabled until the runtime is installed and
-  configured — the same bar as an unconfigured model. A provider
+  configured — the same bar as Settings. A provider
   string of ollama is not Connected while the managed
   runtime is absent. A configured-but-broken probe still
   shows **Error** / **Disconnected** with Retry.
@@ -673,8 +662,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   date and a Verify on NSE link to circular NSE/FAOP/70616
   (3 Oct 2025). Stale `NIFTY=25` / `BANKNIFTY=15` copy is
   gone. Learn market facts that exchanges revise must ship
-  dated, not as forever hardcodes. Independent of #213
-  .
+  dated, not as forever hardcodes. Independent of #213.
 
 - **Performance follows the Review date range.**
   Trade Review **Performance** uses the same date range as
