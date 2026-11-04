@@ -24,20 +24,20 @@ curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/
 
 ## Requirements
 - Raspberry Pi 4 or 5 (4GB RAM minimum, 8GB recommended)
-- 64-bit OS whose **system** Python is `>=3.12` if you install from source
-  (Ubuntu 24.04 LTS on ARM, or Raspberry Pi OS Trixie). Raspberry Pi OS
-  Bookworm ships Python 3.11 and cannot meet the source-install floor.
+- 64-bit OS whose **system** Python is `>=3.14` if you install from source
+  (Ubuntu 26.04 LTS on ARM). Raspberry Pi OS Bookworm ships Python 3.11 and
+  cannot meet the source-install floor.
 - 32GB+ SD card or USB SSD
 
 The one-line installer above is the supported path on a Pi: it provisions
-its own Python 3.12 under `~/.flinttrade/tools` and does not use the
+its own Python 3.14 under `~/.flinttrade/tools` and does not use the
 system interpreter. `infra/install/install-native.sh` is the other supported
 Pi path when you want a bare-metal Ubuntu/Debian install with its own
-Python 3.12.
+Python 3.14.
 
 ## Setup (ARM64 server — advanced)
 
-`setup-production.sh` is an Ubuntu 24.04 / Python >= 3.12 host provisioner
+`setup-production.sh` is an Ubuntu 26.04 / Python >= 3.14 host provisioner
 only. It is not the Bookworm path. It provisions `/opt/flinttrade` to match
 `infra/systemd/flinttrade.service`, creates a repo-local `.venv`, builds the
 terminal, provisions the vault secret as `www-data`, and chowns only runtime

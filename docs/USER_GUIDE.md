@@ -41,7 +41,7 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
-It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
+It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
 launcher — `~/.local/bin/flinttrade-web` on macOS and Linux,
@@ -87,7 +87,7 @@ On Windows, run the checkout copy with
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. It expects you to supply
-the toolchain yourself: git, Python 3.12+, Node 22.22.2+, `uv` and `pnpm`.
+the toolchain yourself: git, Python 3.14+, Node 22.22.2+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -167,7 +167,7 @@ distribution-signing and notarisation secrets.
 ### Terminal dev server (contributors)
 
 When you are changing terminal code, run the Vite dev server alongside the
-backend instead of the built UI. It requires Python 3.12+, Node.js 22.22.2+, Git,
+backend instead of the built UI. It requires Python 3.14+, Node.js 22.22.2+, Git,
 and optionally Rust for `core/ticks`.
 
 ```bash

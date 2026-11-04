@@ -9,7 +9,7 @@ and no make.
 curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 ```
 
-It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node and
+It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node and
 pnpm) into `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a
 `flinttrade-web` launcher at `~/.local/bin/flinttrade-web`. No `sudo` is used.
@@ -112,10 +112,10 @@ same two targets. Generated packages live under
 
 ## Source development
 
-Requires Python `>=3.12`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
+Requires Python `>=3.14`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
 optionally Rust for `core/ticks`. Those floors come from `[requirements]` in
-`flint.toml`, which is the single source of truth for them. Ubuntu 22.04's
-system Python is 3.10 — use 24.04+, a user-space 3.12+, or the one-line
+`flint.toml`, which is the single source of truth for them. Ubuntu releases
+before 26.04 do not ship Python 3.14 — use Ubuntu 26.04, or the one-line
 installer, which provisions its own interpreter.
 
 pnpm is pinned in the root `package.json` `packageManager` field, so install it
@@ -150,8 +150,8 @@ every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
 
-`infra/scripts/setup-production.sh` is the Ubuntu 24.04 production installer
-(Python >= 3.12). A checkout of this repository is only the *script* source;
+`infra/scripts/setup-production.sh` is the Ubuntu 26.04 production installer
+(Python >= 3.14). A checkout of this repository is only the *script* source;
 the installer provisions `/opt/flinttrade` itself. The unit is hardcoded to
 that prefix (`ProtectHome=true`). There is no directory override.
 

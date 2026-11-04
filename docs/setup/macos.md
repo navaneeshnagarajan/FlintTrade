@@ -12,7 +12,7 @@ and no make.
 curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 ```
 
-It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node and
+It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node and
 pnpm) into `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a
 `flinttrade-web` launcher at `~/.local/bin/flinttrade-web`. No `sudo` is used.
@@ -146,7 +146,7 @@ available only through release CI when its complete secret sets are supplied.
 
 ## Source development
 
-Requires Python `>=3.12`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
+Requires Python `>=3.14`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
 optionally Rust for `core/ticks`. Those floors come from `[requirements]` in
 `flint.toml`, which is the single source of truth for them.
 

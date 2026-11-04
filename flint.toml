@@ -45,19 +45,19 @@ site_url = "https://flinttrade.vercel.app"
 # tests/test_minimum_requirements_single_source.py fails, naming the file and
 # line, when any tracked surface disagrees with the values below.
 [requirements]
-# Every packages/*/*/pyproject.toml declares this floor (14 of them).
-python_requires = ">=3.12"
+# Every pyproject.toml declares this floor.
+python_requires = ">=3.14"
 python_target = "3.14"
 # jsdom 30 declares Node 22 support from 22.22.2 and is the binding constraint
 # for the checked-in terminal test environment. Node 22 is in maintenance, so
 # the target runs ahead of the floor rather than dragging it up.
 node_requires = ">=22.22.2"
 node_target = "24"
-# Derived, not chosen: the floor is whichever release provides Python >= 3.12.
-# Ubuntu 24.04 LTS ships 3.12; 22.04 ships 3.10 and cannot meet the floor with
-# its system interpreter. The one-line installer sidesteps this entirely by
-# provisioning its own managed Python, so this constrains source installs only.
-os_requires = "Ubuntu 24.04 LTS or any platform providing Python >= 3.12"
+# Derived, not chosen: the floor is whichever release provides Python >= 3.14.
+# Ubuntu 26.04 LTS ships Python 3.14. Earlier Ubuntu releases do not meet the
+# floor with their system interpreter. The one-line installer sidesteps this
+# by provisioning its own managed Python, so this constrains source installs only.
+os_requires = "Ubuntu 26.04 LTS or any platform providing Python >= 3.14"
 os_target = "Ubuntu 26.04 LTS"
 
 [packages]

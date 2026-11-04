@@ -93,7 +93,7 @@ def _finite_sse_generator(events: list[str]):
         A callable matching the signature of ``_sse_generator(pipeline)``.
     """
 
-    def _gen(_pipeline, **_kwargs) -> Generator[str, None, None]:  # noqa: ANN001
+    def _gen(_pipeline, **_kwargs) -> Generator[str]:  # noqa: ANN001
         yield from events
 
     return _gen
@@ -228,7 +228,7 @@ class TestSignalsStream:
             *,
             auth_revalidator: object,
             shutdown_event: object,
-        ) -> Generator[str, None, None]:
+        ) -> Generator[str]:
             captured["auth_revalidator"] = auth_revalidator
             captured["shutdown_event"] = shutdown_event
             yield ": heartbeat\n\n"

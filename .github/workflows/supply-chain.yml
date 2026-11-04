@@ -64,7 +64,7 @@ jobs:
   # guard scripts and build workflows; unknown paths select all checks.
   changed-surfaces:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       dependencies: ${{ steps.classify.outputs.dependencies }}
@@ -72,8 +72,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '3.14' }
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -91,7 +91,7 @@ jobs:
   # ordered steps sharing a single checkout/setup. Previously eight separate jobs.
   python-audit:
     name: Python audit (pip-audit + lock/licence/provenance/install gates)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -101,8 +101,8 @@ jobs:
         run: |
           rm -f pip-audit-report.json
           rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
@@ -137,7 +137,7 @@ jobs:
 
   rust-audit:
     name: Rust audit (cargo audit)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
@@ -158,14 +158,14 @@ jobs:
 
   node-audit:
     name: Node audit (pnpm audit)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -184,15 +184,15 @@ jobs:
 
   transitive-licences:
     name: transitive dependency licence sweep
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
     continue-on-error: true       # informational; does not block merge in v1.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: pip install --require-hashes -r requirements.lock
       - run: pip-licenses --from=mixed --order=license --format=json --output-file=supply-chain/transitive-licences.json
@@ -215,8 +215,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: uv sync --frozen
       - name: ACL test
@@ -229,19 +229,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 
   cla-gpg-binding:
     name: CLA GPG fingerprint binding (Identity H8)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     # External-fork pull requests only. On push/schedule/dispatch,
     # github.event.pull_request is empty, so the old "not our repo" comparison
@@ -252,8 +252,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }   # full history for GPG signature verification
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: "3.12.8" }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.14.10" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: sudo apt-get install -y gnupg
       - run: python scripts/check-cla-gpg-binding.py

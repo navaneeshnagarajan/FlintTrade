@@ -228,9 +228,8 @@ def test_workflows_exist_and_parse() -> None:
 def test_linux_jobs_do_not_use_the_floating_ubuntu_label() -> None:
     """Hosted Linux jobs pin an Ubuntu image.
 
-    ``ubuntu-latest`` now resolves to 26.04, which does not provide the
-    pinned Python 3.12.8 toolchain or ``libpython3.12``. Versioned labels
-    such as ``ubuntu-24.04``, ``ubuntu-22.04`` and ``ubuntu-26.04`` stay.
+    Hosted Linux jobs use ``ubuntu-26.04``. Floating ``ubuntu-latest`` is
+    refused so a later image move cannot drop the Python 3.14 toolchain.
     """
     offenders: list[str] = []
     for path in sorted(_WORKFLOW_DIR.glob("*.yml")) + sorted(_WORKFLOW_DIR.glob("*.yaml")):

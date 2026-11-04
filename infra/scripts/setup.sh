@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FlintTrade first-time setup script
-# Works on Ubuntu 24.04 (primary), macOS, and other Linux distros
+# Works on Ubuntu 26.04 (primary), macOS, and other Linux distros
 set -euo pipefail
 
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -45,7 +45,7 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     echo "OS: $PRETTY_NAME"
     if [[ "${ID:-}" != "ubuntu" || ! "${VERSION_ID:-}" =~ ^24 ]]; then
-        warn "Tested on Ubuntu 24.04. Your OS may work but is not verified."
+        warn "Tested on Ubuntu 26.04. Your OS may work but is not verified."
     fi
 elif [[ "$(uname)" == "Darwin" ]]; then
     echo "OS: macOS $(sw_vers -productVersion)"
@@ -115,17 +115,21 @@ check_python() {
         if is_store_stub python3; then
             fail "python3: Microsoft Store alias stub (exits 49, runs nothing)"
             echo "  Disable it under Settings > Apps > Advanced app settings > App execution aliases,"
-            echo "  then install real Python 3.12+ from https://python.org"
+            echo "  then install real Python 3.14+ from https://python.org"
         else
             fail "python3: found on PATH but does not run"
         fi
+        return 1
+    fi
+    if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)'; then
+        fail "python3: Python >= 3.14 is required"
         return 1
     fi
     ok "python3: $(python3 --version 2>&1 | head -1)"
     return 0
 }
 
-check_python || { echo "Install Python 3.12+:"; install_hint python3; exit 1; }
+check_python || { echo "Install Python 3.14+:"; install_hint python3; exit 1; }
 check_cmd pip3 || check_cmd pip || { echo "Install pip:"; install_hint python3 python3-pip; exit 1; }
 check_cmd git || { echo "Install git:"; install_hint git; exit 1; }
 check_cmd curl || { echo "Install curl:"; install_hint curl; exit 1; }

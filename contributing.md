@@ -25,7 +25,7 @@ platform. Pick whatever you already run.
 
 | Tool | Version | How we manage it |
 |---|---|---|
-| **Python** | `>=3.12` (we develop against 3.14) | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
+| **Python** | `>=3.14` | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
 | **Node.js** | `>=22.22.2` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
 | **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick engine. |
 
@@ -256,10 +256,9 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
 - Absolute imports for anything cross-package or top-level
   (`flinttrade_<pkg>....`). Intra-package relative imports
   (`from .sibling import x`) are fine.
-- The floor is Python 3.12 (`python_requires` in `flint.toml`); we develop and
-  run CI against `python_target`, currently 3.14. Write to the floor — `StrEnum`
-  and other 3.11+ features are used deliberately — but do not assume 3.12 is what
-  is executing.
+- The floor is Python 3.14 (`python_requires` in `flint.toml`), and CI runs
+  that same series. Write to the floor — `list[int]` and `X | None` — and do
+  not assume an older interpreter is executing.
 
 ### TypeScript and React
 

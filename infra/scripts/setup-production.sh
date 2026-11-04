@@ -1,5 +1,5 @@
 #!/bin/bash
-# FlintTrade First-Time Setup (Ubuntu 24.04)
+# FlintTrade First-Time Setup (Ubuntu 26.04)
 # Run once only. Provisions the host (system packages, Node 22, data and log
 # directories) and installs FlintTrade as a systemd service.
 # Absorbed infra/scripts/setup-ubuntu.sh (host-provisioning steps) — this is
@@ -54,8 +54,8 @@ cd "$INSTALL_DIR"
 
 # Python virtualenv — flinttrade.service ExecStart's $INSTALL_DIR/.venv/bin/python.
 # Apt-installing python3-venv is not enough; the unit path must exist.
-# Ubuntu 24.04 only: refuse Bookworm/Pi system Python 3.11 before creating .venv.
-echo "Checking Python >= 3.12..."
+# Ubuntu 26.04: refuse an older system Python before creating .venv.
+echo "Checking Python >= 3.14..."
 flinttrade_assert_python_floor "$PYTHON_BIN"
 
 echo "Creating Python virtual environment at $VENV_DIR..."

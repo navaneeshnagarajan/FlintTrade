@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Screenshot mismatches and new axe violations fail the Playwright process.
  * `e2e/visual/run-advisory.mjs` turns that into a green job while
- * `VISUAL_AXE_GATE` is "0". Pixel baselines belong to ubuntu-24.04 only.
+ * `VISUAL_AXE_GATE` is "0". Pixel baselines belong to ubuntu-26.04 only.
  */
 const advisory = process.env["VISUAL_AXE_ADVISORY"] === "1";
 
