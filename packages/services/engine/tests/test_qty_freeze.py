@@ -238,12 +238,12 @@ def test_load_from_csv_updates_existing_limits(mgr: QuantityFreezeManager, tmp_p
 
 def test_nse_defaults_seeded_on_fresh_db(tmp_path: Path) -> None:
     mgr = QuantityFreezeManager(db_path=tmp_path / "defaults.duckdb")
-    assert mgr.get_limit("NIFTY", "NFO") == 3510
-    assert mgr.get_limit("BANKNIFTY", "NFO") == 1440
-    assert mgr.get_limit("FINNIFTY", "NFO") == 3240
-    assert mgr.get_limit("MIDCPNIFTY", "NFO") == 5760
-    assert mgr.get_limit("NIFTYNXT50", "NFO") == 1125
-    assert mgr.get_limit("NIFTYFPI", "NFO") == 53900
+    assert mgr.get_limit("NIFTY", "NFO") == 1800
+    assert mgr.get_limit("BANKNIFTY", "NFO") == 900
+    assert mgr.get_limit("FINNIFTY", "NFO") == 1800
+    assert mgr.get_limit("MIDCPNIFTY", "NFO") == 2800
+    assert mgr.get_limit("NIFTYNXT50", "NFO") == 600
+    assert mgr.get_limit("NIFTYFPI", "NFO") == 8500
     assert mgr.get_limit("SENSEX", "BFO") == 500
     mgr.close()
 
@@ -444,20 +444,58 @@ class TestWorkspaceResolution:
 def test_admission_uses_circular_limits_and_does_not_split() -> None:
     from flinttrade_engine.qty_freeze import quantity_admission_refusal
 
-    assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3510, lot_size=65) is None
-    message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 3575, lot_size=65)
-    assert message == "Max 3510 per order for NIFTY 24500 CE. Place smaller orders."
-    assert quantity_admission_refusal("BANKNIFTY", "NFO", 1455, lot_size=15) == (
-        "Max 1440 per order for BANKNIFTY. Place smaller orders."
+    assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1755, lot_size=65) is None
+    message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1820, lot_size=65)
+    assert message == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert quantity_admission_refusal("BANKNIFTY", "NFO", 915, lot_size=30) == (
+        "Max 900 per order for BANKNIFTY. Place smaller orders."
     )
-    assert quantity_admission_refusal("NIFTYNXT50", "NFO", 1126) == (
-        "Max 1125 per order for NIFTYNXT50. Place smaller orders."
+    assert quantity_admission_refusal("NIFTYNXT50", "NFO", 601) == (
+        "Max 600 per order for NIFTYNXT50. Place smaller orders."
     )
-    assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 3240) is None
-    assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 5761) == (
-        "Max 5760 per order for MIDCPNIFTY. Place smaller orders."
+    assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 1800) is None
+    assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 2801) == (
+        "Max 2,800 per order for MIDCPNIFTY. Place smaller orders."
     )
-    assert quantity_admission_refusal("NIFTYFPI", "NFO", 53900) is None
+    assert quantity_admission_refusal("NIFTYFPI", "NFO", 8500) is None
+
+
+def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
+    from flinttrade_engine.qty_freeze import max_placeable_quantity, quantity_admission_refusal
+
+    assert max_placeable_quantity("NIFTY", 65) == 1755
+    assert max_placeable_quantity("NIFTY-OCT2026-FUT", 65) == 1755
+    assert 1755 % 65 == 0
+    assert quantity_admission_refusal("NIFTY", "NFO", 1755, lot_size=65) is None
+    over_max = "Max 1,755 per order for NIFTY. Place smaller orders."
+    assert quantity_admission_refusal("NIFTY", "NFO", 1801, lot_size=65) == over_max
+    assert quantity_admission_refusal("NIFTY", "NFO", 1800, lot_size=65) == over_max
+    assert quantity_admission_refusal("NIFTY", "NFO", 1820, lot_size=65) == over_max
+    assert quantity_admission_refusal("BANKNIFTY", "NFO", 901, lot_size=30) == (
+        "Max 900 per order for BANKNIFTY. Place smaller orders."
+    )
+    assert quantity_admission_refusal("NIFTY", "NFO", 100, lot_size=65) == (
+        "Quantity must be a multiple of the lot size (65)."
+    )
+
+
+def test_order_slices_use_each_index_freeze_quantity() -> None:
+    from flinttrade_engine.qty_freeze import slice_order_quantities
+
+    published = {
+        "NIFTY": 1800,
+        "BANKNIFTY": 900,
+        "FINNIFTY": 1800,
+        "MIDCPNIFTY": 2800,
+        "NIFTYNXT50": 600,
+        "NIFTYFPI": 8500,
+    }
+    lot = 50
+    for symbol, freeze in published.items():
+        assert freeze % lot == 0
+        assert slice_order_quantities(symbol, freeze * 2 + lot, lot) == [freeze, freeze, lot]
+    assert slice_order_quantities("NIFTY", 1755 * 2 + 65, 65) == [1755, 1755, 65]
+    assert slice_order_quantities("NIFTYNXT50-OCT2026-FUT", 1200, lot) == [600, 600]
 
 
 def test_admission_prefers_broker_freeze_qty() -> None:
@@ -470,7 +508,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == "Max 100 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 65 per order for NIFTY 24500 CE. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",
