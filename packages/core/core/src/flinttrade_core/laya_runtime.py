@@ -21,6 +21,7 @@ import argparse
 import atexit
 import errno
 import hashlib
+import hmac
 import inspect
 import json
 import logging
@@ -1096,6 +1097,10 @@ class LayaRuntime:
         self._downloader = downloader
         self._process: Any | None = None
         self._attached = False
+        # Bind credentials without exposing an offline guessing oracle for
+        # attached keys. This private key lives only in this runtime object;
+        # never persist it or include it in status/qualification reports.
+        self._credential_witness_key = secrets.token_bytes(32)
         self._api_key = ""
         self._watched_key: Path | None = None
         self._key_rejected = False
@@ -1449,7 +1454,8 @@ class LayaRuntime:
             if not self._record_belongs_to_running_sidecar(check, policy):
                 raise LayaRuntimeError("Laya artifact belongs to a different runtime")
             value = [id(self), id(client), self._generation, asdict(check), self.base_url, self._device,
-                     hashlib.sha256(self._api_key.encode()).hexdigest(), self._watched_signature()]
+                     hmac.new(self._credential_witness_key, self._api_key.encode(), hashlib.sha256).hexdigest(),
+                     self._watched_signature()]
             return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
     def qualification_client(self, gate: Any) -> Any:
