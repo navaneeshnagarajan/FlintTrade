@@ -14,6 +14,7 @@ from flinttrade_core.indian_charges import round_trip
 from flinttrade_core.instrument_lots import (
     contract_quantity_message,
     fixture_path,
+    future_index_rows,
     load_fixture_rows,
     lot_size_for_contract,
     index_lot_line,
@@ -26,6 +27,19 @@ _ROOT = Path(__file__).resolve().parents[4]
 _REVISION_PATH = Path(__file__).parent / "data" / "instrument_lot_revision_window.json"
 _AS_OF = date(2026, 9, 1)
 _SYNTHETIC_IDS = ("13", "14", "25", "51", "9013", "9014", "9025", "9051")
+
+
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    import importlib.util
+
+    path = _ROOT / "tests" / "lot_clock.py"
+    spec = importlib.util.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _revision_window() -> tuple[list[dict[str, str]], dict[str, str]]:
@@ -216,10 +230,11 @@ def test_index_lot_line_uses_the_scalper_rows_and_marks_gaps() -> None:
 def test_risk_skill_lot_line_matches_the_scalper_labels() -> None:
     """The skill states the same multipliers the Scalper reads from the master.
 
-    The expiry month is the near contract on the day the test runs, so the
-    procedure quotes the sizes and not a calendar month that goes stale.
+    Expiries are generated from the test clock, so a shipped month cannot
+    blank the line. ``FLINTTRADE_CLOCK_OFFSET_MONTHS`` moves that clock.
     """
-    line = index_lot_line()
+    day = _lot_clock().clock_day()
+    line = index_lot_line(future_index_rows(day), as_of=day)
     head = "NIFTY 65 · BANKNIFTY 30 · SENSEX 20"
     assert re.fullmatch(
         r"NIFTY 65 · BANKNIFTY 30 · SENSEX 20 \((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) expiry\)",

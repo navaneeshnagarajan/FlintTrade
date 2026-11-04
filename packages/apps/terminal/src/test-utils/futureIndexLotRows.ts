@@ -12,6 +12,18 @@ const LOTS: readonly [string, string, string][] = [
   ["SENSEX", "BSE", "20"],
 ];
 
+/**
+ * Wall clock plus `FLINTTRADE_CLOCK_OFFSET_MONTHS`.
+ * Proof runs set `1` and `6` so a shipped expiry cannot blank the lookup.
+ */
+export function lotTestClock(from: Date = new Date()): Date {
+  const months = Number(process.env.FLINTTRADE_CLOCK_OFFSET_MONTHS ?? "0");
+  if (!Number.isFinite(months) || months === 0) return from;
+  const shifted = new Date(from.getTime());
+  shifted.setUTCMonth(shifted.getUTCMonth() + months);
+  return shifted;
+}
+
 function isoDaysAhead(days: number, from: Date): string {
   const date = new Date(from.getTime());
   date.setUTCDate(date.getUTCDate() + days);

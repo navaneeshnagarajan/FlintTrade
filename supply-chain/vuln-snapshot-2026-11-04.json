@@ -77,8 +77,29 @@
     },
     {
       "name": "certifi",
-      "version": "2026.10.23",
-      "vulns": []
+      "version": "2025.11.12",
+      "vulns": [
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        },
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        }
+      ]
     },
     {
       "name": "cffi",
@@ -575,9 +596,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-11-04T01:02:58.167033Z",
-    "audited_at": "2026-11-04T01:02:58.167033Z",
-    "requirements_lock_sha256": "92d6c229241e700c76a34a317bbfc206927c4e8770939de58f6115b44efa288e",
-    "pip_audit_exit_code": 0
+    "generated_at": "2026-11-04T03:46:08.736328Z",
+    "audited_at": "2026-11-04T03:46:08.736328Z",
+    "requirements_lock_sha256": "3b643f15cd7c9ccc0d9282cd15180df3b05ee41aaf1309108de74e4c3c51bd73",
+    "pip_audit_exit_code": 1
   }
 }

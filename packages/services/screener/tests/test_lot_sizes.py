@@ -9,6 +9,7 @@ Run with: python -m pytest packages/services/screener/tests/test_lot_sizes.py -v
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +21,26 @@ from flinttrade_screener.lot_sizes import (
 )
 
 
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[4] / "tests" / "lot_clock.py"
+    spec = importlib.util.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _clocked_index_master(monkeypatch: pytest.MonkeyPatch):
+    """Current index lots follow the test clock, not the shipped expiries."""
+    with _lot_clock().open_clocked_master(monkeypatch):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Fallback table
 # ---------------------------------------------------------------------------
@@ -29,9 +50,8 @@ class TestFallbackTable:
     def test_nifty_lot_size_comes_from_the_instrument_master(self):
         from flinttrade_core.instrument_lots import load_fixture_rows, lot_size_from_master
 
-        # Every shipped NIFTY future is 65. The lookup must not depend on a
-        # particular expiry still being in the future: a month with no row
-        # falls back only when the retained contracts agree.
+        # Every shipped NIFTY future is 65. The live lookup uses futures
+        # generated from the test clock, so a shipped expiry cannot blank it.
         nifty_lots = {
             int(str(row.get("SEM_LOT_UNITS") or row.get("lLotSize")))
             for row in load_fixture_rows()

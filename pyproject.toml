@@ -2,9 +2,10 @@
 no-build-package = ["growwapi"]
 
 constraint-dependencies = ["plotly==6.9.0"]
-# growwapi 1.5.0 (latest) caps certifi<2026, which is inside PYSEC-2026-4320.
-# certifi is a CA bundle; the patched 2026.10.23 release is a drop-in.
-override-dependencies = ["certifi==2026.10.23"]
+# certifi stays on the newest release growwapi 1.5.0 accepts (certifi<2026).
+# A uv override to the patched 2026 bundle does not apply to
+# `pip install --require-hashes -r requirements.lock`. The resulting advisory
+# is time-limited in supply-chain/pip-audit-allowlist.yml.
 
 # Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
 # retained as separate release-compatibility evidence in brokers.lock.

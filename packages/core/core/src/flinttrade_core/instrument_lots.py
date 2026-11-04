@@ -10,9 +10,11 @@ underlying may differ. The only rejected row is a real conflict: the same
 contract (same underlying, expiry month, and kind) carrying different sizes
 in the Dhan and Neo masters.
 
-There is no built-in NIFTY / BANKNIFTY / SENSEX table. A missing contract
-returns ``None``. A live session reads the disk cache written from the
-public masters; otherwise the shipped excerpt is used. Contracts whose
+There is no built-in NIFTY / BANKNIFTY / SENSEX table on the order path.
+A missing contract returns ``None``. ``future_index_rows`` only builds
+dated rows for a caller that already knows the published multipliers;
+order lookup does not read it. A live session reads the disk cache written
+from the public masters; otherwise the shipped excerpt is used. Contracts whose
 expiry is before today (IST) are dropped. A month with no unexpired row
 stays unverified for orders. The index line may name the last listed size
 when every retained contract agrees, and stays ``—`` when they do not.
@@ -24,7 +26,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -131,6 +133,41 @@ def cache_path() -> Path:
 def today_ist() -> date:
     """Current calendar day in India Standard Time."""
     return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+
+# Published contract multipliers. A later exchange revision belongs in the
+# shipped excerpt, not in this generator.
+_FUTURE_INDEX_LOTS: tuple[tuple[str, str], ...] = (
+    ("NIFTY", "65"),
+    ("BANKNIFTY", "30"),
+    ("SENSEX", "20"),
+)
+
+
+def future_index_rows(as_of: date) -> tuple[dict[str, object], ...]:
+    """Near, next and far index futures measured from ``as_of``.
+
+    NIFTY, BANKNIFTY and SENSEX share each expiry, and every expiry is after
+    ``as_of``, so the near month stays one calendar month when the clock
+    moves. The multipliers are the published sizes (65, 30 and 20). These
+    rows are not the shipped excerpt, and they do not make an expired
+    security id placeable.
+    """
+    rows: list[dict[str, object]] = []
+    for month in range(3):
+        expiry = (as_of + timedelta(days=28 + month * 32)).isoformat()
+        for symbol, lot in _FUTURE_INDEX_LOTS:
+            rows.append(
+                {
+                    "SEM_SMST_SECURITY_ID": f"{symbol}-{month}",
+                    "SEM_CUSTOM_SYMBOL": symbol,
+                    "SEM_INSTRUMENT_NAME": "FUTIDX",
+                    "SEM_TRADING_SYMBOL": f"{symbol}-FUT",
+                    "SEM_EXPIRY_DATE": expiry,
+                    "SEM_LOT_UNITS": lot,
+                }
+            )
+    return tuple(rows)
 
 
 def _resolve_as_of(as_of: date | None) -> date:
