@@ -23,7 +23,7 @@
  *     same way until the operator changes the symbol or closes the pad.
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo, type KeyboardEvent } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
 import { useAtomValue } from "jotai";
 import { useModeStore } from "@/stores/modeStore";
@@ -65,9 +65,10 @@ import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErr
 import {
   checkLotMultiple,
   checkOrderEntryMode,
-  checkFreezeQuantity,
   checkOrderQuantityLimit,
-  lotMultipleRefusal,
+  maxPlaceableQuantity,
+  quantityAdmissionRefusal,
+  quantityCapLabel,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -250,6 +251,12 @@ function StepInput({
     const next = n + step;
     onChange(String(max != null ? Math.min(max, next) : next));
   }
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    if (event.key === "ArrowUp") inc();
+    else dec();
+  }
   const numeric = parseFloat(String(value)) || 0;
   const atMax = max != null && numeric >= max;
 
@@ -273,6 +280,7 @@ function StepInput({
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
           disabled={disabled}
           min={min}
           max={max}
@@ -767,12 +775,15 @@ function OrderPadWidget(props: WidgetProps) {
           calculated = Math.floor(amount / ltp);
         }
         if (calculated >= 1) {
-          const capped = closeCap != null ? Math.min(calculated, closeCap) : calculated;
+          const placeable = lotSize > 0 ? maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty) : null;
+          const caps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
+            .filter((value): value is number => value != null);
+          const capped = caps.length > 0 ? Math.min(calculated, ...caps) : calculated;
           if (capped >= 1) setValue("qty", capped);
         }
       }
     },
-    [closeCap, ltp, lotSize, setValue],
+    [brokerFreezeQty, closeCap, ltp, lotSize, setValue, symbol],
   );
 
   const handleQtyChange = useCallback(
@@ -1156,7 +1167,9 @@ function OrderPadWidget(props: WidgetProps) {
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
     const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
-      ?? checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty);
+      ?? (lotSizeKnown
+        ? quantityAdmissionRefusal(values.symbol, values.qty, lotSize, brokerFreezeQty)
+        : null);
     if (qtyRefusal) {
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
       return;
@@ -1194,9 +1207,8 @@ function OrderPadWidget(props: WidgetProps) {
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
         ? missingLotRefusal(deskContractName(values.symbol))
-        : lotMultipleRefusal(lotSize);
+        : lotRefusal;
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
-      showToast("error", msg, 6000, false, QUANTITY_CHECK_ERROR);
       return;
     }
 
@@ -1677,11 +1689,6 @@ function OrderPadWidget(props: WidgetProps) {
               Fund
             </button>
           </div>
-          {lotSize > 0 && (
-            <span className="ml-auto text-xxs text-text-muted font-mono tabular-nums">
-              Lot: {lotSize}
-            </span>
-          )}
         </div>
 
         {/* Qty mode: manual quantity + price row */}
@@ -1690,28 +1697,48 @@ function OrderPadWidget(props: WidgetProps) {
             <Controller
               control={control}
               name="qty"
-              render={({ field }) => (
-                <>
-                  <StepInput
-                    id="orderpad-qty"
-                    label="Quantity"
-                    value={field.value}
-                    onChange={(v) => handleQtyChange(v, field.onChange)}
-                    // One lot is the floor when the lot size is known, keeping the
-                    // stepper (and the native spinner's step base) lot-aligned.
-                    min={closeCap != null ? 1 : (lotSize > 0 ? lotSize : 1)}
-                    max={closeCap ?? undefined}
-                    step={closeCap != null && lotSize > closeCap ? 1 : (lotSize > 0 ? lotSize : 1)}
-                    invalid={!!errors.qty}
-                    errorId={errors.qty ? "orderpad-qty-error" : undefined}
-                  />
-                  {errors.qty && (
-                    <span id="orderpad-qty-error" role="alert" className="text-xs text-loss col-span-2 -mt-2">
-                      {errors.qty.message}
-                    </span>
-                  )}
-                </>
-              )}
+              render={({ field }) => {
+                const placeable = lotSizeKnown && lotSize > 0
+                  ? maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty)
+                  : null;
+                const quantityHint = placeable != null && placeable > 0
+                  ? quantityCapLabel(lotSize, placeable)
+                  : lotSize > 0
+                    ? `Lot: ${lotSize}`
+                    : "";
+                const stepperCaps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
+                  .filter((value): value is number => value != null);
+                const stepperMax = stepperCaps.length > 0 ? Math.min(...stepperCaps) : undefined;
+                return (
+                  <div className="flex flex-col gap-1">
+                    <StepInput
+                      id="orderpad-qty"
+                      label="Quantity"
+                      value={field.value}
+                      onChange={(v) => handleQtyChange(v, field.onChange)}
+                      // One lot is the floor when the lot size is known, keeping the
+                      // stepper (and the native spinner's step base) lot-aligned.
+                      // The max stops the stepper at the lot-aligned cap. A typed
+                      // or pasted value above that cap is left as entered and refused.
+                      min={closeCap != null ? 1 : (lotSize > 0 ? lotSize : 1)}
+                      max={stepperMax}
+                      step={closeCap != null && lotSize > closeCap ? 1 : (lotSize > 0 ? lotSize : 1)}
+                      invalid={!!errors.qty}
+                      errorId={errors.qty ? "orderpad-qty-error" : "orderpad-qty-hint"}
+                    />
+                    <p id="orderpad-qty-hint" className="min-h-4 text-xs leading-4 text-text-muted">
+                      {quantityHint || "\u00a0"}
+                    </p>
+                    <p
+                      id="orderpad-qty-error"
+                      role={errors.qty ? "alert" : undefined}
+                      className="min-h-4 text-xs leading-4 text-loss"
+                    >
+                      {errors.qty?.message || "\u00a0"}
+                    </p>
+                  </div>
+                );
+              }}
             />
             <Controller
               control={control}

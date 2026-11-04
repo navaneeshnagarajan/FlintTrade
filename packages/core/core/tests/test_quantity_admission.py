@@ -42,7 +42,7 @@ def test_admit_place_refuses_before_laya(monkeypatch: pytest.MonkeyPatch, app_co
     assert status == 400
     body = response.get_json()
     assert body["code"] == "quantity_admission"
-    assert body["message"] == "Max 1800 per order for NIFTY 24500 CE. Place smaller orders."
+    assert body["message"] == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
 
 
 @pytest.mark.unit
@@ -52,7 +52,7 @@ def test_admit_place_accepts_a_quantity_at_the_freeze_limit(app_context: None) -
             "symbol": "BANKNIFTY",
             "exchange": "NFO",
             "quantity": 900,
-            "lot_size": 15,
+            "lot_size": 30,
         }
     ) is None
 

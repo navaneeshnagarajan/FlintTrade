@@ -446,8 +446,8 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
 
     assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1755, lot_size=65) is None
     message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1820, lot_size=65)
-    assert message == "Max 1800 per order for NIFTY 24500 CE. Place smaller orders."
-    assert quantity_admission_refusal("BANKNIFTY", "NFO", 915, lot_size=15) == (
+    assert message == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert quantity_admission_refusal("BANKNIFTY", "NFO", 915, lot_size=30) == (
         "Max 900 per order for BANKNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYNXT50", "NFO", 601) == (
@@ -455,7 +455,7 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
     )
     assert quantity_admission_refusal("FINNIFTY-OCT2026-FUT", "NFO", 1800) is None
     assert quantity_admission_refusal("MIDCPNIFTY", "NFO", 2801) == (
-        "Max 2800 per order for MIDCPNIFTY. Place smaller orders."
+        "Max 2,800 per order for MIDCPNIFTY. Place smaller orders."
     )
     assert quantity_admission_refusal("NIFTYFPI", "NFO", 8500) is None
 
@@ -467,11 +467,15 @@ def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
     assert max_placeable_quantity("NIFTY-OCT2026-FUT", 65) == 1755
     assert 1755 % 65 == 0
     assert quantity_admission_refusal("NIFTY", "NFO", 1755, lot_size=65) is None
-    assert quantity_admission_refusal("NIFTY", "NFO", 1800, lot_size=65) == (
-        "Quantity must be a multiple of the lot size (65)."
+    over_max = "Max 1,755 per order for NIFTY. Place smaller orders."
+    assert quantity_admission_refusal("NIFTY", "NFO", 1801, lot_size=65) == over_max
+    assert quantity_admission_refusal("NIFTY", "NFO", 1800, lot_size=65) == over_max
+    assert quantity_admission_refusal("NIFTY", "NFO", 1820, lot_size=65) == over_max
+    assert quantity_admission_refusal("BANKNIFTY", "NFO", 901, lot_size=30) == (
+        "Max 900 per order for BANKNIFTY. Place smaller orders."
     )
-    assert quantity_admission_refusal("NIFTY", "NFO", 1820, lot_size=65) == (
-        "Max 1800 per order for NIFTY. Place smaller orders."
+    assert quantity_admission_refusal("NIFTY", "NFO", 100, lot_size=65) == (
+        "Quantity must be a multiple of the lot size (65)."
     )
 
 
@@ -504,7 +508,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == "Max 100 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 65 per order for NIFTY 24500 CE. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",

@@ -268,14 +268,37 @@ export function orderSymbolLabel(symbol: string): string {
   return text || "this contract";
 }
 
-/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
-export function lotMultipleRefusal(lotSize: number): string {
-  return `Quantity must be a multiple of the lot size (${lotSize}).`;
+/** Visible quantity sentences. Match engine admission so wording is one edit. */
+export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
+export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
+export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
+
+/** Indian digit grouping, matching en-IN. */
+export function formatIndianQuantity(value: number): string {
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(value);
 }
 
-/** Same freeze sentence as order admission. The number is the broker freeze when one was sent. */
-export function freezeQuantityRefusal(symbol: string, freeze: number): string {
-  return `Max ${freeze} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
+/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
+export function lotMultipleRefusal(lotSize: number): string {
+  return LOT_MULTIPLE_REFUSAL.replace("{lot}", String(lotSize));
+}
+
+/**
+ * Same over-max sentence as order admission.
+ *
+ * `placeable` is the lot-aligned cap, not the raw freeze.
+ */
+export function freezeQuantityRefusal(symbol: string, placeable: number): string {
+  return OVER_MAX_REFUSAL
+    .replace("{cap}", formatIndianQuantity(placeable))
+    .replace("{symbol}", orderSymbolLabel(symbol));
+}
+
+/** Muted helper under Quantity. Never names the raw freeze. */
+export function quantityCapLabel(lotSize: number, placeable: number): string {
+  return QUANTITY_CAP_LABEL
+    .replace("{lot}", String(lotSize))
+    .replace("{cap}", formatIndianQuantity(placeable));
 }
 
 /**
@@ -339,17 +362,50 @@ export function sliceOrderQuantities(
 }
 
 /**
+ * Refuse an over-cap quantity before a lot-multiple breach.
+ *
+ * With a lot size, the cap is the freeze rounded down to a whole number of
+ * lots. A quantity that breaks both rules returns only the over-max
+ * sentence. Without a lot size, the raw freeze is the cap. Returns null for
+ * non-positive values so the minimum check owns that sentence.
+ */
+export function quantityAdmissionRefusal(
+  symbol: string,
+  quantity: number,
+  lotSize?: number | null,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const lot = typeof lotSize === "number" && Number.isInteger(lotSize) && lotSize > 0 ? lotSize : null;
+  if (lot != null) {
+    const cap = maxPlaceableQuantity(symbol, lot, brokerFreezeQty);
+    if (cap != null && quantity > cap) return freezeQuantityRefusal(symbol, cap);
+    if (quantity % lot !== 0) return lotMultipleRefusal(lot);
+    return null;
+  }
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || quantity <= limit) return null;
+  return freezeQuantityRefusal(symbol, limit);
+}
+
+/**
  * Refuse a quantity above the freeze quantity.
  *
- * Returns null for non-positive values so the minimum check owns that
- * sentence. The visible message matches order admission.
+ * Pass `lotSize` so the sentence uses the lot-aligned cap. Returns null for
+ * non-positive values so the minimum check owns that sentence.
  */
 export function checkFreezeQuantity(
   symbol: string,
   quantity: number,
   brokerFreezeQty?: number | null,
+  lotSize?: number | null,
 ): string | null {
   if (!Number.isInteger(quantity) || quantity < 1) return null;
+  if (typeof lotSize === "number" && Number.isInteger(lotSize) && lotSize > 0) {
+    const cap = maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty);
+    if (cap == null || quantity <= cap) return null;
+    return freezeQuantityRefusal(symbol, cap);
+  }
   const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
   if (limit == null || quantity <= limit) return null;
   return freezeQuantityRefusal(symbol, limit);

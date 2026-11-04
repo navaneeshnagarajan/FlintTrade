@@ -8,6 +8,8 @@ import {
   resolveLotQuantity,
   checkFreezeQuantity,
   maxPlaceableQuantity,
+  quantityAdmissionRefusal,
+  quantityCapLabel,
   sliceOrderQuantities,
   NSE_INDEX_FREEZE_QUANTITY,
   checkOrderQuantityLimit,
@@ -187,7 +189,7 @@ describe("checkFreezeQuantity", () => {
   it("uses NSE/FAOP/77189 when the broker does not send a freeze quantity", () => {
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1800)).toBeNull();
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1820)).toBe(
-      "Max 1800 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 1,800 per order for NIFTY 24500 CE. Place smaller orders.",
     );
     expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 601)).toBe(
       "Max 600 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
@@ -199,8 +201,25 @@ describe("checkFreezeQuantity", () => {
   it("rounds the NIFTY maximum placeable quantity down to 1755 at lot 65", () => {
     expect(maxPlaceableQuantity("NIFTY", 65)).toBe(1755);
     expect(maxPlaceableQuantity("NIFTY-OCT2026-FUT", 65)).toBe(1755);
-    expect(checkFreezeQuantity("NIFTY", 1755)).toBeNull();
+    expect(quantityCapLabel(65, 1755)).toBe("Lot 65 · Max 1,755 per order");
+    expect(checkFreezeQuantity("NIFTY", 1755, null, 65)).toBeNull();
     expect(1755 % 65).toBe(0);
+  });
+
+  it("checks the lot-aligned cap before the lot multiple on both sides of the cap", () => {
+    const overMax = "Max 1,755 per order for NIFTY. Place smaller orders.";
+    expect(quantityAdmissionRefusal("NIFTY", 1801, 65)).toBe(overMax);
+    expect(quantityAdmissionRefusal("NIFTY", 1800, 65)).toBe(overMax);
+    expect(quantityAdmissionRefusal("NIFTY 24500 CE", 1800, 65)).toBe(
+      "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("BANKNIFTY", 901, 30)).toBe(
+      "Max 900 per order for BANKNIFTY. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 100, 65)).toBe(
+      "Quantity must be a multiple of the lot size (65).",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 1755, 65)).toBeNull();
   });
 
   it("slices each index at its NSE/FAOP/77189 freeze quantity", () => {
@@ -229,6 +248,9 @@ describe("checkFreezeQuantity", () => {
   it("uses the broker freeze quantity ahead of the circular", () => {
     expect(checkFreezeQuantity("NIFTY", 130, 100)).toBe(
       "Max 100 per order for NIFTY. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 130, 65, 100)).toBe(
+      "Max 65 per order for NIFTY. Place smaller orders.",
     );
   });
 });

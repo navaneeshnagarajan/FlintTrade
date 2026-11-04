@@ -157,6 +157,47 @@ def order_symbol_label(symbol: str) -> str:
     return text or "this contract"
 
 
+# Visible quantity sentences. Admission and the order pad use these templates
+# so a wording change is one edit. The number is the lot-aligned cap.
+OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders."
+LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot})."
+QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order"
+
+
+def format_indian_quantity(value: int) -> str:
+    """Format a quantity with Indian digit grouping (en-IN)."""
+    text = str(abs(value))
+    if len(text) <= 3:
+        return text
+    head, tail = text[:-3], text[-3:]
+    groups = [tail]
+    while head:
+        groups.append(head[-2:])
+        head = head[:-2]
+    return ",".join(reversed(groups))
+
+
+def over_max_refusal(symbol: str, placeable: int) -> str:
+    """Refusal when the quantity is above the lot-aligned cap."""
+    return OVER_MAX_REFUSAL.format(
+        cap=format_indian_quantity(placeable),
+        symbol=order_symbol_label(symbol),
+    )
+
+
+def lot_multiple_refusal(lot_size: int) -> str:
+    """Refusal when the quantity is under the cap but not a whole number of lots."""
+    return LOT_MULTIPLE_REFUSAL.format(lot=lot_size)
+
+
+def quantity_cap_label(lot_size: int, placeable: int) -> str:
+    """Muted helper under Quantity. Never names the raw freeze."""
+    return QUANTITY_CAP_LABEL.format(
+        lot=lot_size,
+        cap=format_indian_quantity(placeable),
+    )
+
+
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
     """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/77189 index table.
 
@@ -234,11 +275,13 @@ def quantity_admission_refusal(
     lot_size: int | None = None,
     broker_freeze_qty: int | None = None,
 ) -> str | None:
-    """Refuse a quantity that is not a lot multiple or is above the freeze quantity.
+    """Refuse an over-cap quantity first, then a quantity that is not a lot multiple.
 
-    A missing lot size skips the multiple check. A missing freeze quantity
-    skips the freeze check. The sentences are the same for Practice and Live.
-    Nothing here splits the order into smaller slices.
+    The visible cap is the freeze rounded down to a whole number of lots.
+    When the quantity breaks both rules, only the over-max sentence is
+    returned. A missing lot size skips the multiple check and compares with
+    the raw freeze. A missing freeze skips the cap check. Nothing here
+    splits the order.
 
     Args:
         _exchange: Order segment. The visible lot sentence does not name it.
@@ -249,12 +292,17 @@ def quantity_admission_refusal(
     if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
         return None
     lot = _positive_int(lot_size)
-    if lot is not None and quantity % lot != 0:
-        return f"Quantity must be a multiple of the lot size ({lot})."
+    if lot is not None:
+        cap = max_placeable_quantity(symbol, lot, broker_freeze_qty)
+        if cap is not None and quantity > cap:
+            return over_max_refusal(symbol, cap)
+        if quantity % lot != 0:
+            return lot_multiple_refusal(lot)
+        return None
     limit = resolve_freeze_quantity(symbol, broker_freeze_qty)
     if limit is None or quantity <= limit:
         return None
-    return f"Max {limit} per order for {order_symbol_label(symbol)}. Place smaller orders."
+    return over_max_refusal(symbol, limit)
 
 
 # ---------------------------------------------------------------------------
