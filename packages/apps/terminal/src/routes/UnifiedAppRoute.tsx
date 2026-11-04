@@ -54,7 +54,9 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     try {
       const saved = readAppLayouts(app);
       const existing = saved["Current"] ?? Object.values(saved)[0];
-      return { model: Model.fromJson(existing ?? buildAppPreset(app, "default")), error: "", choose: app === "terminal" && !existing };
+      const choose = app === "terminal" && !existing;
+      const layout = existing ?? (choose ? workspaceJson(rowJson(100, [tabsetJson(100, [])])) : buildAppPreset(app, "default"));
+      return { model: Model.fromJson(layout), error: "", choose };
     } catch (error) { return { model: Model.fromJson(buildAppPreset(app, "default")), error: String(error), choose: false }; }
   });
   const [model, setModel] = useState(initial.model);
@@ -114,7 +116,12 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }, [active, choosing, model, persist]);
   useEffect(() => {
     if (!active || !host.current) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760 || entry.contentRect.height < 330));
+    const observer = new ResizeObserver(([entry]) => {
+      // A hidden chooser host has no geometry; it is not a compact workspace.
+      if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+        setCompact(entry.contentRect.width < 760 || entry.contentRect.height < 330);
+      }
+    });
     observer.observe(host.current);
     return () => observer.disconnect();
   }, [active]);
@@ -133,6 +140,8 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const id = request.widgetId;
     if (!id || !widgetAllowed(app, id)) { setError("This widget belongs to a different app. No account or mode was changed."); return; }
     setPicker(false);
+    setChoosing(false);
+    setHasWorkspace(true);
     const current = modelRef.current;
     const api = createWorkspaceApi(() => current, setModel);
     const meta = APP_WIDGETS.find(w => w.id === id)!;
@@ -218,7 +227,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     <h1 className="sr-only">{meta.name}</h1>
     <WorkspaceChrome>
     <div className="ft-app-toolbar" hidden={!active} data-app-chrome={app} aria-label={`${meta.name} layout controls`}>
-      <span className="ft-current-layout">Current layout <span className="text-text-muted">{tabs.length} panels</span></span>
+      <span className="ft-current-layout">{hasWorkspace ? <>Current layout <span className="text-text-muted">{tabs.length} panels</span></> : "No layout selected"}</span>
       <label className="ft-layout-restore">Saved layouts
           <select aria-label="Restore saved layout" value="" onChange={e => { if (!e.target.value) return; setNotice(""); setError(""); try { const saved = readAppLayouts(app)[e.target.value]; if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app."); replaceLayout(saved, `Restored ${e.target.value}`); } catch (e) { setError(String(e)); } }}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
         </label>
@@ -235,11 +244,11 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
         <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
         <div className="ft-layout-save" role="group" aria-label="Save a named layout">
           <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 min-w-0" />
-          <Button variant="outline" size="sm" onClick={() => { setNotice(""); setError(""); try { saveAppLayout(app, layoutName, wideJson(model)); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
+          <Button variant="outline" size="sm" disabled={!hasWorkspace} onClick={() => { setNotice(""); setError(""); try { saveAppLayout(app, layoutName, wideJson(model)); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
         </div>
 
         <div className="ft-layout-transfer" role="group" aria-label="Transfer or reset layout">
-          <Button size="sm" variant="outline" onClick={exportLayout}><Download aria-hidden="true" />Export layout</Button>
+          <Button size="sm" variant="outline" disabled={!hasWorkspace} onClick={exportLayout}><Download aria-hidden="true" />Export layout</Button>
           <label className="ft-layout-import">Import layout <input aria-label="Import app layout" type="file" accept="application/json,.json" onChange={event => {
             const file = event.currentTarget.files?.[0];
             // Native inputs do not emit change when the same file is chosen
@@ -253,7 +262,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
         {notice && <p className="text-xs text-text-secondary" aria-hidden="true">{notice}</p>}
       </div>
     </details>
-    {compact && <label className="ft-compact-panel">Panel <select aria-label="Compact panel" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
+    {hasWorkspace && compact && <label className="ft-compact-panel">Panel <select aria-label="Compact panel" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
     </div>
     </WorkspaceChrome>
     <div className="ft-app-scope-row">

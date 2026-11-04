@@ -538,7 +538,7 @@ async function addWidget(page: Page, name: string) {
   const app = route.charAt(0).toUpperCase() + route.slice(1);
   const region = page.getByRole("region", { name: app + " app", exact: true });
   await expect(region).toBeVisible();
-  await region.getByRole("button", { name: "Add widget", exact: true }).click();
+  await page.locator(`[data-app-chrome="${route}"]`).getByRole("button", { name: "Add widget", exact: true }).click();
   await page.getByRole("button", { name: "Add " + name, exact: true }).click();
 }
 
@@ -823,7 +823,8 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(finalLeaseRead?.status).toBe(404);
   expect(finalLeaseRead?.response).toMatchObject({ code: "dataset_or_lease_retired" });
   const settings = page.getByRole("region", { name: "Settings app", exact: true });
-  await settings.locator("summary").filter({ hasText: "Layout actions" }).click();
+  const settingsChrome = page.locator('[data-app-chrome="settings"]');
+  await settingsChrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   const retainedControls = await controls.elementHandle();
   expect(retainedControls).not.toBeNull();
   const draft = "unsubmitted-snapshot-draft";
@@ -877,7 +878,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(firstClient).toBeDefined();
   expect(beforeLifetime.section).toBe("settings-tabpanel-dataPaths");
   expect(beforeLifetime.inputLineage.length).toBeGreaterThan(beforeLifetime.controlsLineage.length);
-  await settings.getByLabel("Layout name", { exact: true }).fill("Activity retained Settings draft");
+  await settingsChrome.getByLabel("Layout name", { exact: true }).fill("Activity retained Settings draft");
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
   await apps.getByRole("button", { name: "Choose app", exact: true }).click();
   await apps.getByRole("link", { name: "Learn", exact: true }).click();
@@ -892,7 +893,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   await page.goBack();
   await expect(page).toHaveURL(/\/settings#dataPaths$/);
   await expect(settings).toBeVisible();
-  await expect(settings.getByLabel("Layout name", { exact: true })).toHaveValue("Activity retained Settings draft");
+  await expect(settingsChrome.getByLabel("Layout name", { exact: true })).toHaveValue("Activity retained Settings draft");
   const retainedSettingsNode = await controls.evaluate((element, previous) => element === previous, retainedControls);
   expect.soft(retainedSettingsNode, "Actual Activity return must not remount canonical controls").toBe(true);
   await expect.poll(() => core.rows.filter(row => row.method === "GET" && row.path === prefix + "/api/v1/data/datasets").length).toBe(2);
@@ -986,12 +987,14 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Terminal", exact: true }).click();
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal).toBeVisible();
-  await terminal.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await terminal.getByLabel("Layout name", { exact: true }).fill("Synthetic retained layout");
-  await terminal.getByRole("button", { name: "Save layout", exact: true }).click();
+  await page.getByRole("button", { name: "Use Watchlist driven layout", exact: true }).click();
+  const terminalChrome = page.locator('[data-app-chrome="terminal"]');
+  await terminalChrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await terminalChrome.getByLabel("Layout name", { exact: true }).fill("Synthetic retained layout");
+  await terminalChrome.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(terminal.getByRole("status").filter({ hasText: "Saved Synthetic retained layout" })).toBeVisible();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:app-layouts:v1:terminal")!)["Synthetic retained layout"]);
-  await terminal.getByLabel("Layout name", { exact: true }).fill("Unsubmitted retained draft");
+  await terminalChrome.getByLabel("Layout name", { exact: true }).fill("Unsubmitted retained draft");
   await terminal.getByTestId("instrument-links").locator("summary").click();
   await terminal.getByLabel("Instrument link channel").selectOption("fdc3.channel.red");
   await terminal.getByLabel("Linked symbol").fill("SYNTHETIC");
@@ -1036,7 +1039,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await apps.getByRole("button", { name: "Choose app", exact: true }).click();
   await apps.getByRole("link", { name: "Terminal", exact: true }).click();
   await expect(terminal).toBeVisible();
-  await expect(terminal.getByLabel("Layout name", { exact: true })).toHaveValue("Unsubmitted retained draft");
+  await expect(terminalChrome.getByLabel("Layout name", { exact: true })).toHaveValue("Unsubmitted retained draft");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:app-layouts:v1:terminal")!)["Synthetic retained layout"])).toEqual(saved);
   expect(await page.evaluate(() => localStorage.getItem("flinttrade:mode"))).toBe(mode);
   await checkpoint(page, info, "terminal-return-wide");

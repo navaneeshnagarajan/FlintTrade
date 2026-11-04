@@ -336,6 +336,7 @@ describe("compact app navigation and layout ownership", () => {
     const app = within(await screen.findByRole("region", { name: "Terminal app" }));
     const chrome = within(screen.getByLabelText("Terminal layout controls"));
     await user.click(chrome.getByText("Layout actions"));
+    await user.click(chrome.getByRole("button", { name: "Reset app layout" }));
     const preset = chrome.getByRole("combobox", { name: "Terminal preset" });
     const panelNames = () => within(chrome.getByRole("combobox", { name: "Compact panel" })).getAllByRole("option").map(option => option.textContent);
     expect(chrome.getByText("5 panels")).toBeVisible();
@@ -364,6 +365,35 @@ describe("compact app navigation and layout ownership", () => {
       expect(preset).toHaveValue("");
       expect(app.getByRole("status")).toHaveTextContent("Restored Default panels");
     }
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+    expect(useModeStore.getState().mode).toBe("explore");
+  });
+
+  it.each(["header", "custom", "event", "route"])("starts fresh %s widget entry from an empty presentation, not a hidden default", async (entry: string) => {
+    if (entry === "route") {
+      render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[{ pathname: "/terminal", state: { openWidget: { widgetId: "chart" } } }]}><AppLayout /></MemoryRouter></QueryClientProvider>);
+    } else {
+      renderShell("/terminal");
+      const chooser = await screen.findByRole("region", { name: "Choose a layout" });
+      const chrome = within(screen.getByLabelText("Terminal layout controls"));
+      expect(chrome.getByText("No layout selected")).toBeVisible();
+      expect(chrome.queryByText("5 panels")).not.toBeInTheDocument();
+      expect(chrome.queryByRole("combobox", { name: "Compact panel" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Chart leaf")).not.toBeInTheDocument();
+      expect(readAppLayouts("terminal").Current).toBeUndefined();
+      if (entry === "event") {
+        act(() => window.dispatchEvent(new CustomEvent("flinttrade:app-widget", { detail: { widgetId: "chart" } })));
+      } else {
+        fireEvent.click(entry === "header" ? chrome.getByRole("button", { name: "Add widget" }) : within(chooser).getByRole("button", { name: "Create new layout" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Add Chart" }));
+      }
+    }
+    expect(await screen.findByText("Chart leaf")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Choose a layout" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Terminal layout controls")).toHaveTextContent("1 panels");
+    const json = JSON.stringify(readAppLayouts("terminal").Current);
+    expect(json.match(/"component":"chart"/g)).toHaveLength(1);
+    expect(json).not.toContain('"component":"watchlist"');
     expect(useBrokerStore.getState().activeAccountId).toBeNull();
     expect(useModeStore.getState().mode).toBe("explore");
   });

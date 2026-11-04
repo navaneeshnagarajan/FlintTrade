@@ -51,6 +51,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   const preset = chrome.getByRole("combobox", { name: "Terminal preset", exact: true });
   const restore = chrome.getByRole("combobox", { name: "Restore saved layout", exact: true });
   await expect(workspace).toBeVisible();
+  await page.getByRole("button", { name: "Use Watchlist driven layout", exact: true }).click();
   await expect(preset.locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
   await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   await preset.selectOption("trader");

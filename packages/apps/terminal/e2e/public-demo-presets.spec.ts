@@ -91,6 +91,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect(app).toBeVisible();
     await anonymous();
     const frozenTime = await page.evaluate(() => Date.now());
+    await page.getByRole("button", { name: "Use Watchlist driven layout", exact: true }).click();
     await openLayoutActions();
     await expect(chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
     await chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
