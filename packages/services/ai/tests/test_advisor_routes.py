@@ -512,11 +512,11 @@ class TestAdvisorNativeLiveReadContext:
             patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
             patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
             patch(
-                "flinttrade_core.ai_broker_context.collect_authorised_monday_read_feeds",
+                "flinttrade_core.ai_broker_context.collect_authorised_connected_read_feeds",
                 return_value=rows,
             ) as authorised,
             patch(
-                "flinttrade_gateway.monday_read_smoke.list_monday_ai_read_handles",
+                "flinttrade_gateway.connected_read_smoke.list_connected_ai_read_handles",
             ) as raw_handles,
         ):
             resp = client.post(

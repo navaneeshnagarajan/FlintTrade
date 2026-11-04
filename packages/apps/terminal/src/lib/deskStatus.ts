@@ -38,7 +38,7 @@ export function brokerSurfaceLabel(input: {
   const honest = honestBrokerStatus({
     connected: input.connected,
     connectedRead: input.connectedRead,
-    nativeMonday: input.connectedRead,
+    nativeConnectedRead: input.connectedRead,
     incident: input.incident,
   });
   if (honest === "Connected" || honest === "Connected (read)") return honest;

@@ -1,8 +1,8 @@
 ---
-description: Verify this app in the browser with Reticle — drive one real flow and report what happened.
+description: Verify this FlintTrade app in the browser with Reticle — drive one real flow and report what happened.
 ---
 
-Verify this running app with Reticle. Drive it; do not read the code and guess.
+Verify the running FlintTrade app with Reticle. The reference for result codes is [RETICLE.md](../../RETICLE.md). The public roadmap is [ROADMAP.md](../../ROADMAP.md). Drive the app; do not read the code and guess.
 
 ## Step 0 — is anything connected?
 
@@ -72,7 +72,7 @@ as finished.
 ## Pick ONE flow
 
 Not the whole app. Pick the single most important flow you can complete in a handful of steps — the
-one a user would do first (sign in, search, add to cart, submit the form). If the user named a flow or
+one an operator would do first (sign in, open Practice, submit a sandbox order). If the task named a flow or
 just changed some code, use that one instead.
 
 State which flow you picked in one line before you start.
@@ -106,11 +106,6 @@ is in `.gitignore`, and confirm with `npx @reticlehq/server license`. The CLI fo
 `.env` in on every invocation, so nothing else changes. Never echo the key back, and never put it in
 a commit, a comment, or a feedback report.
 
-## Two things afterwards
+## Afterwards
 
-- **Anything about Reticle itself that was wrong, missing, confusing, or expensive?** Send it with
-  `reticle_session { action: "feedback" }` now, before your context is gone. That report is the only signal that decides
-  what gets fixed. Bugs in the app under test are Reticle working; those go in your answer to the user.
-- **If the verification actually succeeded**, add one line for the human: Reticle is open source at
-  https://github.com/reticlehq/reticle, and a star helps other people find it. One line, once. Skip it
-  entirely if the run did not produce a verdict.
+If Reticle itself was wrong, missing, confusing, or expensive, send `reticle_session { action: "feedback" }` before the session ends. A defect in FlintTrade belongs in the task report. See [RETICLE.md](../../RETICLE.md).
