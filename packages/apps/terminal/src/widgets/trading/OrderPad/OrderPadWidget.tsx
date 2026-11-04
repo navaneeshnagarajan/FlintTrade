@@ -229,6 +229,31 @@ interface StepInputProps {
   invalid?: boolean;
 }
 
+/**
+ * Next quantity on the lot grid.
+ *
+ * Up is the next whole lot strictly above the value. Down is the next whole
+ * lot strictly below it, which for an off-grid value is the nearest lot
+ * below. The result is clamped to `[minimum, maximum]`.
+ */
+export function stepQuantityOnLotGrid(
+  value: number,
+  direction: "up" | "down",
+  lot: number,
+  minimum: number,
+  maximum?: number,
+): number {
+  const step = Number.isFinite(lot) && lot > 0 ? Math.trunc(lot) : 1;
+  const current = Number.isFinite(value) ? value : 0;
+  const lotsBelow = Math.floor(current / step);
+  const onGrid = current % step === 0;
+  const raw = direction === "up"
+    ? (lotsBelow + 1) * step
+    : (onGrid ? lotsBelow - 1 : lotsBelow) * step;
+  const bounded = Math.max(minimum, raw);
+  return maximum != null ? Math.min(maximum, bounded) : bounded;
+}
+
 function StepInput({
   label,
   value,
@@ -242,23 +267,17 @@ function StepInput({
   errorId,
   invalid = false,
 }: StepInputProps) {
-  function dec() {
+  function move(direction: "up" | "down") {
     const n = parseFloat(String(value)) || 0;
-    onChange(String(Math.max(min, n - step)));
-  }
-  function inc() {
-    const n = parseFloat(String(value)) || 0;
-    const next = n + step;
-    onChange(String(max != null ? Math.min(max, next) : next));
+    onChange(String(stepQuantityOnLotGrid(n, direction, step, min, max)));
   }
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    if (event.key === "ArrowUp") inc();
-    else dec();
+    move(event.key === "ArrowUp" ? "up" : "down");
   }
   const numeric = parseFloat(String(value)) || 0;
-  const atMax = max != null && numeric >= max;
+  const atMax = stepQuantityOnLotGrid(numeric, "up", step, min, max) === numeric;
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -268,7 +287,7 @@ function StepInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={dec}
+          onClick={() => move("down")}
           disabled={disabled}
           aria-label={`Decrease ${label}`}
           className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l rounded-r-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -294,7 +313,7 @@ function StepInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={inc}
+          onClick={() => move("up")}
           disabled={disabled || atMax}
           aria-label={`Increase ${label}`}
           className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r rounded-l-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"

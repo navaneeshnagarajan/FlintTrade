@@ -101,7 +101,7 @@ vi.mock("jotai", async () => {
 // Import component under test
 // ---------------------------------------------------------------------------
 
-import OrderPadWidget from "../OrderPadWidget";
+import OrderPadWidget, { stepQuantityOnLotGrid } from "../OrderPadWidget";
 import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
 import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -127,6 +127,16 @@ async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("stepQuantityOnLotGrid", () => {
+  it("steps to the next lot and clamps to the lot and the placeable cap", () => {
+    expect(stepQuantityOnLotGrid(100, "up", 65, 65, 1755)).toBe(130);
+    expect(stepQuantityOnLotGrid(1801, "down", 65, 65, 1755)).toBe(1755);
+    expect(stepQuantityOnLotGrid(1800, "down", 65, 65, 1755)).toBe(1755);
+    expect(stepQuantityOnLotGrid(1755, "up", 65, 65, 1755)).toBe(1755);
+    expect(stepQuantityOnLotGrid(65, "down", 65, 65, 1755)).toBe(65);
+  });
+});
 
 describe("OrderPadWidget", () => {
   beforeEach(() => {
@@ -1269,6 +1279,54 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(overMax);
     expect(screen.queryByText(lotMessage)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("snaps arrow keys and stepper buttons onto the next lot", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY-OCT2026-FUT", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "FUTIDX", lotsize: 65, tick_size: 0.05,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "NIFTY-OCT2026-FUT", exchange: "NFO" },
+    })} />);
+    await screen.findByText("Lot 65 · Max 1,755 per order");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    const increase = screen.getByRole("button", { name: "Increase Quantity" });
+    const decrease = screen.getByRole("button", { name: "Decrease Quantity" });
+
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    fireEvent.keyDown(qtyInput, { key: "ArrowUp" });
+    expect(qtyInput).toHaveValue(130);
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    fireEvent.click(increase);
+    expect(qtyInput).toHaveValue(130);
+
+    fireEvent.change(qtyInput, { target: { value: "1801" } });
+    fireEvent.keyDown(qtyInput, { key: "ArrowDown" });
+    expect(qtyInput).toHaveValue(1755);
+    fireEvent.change(qtyInput, { target: { value: "1801" } });
+    fireEvent.click(decrease);
+    expect(qtyInput).toHaveValue(1755);
+
+    fireEvent.change(qtyInput, { target: { value: "1800" } });
+    fireEvent.keyDown(qtyInput, { key: "ArrowDown" });
+    expect(qtyInput).toHaveValue(1755);
+    fireEvent.change(qtyInput, { target: { value: "1800" } });
+    fireEvent.click(decrease);
+    expect(qtyInput).toHaveValue(1755);
+
+    fireEvent.change(qtyInput, { target: { value: "1755" } });
+    fireEvent.keyDown(qtyInput, { key: "ArrowUp" });
+    expect(qtyInput).toHaveValue(1755);
+    expect(increase).toBeDisabled();
+    fireEvent.click(increase);
+    expect(qtyInput).toHaveValue(1755);
+
+    fireEvent.change(qtyInput, { target: { value: "65" } });
+    fireEvent.keyDown(qtyInput, { key: "ArrowDown" });
+    expect(qtyInput).toHaveValue(65);
+    fireEvent.click(decrease);
+    expect(qtyInput).toHaveValue(65);
   });
 
   it("stops the quantity stepper at the lot-aligned cap", async () => {
