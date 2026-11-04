@@ -58,6 +58,7 @@ from flinttrade_gateway.adapter import BROKER_CATALOG
 # the two could drift. Imported into this namespace so tests can still
 # monkeypatch ``native_account_routes._sdk_attestations_by_pin``.
 from flinttrade_gateway.capabilities_routes import _sdk_attestations_by_pin
+from flinttrade_gateway.connected_read_smoke import connected_read_connectable
 from flinttrade_gateway.credentials import (
     CredentialStaleError,
     PrimaryProjectionMutation,
@@ -65,7 +66,6 @@ from flinttrade_gateway.credentials import (
     SelectorSnapshot,
 )
 from flinttrade_gateway.log_safety import selector_ref
-from flinttrade_gateway.connected_read_smoke import connected_read_connectable
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 
 from .workspace import workspace_dir
