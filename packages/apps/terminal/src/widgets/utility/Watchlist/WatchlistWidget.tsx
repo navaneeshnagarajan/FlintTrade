@@ -319,6 +319,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
     >
       {/* HEADER */}
       <div className="ft-watchlist-header flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
+        <h2 className="sr-only">Watchlist</h2>
         <Button variant="ghost" className="ft-watchlist-search" onClick={() => setShowSearch(true)} aria-label="Add symbol" title="Add symbol">
           <Search size={14} aria-hidden="true" /><span>Search &amp; add items</span>
         </Button>

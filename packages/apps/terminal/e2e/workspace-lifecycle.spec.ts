@@ -50,7 +50,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   const preset = workspace.getByRole("combobox", { name: "Terminal preset", exact: true });
   const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
   await expect(workspace).toBeVisible();
-  await expect(preset.locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+  await expect(preset.locator("option")).toHaveText(["Choose layout", "Watchlist driven", "Chart focus", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
   await preset.selectOption("trader");
   await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
   const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });

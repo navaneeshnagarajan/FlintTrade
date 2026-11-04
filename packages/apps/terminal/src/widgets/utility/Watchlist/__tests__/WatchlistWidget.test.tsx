@@ -142,6 +142,7 @@ describe("WatchlistWidget", () => {
   it("shows the Watchlist heading", () => {
     renderWidget();
     expect(screen.getByText("Watchlist")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Watchlist", level: 2 })).toBeInTheDocument();
   });
 
   it("shows default symbols (NIFTY, BANKNIFTY, SBIN, RELIANCE, HDFCBANK)", () => {
