@@ -320,4 +320,3 @@ function NativeV2Evidence({ view, generation }: { view: NativeV2View; generation
       Synthetic evidence proves engineering mechanics only, not provider eligibility. Conversations propose; they never authorise.</p>
   </section>;
 }
-

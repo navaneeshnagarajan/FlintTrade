@@ -193,4 +193,3 @@ it.each(["duplicate", "foreign run", "missing collection"])("refuses a %s comple
   expect(studio.queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(1); mounted.unmount(); client.clear();
 });
-

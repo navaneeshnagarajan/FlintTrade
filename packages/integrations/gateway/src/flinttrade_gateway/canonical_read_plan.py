@@ -200,7 +200,7 @@ async def capture_plan(
                     if type(result) is BrokerReadSuccess:
                         trades += result.value.trades
             elif surface == "fees":
-                result = await collect(surface, "account_postings", (lambda: owner._ledger(port, ledger)) 
+                result = await collect(surface, "account_postings", (lambda: owner._ledger(port, ledger))
                     if ledger else None)
                 if type(result) is BrokerReadSuccess:
                     postings = result.value.postings

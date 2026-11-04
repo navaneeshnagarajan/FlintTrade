@@ -635,4 +635,3 @@ async def test_margin_and_replacement_freeze_the_caller_economics(
     assert len(calls) == 1
     wire = json.loads(calls[0][2]["data"])
     assert wire["price"] == 7.25 and wire["quantity"] == 6
-

@@ -574,7 +574,7 @@ def test_preparation_transfers_actual_candidate_before_post_login_work(phase: "s
             asyncio.run(command)
         assert observed.value is error
     assert adapter.calls == 1
-    assert events == ["login", *(["accept"] if owned else []), "probe", *([] if phase in {"probe", "cancelled"} 
+    assert events == ["login", *(["accept"] if owned else []), "probe", *([] if phase in {"probe", "cancelled"}
         else ["export"])]
     if owned or phase == "success":
         assert tuple(native_login._QUARANTINED_CANDIDATES) == before

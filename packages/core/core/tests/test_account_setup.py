@@ -582,12 +582,12 @@ def test_unknown_auth_retains_worker_and_claim_without_reauthentication(
     path = tmp_path / "uncertain-workspace"
     root = Path(__file__).resolve().parents[4]
     code = (
-        
+
             "import sys\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "from packages.core.core.tests.test_account_setup import _uncertain_auth_child\n"
             "_uncertain_auth_child(sys.argv[2])\n"
-        
+
     )
     child = subprocess.run(
         [sys.executable, "-I", "-c", code, str(root), str(path)], capture_output=True, text=True, timeout=60
@@ -1108,12 +1108,12 @@ def test_fresh_connect_requires_successful_liveness(
     path = tmp_path / "fresh-probe"
     root = Path(__file__).resolve().parents[4]
     code = (
-        
+
             "import sys\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "from packages.core.core.tests.test_account_setup import _fresh_probe_child\n"
             "_fresh_probe_child(sys.argv[2], sys.argv[3], sys.argv[4])\n"
-        
+
     )
     child = subprocess.run(
         [sys.executable, "-I", "-c", code, str(root), str(path), fault, cleanup_mode],

@@ -515,12 +515,12 @@ def test_restart_recovers_actual_workspace_commit_before_vault_ack(
     root = Path(__file__).resolve().parents[4]
     key = str(uuid4())
     code = (
-        
+
             "import sys\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "from packages.core.core.tests.test_account_setup_production import _restart_child\n"
             "_restart_child(*sys.argv[2:])\n"
-        
+
     )
 
     def run(phase):

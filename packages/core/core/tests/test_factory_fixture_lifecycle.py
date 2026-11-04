@@ -181,4 +181,3 @@ def test_native_route_fixture_drains_retained_owner_before_lease_release(
         assert body_fails and str(error) == "synthetic route body failure"
     assert len(retained) == 1
     reacquired(path, retained[0])
-

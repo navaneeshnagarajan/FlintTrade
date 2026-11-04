@@ -523,7 +523,7 @@ class NativeAutonomy:
         state = "entries_stopped" if blocker == "kill_switch_latched" else row["state"]
         return {**row, "state": state, "configured": True, "qualified": qualified, "authorised": authorised,
                 "native_ready": authorised and not obligations, "commands": commands,
-                "admission_reason": blocker or ("reconciliation_required" if obligations 
+                "admission_reason": blocker or ("reconciliation_required" if obligations
                     else "canonical_admission_required"),
                 "obligations": obligations,
                 "protection": "operator_handback_required" if obligations else "not_granted",

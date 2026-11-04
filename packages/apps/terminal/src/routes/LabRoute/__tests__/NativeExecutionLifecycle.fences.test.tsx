@@ -151,4 +151,3 @@ it("retires a late acceptance across connected A-B-A without a readback or grant
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(trace.calls).toEqual([2,3,4,5,6,7]); expect(trace.queue).toEqual([8,9]);
 });
-

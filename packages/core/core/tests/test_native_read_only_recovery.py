@@ -541,4 +541,3 @@ def test_P03_kotak_installed_auth_identity_and_supported_option_allocation(
         source.publish("mounted-native", facts)
         _qualify(desk)
     assert native.retire_all(), _financial(desk)
-

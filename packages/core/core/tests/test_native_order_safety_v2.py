@@ -345,4 +345,3 @@ def test_bounded_settlement_retains_holds_until_complete_correspondence(
 ) -> None:
     """Pair incomplete/conflicting observations with a genuine later terminal read."""
     _terminal_lifecycle_case(mounted_desk, sidecar, monkeypatch, refusal)
-
