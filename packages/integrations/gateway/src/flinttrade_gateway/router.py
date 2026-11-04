@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import hmac
+import inspect
 import json
 import logging
 import threading
@@ -450,6 +453,40 @@ class LifecycleFaultClearReceipt:
     router_generation: str
 
 
+@dataclass(frozen=True, eq=False)
+class PlacementTargetPin:
+    """Request-local exact preflight observation; never execution authority."""
+
+    router: Any
+    adapter: Any
+    adapter_id: str
+    account_id: str | None
+    session: Any
+    session_version: object | None
+    native_account: str | None
+    request_json: str | None
+    intent_json: str
+    observation_json: str
+    preparation: object | None
+    seal: bytes
+
+
+def _pin_material(pin: PlacementTargetPin) -> bytes:
+    """Bind object identities and detached values without serialising credentials."""
+    return json.dumps([
+        "flinttrade.placement-target.v1", id(pin.router), id(pin.adapter), pin.adapter_id,
+        pin.account_id, id(pin.session), repr(pin.session_version), pin.native_account,
+        pin.request_json, pin.intent_json, pin.observation_json, id(pin.preparation),
+    ], separators=(",", ":")).encode()
+
+
+def _pin_seal(pin: PlacementTargetPin) -> bytes:
+    """Domain-separated observation seal from the existing signature owner."""
+    from flinttrade_engine.safety import _get_safety_gate_secret  # noqa: PLC0415
+
+    return hmac.new(_get_safety_gate_secret(), _pin_material(pin), hashlib.sha256).digest()
+
+
 class BrokerRouter:
     """Dispatch broker writes only after SafetyContext verification.
 
@@ -739,6 +776,7 @@ class BrokerRouter:
         operation: str,
         payload: Any,
         emergency: bool,
+        native_source: Any = None,
     ) -> str | None:
         """Persist normal-write intent before the adapter invocation boundary."""
         store = self._lifecycle_store
@@ -764,6 +802,7 @@ class BrokerRouter:
                 operation=operation,
                 request_context=request_ctx,
                 payload=payload,
+                **({"native_source": native_source} if native_source is not None else {}),
             ))
         except Exception as exc:
             if emergency:
@@ -815,10 +854,23 @@ class BrokerRouter:
         invoked: bool,
         error: BaseException,
         emergency: bool,
+        native_source: Any = None,
     ) -> None:
         if attempt_id is None:
             return
         operation = "mark_outcome_unknown" if invoked else "mark_failed_before_invoke"
+        if invoked and native_source is not None and self._lifecycle_store is not None:
+            from .native_acknowledgement import UncertainNativeAcknowledgement
+            from .writer_provenance import _acknowledgement_frontier
+
+            if type(error) is UncertainNativeAcknowledgement:
+                try:
+                    with _acknowledgement_frontier(native_source, attempt_id, error):
+                        self._lifecycle_store.record_native_acknowledgement(attempt_id, error,
+                                                                           native_source=native_source)
+                except Exception as observation_error:
+                    logger.critical("Uncertain native observation persistence failed: %s",
+                                    type(observation_error).__name__)
         try:
             getattr(self._lifecycle_store, operation)(attempt_id, type(error).__name__)
         except Exception as ledger_error:
@@ -836,10 +888,16 @@ class BrokerRouter:
         attempt_id: str | None,
         result: Any,
         emergency: bool,
+        native_source: Any = None,
     ) -> None:
         if attempt_id is None:
             return
         try:
+            if native_source is not None:
+                from .writer_provenance import _acknowledgement_frontier  # noqa: PLC0415
+
+                with _acknowledgement_frontier(native_source, attempt_id, result):
+                    self._lifecycle_store.record_native_acknowledgement(attempt_id, result, native_source=native_source)
             evidence = placement_acknowledgement_fields(result)
             acknowledgement = {"orderid": str(result), **evidence} if evidence else result
             self._lifecycle_store.acknowledge(attempt_id, acknowledgement)
@@ -1004,6 +1062,136 @@ class BrokerRouter:
     # Write path
     # ------------------------------------------------------------------
 
+    def preflight_order(
+        self, order: Any, *, adapter_id: str,
+        request_ctx: RequestContext | None = None, account_id: str | None = None,
+        capture_target: Callable[[PlacementTargetPin], None] | None = None,
+    ) -> Any:
+        """Validate on the exact configured adapter without acquiring write authority.
+
+        The caller supplies its already-resolved target; this method never uses
+        a body override, default, alternate broker or session provider. Only an
+        adapter's synchronous, I/O-free preflight hook is permitted here. The
+        returned observation is not a signed qualification or an execution
+        grant; placement still performs all normal ACL, gate and adapter checks.
+
+        Args:
+            order: Canonical order whose selected target is already resolved.
+            adapter_id: Exact configured adapter key; no fallback is permitted.
+            request_ctx: Optional authenticated caller for retained session capture.
+            account_id: Exact public account alias selected by the caller.
+            capture_target: Internal synchronous consumer of this call's sealed pin.
+
+        Returns:
+            The actual completed synchronous observation, including None or a
+            dict. This checks completion, not resolver purity or source custody.
+
+        Raises:
+            UnsupportedCapabilityError: If the exact target or synchronous hook
+                is unavailable, or its returned validation is still lazy.
+            BrokerError: If the actual adapter refuses its contract or intent.
+            ValueError: If the actual adapter rejects malformed canonical input.
+        """
+        adapter = self._adapters.get(adapter_id)
+        if adapter is None or adapter.broker_id != adapter_id:
+            raise UnsupportedCapabilityError("Exact placement preflight adapter is unavailable")
+        preflight = getattr(adapter, "preflight_order", None)
+        if not callable(preflight) or inspect.iscoroutinefunction(preflight) or inspect.isasyncgenfunction(preflight):
+            raise UnsupportedCapabilityError("Exact placement preflight is unavailable")
+        intent_json = _canonical_json(order)
+        session = None
+        preparations: list[Any] = []
+        from .session_provider import AuthenticatingSessionProvider  # noqa: PLC0415
+
+        if (capture_target is not None and request_ctx is not None and account_id is not None
+                and type(self._session_provider) is AuthenticatingSessionProvider):
+            try:
+                session = self._session_provider(request_ctx, adapter_id, account_id)
+            except SafetyBypassError:
+                # Preserve the existing authority refusal at admission/dispatch.
+                # No session witness is issued and the real provider is still
+                # required below the gate; preflight cannot authorise a caller.
+                session = None
+        from .brokers.dhan import DhanAdapter  # noqa: PLC0415
+        from .brokers.kotakneo import KotakNeoAdapter  # noqa: PLC0415
+
+        if capture_target is not None and type(adapter) in (DhanAdapter, KotakNeoAdapter):
+            result = preflight(order, tag=session.algo_id or None if session is not None else None,
+                               _capture_preparation=preparations.append,
+                               **({"session": session} if type(adapter) is KotakNeoAdapter else {}))
+        else:
+            result = preflight(order)
+        if inspect.isawaitable(result) or inspect.isasyncgen(result):
+            # Close only an unstarted native coroutine, which cannot execute
+            # its body. Never await validation or call arbitrary cleanup hooks.
+            if inspect.iscoroutine(result) and inspect.getcoroutinestate(result) == inspect.CORO_CREATED:
+                result.close()
+            raise UnsupportedCapabilityError("Exact placement preflight must complete synchronously")
+        if _canonical_json(order) != intent_json:
+            raise UnsupportedCapabilityError("Placement preflight changed the canonical intent")
+        if capture_target is not None and type(adapter) is DhanAdapter:
+            if len(preparations) != 1 or preparations[0].sdk_kwargs() != result:
+                raise UnsupportedCapabilityError("Dhan preflight did not retain its exact preparation")
+        if capture_target is not None and type(adapter) is KotakNeoAdapter and result is not None:
+            if len(preparations) != 1 or preparations[0].contract_evidence() != result:
+                raise UnsupportedCapabilityError("Kotak preflight did not retain its exact preparation")
+        if capture_target is not None:
+            from dataclasses import replace  # noqa: PLC0415
+
+            pin = PlacementTargetPin(
+                self, adapter, adapter_id, account_id, session, getattr(session, "version", None),
+                session.account_id if session is not None else None,
+                _canonical_json(request_ctx) if request_ctx is not None else None, intent_json,
+                json.dumps(result, sort_keys=True, allow_nan=False),
+                preparations[0] if len(preparations) == 1 else None, b"",
+            )
+            capture_target(replace(pin, seal=_pin_seal(pin)))
+        return result
+
+    def check_preflight_target(
+        self, pin: PlacementTargetPin, order: Any, *, adapter_id: str,
+        request_ctx: RequestContext | None = None, account_id: str | None = None,
+        check_write: bool = False,
+    ) -> None:
+        """Revalidate the retained target without another contract resolution.
+
+        New managed handles may name the same session version; the original
+        handle stays the invocation target. Legacy providers keep their original
+        lookup path and receive no managed witness. This check never consumes
+        or grants write authority.
+
+        Args:
+            pin: Actual observation issued by this router's completed preflight.
+            order: Complete canonical intent whose signature will be checked later.
+            adapter_id: Exact selected adapter key.
+            request_ctx: Authenticated caller retained by the request.
+            account_id: Public alias bound at capture.
+            check_write: Also refuse a newly read-only session at invocation.
+
+        Raises:
+            SafetyBypassError: If the seal, target, intent or session differs.
+        """
+        if (type(pin) is not PlacementTargetPin or pin.router is not self
+                or not hmac.compare_digest(pin.seal, _pin_seal(pin))
+                or pin.adapter_id != adapter_id or self._adapters.get(adapter_id) is not pin.adapter
+                or _canonical_json(order) != pin.intent_json or pin.account_id != account_id
+                or pin.request_json != (_canonical_json(request_ctx) if request_ctx is not None else None)):
+            raise SafetyBypassError("Exact placement preflight target changed")
+        if pin.session is not None:
+            if request_ctx is None or account_id is None:
+                raise SafetyBypassError("Exact placement session is unavailable")
+            from .session_provider import AuthenticatingSessionProvider  # noqa: PLC0415
+
+            provider: Any = self._session_provider
+            if type(provider) is not AuthenticatingSessionProvider:
+                raise SafetyBypassError("Exact placement session owner changed")
+            provider._registry.client_for_connected_session(
+                pin.session, current_authority=provider.current_authority_for(pin.session.selector),
+            )
+            if (pin.session.account_id != pin.native_account or pin.session.version != pin.session_version
+                    or check_write and pin.session.is_read_only):
+                raise SafetyBypassError("Captured placement native account changed")
+
     async def place_order(
         self,
         request_ctx: RequestContext,
@@ -1015,6 +1203,7 @@ class BrokerRouter:
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
         on_adapter_invoke: _AdapterInvokeCallback = None,
+        preflight_target: PlacementTargetPin | None = None,
     ) -> Any:
         signed_order = _detached_snapshot(order)
         with self._broker_write_lease(False, f"{safety_ctx.adapter_id}:{safety_ctx.account_id}"):
@@ -1022,47 +1211,84 @@ class BrokerRouter:
             try:
                 if hint is not None or adapter_id is None:
                     adapter_id, account_id = self._resolve(routing_key, signed_order, hint)
-                session = self._session_provider(request_ctx, adapter_id, account_id)
+                if preflight_target is not None and preflight_target.session is not None:
+                    self.check_preflight_target(preflight_target, signed_order, adapter_id=adapter_id,
+                                                account_id=account_id, request_ctx=request_ctx, check_write=True)
+                    session = preflight_target.session
+                else:
+                    session = self._session_provider(request_ctx, adapter_id, account_id)
                 if session.is_read_only:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._algo_tag(adapter_id, session, signed_order)
                 await self._throttle(adapter_id, "order")
-                attempt_id = self._prepare_lifecycle(
-                    request_ctx=request_ctx,
-                    adapter_id=adapter_id,
-                    account_id=account_id,
-                    operation="place_order",
-                    payload=signed_order,
-                    emergency=False,
+                if preflight_target is not None:
+                    self.check_preflight_target(preflight_target, signed_order, adapter_id=adapter_id,
+                                                account_id=account_id, request_ctx=request_ctx, check_write=True)
+                    session = preflight_target.session or session
+                selected_adapter = (
+                    preflight_target.adapter if preflight_target is not None else self._adapters[adapter_id]
                 )
+                placement_kwargs = {}
+                if preflight_target is not None and preflight_target.preparation is not None:
+                    placement_kwargs["preparation"] = preflight_target.preparation
+                    def verify_prepared_session() -> None:
+                        self.check_preflight_target(preflight_target, signed_order, adapter_id=adapter_id,
+                            account_id=account_id, request_ctx=request_ctx, check_write=True)
+                    placement_kwargs["_verify_session"] = verify_prepared_session
+                from .writer_provenance import _verified_writer_frontier  # noqa: PLC0415
+
+                with _verified_writer_frontier(self, session, selected_adapter, signed_order,
+                                               request_ctx, safety_ctx, preflight_target) as native_source:
+                    attempt_id = self._prepare_lifecycle(
+                        request_ctx=request_ctx,
+                        adapter_id=adapter_id,
+                        account_id=account_id,
+                        operation="place_order",
+                        payload=signed_order,
+                        emergency=False,
+                        native_source=native_source,
+                    )
+                def before_place_invoke() -> None:
+                    if on_adapter_invoke is not None:
+                        on_adapter_invoke()
+                    if preflight_target is not None:
+                        self.check_preflight_target(preflight_target, signed_order, adapter_id=adapter_id,
+                                                    account_id=account_id, request_ctx=request_ctx, check_write=True)
+
                 invoked = [False]
                 try:
-                    result = await _invoke_adapter(
-                        self._adapters[adapter_id].place_order,
-                        self._invocation_callback(
-                            safety_ctx=safety_ctx,
-                            attempt_id=attempt_id,
-                            external_callback=on_adapter_invoke,
-                            emergency=False,
-                            invoked=invoked,
-                        ),
-                        session,
-                        signed_order,
-                        _router_token=_ROUTER_TOKEN,
-                    )
+                    from .native_scope_primitives import observing_invocation
+
+                    with observing_invocation(native_source):
+                        result = await _invoke_adapter(
+                            selected_adapter.place_order,
+                            self._invocation_callback(
+                                safety_ctx=safety_ctx,
+                                attempt_id=attempt_id,
+                                external_callback=before_place_invoke,
+                                emergency=False,
+                                invoked=invoked,
+                            ),
+                            session,
+                            signed_order,
+                            _router_token=_ROUTER_TOKEN,
+                            **placement_kwargs,
+                        )
                 except BaseException as exc:
                     self._record_lifecycle_failure(
                         attempt_id=attempt_id,
                         invoked=invoked[0],
                         error=exc,
                         emergency=False,
+                        native_source=native_source,
                     )
                     raise
                 self._record_lifecycle_success(
                     attempt_id=attempt_id,
                     result=result,
                     emergency=False,
+                    native_source=native_source,
                 )
                 return result
             finally:

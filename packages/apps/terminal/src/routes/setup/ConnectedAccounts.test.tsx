@@ -14,15 +14,7 @@ vi.mock("@/hooks/useBrokerAccounts", () => ({
   useBrokerAccounts: () => ({ refetch: mocks.refetch }),
 }));
 
-vi.mock("@/stores/brokerStore", () => ({
-  brokerAccountKey: (account: BrokerAccount) => [
-    account.source ?? "gateway",
-    account.broker,
-    account.account_id,
-  ].map(encodeURIComponent).join(":"),
-  useBrokerStore: (selector: (s: { accounts: BrokerAccount[] }) => unknown) =>
-    selector({ accounts: mocks.accounts }),
-}));
+import { useBrokerStore } from "@/stores/brokerStore";
 
 vi.mock("@/services/brokerAccountsApi", () => ({
   removeBrokerAccount: mocks.removeBroker,
@@ -37,7 +29,7 @@ describe("ConnectedAccounts", () => {
     mocks.accounts = [];
     mocks.refetch.mockReset().mockResolvedValue({});
     mocks.removeBroker.mockReset().mockResolvedValue(undefined);
-    mocks.reconnectBroker.mockReset().mockResolvedValue(undefined);
+    mocks.reconnectBroker.mockReset().mockResolvedValue({ has_session: true });
     mocks.setPrimaryBroker.mockReset().mockResolvedValue(undefined);
   });
 
@@ -53,6 +45,7 @@ describe("ConnectedAccounts", () => {
       source: "native",
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     expect(screen.queryByLabelText(/Set Upstox main as primary account/i)).not.toBeInTheDocument();
@@ -77,6 +70,7 @@ describe("ConnectedAccounts", () => {
       source: "native",
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     fireEvent.click(screen.getByLabelText(/Set Upstox main as primary account/i));
@@ -100,6 +94,7 @@ describe("ConnectedAccounts", () => {
       source: "gateway",
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     expect(screen.queryByLabelText(/Set Zerodha gateway as primary account/i)).not.toBeInTheDocument();
@@ -118,6 +113,7 @@ describe("ConnectedAccounts", () => {
       read_only: true,
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     expect(screen.queryByLabelText(/Set Zerodha analytics as primary account/i)).not.toBeInTheDocument();
@@ -135,6 +131,7 @@ describe("ConnectedAccounts", () => {
       source: "gateway",
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     expect(screen.getByLabelText(/Set Zerodha main as primary account/i)).toBeInTheDocument();
@@ -153,6 +150,7 @@ describe("ConnectedAccounts", () => {
       read_only: true,
     }];
 
+    useBrokerStore.setState({ accounts: mocks.accounts, activeAccountId: null });
     render(<ConnectedAccounts />);
 
     expect(screen.getByText(/upstox .* read-only/i)).toBeInTheDocument();

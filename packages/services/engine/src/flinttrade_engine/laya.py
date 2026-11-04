@@ -291,6 +291,7 @@ class Laya:
         self._download_progress: tuple[int, int] | None = None
         self._decision_client: Any = None
         self._qualification: Any = None
+        self._qualification_owner: Any = None
         self._gate_checking = False
         self._lock = threading.Lock()
         self._log: list[DecisionRecord] = []
@@ -418,14 +419,58 @@ class Laya:
         with self._lock:
             self._qualification = record
 
+    def bind_qualification_owner(self, owner: Any) -> None:
+        """Bind the normal factory's exact qualification producer, initially closed.
+
+        Args:
+            owner: Exact normal-factory qualification owner already bound to this gate.
+
+        Raises:
+            TypeError: The object is not the expected qualification owner or belongs to another gate.
+        """
+        from flinttrade_core.laya_qualification import LayaQualificationOwner  # noqa: PLC0415
+
+        if type(owner) is not LayaQualificationOwner or owner.gate is not self:
+            raise TypeError("exact Laya qualification owner required")
+        with self._lock:
+            self._qualification_owner = owner
+            self._live_qualified = False
+
+    def qualification_owner_is(self, owner: object) -> bool:
+        """Check exact producer custody without interpreting a returned report.
+
+        Args:
+            owner: Candidate producer identity to compare without evaluating its report.
+
+        Returns:
+            Whether the candidate is the exact currently retained qualification owner.
+        """
+        return self._qualification_owner is owner
+
+    def runtime_qualifies(self, policy: Any) -> bool:
+        """Read current producer evidence; a transport DTO is not factory authority.
+
+        Args:
+            policy: Current policy checked by the bound producer or legacy qualification record.
+
+        Returns:
+            Whether retained producer evidence or the existing legacy record covers the policy.
+        """
+        from .laya_decision import qualification_covers_live  # noqa: PLC0415
+
+        with self._lock:
+            owner, record = self._qualification_owner, self._qualification
+        return owner.qualifies(policy) if owner is not None else qualification_covers_live(record, policy)
+
     def effective_status(self, mode: str) -> DecisionStatus:
         """Status that applies to ``mode``. Unqualified Live stays Down."""
         with self._lock:
-            if self._status is DecisionStatus.DOWN:
-                return DecisionStatus.DOWN
-            if mode.strip().lower() == "live" and not self._live_qualified:
-                return DecisionStatus.DOWN
-            return self._status
+            status, qualified, owner = self._status, self._live_qualified, self._qualification_owner
+        if status is DecisionStatus.DOWN:
+            return DecisionStatus.DOWN
+        if mode.strip().lower() == "live" and (not qualified or owner is not None and not owner.qualifies()):
+            return DecisionStatus.DOWN
+        return status
 
     def note_heartbeat(self) -> DecisionStatus:
         """Return the Live-facing status a desk heartbeat should publish.
@@ -443,7 +488,8 @@ class Laya:
         with self._lock:
             runtime = self._status
             qualified = bool(self._live_qualified) and runtime is not DecisionStatus.DOWN
-        live = runtime if qualified else DecisionStatus.DOWN
+        live = self.effective_status("live")
+        qualified = qualified and live is not DecisionStatus.DOWN
         return runtime, live, qualified
 
     def decision_log(self) -> tuple[DecisionRecord, ...]:
@@ -504,6 +550,8 @@ class Laya:
             degraded_ceiling=self._degraded_max_quantity,
             client=client,
         )
+        if self.effective_status(proposal.mode) is DecisionStatus.DOWN:
+            return self._down_verdict(limits)
         if decision.effect == "unverified":
             return Verdict(
                 allow=False,
@@ -576,6 +624,8 @@ class Laya:
             degraded_ceiling=self._degraded_max_quantity,
             client=client,
         )
+        if self.effective_status(proposal.mode) is DecisionStatus.DOWN:
+            return self._down_verdict(limits)
         if decision.effect == "unverified":
             return Verdict(
                 allow=False,

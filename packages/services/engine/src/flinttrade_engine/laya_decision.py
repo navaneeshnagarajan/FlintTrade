@@ -493,8 +493,7 @@ def publish_probe(
         requested_device=requested_device,
         verified=verified,
     )
-    record = getattr(engine, "qualification", None)
-    live = status is not DecisionStatus.DOWN and qualification_covers_live(record, active)
+    live = status is not DecisionStatus.DOWN and engine.runtime_qualifies(active)
     engine.apply_runtime_status(status, live_qualified=live)
     return status
 

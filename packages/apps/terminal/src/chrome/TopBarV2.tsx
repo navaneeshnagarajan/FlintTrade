@@ -1,11 +1,11 @@
 /**
- * TopBarV2 — the app bar (44px, single row), in three zones:
+ * TopBarV2 — shared compact app bar, wrapping rather than clipping controls:
  *
- *   [Menu*] [F FlintTrade] | [Search symbols, pages, commands…  Ctrl K]
+ *   [F FlintTrade] | [Search symbols, pages, commands…  Ctrl K]
  *                                  [Account*] [Mode] [Market · IST] [Status]
  *                                  | [Ask AI] [Tools] [Fullscreen] [Bell] [Avatar]
  *
- *   * Menu appears below 768px and opens the navigation drawer; Account
+ *   * Grouped app navigation lives beside the retained app host; Account
  *     appears once a broker account exists.
  *
  * Each status has one home. Broker, Laya and LLM live in the Status menu:
@@ -181,7 +181,7 @@ function MarketSessionStatus() {
 function MarketChip({ showClock }: { showClock: boolean }) {
   return (
     <div
-      className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-default bg-surface-base/60 pl-1 pr-2"
+      className="ft-market-chip flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-default bg-surface-base/60 pl-1 pr-2"
       data-testid="market-chip"
     >
       <MarketSessionStatus />
@@ -308,7 +308,7 @@ function SearchButton({ variant = "field" }: { variant?: "field" | "row" }) {
     <button
       type="button"
       onClick={handleClick}
-      aria-label={`Search (${shortcutHint})`}
+      aria-label={`Search symbols, pages, commands… ${shortcutHint}`}
       data-testid="search-btn"
       className={cn(
         "group flex h-8 w-full min-w-0 max-w-md items-center gap-2 rounded-md border border-border-default bg-surface-base/70 px-2.5 text-left transition-colors",
@@ -333,7 +333,7 @@ function SearchButton({ variant = "field" }: { variant?: "field" | "row" }) {
 // Ask AI — launches the shared AI tutor panel
 // ---------------------------------------------------------------------------
 
-function AskAIButton() {
+function AskAIButton({ showLabel = false, onActivate }: { showLabel?: boolean; onActivate?: () => void }) {
   const aiTutorEnabled = useSkillStore((s) => s.helpPrefs.aiTutor);
   if (!aiTutorEnabled) return null;
   return (
@@ -342,12 +342,15 @@ function AskAIButton() {
       variant="ghost"
       size="sm"
       className={barButton}
-      onClick={() => window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT))}
+      onClick={() => {
+        onActivate?.();
+        window.dispatchEvent(new CustomEvent(TOGGLE_AI_TUTOR_EVENT));
+      }}
       aria-label="Ask AI"
       data-testid="ask-ai-btn"
     >
       <Sparkles className="h-4 w-4 text-accent" aria-hidden="true" />
-      <span className="hidden lg:inline">Ask AI</span>
+      <span className={showLabel ? undefined : "hidden lg:inline"}>Ask AI</span>
     </Button>
   );
 }
@@ -418,8 +421,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   }, [mode, directBrokerConnected, moneyPathClosed, setStatus]);
 
   const barStyle: React.CSSProperties = {
-    background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",
-    borderBottom: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.05))",
+    background: "var(--ft-chrome, var(--glass-chrome-bg, rgba(12,12,20,0.85)))",
+    borderBottom: "1px solid var(--color-border-default, var(--glass-chrome-border, rgba(255,255,255,0.05)))",
   };
 
   const handleSelectTool = useCallback((toolId: ToolId) => {
@@ -431,11 +434,11 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   return (
     <div
-      className="sticky top-0 z-100 flex h-11 shrink-0 select-none items-center gap-2 overflow-x-hidden px-3"
+      className="ft-topbar sticky top-0 z-100 flex min-h-11 shrink-0 flex-wrap select-none items-center gap-x-2 gap-y-1 px-3 py-1"
       style={barStyle}
       data-testid="topbar-v2"
     >
-      {/* ── Brand (and the navigation drawer toggle on narrow screens) ─────── */}
+      {/* ── Brand ─────────────────────────────────────────────────────────── */}
       <Link
         to="/home"
         aria-label="FlintTrade home"
@@ -451,12 +454,12 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       </Link>
 
       {/* ── Search ─────────────────────────────────────────────────────────── */}
-      <div className="flex min-w-0 flex-1 items-center px-1 md:px-3">
+      <div className="ft-topbar-search flex min-w-0 flex-1 items-center px-1">
         {!collapseOverflow && !hideDeskRibbon ? <SearchButton /> : null}
       </div>
 
       {/* ── Context and actions ───────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="ft-topbar-context flex min-w-0 flex-wrap items-center justify-end gap-1">
         {collapseOverflow ? (
           <>
             <ModeIndicator />
@@ -566,6 +569,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         </MoreRow>
         <MoreRow>
           <SearchButton variant="row" />
+        </MoreRow>
+        <MoreRow>
+          <AskAIButton showLabel onActivate={() => setMoreOpen(false)} />
         </MoreRow>
         <MoreRow>
           <Button

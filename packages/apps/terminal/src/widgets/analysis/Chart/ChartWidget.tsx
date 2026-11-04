@@ -534,7 +534,11 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   const intervalRef = useRef(interval);
   intervalRef.current = interval;
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
-  const [intervalDataScope, setIntervalDataScope] = useState<string | null>(null);
+  const intervalOwnerRef = useRef<AbortController | null>(null);
+  const [intervalDataScope, setIntervalDataScope] = useState<{
+    scope: string;
+    owner: AbortController;
+  } | null>(null);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<FlintChartVisibleLogicalRange | null>(
     () => initialChartView?.visibleLogicalRange ?? null,
   );
@@ -843,7 +847,8 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       chartTheme,
       createFlintChartDisplaySettingsOptions(chartDisplaySettings),
     );
-    applyCandleSpan(chart.timeScale(), barsRef.current.length);
+    // Repainting must preserve the user's zoom/pan. Candle spanning belongs
+    // to data/geometry initialisation, not a theme or display-settings refresh.
   }, [chartDisplaySettings, chartTheme, chartRef, candleRef]);
 
   const handleDrawingCreated = useCallback((drawingId: string) => {
@@ -1089,6 +1094,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // Interval capabilities belong to the active mode/account authority.
   useEffect(() => {
     const controller = new AbortController();
+    intervalOwnerRef.current = controller;
     let active = true;
     setIntervalDataScope(null);
     setIntervals(STATIC_INTERVALS);
@@ -1100,7 +1106,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
           ? current
           : (nextIntervals[0]?.value ?? current)
       ));
-      setIntervalDataScope(dataScope);
+      setIntervalDataScope({ scope: dataScope, owner: controller });
     };
     const fallbackTimer = window.setTimeout(() => {
       controller.abort();
@@ -1134,6 +1140,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     return () => {
       active = false;
       window.clearTimeout(fallbackTimer);
+      intervalOwnerRef.current = null;
       controller.abort();
     };
   }, [dataScope]);
@@ -1179,7 +1186,9 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     const candle = candleRef.current;
     const volume = volumeRef.current;
 
-    if (intervalDataScope !== dataScope) return;
+    // Activity retains state while retiring effects. A previous visit's
+    // settled scope cannot authorise history for the new interval owner.
+    if (intervalDataScope?.scope !== dataScope || intervalDataScope.owner !== intervalOwnerRef.current) return;
     // An unresolved option leg has no real instrument yet — fetching would
     // load the placeholder underlying's candles under the wrong identity.
     if (awaitingOptionLeg || !candle || !volume) return;

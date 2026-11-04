@@ -212,6 +212,33 @@ def test_blueprint_prefix_literal_resolution_is_static_and_unambiguous(source: s
 
 
 def test_blueprint_baseline_matches_dumper_output() -> None:
+    """Check current locations without rewriting the dated blueprint artefact."""
+    provenance = json.loads((BASELINES / "blueprints-current.provenance.json").read_text(encoding="utf-8"))
+    assert provenance["historical"]["path"] == "flinttrade-design/baselines/blueprints-2026-05-23.csv"
+    assert provenance["current"]["path"] == "flinttrade-design/baselines/blueprints-current.csv"
+    assert provenance["historical"]["sha256"] == "c35444d8f1fe70f054b698fc7aaa403126f5c171ed73bac513a648657cb7994a"
+    assert provenance["allowed_correspondence_columns"] == ["line_number"]
+    assert set(provenance["source_bindings"]) == {
+        "packages/core/core/src/flinttrade_core/app.py",
+        "scripts/dump-blueprints.py",
+    }
+    for reference in (provenance["historical"], provenance["current"]):
+        assert hashlib.sha256((ROOT / reference["path"]).read_bytes()).hexdigest() == reference["sha256"]
+    for relative_path, expected_digest in provenance["source_bindings"].items():
+        assert hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest() == expected_digest
+
+    historical_text = (ROOT / provenance["historical"]["path"]).read_text(encoding="utf-8")
+    current_text = (ROOT / provenance["current"]["path"]).read_text(encoding="utf-8")
+    historical_reader = csv.DictReader(StringIO(historical_text))
+    current_reader = csv.DictReader(StringIO(current_text))
+    historical_rows, current_rows = list(historical_reader), list(current_reader)
+    assert historical_reader.fieldnames == current_reader.fieldnames == provenance["fields"]
+    assert len(historical_rows) == len(current_rows) == provenance["rows"]
+    semantic_columns = [field for field in provenance["fields"] if field != "line_number"]
+    assert [[row[field] for field in semantic_columns] for row in historical_rows] == [
+        [row[field] for field in semantic_columns] for row in current_rows
+    ]
+
     result = subprocess.run(
         [sys.executable, "scripts/dump-blueprints.py"],
         cwd=ROOT,
@@ -220,7 +247,7 @@ def test_blueprint_baseline_matches_dumper_output() -> None:
         check=True,
     )
     expected = result.stdout.replace("\r\n", "\n")
-    actual = (BASELINES / "blueprints-2026-05-23.csv").read_text(encoding="utf-8").replace("\r\n", "\n")
+    actual = current_text.replace("\r\n", "\n")
 
     assert actual == expected
 
@@ -278,7 +305,7 @@ def test_pre_restructure_baseline_tag_verifies_with_tracked_allowed_signers() ->
         check=True,
     )
 
-    assert 'Good "git" signature for navaneeshnagarajan@gmail.com' in result.stderr
+    assert 'Good "git" signature for 259833042+navaneeshnagarajan@users.noreply.github.com' in result.stderr
     assert "82c2b391c5dcd2677df9132891b25ee2d0dae981" in result.stdout
 
 

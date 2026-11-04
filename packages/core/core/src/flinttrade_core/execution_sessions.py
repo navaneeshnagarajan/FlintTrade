@@ -43,6 +43,7 @@ class ExecutionSessions:
         self.lease.acquire()
         self.books: dict[str, Any] = {}
         self.owners: dict[str, Any] = {}
+        self._autonomy: Any = None
         self._reconciling_thread: int | None = None
         try:
             marker = ".execution-owner-" + self.path.name + ".json"
@@ -69,6 +70,16 @@ class ExecutionSessions:
             raise ValueError("execution owner unavailable")
         require_backend_lease_proof(self.proof)
 
+    @property
+    def autonomy(self) -> Any:
+        """One durable native-authority child; it owns no account book."""
+        from .native_autonomy import NativeAutonomy
+        with self.lock:
+            self._require()
+            if self._autonomy is None:
+                self._autonomy = NativeAutonomy(self)
+            return self._autonomy
+
     @staticmethod
     def _row(row: tuple[Any, ...]) -> dict[str, Any]:
         names = ("run_id", "actor", "account", "environment", "kind", "config", "generation", "entries_armed",
@@ -78,6 +89,69 @@ class ExecutionSessions:
         result["entries_armed"] = bool(result["entries_armed"])
         result["uncertain"] = bool(result["uncertain"])
         return result
+
+    def _native_child(self) -> Any:
+        """Discover retained native custody without inventing an absent store."""
+        from .native_autonomy import NativeAutonomy
+        if self._autonomy is not None or NativeAutonomy.storage_present(self.path):
+            return self.autonomy
+        return None
+
+    @contextmanager
+    def native_account_fence(self) -> Iterator[None]:
+        """Check actual empty native custody under a nonblocking local fence.
+
+        Account publication already holds its own lane. Never wait for this
+        lock there, and never carry this fence across external work or drains.
+        Missing/partial stores and orphan live identities are not emptiness.
+        """
+        if not self.lock.acquire(blocking=False):
+            raise ValueError("native account custody busy")
+        try:
+            self._require()
+            child = self._native_child()
+            with self.db.transaction() as db:
+                live = {r[0] for r in db.execute("SELECT run_id FROM sessions WHERE environment='live'")}
+            if child is None:
+                if live:
+                    raise ValueError("native registry custody orphaned")
+            else:
+                child.require_empty_account_custody(live)
+            yield
+        finally:
+            self.lock.release()
+
+    @contextmanager
+    def native_recovery_fence(self, request: Any, previous: Any = None) -> Iterator[Any]:
+        """Borrow the same nonblocking custody lock for exact RECONNECT assessment."""
+        if not self.lock.acquire(blocking=False):
+            raise ValueError("native account custody busy")
+        try:
+            self._require()
+            child = self._native_child()
+            with self.db.transaction() as db:
+                live = {r[0] for r in db.execute("SELECT run_id FROM sessions WHERE environment='live'")}
+            if child is None:
+                if live or previous is not None:
+                    raise ValueError("native registry custody orphaned")
+                yield None
+            else:
+                yield child.assess_read_only_recovery(live, request, previous)
+        finally:
+            self.lock.release()
+
+    def require_native_admission(self) -> None:
+        """Use the existing account lane and durable unknown claim, never a new lane."""
+        from .account_setup import setup_for
+
+        self._require()
+        setup = setup_for(self.app)
+        if setup is None:
+            return  # Legacy explicitly composed callers retain their old guards.
+        setup._require_owners()
+        if (not setup.lifecycle.legacy_mutation_admission_allowed()
+                or setup.store.active_operation(setup.store.owner_capability(self.proof)) is not None):
+            raise ValueError("account mutation or authentication outcome remains owned")
 
     def _get(self, scope: ExecutionSession) -> dict[str, Any]:
         self._require()
@@ -109,7 +183,18 @@ class ExecutionSessions:
             raise ValueError("unknown execution kind")
         if scope.environment == "paper" and scope.account != "paper:run:" + scope.run_id:
             raise ValueError("execution scope mismatch")
-        encoded = _payload(config)
+        if scope.environment == "live" and type(config) is dict and "producer" in config:
+            # The strict native schema explicitly contains non-secret
+            # max_tokens. Do not run that known field through the legacy
+            # free-form evidence key blacklist; never relax that blacklist.
+            from .native_autonomy import _encoded
+            from .native_workflow_v2 import NativeWorkflowV2
+
+            version = "2-options-1" if config.get("risk", {}).get("profile_version") == "index_options_v1" else "2"
+            validated = NativeWorkflowV2._config({"schema_version": version, "config": config})
+            encoded = _encoded(validated.config.model_dump(mode="json"))
+        else:
+            encoded = _payload(config)
         with self.lock:
             self._require()
             policy = None
@@ -185,6 +270,18 @@ class ExecutionSessions:
                                            "trades": book.get_trades(), "pnl": book.get_pnl()}
                 except Exception:
                     public.update(state="custody_unknown", entries_armed=False)
+            else:
+                try:
+                    child = self._native_child()
+                    native = child.projection(scope) if child is not None else None
+                    if native is not None and native.get("schema_version") in {"2", "2-options-1"}:
+                        public.update(autonomy_v2=native, state=native["entry_state"], native_ready=False,
+                                      protection=native["duty_state"])
+                    elif native is not None:
+                        public.update(autonomy=native, state=native["state"], native_ready=native["native_ready"],
+                                      protection=native["protection"])
+                except Exception:
+                    public.update(state="custody_unknown", entries_armed=False, native_ready=False)
             return public
 
     def list(self, actor: str) -> list[dict[str, Any]]:
@@ -201,6 +298,10 @@ class ExecutionSessions:
         with self.lock:
             row = self._get(scope)
             self._generation(row, expected_generation)
+            if scope.environment == "live":
+                child = self._native_child()
+                if child is not None:
+                    child.retire(scope)
             with self.db.transaction() as db:
                 db.execute("UPDATE sessions SET entries=0,generation=generation+1,state='entries_stopped' WHERE run_id=?",
                            (scope.run_id,))
@@ -215,6 +316,9 @@ class ExecutionSessions:
         """Logout retires entries without claiming protection stopped or flat."""
         with self.lock:
             self._require()
+            child = self._native_child()
+            if child is not None:
+                child.retire_all(actor=actor)
             with self.db.transaction() as db:
                 db.execute("UPDATE sessions SET entries=0,generation=generation+1,state='rearm_required' WHERE actor=? AND entries=1",
                            (actor,))
@@ -223,6 +327,10 @@ class ExecutionSessions:
         """Core-local idempotent retirement for only the affected run."""
         with self.lock:
             self._get(scope)
+            if scope.environment == "live":
+                child = self._native_child()
+                if child is not None:
+                    child.retire(scope)
             with self.db.transaction() as db:
                 db.execute("UPDATE sessions SET entries=0,generation=generation+1,state='rearm_required' "
                            "WHERE run_id=? AND entries=1", (scope.run_id,))
@@ -354,6 +462,12 @@ class ExecutionSessions:
         from .practice_agent_runtime import PracticeAgentSupervisor
         protection = self.app.config.get("PROTECTION_SERVICES")
         try:
+            # Recover existing native custody at the normal post-lease startup
+            # hook, not on the first HTTP inspection. Construction retires old
+            # authority without replay, provider reads or producer startup.
+            with self.lock:
+                self._require()
+                self._native_child()
             scopes = protection.recovery_scopes()
         except Exception:
             return {"state": "unavailable", "runs": None}
@@ -432,11 +546,26 @@ class ExecutionSessions:
         deadline = monotonic() + max(0, timeout)
         with self.lock:
             if self.closed:
-                return True
+                # Closing local handles does not settle retained native duties.
+                # A closed owner cannot reacquire custody or certify that store.
+                try:
+                    return self._native_child() is None
+                except Exception:
+                    return False
             self._require()
             with self.db.transaction() as db:
                 db.execute("UPDATE sessions SET entries=0,generation=generation+1,state='rearm_required' WHERE entries=1")
-            owners = list(self.owners.values())
+            native_drained = True
+            try:
+                child = self._native_child()
+                if child is not None:
+                    native_drained = child.retire_all()
+            except Exception:
+                native_drained = False
+            from .native_producer_v2 import NativeProducerOwner
+
+            native_owners = [owner for owner in self.owners.values() if type(owner) is NativeProducerOwner]
+            owners = [owner for owner in self.owners.values() if type(owner) is not NativeProducerOwner]
             from .practice_agent_runtime import _sandbox_flat
             retained = {id(owner) for owner in owners if owner.run and owner.run.thread
                         and owner.run.thread.is_alive() and (
@@ -447,19 +576,27 @@ class ExecutionSessions:
         # until a risk rule or an explicit Close reconciles them. No liquidation.
         results = [False if id(owner) in retained else owner.shutdown(max(0, deadline - monotonic()))
                    for owner in owners]
-        return all(results)
+        results.extend(owner.shutdown(max(0, deadline - monotonic())) for owner in native_owners)
+        return all(results) and native_drained
 
     def close(self) -> None:
         """Release only after every actual worker has drained; never liquidate."""
         with self.lock:
             if self.closed:
                 return
+            from .native_producer_v2 import NativeProducerOwner
+
+            if any(type(owner) is NativeProducerOwner and owner.thread is not None and owner.thread.is_alive()
+                   for owner in self.owners.values()):
+                raise RuntimeError("native consumers still owned")
             if any(owner.run and ((owner.run.thread and owner.run.thread.is_alive())
                    or (owner.run.trader is not None and not owner.run.trader.join_background_learning(0)))
-                   for owner in self.owners.values()):
+                   for owner in self.owners.values() if type(owner) is not NativeProducerOwner):
                 raise RuntimeError("execution consumers still owned")
             protection = self.app.config.get("PROTECTION_SERVICES")
             for run_id, owner in self.owners.items():
+                if type(owner) is NativeProducerOwner:
+                    continue  # No independent book/store: native custody belongs to this registry.
                 if getattr(owner, "_resources_closed", False):
                     continue
                 def dispose(owner=owner, run_id=run_id):

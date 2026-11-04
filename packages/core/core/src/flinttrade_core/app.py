@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, ContextManager
+from typing import TYPE_CHECKING, Any, ContextManager
 
 from .source_root import discover_source_root
 from .broker_account_cutover import (
@@ -50,6 +50,9 @@ from .broker_account_cutover import (
 )
 
 # Ensure repo root is on sys.path for cross-package imports.
+if TYPE_CHECKING:
+    from .account_setup import AccountSetupDriver
+
 _REPO_ROOT = str(discover_source_root())
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -1860,45 +1863,33 @@ def _native_activation_checks(
 
 
 def _lazy_dhan_security_resolver() -> Callable[[str, str], str]:
-    """Build a Dhan scrip-master resolver on first use.
+    """Compatibility constructor for a missing, never auto-fetched snapshot.
 
-    Dhan order and market-data calls take numeric security ids. The standalone
-    live probe warms this resolver before market reads; the app-activated native
-    adapter needs the same behaviour so broker routes and gated writes do not
-    fail after a successful connect.
+    Explicit acquisition supplies a versioned resolver at factory composition
+    or the adapter's reviewed replacement seam. Reads cannot download a master
+    or turn an undated cache into contract authority.
     """
-    lock = threading.Lock()
-    resolver: Callable[[str, str], str] | None = None
+    from flinttrade_gateway.brokers import dhan_mapping as dhan_map  # noqa: PLC0415
 
-    def _resolve(symbol: str, exchange: str) -> str:
-        nonlocal resolver
-        if resolver is None:
-            with lock:
-                if resolver is None:
-                    # Reuse the adapter's canonical public fetch+parse helper —
-                    # no cross-package reach into module-private symbols and no
-                    # second copy of the download+CSV composition to drift.
-                    from flinttrade_gateway.brokers import dhan_mapping as dhan_map  # noqa: PLC0415
-                    from flinttrade_gateway.brokers.dhan import load_scrip_master_rows  # noqa: PLC0415
-
-                    rows = load_scrip_master_rows("compact")
-                    resolver = dhan_map.build_security_resolver(rows)
-                    logger.info("Dhan security resolver loaded from compact scrip master rows=%s", len(rows))
-        return resolver(symbol, exchange)
-
-    return _resolve
+    return dhan_map.build_security_resolver([])
 
 
 def _native_adapter_kwargs_for(
     local_state_provider: Callable[[Any], Any],
+    *, reference_resolvers: dict[str, Any] | None = None,
 ) -> Callable[[str], dict[str, Any]]:
     """Return per-native adapter constructor kwargs for app activation."""
-    dhan_security_resolver = _lazy_dhan_security_resolver()
+    references = dict(reference_resolvers or {})
+    dhan_security_resolver = references.get("dhan")
+    if dhan_security_resolver is None:
+        dhan_security_resolver = _lazy_dhan_security_resolver()
 
     def _kwargs(broker_id: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"local_state_provider": local_state_provider}
         if broker_id == "dhan":
             kwargs["security_resolver"] = dhan_security_resolver
+        elif broker_id == "kotakneo" and "kotakneo" in references:
+            kwargs["contract_resolver"] = references["kotakneo"]
         return kwargs
 
     return _kwargs
@@ -2948,7 +2939,9 @@ def _configure_broker_router_locked(
                 broker_client=broker_client,
                 native_attest_ok=native_attest_ok,
                 native_has_credentials=native_has_credentials,
-                native_adapter_kwargs=_native_adapter_kwargs_for(local_state_provider),
+                native_adapter_kwargs=_native_adapter_kwargs_for(
+                    local_state_provider, reference_resolvers=app.config.get("NATIVE_REFERENCE_RESOLVERS"),
+                ),
                 lifecycle_store=local_state_provider,
                 workspace_snapshot=workspace_snapshot,
                 workspace_path=target_workspace,
@@ -3506,6 +3499,8 @@ def create_flask_app(
     broker_account_mutation_admission: MutationAdmission = require_broker_account_mutations,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     backend_lease_proof: BackendLeaseProof | None = None,
+    account_setup_driver: AccountSetupDriver | None = None,
+    native_reference_resolvers: dict[str, Any] | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3525,13 +3520,32 @@ def create_flask_app(
         time_scheduler: Shared effective-session calendar owner.
         service_provider_catalogue: Optional immutable static provider catalogue.
         service_connection_store: Optional preconstructed inert connection authority.
-        broker_account_mutation_admission: Explicit dependency for isolated legacy tests; production denies mutations.
+        broker_account_mutation_admission: Legacy seam; normal owned actions use the durable account coordinator.
         backend_lease_proof: Live process ownership required for broker runtime construction; omit for read-only setup.
+        account_setup_driver: Explicit isolated driver override; normal composition uses reviewed native drivers.
+        native_reference_resolvers: Server-owned, explicitly acquired snapshot objects; never downloaded by reads.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
     """
     runtime_ready = backend_lease_proof is not None
+    production_account_setup = (
+        runtime_ready and account_setup_driver is None
+        and broker_account_mutation_admission is require_broker_account_mutations
+    )
+    if account_setup_driver is not None:
+        from .account_setup import AccountSetupDriver  # noqa: PLC0415
+
+        if (
+            type(account_setup_driver) is not AccountSetupDriver
+            or not runtime_ready
+            or credential_store is not None
+            or registry is not None
+            or registry_publication_owner is not None
+            or broker_account_mutation_admission is not require_broker_account_mutations
+        ):
+            raise BrokerAccountCutoverUnavailable
+        account_setup_driver.__post_init__()
     if runtime_ready:
         require_backend_lease_proof(backend_lease_proof)
     elif any(
@@ -3567,6 +3581,7 @@ def create_flask_app(
                 "SCHEDULER": scheduler, "CRON": cron, "TELEGRAM_BOT": telegram}
     capture_factory_app(app, borrowed=frozenset(key for key, value in injected.items() if value is not None))
     app.config.update(injected)
+    app.config["NATIVE_REFERENCE_RESOLVERS"] = dict(native_reference_resolvers or {})
     app.config.update(BACKEND_LEASE_PROOF=backend_lease_proof, BACKEND_LEASE_READY=runtime_ready)
 
     if safety is None:
@@ -4101,7 +4116,16 @@ def create_flask_app(
     if runtime_ready and credential_store is None:
         flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
-        credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        if production_account_setup:
+            from .account_setup import open_setup_store
+
+            credential_store = open_setup_store(flinttrade_dir, backend_lease_proof, master_password)
+        elif account_setup_driver is None:
+            credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        else:
+            from .account_setup import create_fresh_setup_store  # noqa: PLC0415
+
+            credential_store = create_fresh_setup_store(flinttrade_dir, backend_lease_proof, master_password)
         app.config["CREDENTIAL_STORE"] = credential_store
 
     if contract_manager is None:
@@ -4716,6 +4740,9 @@ def create_flask_app(
     app.register_blueprint(model_run_config_bp)
     install_protection_services(app, _workspace_dir())
     install_execution_sessions(app, _workspace_dir())
+    from .laya_qualification import install_laya_qualification  # noqa: PLC0415
+
+    install_laya_qualification(app)
     if runtime_ready:
         # Normal runtime ownership, not maintenance-created evidence of absence.
         # Opening does not arm entries or grant independent protection authority.
@@ -5548,6 +5575,27 @@ def create_flask_app(
         except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
             logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
 
+    if account_setup_driver is not None:
+        from .account_setup import AccountSetup  # noqa: PLC0415
+
+        AccountSetup(app, account_setup_driver)
+    elif production_account_setup:
+        from flinttrade_engine.local_state_provider import OrderLifecycleLedger  # noqa: PLC0415
+        from .account_setup import AccountSetup  # noqa: PLC0415
+        from .account_setup_drivers import production_account_drivers  # noqa: PLC0415
+
+        # A witnessed account transaction can make the early dependency build
+        # unavailable until AccountSetup recovers it. Retain/reuse the existing
+        # canonical ledger rather than requiring that earlier build to pass.
+        if app.config.get("ORDER_LIFECYCLE_LEDGER") is None:
+            local_state_provider = app.config.get("LOCAL_STATE_PROVIDER")
+            if local_state_provider is None:
+                local_state_provider = OrderLifecycleLedger()
+            app.config["ORDER_LIFECYCLE_LEDGER"] = local_state_provider
+        AccountSetup(app, production_account_drivers(adapter_kwargs=_native_adapter_kwargs_for(
+            app.config["ORDER_LIFECYCLE_LEDGER"], reference_resolvers=app.config["NATIVE_REFERENCE_RESOLVERS"],
+        )))
+
     return app
 
 
@@ -6008,7 +6056,9 @@ class FlintTradeApp:
         # Gateway — broker registry + credential store + contract manager
         flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
-        self.credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        from .account_setup import open_setup_store
+
+        self.credential_store = open_setup_store(flinttrade_dir, self._backend_lease_proof, master_password)
         contracts_dir = flinttrade_dir / "contracts"
         contracts_dir.mkdir(exist_ok=True)
         self.contract_manager = ContractManager(contracts_dir)

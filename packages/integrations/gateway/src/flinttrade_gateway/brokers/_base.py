@@ -116,12 +116,16 @@ class Session:
     algo_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
     read_only_until_at: float | None = None
+    read_only_lifetime: bool = False
 
     def is_expiring_soon(self, leeway_seconds: int = 60) -> bool:
         return self.expires_at <= datetime.now(tz=UTC).timestamp() + leeway_seconds
 
     @property
     def is_read_only(self) -> bool:
+        """Keep recovery restrictions permanent; legacy temporary restrictions retain their old meaning."""
+        if self.read_only_lifetime:
+            return True
         if self.read_only_until_at is None:
             return False
         return datetime.now(tz=UTC).timestamp() < self.read_only_until_at

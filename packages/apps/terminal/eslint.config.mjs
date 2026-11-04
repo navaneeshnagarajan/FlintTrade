@@ -185,7 +185,7 @@ export default [
   {
     // Build/Playwright infrastructure is outside src/, but carries the same two
     // TypeScript safety rules. Hooks rules are irrelevant to non-React E2E code.
-    files: ["playwright.csp.config.ts", "e2e/csp/build-probe.mjs", "e2e/csp/eval-negative.js", "vite.config.ts", "vite.reticle.config.ts", "playwright.reticle.config.ts", "playwright.policy.config.ts", "playwright.incidents.config.ts", "e2e/**/*.ts", "e2e/service-oauth-handoff.browser.mjs", "playwright.config.ts", "playwright.infra.config.ts", "playwright.public-demo.config.ts", "playwright.visual.config.ts", "playwright.order-flow.config.ts"],
+    files: ["playwright.incident-protocol.config.ts", "playwright.csp.config.ts", "e2e/csp/build-probe.mjs", "e2e/csp/eval-negative.js", "vite.config.ts", "vite.reticle.config.ts", "playwright.reticle.config.ts", "playwright.policy.config.ts", "playwright.incidents.config.ts", "e2e/**/*.ts", "e2e/service-oauth-handoff.browser.mjs", "playwright.config.ts", "playwright.infra.config.ts", "playwright.public-demo.config.ts", "playwright.visual.config.ts", "playwright.order-flow.config.ts"],
     plugins: { local: localRules },
     languageOptions: {
       parser: babelParser,

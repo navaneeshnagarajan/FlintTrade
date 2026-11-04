@@ -457,3 +457,177 @@ def test_boot_replay_retains_its_cas_version_when_another_writer_follows(exact, 
     assert exact.store.selector_state(selector).version.generation == 3
     assert publications == []
     assert not exact.registry.snapshot_selector(selector).present
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("error_kind", ["timeout", "window", "rate-limit", "auth"])
+def test_fresh_probe_policy_does_not_change_legacy_continuity(strict: "bool", error_kind: "str") -> None:
+    """Keep strict fresh verification separate from legacy session continuity policy.
+
+    Args:
+        strict: Whether fresh verification is required instead of legacy continuity policy.
+        error_kind: Liveness failure class used to distinguish fresh admission from continuity.
+    """
+    from flinttrade_core.exceptions import RateLimitError
+    from flinttrade_gateway.native_login import verify_native_session
+
+    error = {
+        "timeout": TimeoutError("synthetic timeout"),
+        "window": RuntimeError("synthetic service under maintenance"),
+        "rate-limit": RateLimitError("synthetic limit", endpoint="funds"),
+        "auth": RuntimeError("401 synthetic invalid token"),
+    }[error_kind]
+    calls = []
+    session = Session("synthetic", 4102444800, "Case", "dhan")
+
+    class Probe:
+        async def liveness(self, value):
+            calls.append(value)
+            raise error
+
+    if strict:
+        with pytest.raises(type(error)) as observed:
+            asyncio.run(verify_native_session(Probe(), session, strict_probe=True))
+        assert observed.value is error
+    else:
+        result = asyncio.run(verify_native_session(Probe(), session))
+        assert result == (SESSION_INVALID_RELOGIN_MESSAGE if error_kind == "auth" else None)
+    assert calls == [session]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("strict", [False, True])
+def test_missing_probe_is_not_fresh_verification(strict: "bool") -> None:
+    """Refuse a missing liveness probe as evidence of fresh verification.
+
+    Args:
+        strict: Whether fresh verification is required instead of legacy continuity policy.
+    """
+    from flinttrade_gateway.native_login import verify_native_session
+
+    if strict:
+        with pytest.raises(RuntimeError, match="native_verification_unavailable"):
+            asyncio.run(verify_native_session(object(), object(), strict_probe=True))
+    else:
+        assert asyncio.run(verify_native_session(object(), object())) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("phase", ["probe", "export", "cancelled", "success"])
+@pytest.mark.parametrize("owned", [False, True])
+def test_preparation_transfers_actual_candidate_before_post_login_work(phase: "str", owned: "bool") -> None:
+    """Transfer actual candidate cleanup custody before fallible post-login work.
+
+    Args:
+        phase: Post-login step at which candidate custody is observed or interrupted.
+        owned: Whether the existing preparation owner accepts candidate cleanup custody.
+    """
+    from flinttrade_gateway import native_login
+
+    error = asyncio.CancelledError("synthetic cancellation") if phase == "cancelled" else RuntimeError(
+        "synthetic failure")
+    events, accepted, sessions = [], [], []
+    before = tuple(native_login._QUARANTINED_CANDIDATES)
+
+    class Preparing(Adapter):
+        async def login(self, credentials):
+            session = await super().login(credentials)
+            sessions.append(session)
+            events.append("login")
+            return session
+
+        async def liveness(self, session):
+            assert session is sessions[0]
+            events.append("probe")
+            if phase in {"probe", "cancelled"}:
+                raise error
+
+        def replay_credentials(self, credentials, session):
+            assert session is sessions[0]
+            events.append("export")
+            if phase == "export":
+                raise error
+            return {"access_token": "synthetic-replay"}
+
+    def accept(candidate):
+        assert type(candidate) is native_login.NativeSessionCandidate
+        assert candidate.session is sessions[0]
+        assert events == ["login"]
+        events.append("accept")
+        accepted.append(candidate)
+
+    adapter = Preparing()
+    command = native_login.prepare_native_session(
+        adapter, {"access_token": "synthetic-input"}, verify=True, strict_probe=True,
+        accept_candidate=accept if owned else None, mutation_admission=lambda: None,
+    )
+    if phase == "success":
+        result = asyncio.run(command)
+        assert result.session is sessions[0]
+        assert result.replay_credentials == {"access_token": "synthetic-replay"}
+        assert result.probe_error is None
+        if owned:
+            assert result is accepted[0]
+    else:
+        with pytest.raises(type(error)) as observed:
+            asyncio.run(command)
+        assert observed.value is error
+    assert adapter.calls == 1
+    assert events == ["login", *(["accept"] if owned else []), "probe", *([] if phase in {"probe", "cancelled"} 
+        else ["export"])]
+    if owned or phase == "success":
+        assert tuple(native_login._QUARANTINED_CANDIDATES) == before
+    else:
+        assert tuple(native_login._QUARANTINED_CANDIDATES[:-1]) == before
+        assert native_login._QUARANTINED_CANDIDATES[-1].session is sessions[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("returned", [False, True, "unexpected"])
+def test_unaccepted_preparation_transfer_keeps_legacy_quarantine(returned: "bool | str") -> None:
+    """Keep legacy quarantine when candidate custody transfer is not accepted.
+
+    Args:
+        returned: Candidate-transfer callback result, including the non-boolean refusal control.
+    """
+    from flinttrade_gateway import native_login
+
+    seen = []
+    def incomplete(candidate):
+        seen.append(candidate)
+        return returned
+    with pytest.raises(TypeError, match="native_candidate_custody_incomplete"):
+        asyncio.run(native_login.prepare_native_session(
+            Adapter(), {"access_token": "synthetic"}, verify=True, strict_probe=True,
+            accept_candidate=incomplete, mutation_admission=lambda: None,
+        ))
+    assert len(seen) == 1
+    assert any(candidate is seen[0] for candidate in native_login._QUARANTINED_CANDIDATES)
+
+
+@pytest.mark.unit
+def test_strict_preparation_does_not_bypass_default_admission() -> None:
+    """Retain default admission checks during strict native preparation."""
+    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
+    from flinttrade_gateway.native_login import prepare_native_session
+
+    adapter = Adapter()
+    accepted = []
+    with pytest.raises(BrokerAccountCutoverUnavailable):
+        asyncio.run(prepare_native_session(adapter, {}, verify=True, strict_probe=True,
+            accept_candidate=accepted.append))
+    assert adapter.calls == 0 and accepted == []
+
+
+@pytest.mark.unit
+def test_strict_preparation_refuses_disabled_verification_before_login() -> None:
+    # verify selects the liveness probe, never TLS certificate verification.
+    """Refuse disabled fresh verification before invoking native login."""
+    from flinttrade_gateway.native_login import prepare_native_session
+
+    adapter = Adapter()
+    with pytest.raises(ValueError, match="native_verification_required"):
+        asyncio.run(prepare_native_session(adapter, {}, verify=False, strict_probe=True,
+            mutation_admission=lambda: None))
+    assert adapter.calls == 0

@@ -10,14 +10,20 @@ session to dispatch to — every read and write for that selector fails. This
 module is that step.
 
 It is deliberately broker-agnostic: it only speaks the ``BrokerAdapter.login``
-contract and the exact registry publication owner, so the same
-code path serves boot-time re-establishment, an interactive "connect broker"
-action, and daily token re-authentication.
+contract and the exact registry publication owner. The normal factory does not
+invoke authentication during startup or GET requests: explicit CONNECT and
+RECONNECT use the account transaction and lifecycle owners. Legacy replay
+helpers remain guarded and cannot bypass that production cutover.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
+import math
+import time
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,7 +61,10 @@ def _is_transient_probe_error(exc: BaseException) -> bool:
     for module, names in (
         ("httpx", ("ConnectError", "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout", "NetworkError")),
         ("requests.exceptions", ("ConnectionError", "Timeout", "ConnectTimeout", "ReadTimeout")),
-        ("urllib3.exceptions", ("TimeoutError", "ConnectionError", "NewConnectionError", "MaxRetryError", "ProtocolError")),
+        (
+            "urllib3.exceptions",
+            ("TimeoutError", "ConnectionError", "NewConnectionError", "MaxRetryError", "ProtocolError"),
+        ),
     ):
         try:
             mod = __import__(module, fromlist=["*"])
@@ -168,6 +177,15 @@ class NativeSessionCandidate:
     replay_credentials: dict[str, Any] = field(repr=False)
     probe_error: str | None = None
     registry_version: Any = None
+    identity_evidence: object | None = field(default=None, repr=False)
+
+    def require_identity(self, adapter: object, account: str) -> None:
+        """Require this exact candidate's producer receipt for the selected account."""
+        proof = self.identity_evidence
+        if (type(proof) is not _VerifiedNativeIdentity or proof.adapter is not adapter
+                or proof is not self.session.extra.get("_verified_native_identity")
+                or verified_session_identity(self.session) != account):
+            raise ValueError("candidate_native_identity_unavailable")
 
     @property
     def expires_at(self) -> float:
@@ -193,54 +211,248 @@ def quarantine_native_candidate(candidate: NativeSessionCandidate) -> None:
         _QUARANTINED_CANDIDATES.append(candidate)
 
 
-async def verify_native_session(adapter: Any, session: Any) -> str | None:
-    """Probe an unpublished payload; this function never mutates a registry."""
+async def verify_native_session(
+    adapter: Any,
+    session: Any,
+    *,
+    strict_probe: bool = False,
+    registry_publication_owner: Any | None = None,
+    current_authority: Any | None = None,
+) -> str | None:
+    """Probe without publication, distinguishing admission from continuity.
+
+    Args:
+        adapter: External liveness provider, with funds as the legacy fallback.
+        session: Exact unpublished candidate or current sealed registry handle.
+        strict_probe: Require an actual successful probe for fresh admission.
+            The default preserves legacy keep-session policy, not verification.
+        registry_publication_owner: Exact existing owner for a shorter published lifetime.
+        current_authority: Server-resolved current lookup witness; not caller flags.
+
+    Returns:
+        A legacy invalid-session message, or None after the applicable policy.
+        None can mean that an expired observation was applied successfully; it
+        is not an alive/ready flag. Callers making an authority decision must
+        reacquire the current session through the existing registry lookup.
+
+    Raises:
+        RuntimeError: Strict verification has no callable probe.
+        BaseException: A strict probe fails or either policy is cancelled.
+    """
     reader = getattr(adapter, "liveness", None)
     if not callable(reader):
         reader = getattr(adapter, "funds", None)
     if not callable(reader):
+        if strict_probe:
+            raise RuntimeError("native_verification_unavailable")
         return None
     try:
-        await reader(session)
+        observation = await reader(session)
+        from .registry import ConnectedRegistrySession, RegistryPublicationOwner
+
+        if type(session) is ConnectedRegistrySession and getattr(adapter, "broker_id", None) == "dhan":
+            # The adapter's continuity observation must not mutate a sealed view.
+            # Only its existing registry owner can shorten and revoke a prior
+            # generation; an absent owner cannot silently ignore new evidence.
+            if type(observation) not in (int, float) or not math.isfinite(observation) or observation < 0:
+                raise RuntimeError("native_continuity_observation_unavailable")
+            if registry_publication_owner is not None or observation < session.expires_at:
+                if type(registry_publication_owner) is not RegistryPublicationOwner:
+                    raise RuntimeError("native_continuity_owner_unavailable")
+                registry_publication_owner.shorten_session_expiry(
+                    session,
+                    min(observation, session.expires_at),
+                    current_authority=current_authority,
+                )
     except Exception as exc:
+        if strict_probe:
+            raise
         if not should_keep_session_after_probe_error(exc):
             return SESSION_INVALID_RELOGIN_MESSAGE
     from flinttrade_gateway.monday_read_smoke import MONDAY_READ_BROKERS, probe_monday_session_reads
 
     broker_id = str(getattr(adapter, "broker_id", "") or "")
-    if broker_id in MONDAY_READ_BROKERS:
+    if broker_id in MONDAY_READ_BROKERS and not strict_probe:
         await probe_monday_session_reads(adapter, session)
     return None
+
+
+_IDENTITY_SEAL = object()
+
+
+class _VerifiedNativeIdentity:
+    """Opaque provider result bound to the actual login resource and session."""
+
+    __slots__ = ("session", "adapter", "resource", "account", "seal", "binding")
+
+    def __init__(self) -> None:
+        """Reject caller construction; only the active provider authentication frame issues receipts."""
+        raise TypeError("provider identity is issued by authentication")
+
+
+def verified_session_identity(session: object) -> str | None:
+    """Read only a genuine, still-bound authentication receipt, never extra flags."""
+    from .brokers._base import Session
+    from .brokers.dhan import DhanAdapter
+    from .brokers.kotakneo import KotakNeoAdapter
+    from .brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    if type(session) is not Session:
+        return None
+    proof = session.extra.get("_verified_native_identity")
+    if (type(proof) is not _VerifiedNativeIdentity or proof.seal is not _IDENTITY_SEAL
+            or proof.session is not session or proof.account != session.account_id
+            or proof.binding != (session.access_token, session.expires_at, session.account_id,
+                                  session.adapter_id, id(session.extra.get("client")))):
+        return None
+    if type(proof.adapter) is DhanAdapter and proof.resource is session and session.adapter_id == "dhan":
+        return proof.account
+    if (type(proof.adapter) is KotakNeoAdapter and type(proof.resource) is KotakNeoSdkSession
+            and proof.resource is session.extra.get("client") and not proof.resource._closed
+            and session.adapter_id == "kotakneo"):
+        return proof.account
+    return None
+
+
+_IDENTITY_FRAME: ContextVar[Any] = ContextVar("native_authentication_identity", default=None)
+
+
+def observe_provider_identity(producer: object, resource: object, native_account: str) -> None:
+    """Retain validated profile/UCC facts only inside their actual auth producer.
+
+    Dhan calls this after profile validation. Kotak calls it after both installed
+    View/Trade steps. Continuity probes outside candidate authentication do not
+    issue a new identity receipt or change an existing historical binding.
+    """
+    from .brokers.dhan import DhanAdapter
+    from .brokers.kotakneo import KotakNeoAdapter
+    from .brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    frame = _IDENTITY_FRAME.get()
+    if frame is None:
+        return
+    adapter, observations = frame
+    valid = (type(adapter) is DhanAdapter and producer is adapter)
+    valid = valid or (type(adapter) is KotakNeoAdapter and producer is resource
+                      and type(resource) is KotakNeoSdkSession)
+    if not valid or type(native_account) is not str or not native_account or observations:
+        raise ValueError("native authentication identity producer mismatch")
+    observations.append((resource, native_account))
 
 
 async def prepare_native_session(
     adapter: Any, credentials: dict[str, Any], *, verify: bool,
     mutation_admission: MutationAdmission = require_broker_account_mutations,
+    strict_probe: bool = False, accept_candidate: Callable[[NativeSessionCandidate], None] | None = None,
 ) -> NativeSessionCandidate:
-    """Authenticate outside the registry; production remains denied before work."""
+    """Preserve early cleanup custody and bind genuine provider identity to its candidate."""
+    observations: list[tuple[object, str]] = []
+    token = _IDENTITY_FRAME.set((adapter, observations))
+    try:
+        candidate = await _prepare_native_session(
+            adapter, credentials, verify=verify, mutation_admission=mutation_admission,
+            strict_probe=strict_probe, accept_candidate=accept_candidate,
+        )
+        if len(observations) == 1 and candidate.probe_error is None:
+            resource, account = observations[0]
+            proof = object.__new__(_VerifiedNativeIdentity)
+            proof.session, proof.adapter, proof.resource = candidate.session, adapter, resource
+            proof.account, proof.seal = account, _IDENTITY_SEAL
+            proof.binding = (candidate.session.access_token, candidate.session.expires_at, candidate.session.account_id,
+                             candidate.session.adapter_id, id(candidate.session.extra.get("client")))
+            candidate.session.extra["_verified_native_identity"] = proof
+            candidate.identity_evidence = proof
+        return candidate
+    finally:
+        _IDENTITY_FRAME.reset(token)
+
+
+async def _prepare_native_session(
+    adapter: Any,
+    credentials: dict[str, Any],
+    *,
+    verify: bool,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
+    strict_probe: bool = False,
+    accept_candidate: Callable[[NativeSessionCandidate], None] | None = None,
+) -> NativeSessionCandidate:
+    """Prepare under explicit custody, without publishing or granting authority.
+
+    Args:
+        adapter: External authentication and optional replay-export provider.
+        credentials: Detached credential input for this attempt only.
+        verify: Optional authentication probe, never a TLS verification setting.
+            Provisional sessions always require successful strict verification.
+        mutation_admission: Existing fail-closed admission check before login.
+        strict_probe: Require successful verification rather than legacy
+            session-continuity policy. Requires verify to be True.
+        accept_candidate: Synchronous custody transfer immediately after login,
+            before any probe/export. A successful None return means the caller
+            retains this exact session even if later preparation raises.
+
+    Returns:
+        The actual unpublished candidate; legacy probe errors remain explicit.
+
+    Raises:
+        ValueError: Strict probing is requested without verification.
+        TypeError: The supplied custody callback is not synchronous or returns
+            a non-None value; the unclaimed payload stays quarantined.
+        BaseException: Admission, login, custody, probe or export fails. Original
+            failure/cancellation propagates; accepted custody stays caller-owned.
+    """
     mutation_admission()
+    if strict_probe and not verify:
+        raise ValueError("native_verification_required")
+    if accept_candidate is not None and (
+        not callable(accept_candidate) or inspect.iscoroutinefunction(accept_candidate)
+    ):
+        raise TypeError("native_candidate_custody_invalid")
     session = await adapter.login(credentials)
     candidate = NativeSessionCandidate(session, dict(credentials))
+    accepted = False
     try:
-        if verify:
-            candidate.probe_error = await verify_native_session(adapter, session)
+        if accept_candidate is not None:
+            result = accept_candidate(candidate)
+            if result is not None:
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise TypeError("native_candidate_custody_incomplete")
+            accepted = True
+        expiry = session.expires_at
+        provisional = type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= time.time()
+        # Optional legacy probing is not evidence for a newly created provisional
+        # session. Strict success and provider-derived future expiry are required
+        # even when verify=False; prior-session continuity remains separate.
+        if verify or provisional:
+            candidate.probe_error = await verify_native_session(
+                adapter, session, strict_probe=strict_probe or provisional
+            )
+        expiry = session.expires_at
+        if type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= time.time():
+            raise RuntimeError("native_session_expiry_unverified")
         replay = getattr(adapter, "replay_credentials", None)
         if callable(replay) and candidate.probe_error is None:
             value = replay(dict(credentials), session)
             if isinstance(value, dict):
                 candidate.replay_credentials = value
     except BaseException:
-        quarantine_native_candidate(candidate)
+        if not accepted:
+            quarantine_native_candidate(candidate)
         raise
-    if candidate.probe_error is not None:
+    if candidate.probe_error is not None and not accepted:
         quarantine_native_candidate(candidate)
     return candidate
 
 
 async def establish_native_session(
-    adapter: Any, registry: Any, credentials: dict[str, Any],
-    adapter_id: str, account_id: str, credential_store: Any | None = None,
-    verify: bool = False, *,
+    adapter: Any,
+    registry: Any,
+    credentials: dict[str, Any],
+    adapter_id: str,
+    account_id: str,
+    credential_store: Any | None = None,
+    verify: bool = False,
+    *,
     mutation_admission: MutationAdmission = require_broker_account_mutations,
     registry_publication_owner: Any | None = None,
     workspace_path: Any | None = None,
@@ -259,8 +471,12 @@ async def establish_native_session(
     from .registry import ManagedSessionAuthority, RegistryPublicationOwner
 
     owner = registry_publication_owner
-    if (type(owner) is not RegistryPublicationOwner or not owner.owns(registry)
-            or workspace_path is None or credential_store is None):
+    if (
+        type(owner) is not RegistryPublicationOwner
+        or not owner.owns(registry)
+        or workspace_path is None
+        or credential_store is None
+    ):
         raise RegistrySessionUnavailable
     selector = BrokerSelector(adapter_id, account_id)
     if type(credential_version) is not CredentialVersion:
@@ -270,48 +486,93 @@ async def establish_native_session(
         raise RegistrySessionUnavailable
     expected = registry.snapshot_selector(selector)
     before = credential_store.selector_state(selector)
-    if (not before.present or not before.credential_present or before.origin != "managed"
-            or before.version != credential_version):
+    if (
+        not before.present
+        or not before.credential_present
+        or before.origin != "managed"
+        or before.version != credential_version
+    ):
         raise RegistrySessionUnavailable
+    workspace = read_workspace_snapshot(workspace_path)
+    initial_authority = ManagedSessionAuthority(
+        credential_version, workspace.version, broker_workspace_version(workspace)
+    )
+    metadata = credential_store.account_for_selector(selector)
     candidate = None
+    receipt = None
+
+    def retain_prepared(value: NativeSessionCandidate) -> None:
+        nonlocal candidate, receipt
+        candidate = value
+        receipt = owner.prepare_session_candidate(
+            selector,
+            value.session,
+            expected_registry=expected,
+            authority=initial_authority,
+            broker=metadata.broker,
+            label=metadata.label,
+        )
+
     try:
-        candidate = await prepare_native_session(adapter, credentials, verify=verify, mutation_admission=mutation_admission)
+        candidate = await prepare_native_session(
+            adapter, credentials, verify=verify, mutation_admission=mutation_admission, accept_candidate=retain_prepared
+        )
         if candidate.probe_error is not None:
             from .exceptions import AuthFlowError
+
             raise AuthFlowError(candidate.probe_error)
         if credential_store.selector_state(selector).version != credential_version:
             raise RegistrySessionUnavailable
         final_version = credential_version
         if candidate.replay_credentials != credentials:
             final_version = credential_store.update_credentials(
-                selector, candidate.replay_credentials, expected=credential_version)
+                selector, candidate.replay_credentials, expected=credential_version
+            )
         state = credential_store.selector_state(selector)
-        if (not state.present or not state.credential_present or state.origin != "managed"
-                or state.version != final_version):
+        if (
+            not state.present
+            or not state.credential_present
+            or state.origin != "managed"
+            or state.version != final_version
+        ):
             raise RegistrySessionUnavailable
         workspace = read_workspace_snapshot(workspace_path)
         authority = ManagedSessionAuthority(final_version, workspace.version, broker_workspace_version(workspace))
-        metadata = credential_store.account_for_selector(selector)
-        receipt = owner.prepare_session_candidate(selector, candidate.session, expected_registry=expected,
-            authority=authority, broker=metadata.broker, label=metadata.label)
-        try:
-            current = read_workspace_snapshot(workspace_path)
-            state = credential_store.selector_state(selector)
-            if (not state.present or not state.credential_present or state.origin != "managed"
-                    or state.version != final_version):
-                raise RegistrySessionUnavailable
-        except BaseException:
-            owner.abandon_prepared_candidate(receipt)
-            raise
-        result = owner.publish_prepared_candidate(receipt, current_authority=ManagedSessionAuthority(
-            final_version, current.version, broker_workspace_version(current)))
+        owner.rebind_prepared_credentials(receipt, expected_authority=initial_authority, current_authority=authority)
+        current = read_workspace_snapshot(workspace_path)
+        state = credential_store.selector_state(selector)
+        if (
+            not state.present
+            or not state.credential_present
+            or state.origin != "managed"
+            or state.version != final_version
+        ):
+            raise RegistrySessionUnavailable
+        publishing, receipt = receipt, None  # publication consumes or retires this capability
+        result = owner.publish_prepared_candidate(
+            publishing,
+            current_authority=ManagedSessionAuthority(
+                final_version, current.version, broker_workspace_version(current)
+            ),
+        )
         candidate.registry_version = result.version.registry_version
-    except BaseException:
-        if candidate is not None:
+    except BaseException as exc:
+        if receipt is not None:
+            owner.abandon_prepared_candidate(receipt)
+        elif (
+            candidate is not None
+            and not owner.owns_live_candidate(candidate.session)
+            and owner.retirement_for_candidate(candidate.session) is None
+        ):
             quarantine_native_candidate(candidate)
         from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+
         try:
-            owner.remove_session_for_exact(selector, expected_registry=expected)
+            # A failed fresh probe is not evidence that an already verified
+            # prior session died. Keep that exact generation on transient error;
+            # genuine invalid-auth and changed-authority refusals remain intact.
+            if not (expected.present and should_keep_session_after_probe_error(exc)):
+                owner.remove_session_for_exact(selector, expected_registry=expected)
         except RegistryVersionConflict:
             pass  # A concurrent successor is never ours to retire.
         raise
@@ -329,13 +590,13 @@ async def establish_native_sessions(
     registry_publication_owner: Any | None = None,
     workspace_path: Any | None = None,
 ) -> dict[str, Any]:
-    """Re-establish sessions for every active native selector with vault creds.
+    """Re-establish sessions only through an explicitly admitted legacy replay.
 
-    Called at boot (and after a router rebuild) so natives that authenticated
-    previously — or whose credentials were just stored — come back online
-    without an interactive step. Each selector is isolated: one broker's login
-    failure (expired token, network) is logged and skipped, never blocking the
-    others.
+    Production startup and automatic refresh retain the default cutover refusal.
+    The normal factory's CONNECT/RECONNECT path instead borrows the canonical
+    account transaction and lifecycle owners. An explicitly composed caller must
+    supply the existing publication owner and current durable witnesses. Each
+    selector's failure is reported separately; an unknown result is not ready.
 
     Args:
         native_adapters: Live ``broker_id -> adapter`` map of ACTIVE natives
@@ -343,10 +604,9 @@ async def establish_native_sessions(
         registry: The ``BrokerRegistry``.
         credential_store: The ``CredentialStore`` (``retrieve_for`` lookups).
         selectors: The registered ``<adapter_id>:<account_id>`` selectors.
-        verify: When True, probe each freshly-established session with a cheap
-            authenticated read so a dead token surfaces as a failure rather than
-            a false "ok". Transient probe failures keep the session; transient
-            login failures leave the selector sessionless with a retry message.
+        verify: Optional legacy probe policy for nonprovisional sessions. A new
+            provisional session always requires strict successful verification;
+            the flag cannot turn an unknown token into an authenticated session.
 
     Returns:
         ``{selector: "ok" | "<error>"}`` for admitted replay attempts.
@@ -376,21 +636,33 @@ async def establish_native_sessions(
                 raise RegistrySessionUnavailable
             credentials = credential_store.retrieve_for(adapter_id, account_id)
             after = credential_store.selector_state(exact_selector)
-            if (not after.present or not after.credential_present or after.origin != "managed"
-                    or after.version != before.version):
+            if (
+                not after.present
+                or not after.credential_present
+                or after.origin != "managed"
+                or after.version != before.version
+            ):
                 raise RegistrySessionUnavailable
         except Exception as exc:  # noqa: BLE001 - a missing/undecryptable row must not brick boot
             logger.info(
                 "No usable vault credentials for %s (%s) — leaving sessionless",
-                adapter_id, type(exc).__name__,
+                adapter_id,
+                type(exc).__name__,
             )
             results[selector] = CREDENTIALS_UNAVAILABLE_MESSAGE
             continue
         try:
             await establish_native_session(
-                adapter, registry, credentials, adapter_id, account_id,
-                credential_store=credential_store, verify=verify, mutation_admission=mutation_admission,
-                registry_publication_owner=registry_publication_owner, workspace_path=workspace_path,
+                adapter,
+                registry,
+                credentials,
+                adapter_id,
+                account_id,
+                credential_store=credential_store,
+                verify=verify,
+                mutation_admission=mutation_admission,
+                registry_publication_owner=registry_publication_owner,
+                workspace_path=workspace_path,
                 credential_version=before.version,
             )
             results[selector] = "ok"

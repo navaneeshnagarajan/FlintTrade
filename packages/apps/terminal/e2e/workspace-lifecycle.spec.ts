@@ -55,7 +55,9 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
   const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
   await catalogue.getByRole("button", { name: "Add Risk", exact: true }).click();
-  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
+  // Named-layout controls remain native, inside the public disclosure.
+  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
   await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
   await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(workspace.getByRole("status")).toHaveText("Saved Trading Desk");
@@ -66,7 +68,9 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY)).toEqual(original);
   await preset.selectOption("options-scalper");
-  await expect(workspace.getByText("Option Chain", { exact: true }).first()).toBeVisible();
+  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await expect(workspace.getByRole("tab", { name: "Option Chain", exact: true })).toBeVisible();
+  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
   await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   const copy = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY);
   expect(copy).not.toEqual(original);
@@ -75,12 +79,14 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
 
   for (const [name, expected, label] of [["Trading Desk", original, "Risk"], ["Trading Desk (Copy)", copy, "Option Chain"], ["Trading Desk", original, "Risk"]] as const) {
     await restore.selectOption({ label: name });
-    await expect(workspace.getByText(label, { exact: true }).first()).toBeVisible();
+    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
+    await expect(workspace.getByRole("tab", { name: label, exact: true })).toBeVisible();
     await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key)!).Current, LAYOUT_KEY)).toEqual(expected);
+    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
   }
   await page.reload();
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
   const persisted = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
   expect(Object.keys(persisted).sort()).toEqual(["Current", "Trading Desk", "Trading Desk (Copy)"]);
   expect(persisted["Trading Desk"]).toEqual(original);
@@ -170,6 +176,7 @@ for (const draftMode of ["new", "edit"] as const) {
     await expect(page).toHaveURL("http://localhost:5173/terminal");
     const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
     await expect(workspace).toBeVisible();
+    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
     const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
     await expect(restore.locator("option")).toHaveText(["Restore layout", "Synthetic saved layout"]);
     const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Synthetic saved layout"], LAYOUT_KEY);
@@ -183,7 +190,7 @@ for (const draftMode of ["new", "edit"] as const) {
     const expectDraft = async (): Promise<void> => {
       await expect(workspace).toBeVisible();
       await expect(workspace.getByRole("textbox", { name: "Layout name", exact: true })).toHaveValue(draftName);
-      await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+      await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
       await expect.poll(() => page.evaluate(key => JSON.stringify(JSON.parse(localStorage.getItem(key)!).Current), LAYOUT_KEY)).toContain('"riskdashboard"');
       const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
       expect(saved[draftName]).toBeUndefined();

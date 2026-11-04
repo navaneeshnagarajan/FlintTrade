@@ -44,7 +44,11 @@ def test_place_order_sl_m_fno_and_string_coercion():
         symbol="NIFTY", action="SELL", exchange="NFO", pricetype="SL-M",
         product="NRML", quantity="75", trigger_price="120.5",
     )
-    p = to_place_order_params(order, "NIFTY25JUN24000CE")
+    with pytest.raises(KotakNeoMappingError, match="prohibits SL-M"):
+        to_place_order_params(order, "NIFTY25JUN24000CE")
+    # Preserve the original string/wire assertions on the unrelated NSE future.
+    order = order.model_copy(update={"symbol": "NIFTY25JUNFUT"})
+    p = to_place_order_params(order, "NIFTY25JUNFUT")
     assert p["order_type"] == "SL-M"
     assert p["exchange_segment"] == "nse_fo"
     assert p["product"] == "NRML"

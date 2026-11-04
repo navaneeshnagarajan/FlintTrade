@@ -4,6 +4,7 @@ import {
   reloginNativeAccount,
   setPrimaryNativeAccount,
   type NativeAccount,
+  type ReloginResult,
 } from "@/services/ftApi.native";
 import { resolveNativeDataAccount } from "@/lib/marketDataScope";
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
@@ -84,10 +85,9 @@ export async function removeBrokerAccount(account: BrokerAccountRef, idempotency
   throw new Error("Only native broker accounts are supported.");
 }
 
-export async function reconnectBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
+export async function reconnectBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<ReloginResult> {
   if (account.source === "native") {
-    await reloginNativeAccount(account.broker, account.account_id, undefined, idempotencyKey);
-    return;
+    return reloginNativeAccount(account.broker, account.account_id, undefined, idempotencyKey);
   }
   throw new Error("Only native broker accounts are supported.");
 }

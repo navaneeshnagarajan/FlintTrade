@@ -1,0 +1,458 @@
+{
+  "synthetic": true,
+  "brokerProof": false,
+  "responses": {
+    "requalified": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "canonical_admission_required",
+          "admission_required": true,
+          "authorised": true,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.1034572,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.099048,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+            },
+            "revoked": false,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": true,
+          "obligations": [],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "not_granted",
+          "qualification": {
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "evidence_id": "inert-external-proof",
+            "expires_at": 1792482639.099048,
+            "provenance": "synthetic-inert-external-adapter-only",
+            "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+          },
+          "qualification_reason": "current_server_evidence",
+          "qualified": true,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "qualified"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": true,
+        "protection": "not_granted",
+        "run_id": "bounded-one",
+        "state": "qualified",
+        "uncertain": false
+      },
+      "status": "success"
+    },
+    "uncertain": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "reconciliation_required",
+          "admission_required": true,
+          "authorised": true,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [
+            {
+              "body": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "broker_order_id": null,
+              "cause": "canonical_dispatch_not_confirmed",
+              "command_id": "command-one",
+              "created_at": 1792482339.1209695,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "uncertain"
+              ],
+              "notional": "200",
+              "quantity": 2,
+              "request_digest": "8e477bb18aa985987b42ed36323d4825e001aa43979b2669bc22acc175cfba4a",
+              "run_id": "bounded-one",
+              "source": "bounded:c8b35e864091fe91b56f5d5e7d22ebf57d39ce7e191c7b76b9881f36d7c6c5e8",
+              "state": "uncertain",
+              "updated_at": 1792482339.1351175
+            }
+          ],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.1034572,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.099048,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+            },
+            "revoked": false,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": false,
+          "obligations": [
+            "command-one"
+          ],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "operator_handback_required",
+          "qualification": {
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "evidence_id": "inert-external-proof",
+            "expires_at": 1792482639.099048,
+            "provenance": "synthetic-inert-external-adapter-only",
+            "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+          },
+          "qualification_reason": "current_server_evidence",
+          "qualified": true,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "qualified"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": false,
+        "protection": "operator_handback_required",
+        "run_id": "bounded-one",
+        "state": "qualified",
+        "uncertain": false
+      },
+      "status": "success"
+    },
+    "staleQualification": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "current_grant_and_qualification_required",
+          "admission_required": true,
+          "authorised": false,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [
+            {
+              "body": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "broker_order_id": null,
+              "cause": "canonical_dispatch_not_confirmed",
+              "command_id": "command-one",
+              "created_at": 1792482339.1209695,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "uncertain"
+              ],
+              "notional": "200",
+              "quantity": 2,
+              "request_digest": "8e477bb18aa985987b42ed36323d4825e001aa43979b2669bc22acc175cfba4a",
+              "run_id": "bounded-one",
+              "source": "bounded:c8b35e864091fe91b56f5d5e7d22ebf57d39ce7e191c7b76b9881f36d7c6c5e8",
+              "state": "uncertain",
+              "updated_at": 1792482339.1351175
+            }
+          ],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.1034572,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.099048,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+            },
+            "revoked": false,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": false,
+          "obligations": [
+            "command-one"
+          ],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "operator_handback_required",
+          "qualification": {
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "evidence_id": "inert-external-proof",
+            "expires_at": 1792482639.099048,
+            "provenance": "synthetic-inert-external-adapter-only",
+            "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+          },
+          "qualification_reason": "server_qualification_required",
+          "qualified": false,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "qualified"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": false,
+        "protection": "operator_handback_required",
+        "run_id": "bounded-one",
+        "state": "qualified",
+        "uncertain": false
+      },
+      "status": "success"
+    },
+    "restart": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "current_grant_and_qualification_required",
+          "admission_required": true,
+          "authorised": false,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [
+            {
+              "body": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "broker_order_id": null,
+              "cause": "owner_restarted_no_replay",
+              "command_id": "command-one",
+              "created_at": 1792482339.1209695,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "uncertain"
+              ],
+              "notional": "200",
+              "quantity": 2,
+              "request_digest": "8e477bb18aa985987b42ed36323d4825e001aa43979b2669bc22acc175cfba4a",
+              "run_id": "bounded-one",
+              "source": "bounded:c8b35e864091fe91b56f5d5e7d22ebf57d39ce7e191c7b76b9881f36d7c6c5e8",
+              "state": "reconciling",
+              "updated_at": 1792482339.1351175
+            }
+          ],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.1034572,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.099048,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "587f7b29e7bda57adb6be6596d259f5e3379fafcfb81f100a67d41ae08d8622e"
+            },
+            "revoked": true,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": false,
+          "obligations": [
+            "command-one"
+          ],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "operator_handback_required",
+          "qualification": null,
+          "qualification_reason": "server_qualification_required",
+          "qualified": false,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "reconciliation_required"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": false,
+        "protection": "operator_handback_required",
+        "run_id": "bounded-one",
+        "state": "reconciliation_required",
+        "uncertain": false
+      },
+      "status": "success"
+    }
+  }
+}

@@ -195,9 +195,9 @@ export default async function DownloadPage() {
     : `https://github.com/navaneeshnagarajan/FlintTrade/blob/${sourceSha}/scripts/install/flinttrade-install.sh`;
 
   return (
-    <main className="site-shell">
-      <SiteHeader />
-      <section className="subpage">
+    <div className="site-shell">
+      <SiteHeader activePath="/download" />
+      <main className="subpage" id="site-content" tabIndex={-1}>
         <h1>Install FlintTrade.</h1>
 
         <section aria-labelledby="web-app-install">
@@ -443,8 +443,8 @@ export default async function DownloadPage() {
           {desktopAvailabilityNote(manifest, installerReleaseAvailable, lookupFailed)}{' '}
           Use Practice and example data first; Live mode remains your own risk.
         </p>
-      </section>
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }

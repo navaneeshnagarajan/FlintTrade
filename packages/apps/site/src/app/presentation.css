@@ -1,0 +1,551 @@
+/* Static presentation only. Signature selectors and timings stay in globals.css.
+   Surface/interactive radius: 8px. Nested controls: 4px.
+   Layers: content 1, sticky navigation 20, keyboard skip link 30. */
+
+html {
+  overflow-x: visible;
+}
+
+.site-shell {
+  min-height: 100dvh;
+  overflow: visible;
+}
+
+.site-shell :where(a, button, summary, pre[tabindex]):focus-visible {
+  outline: 2px solid var(--site-accent);
+  outline-offset: 4px;
+}
+
+#site-content {
+  scroll-margin-top: 88px;
+}
+
+.site-header {
+  min-height: 72px;
+  gap: 16px;
+  padding: 10px 0;
+  background: var(--site-background);
+  backdrop-filter: none;
+}
+
+.site-header :is(.brand-link, .main-nav, .github-link, .theme-toggle) {
+  box-shadow: none;
+  backdrop-filter: none;
+  border-radius: 8px;
+}
+
+.site-header .brand-link {
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+}
+
+.site-header .main-nav {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: 0;
+}
+
+.site-header .main-nav a {
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 13px;
+  color: var(--site-text-secondary);
+}
+
+.site-header a[aria-current="page"] {
+  color: var(--site-accent);
+  background: var(--site-surface-elevated);
+  font-weight: 600;
+}
+
+.site-header .theme-toggle {
+  background: var(--site-surface-card);
+}
+
+.site-header .theme-toggle button {
+  border-radius: 4px;
+}
+
+.site-header .theme-toggle button[aria-pressed="true"] {
+  box-shadow: none;
+}
+
+.site-header .github-link {
+  background: transparent;
+  width: 36px;
+  height: 36px;
+}
+
+.site-skip-link {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  left: 16px;
+  padding: 12px 16px;
+  background: var(--site-accent);
+  color: var(--site-accent-text);
+  border-radius: 8px;
+}
+
+.site-skip-link:not(:focus) {
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.site-menu {
+  display: none;
+}
+
+.site-menu summary {
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.site-menu nav {
+  position: absolute;
+  inset: 100% 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  background: var(--site-surface-card);
+}
+
+.site-menu nav a {
+  padding: 14px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.site-menu nav a:hover,
+.site-menu summary:hover {
+  background: var(--site-nav-hover);
+}
+
+.site-shell .button {
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.site-shell .button:hover {
+  outline: 1px solid var(--site-accent);
+  outline-offset: 2px;
+}
+
+.site-shell .button.secondary {
+  background: var(--site-surface-card);
+  backdrop-filter: none;
+}
+
+.product-site .hero {
+  min-height: auto;
+  padding-top: 20px;
+  padding-bottom: 56px;
+  /* Contain off-viewport decoration, not the document or the reveal itself.
+     Match the existing section gutter so the in-viewport flight stays visible. */
+  overflow-x: clip;
+  overflow-clip-margin: 16px;
+}
+
+@media (max-width: 620px) {
+  .product-site .hero {
+    overflow-clip-margin: 11px;
+  }
+}
+
+.product-notice {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto 24px;
+  padding: 18px 22px;
+  border-left: 3px solid var(--site-accent);
+  background: var(--site-surface-elevated);
+  color: var(--site-text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.product-notice p {
+  margin: 0 0 8px;
+}
+
+.product-notice a,
+.product-links a,
+.resource-links a,
+.availability-details a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--site-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.product-notice a:hover,
+.product-links a:hover,
+.resource-links a:hover,
+.availability-details a:hover,
+.site-footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.product-section {
+  padding: 72px 0;
+  border-top: 1px solid var(--site-border);
+}
+
+.product-heading {
+  max-width: 680px;
+  margin-bottom: 28px;
+}
+
+.product-heading h2 {
+  margin: 0;
+  font-size: clamp(28px, 3.4vw, 40px);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.product-heading p {
+  margin: 16px 0 0;
+  max-width: 65ch;
+  color: var(--site-text-secondary);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.product-heading .product-lead {
+  margin-top: 12px;
+  color: var(--site-foreground);
+  font-size: 21px;
+  line-height: 1.4;
+  letter-spacing: -0.015em;
+}
+
+.product-figure {
+  min-width: 0;
+  margin: 0;
+}
+
+.product-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--site-surface-card);
+}
+
+.product-figure figcaption {
+  margin-top: 12px;
+  max-width: 80ch;
+  color: var(--site-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.product-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 28px;
+  margin-top: 24px;
+}
+
+.product-links svg,
+.resource-links svg {
+  flex-shrink: 0;
+}
+
+.studio-section {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.3fr);
+  gap: 40px;
+  align-items: center;
+}
+
+.product-principle {
+  max-width: 55ch;
+  border-left: 2px solid var(--site-border);
+  padding-left: 18px;
+}
+
+.product-principle h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.product-principle p,
+.product-note {
+  margin: 0;
+  color: var(--site-text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.product-note {
+  max-width: 80ch;
+  margin-top: 20px;
+}
+
+.review-topics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  margin: 32px 0 0;
+}
+
+.review-topics dt,
+.mode-list dt {
+  margin-bottom: 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.review-topics dd,
+.mode-list dd {
+  margin: 0;
+  color: var(--site-text-secondary);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.mode-list {
+  display: grid;
+  gap: 24px;
+  margin: 32px 0;
+}
+
+.mode-list > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.4fr) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.availability-details {
+  max-width: 80ch;
+  margin-top: 20px;
+  padding: 20px 24px;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  color: var(--site-text-secondary);
+  background: var(--site-surface-card);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.availability-details summary {
+  color: var(--site-foreground);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.availability-details ul {
+  margin: 16px 0;
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.availability-details p {
+  margin: 0 0 16px;
+}
+
+.install-commands {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.site-shell .code-panel {
+  min-width: 0;
+  background: var(--site-surface-card);
+  backdrop-filter: none;
+  text-align: left;
+}
+
+.resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+}
+
+.mcp-endpoint {
+  overflow-wrap: anywhere;
+}
+
+.site-footer {
+  gap: 20px;
+  color: var(--site-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.site-footer p {
+  max-width: 58ch;
+}
+
+/* The documentation retains its own Fumadocs layout. Marketing subpages
+   share the same restrained surfaces, typography and keyboard treatment. */
+.site-shell .subpage {
+  max-width: 980px;
+  padding-top: 56px;
+  text-align: left;
+}
+
+.site-shell .subpage h1 {
+  font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.site-shell .subpage h2 {
+  margin-top: 40px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.site-shell .subpage p {
+  max-width: 75ch;
+  margin: 16px 0;
+  color: var(--site-text-secondary);
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.site-shell .subpage p.hero-disclaimer {
+  color: var(--site-hero-disclaimer);
+}
+
+.site-shell .subpage .section-heading {
+  margin: 36px 0;
+  text-align: left;
+}
+
+.site-shell .subpage .section-heading p {
+  overflow-wrap: anywhere;
+}
+
+.site-shell .subpage p a {
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.site-shell .subpage .feature-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 28px;
+}
+
+.site-shell .subpage .feature-card {
+  text-align: left;
+  background: var(--site-surface-card);
+  backdrop-filter: none;
+}
+
+.site-shell .subpage .feature-card svg {
+  margin: 0;
+}
+
+.site-shell .subpage .section-actions {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .site-header {
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    justify-content: normal;
+  }
+
+  .site-header .main-nav {
+    display: none;
+  }
+
+  .site-header .header-tools {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .site-menu {
+    display: block;
+    grid-row: 1;
+    grid-column: 3;
+  }
+}
+
+@media (max-width: 768px) {
+  .studio-section,
+  .review-topics,
+  .install-commands,
+  .mode-list > div,
+  .site-shell .subpage .feature-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .studio-section {
+    gap: 28px;
+  }
+
+  .product-section {
+    padding: 44px 0;
+  }
+
+  .review-topics {
+    gap: 24px;
+  }
+
+  .mode-list > div {
+    gap: 0;
+  }
+
+  .product-site .hero {
+    padding-top: 8px;
+    padding-bottom: 36px;
+  }
+}
+
+@media (max-width: 620px) {
+  .site-header,
+  .product-section,
+  .product-notice,
+  .site-footer,
+  .site-shell .subpage {
+    width: calc(100% - 32px);
+  }
+
+  .site-header {
+    gap: 8px;
+  }
+
+  .site-header .header-tools {
+    gap: 6px;
+  }
+
+  .site-shell .subpage {
+    padding-top: 32px;
+  }
+}

@@ -23,12 +23,17 @@ vi.mock("framer-motion", () => ({
   useInView: () => true,
 }));
 
-vi.mock("@/lib/motion", () => ({
-  motionConfig: {
-    prefersReducedMotion: () => true,
-    transitions: { tab: { duration: 0 } },
-  },
-}));
+vi.mock("@/lib/motion", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/motion")>();
+  return {
+    ...actual,
+    motionConfig: {
+      ...actual.motionConfig,
+      prefersReducedMotion: () => true,
+      transitions: { ...actual.motionConfig.transitions, tab: { duration: 0 } },
+    },
+  };
+});
 
 vi.mock("@/hooks/useSkillLevel", () => ({
   useSkillLevel: () => "advanced",

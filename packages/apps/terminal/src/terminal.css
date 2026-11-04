@@ -295,3 +295,315 @@ html[data-mode="dark"] .ft-tray-tab:not([aria-selected="true"]) {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Shared trading workspace (static presentation only) ----------
+   These tokens stop at the app shell. Welcome, the logo reveal, particles and
+   portal-owned dialogs keep their existing theme and animation contracts. */
+.ft-workspace {
+  font-variant-numeric: tabular-nums;
+  overflow: auto;
+  --ft-chrome: var(--color-surface-base);
+  --ft-panel: var(--color-surface-card);
+}
+
+html[data-mode="dark"] .ft-workspace {
+  --color-surface-base: #151819;
+  --color-surface-card: #1b1f20;
+  --color-surface-elevated: #232728;
+  --color-surface-hover: #2b3031;
+  --color-border-subtle: #2c3132;
+  --color-border-default: #363c3d;
+  --color-border-strong: #596162;
+  --color-text-primary: #e5e9e7;
+  --color-text-secondary: #b0bab6;
+  --color-text-muted: #9ca7a2;
+}
+
+.ft-workspace-body {
+  display: flex;
+  min-width: 0;
+  /* Short windows scroll the shell instead of squeezing panels to zero. */
+  min-height: 24rem;
+}
+
+.ft-topbar { font-variant-numeric: tabular-nums; }
+.ft-topbar-context { max-width: 100%; }
+.ft-topbar button, .ft-topbar .ft-market-chip { border-radius: 0.1875rem; }
+.ft-topbar .ft-market-chip {
+  border: 0;
+  border-left: 1px solid var(--color-border-default);
+  border-radius: 0;
+  background: transparent;
+}
+.ft-system-status { max-height: 6rem; overflow-y: auto; font-size: 0.6875rem; }
+
+.ft-app-nav {
+  display: flex;
+  flex: 0 0 10rem;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.75rem 0.5rem 0.5rem;
+  border-right: 1px solid var(--color-border-default);
+  background: var(--ft-chrome);
+  font-size: 0.75rem;
+}
+
+.ft-app-nav-heading {
+  padding: 0 0.625rem 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ft-app-nav-groups {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ft-app-nav-group + .ft-app-nav-group {
+  margin-top: 1rem;
+}
+
+.ft-app-nav-group h2 {
+  margin: 0 0 0.375rem;
+  padding-inline: 0.625rem;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.ft-app-nav ul {
+  display: grid;
+  gap: 0.125rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ft-app-nav-link {
+  display: flex;
+  min-height: 2.125rem;
+  align-items: center;
+  gap: 0.625rem;
+  border-left: 2px solid transparent;
+  border-radius: 0.125rem;
+  padding: 0.375rem 0.5rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.ft-app-nav-link:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.ft-app-nav-link[aria-current="page"] {
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.ft-app-nav-link[aria-current="page"] svg { color: var(--color-accent); }
+.ft-app-nav-link svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+
+.ft-app-nav .ft-app-nav-utilities {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.ft-app-nav-toggle {
+  display: flex;
+  min-height: 2.75rem;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding-inline: 0.5rem;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ft-app-nav-toggle svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+.ft-app-nav-toggle:hover { background: var(--color-surface-hover); }
+
+.ft-app-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--ft-chrome);
+}
+.ft-app-title { display: flex; align-items: baseline; gap: 0.625rem; }
+.ft-app-preset { margin-left: auto; }
+.ft-app-preset, .ft-layout-restore, .ft-compact-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+.ft-app-toolbar select, .ft-layout-management select, .ft-compact-panel select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: 0.1875rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--color-surface-card);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+.ft-app-toolbar button, .ft-layout-management button, .ft-layout-management input {
+  border-radius: 0.1875rem;
+  box-shadow: none;
+  font-size: 0.75rem;
+}
+.ft-layout-management {
+  flex-shrink: 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--ft-chrome);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+.ft-layout-management > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.875rem;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+.ft-layout-management > summary::-webkit-details-marker { display: none; }
+.ft-layout-management > summary::after { content: "+"; margin-left: auto; font-size: 1rem; }
+.ft-layout-management[open] > summary::after { content: "−"; }
+.ft-layout-management > summary:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.ft-layout-management > summary svg { width: 0.875rem; height: 0.875rem; }
+.ft-layout-hint { color: var(--color-text-muted); }
+.ft-layout-management-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  max-height: min(14rem, 25dvh);
+  overflow-y: auto;
+  padding: 0.75rem;
+  border-top: 1px solid var(--color-border-subtle);
+}
+.ft-layout-save { display: flex; align-items: center; gap: 0.5rem; }
+.ft-layout-save input { flex: 1; width: 0; }
+.ft-layout-restore select { flex: 1; }
+.ft-layout-transfer {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.ft-layout-import { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; min-width: 0; }
+.ft-layout-import input { min-width: 0; max-width: 100%; }
+.ft-layout-explanation { grid-column: 1 / -1; margin: 0; color: var(--color-text-muted); }
+.ft-app-context {
+  flex-shrink: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 0.25rem 0.75rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.ft-compact-panel { flex-shrink: 0; padding: 0.25rem 0.75rem; border-bottom: 1px solid var(--color-border-default); }
+.ft-compact-panel select { flex: 1; }
+
+/* FlexLayout 0.11 reads the public --flexlayout-* variables on the layout
+   element itself. Old --color-* aliases alone do not theme its panel bodies. */
+.ft-workspace .flexlayout__layout.flexlayout__layout {
+  --flexlayout-font-family: var(--font-sans);
+  --flexlayout-font-size: 13px;
+  --flexlayout-splitter-size: 4px;
+  --flexlayout-splitter-active-size: 8px;
+  --flexlayout-color-text: var(--color-text-primary);
+  --flexlayout-color-background: var(--ft-panel);
+  --flexlayout-color-base: var(--ft-chrome);
+  --flexlayout-color-1: var(--ft-chrome);
+  --flexlayout-color-2: var(--ft-panel);
+  --flexlayout-color-3: var(--color-surface-hover);
+  --flexlayout-color-4: var(--color-border-default);
+  --flexlayout-color-tab-content: var(--ft-panel);
+  --flexlayout-color-tabset-background: var(--ft-chrome);
+  --flexlayout-color-tabset-background-selected: var(--ft-chrome);
+  --flexlayout-color-tabset-background-maximized: var(--ft-chrome);
+  --flexlayout-color-tabset-divider-line: var(--color-border-default);
+  --flexlayout-color-tab-selected: var(--color-text-primary);
+  --flexlayout-color-tab-selected-background: var(--color-surface-hover);
+  --flexlayout-color-tab-unselected: var(--color-text-secondary);
+  --flexlayout-color-tab-unselected-background: transparent;
+  --flexlayout-color-splitter: var(--color-border-subtle);
+  --flexlayout-color-splitter-hover: var(--color-accent);
+  --flexlayout-color-splitter-drag: var(--color-accent);
+  --flexlayout-color-focus: var(--color-accent);
+  --flexlayout-color-icon: var(--color-text-secondary);
+  --flexlayout-color-overflow: var(--color-text-secondary);
+  --flexlayout-color-toolbar-button-hover: var(--color-surface-hover);
+  --flexlayout-color-popup-border: var(--color-border-default);
+  --flexlayout-color-popup-unselected: var(--color-text-primary);
+  --flexlayout-color-popup-unselected-background: var(--ft-panel);
+  --flexlayout-color-popup-selected: var(--color-text-primary);
+  --flexlayout-color-popup-selected-background: var(--color-surface-hover);
+}
+.ft-workspace .flexlayout__tabset { border-radius: 0; box-shadow: none; }
+.ft-workspace .flexlayout__tab_button,
+.ft-workspace .flexlayout__tab_button_stretch { border-radius: 0; }
+.ft-workspace .flexlayout__tab_button:focus-within .flexlayout__tab_button_trailing,
+.ft-workspace .flexlayout__tab_button_stretch:focus-within .flexlayout__tab_button_trailing { display: flex; }
+
+@media (pointer: coarse) {
+  .ft-workspace .flexlayout__tab_button_trailing { display: flex; }
+}
+
+@media (max-width: 767px) {
+  .ft-workspace-body { flex-direction: column; min-height: 36rem; }
+  .ft-app-nav {
+    display: grid;
+    flex: 0 0 auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0 0.5rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-default);
+  }
+  .ft-app-nav .ft-app-nav-utilities {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+  }
+  .ft-app-nav-link { min-height: 2.75rem; }
+  .ft-app-nav-groups:not([hidden]) {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    max-height: 45dvh;
+    padding: 0.5rem 0 0.75rem;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+  .ft-app-nav-group + .ft-app-nav-group { margin-top: 0; }
+  .ft-app-title { flex: 1 0 100%; }
+  .ft-app-preset { flex: 1; margin-left: 0; }
+  .ft-app-preset select { flex: 1; }
+  .ft-layout-management-body { grid-template-columns: minmax(0, 1fr); }
+  .ft-layout-hint { display: none; }
+  .ft-layout-management > summary,
+  .ft-app-toolbar button, .ft-app-toolbar select,
+  .ft-layout-management button, .ft-layout-management input, .ft-layout-management select,
+  .ft-compact-panel select { min-height: 2.75rem; }
+}

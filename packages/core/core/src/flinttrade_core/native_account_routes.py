@@ -92,6 +92,14 @@ def _serialized(fn: Any) -> Any:
 
     @functools.wraps(fn)
     def _wrap(*args: Any, **kwargs: Any) -> Any:
+        from .account_setup import setup_for
+
+        setup = setup_for(current_app._get_current_object())
+        if (
+            setup is not None and setup.production
+            and fn.__name__ in {"relogin_native_account", "remove_native_account"}
+        ):
+            return fn(*args, **kwargs)  # The durable coordinator owns this rewritten lane.
         mutation_admission_for(current_app)()
         with _CONNECT_LOCK:
             return fn(*args, **kwargs)
@@ -126,11 +134,15 @@ def _native_connect_unavailable_body(adapter_id: str) -> dict[str, Any]:
     }
 
 
-def _native_sdk_fields(info: Any) -> dict[str, Any]:
+def _native_sdk_fields(
+    info: Any, *, attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Expose repo-managed SDK readiness on native broker catalogue rows."""
     from .broker_sdk_attest import sdk_attestation_fields  # noqa: PLC0415
 
-    return sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
+    if attestations is None and info.sdk_pin is not None:
+        attestations = _sdk_attestations_by_pin()
+    return sdk_attestation_fields(info.sdk_pin, attestations=attestations)
 
 
 def _native_sdk_not_ready_body(adapter_id: str) -> dict[str, Any] | None:
@@ -185,8 +197,30 @@ def _guard_account_writes() -> Any | None:
         auth_error = require_operator_session()
         if auth_error is not None:
             return auth_error
+        if request.endpoint in {
+            "native_accounts.connect_native_account", "native_accounts.relogin_native_account",
+            "native_accounts.remove_native_account",
+        }:
+            from .account_setup import setup_for  # noqa: PLC0415
+
+            service = setup_for(current_app._get_current_object())
+            if service is not None and (
+                request.endpoint == "native_accounts.connect_native_account"
+                or service.production and (request.view_args or {}).get("adapter_id") in service.drivers
+            ):
+                # This exact rewritten action alone bypasses the legacy guard.
+                # The real facade rechecks principal, custody and coherence.
+                return None
         return guard_broker_account_http()
     return None
+
+
+@native_accounts_bp.after_request
+def _uncached_account_mutations(response: Any) -> Any:
+    """Include early authentication refusals in the account no-store contract."""
+    if request.method in ("POST", "DELETE", "PUT", "PATCH"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _operator_actor_id() -> str:
@@ -1802,6 +1836,9 @@ def list_native_brokers() -> Any:
     preferred login method per broker (full broker support). Secret fields are
     flagged so the UI masks them.
     """
+    # One fresh observation belongs to this response only. Mutation admission
+    # and subsequent requests still perform their own current attestation.
+    attestations = _sdk_attestations_by_pin()
     brokers = []
     for info in BROKER_CATALOG.values():
         if not info.native:
@@ -1818,7 +1855,7 @@ def list_native_brokers() -> Any:
             "oauth_redirect_uri": _default_oauth_redirect_uri(),
             "postback_uri": _default_native_postback_uri(info.name),
         }
-        row.update(_native_sdk_fields(info))
+        row.update(_native_sdk_fields(info, attestations=attestations))
         brokers.append(row)
     return jsonify({"status": "success", "data": {"brokers": brokers}})
 
@@ -1829,6 +1866,11 @@ def connect_native_account() -> Any:
 
     Body: ``{adapter_id, account_id, label?, credentials, is_primary?}``.
     """
+    from .account_setup import connect_http, setup_for  # noqa: PLC0415
+
+    app = current_app._get_current_object()
+    if setup_for(app) is not None:
+        return connect_http(app)
     body: dict[str, Any] = request.get_json(silent=True) or {}
     adapter_id = body.get("adapter_id", "")
     account_id = body.get("account_id", "")
@@ -2158,6 +2200,16 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
     Body (optional): ``{credentials}`` — fresh credentials to re-store first
     (e.g. a new daily access token); omit to replay the stored credentials.
     """
+    from .account_setup import connect_http, setup_for
+
+    app = current_app._get_current_object()
+    setup = setup_for(app)
+    if setup is not None and setup.production:
+        try:
+            selector = broker_selector_from_path(adapter_id, account_id)
+        except BrokerSelectorValidationError:
+            return jsonify({"error": "account_setup_invalid"}), 400
+        return connect_http(app, selector=selector)
     try:
         broker_selector_from_path(adapter_id, account_id)
     except BrokerSelectorValidationError:
@@ -2796,6 +2848,16 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     and internal read-owner ports retain their separate contracts; this HTTP
     dispatch remains unavailable until the reviewed native read cutover.
     """
+    from .account_setup import read_http, setup_for
+
+    app = current_app._get_current_object()
+    setup = setup_for(app)
+    if setup is not None and setup.production:
+        try:
+            selector = broker_selector_from_path(adapter_id, account_id)
+        except BrokerSelectorValidationError:
+            return jsonify({"error": "account_read_invalid"}), 400
+        return read_http(app, selector, kind)
     response = jsonify(
         {
             "status": "error",
@@ -2914,6 +2976,17 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
 @_serialized
 def remove_native_account(adapter_id: str, account_id: str) -> Any:
     """Remove a native account without exposing partially deleted state."""
+    from .account_lifecycle_contracts import AccountMutationKind
+    from .account_setup import connect_http, setup_for
+
+    app = current_app._get_current_object()
+    setup = setup_for(app)
+    if setup is not None and setup.production:
+        try:
+            selector = broker_selector_from_path(adapter_id, account_id)
+        except BrokerSelectorValidationError:
+            return jsonify({"error": "account_setup_invalid"}), 400
+        return connect_http(app, selector=selector, kind=AccountMutationKind.REMOVE)
     try:
         broker_selector_from_path(adapter_id, account_id)
     except BrokerSelectorValidationError:

@@ -24,9 +24,9 @@ export default async function McpPage() {
   const mcpUrl = hostedMcpUrl(await resolveSiteOrigin());
 
   return (
-    <main className="site-shell">
-      <SiteHeader />
-      <section className="subpage">
+    <div className="site-shell">
+      <SiteHeader activePath="/mcp" />
+      <main className="subpage" id="site-content" tabIndex={-1}>
         <h1>Docs MCP for FlintTrade contributors.</h1>
         <p>
           Use the hosted endpoint for public docs assistants or the local stdio command inside a cloned repo.
@@ -101,8 +101,8 @@ export default async function McpPage() {
         <Link className="button primary" href="/docs/mcp">
           Read generated MCP docs <Cable aria-hidden="true" size={17} />
         </Link>
-      </section>
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }

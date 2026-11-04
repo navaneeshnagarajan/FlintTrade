@@ -365,26 +365,14 @@ export async function captureEvidence(page: Page, info: TestInfo, name: string):
 }
 
 export async function captureNarrow(page: Page, info: TestInfo, name: string, phone = false): Promise<void> {
-  // Below 768px the real Trade route deliberately replaces the saved workspace
-  // with its five-panel compact surface (which has Positions but no GTT). Do
-  // not bypass that policy; GTT stays mounted at the 800px narrow desk width.
+  // Keep the real compact/maximised workspace policy. The 800px checkpoint
+  // remains a table; phone-width cards are observed separately at 390px.
   await page.setViewportSize({ width: phone ? 390 : 800, height: 844 });
   await page.clock.runFor(50);
   const continueButton = page.getByRole("button", { name: "Continue anyway", exact: true });
   if (await continueButton.isVisible()) await continueButton.click();
   if (await page.locator("#flexlayout-tab-synthetic-narrow-sibling").count()) {
-    // Restore the original 60/40 proportion at this existing narrow checkpoint:
-    // both the primary and sibling books must become cards, not just the sibling.
-    const splitter = page.getByRole("separator", { name: "Resize", exact: true });
-    const divider = await splitter.boundingBox();
-    const workspace = await page.getByTestId("app-layout").boundingBox();
-    expect(divider).not.toBeNull();
-    expect(workspace).not.toBeNull();
-    if (!divider || !workspace) throw new Error("Current narrow workspace has no public splitter");
-    await page.mouse.move(divider.x + divider.width / 2, divider.y + divider.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(workspace.x + workspace.width * 0.6, divider.y + divider.height / 2, { steps: 4 });
-    await page.mouse.up();
+    await expect(page.getByRole("separator", { name: "Resize", exact: true })).toBeHidden();
   }
   await page.clock.runFor(50);
   await captureEvidence(page, info, name);

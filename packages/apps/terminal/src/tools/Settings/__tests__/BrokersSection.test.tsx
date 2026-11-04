@@ -39,6 +39,7 @@ import {
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useAuthStore } from "@/stores/authStore";
 import { BrokersSection } from "../BrokersSection";
+import { NativeCredentialsRequired } from "@/services/nativeAccountResult";
 
 const BROKERS = [
   {
@@ -1558,7 +1559,7 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
   });
 
   it("one-click re-authenticate replays the stored credentials", async () => {
-    (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ has_session: true });
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());
 
@@ -1576,7 +1577,7 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
 
   it("prefills the connect form when the stored material is stale", async () => {
     (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("Re-login did not establish a session — enter fresh credentials."),
+      new NativeCredentialsRequired("Re-login did not establish a session — enter fresh credentials."),
     );
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());

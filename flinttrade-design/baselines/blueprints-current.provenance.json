@@ -1,0 +1,33 @@
+{
+  "purpose": "Current source-location correspondence; the dated historical blueprint artefact is retained unchanged.",
+  "historical": {
+    "path": "flinttrade-design/baselines/blueprints-2026-05-23.csv",
+    "sha256": "c35444d8f1fe70f054b698fc7aaa403126f5c171ed73bac513a648657cb7994a"
+  },
+  "current": {
+    "path": "flinttrade-design/baselines/blueprints-current.csv",
+    "sha256": "dca684d007c3d2b0aafda3d21aae826690a326aec7562dd6aee0e8428e97d728"
+  },
+  "source_bindings": {
+    "packages/core/core/src/flinttrade_core/app.py": "ad35d991f3f22780c9d5ee5a5ba7b493a8f9c0612305bd461813ca55f750d275",
+    "scripts/dump-blueprints.py": "53dea1153ce423efd6a48a484df52782292cd889ff699532b3ea7b8a17aec22b"
+  },
+  "allowed_correspondence_columns": [
+    "line_number"
+  ],
+  "fields": [
+    "blueprint_name",
+    "current_url_prefix",
+    "line_number",
+    "target_url_prefix",
+    "methods",
+    "owner_package",
+    "duplicate_flag"
+  ],
+  "rows": 82,
+  "validation": {
+    "status": "STATIC_LOCATORS_BOUND_REAL_EMITTER_VALIDATION_PENDING",
+    "method": "AST register_blueprint argument identity and exact source line; ordered historical non-location columns unchanged",
+    "required_next_step": "Run the unchanged scripts/dump-blueprints.py in the authorised isolated runtime and compare its complete output including locations; execute corruption controls. No emitter or product code was executed during composition."
+  }
+}

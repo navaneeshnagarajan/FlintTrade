@@ -17,6 +17,8 @@ access. In-process native read ownership is tested in the broker-read suites.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Iterator
+from typing import Any
 import json
 import logging
 import threading
@@ -123,7 +125,11 @@ class _KeyedClient(FlaskClient):
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch, backend_lease_factory):
+def client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend_lease_factory: Callable[[], Any],
+    owned_flask_apps: Any,
+) -> Iterator[tuple[Any, Any, Path]]:
+    """Retain the actual factory through bounded cleanup before releasing its lease."""
     from flinttrade_core.secure_file import harden_directory
 
     harden_directory(tmp_path)
@@ -160,10 +166,15 @@ def client(tmp_path, monkeypatch, backend_lease_factory):
     app.config["EMERGENCY_RUNTIME_READY"] = True
     app.test_client_class = _KeyedClient
     _REGISTRY_CONTEXT[app.config["REGISTRY"]] = (app, tmp_path)
-    with app.test_client() as c:
-        yield c, app, tmp_path
-    _REGISTRY_CONTEXT.pop(app.config["REGISTRY"], None)
-    native_routes._OAUTH_PENDING.clear()
+    try:
+        with app.test_client() as c:
+            yield c, app, tmp_path
+    finally:
+        # The backend lease fixture releases only after this exact normal
+        # factory's bounded cleanup; retain a failed owner for same-owner retry.
+        owned_flask_apps.close()
+        _REGISTRY_CONTEXT.pop(app.config["REGISTRY"], None)
+        native_routes._OAUTH_PENDING.clear()
 
 
 def _h() -> dict[str, str]:
@@ -1558,17 +1569,22 @@ def test_read_only_demotion_defers_on_corrupt_workspace(client):
 
     from flinttrade_core import native_account_routes as native_routes
 
-    (tmp_path / "workspace.json").write_text("{not-json", encoding="utf-8")
-    with _app.app_context():
-        notice = native_routes._demote_read_only_connected_account(
-            _app.config["CREDENTIAL_STORE"],
-            _app.config["REGISTRY"],
-            adapter_id="upstox",
-            account_id="UPXCORRUPTWS",
-            fallback_label="Upstox corrupt-ws",
-        )
-    assert notice is not None
-    assert "could not be applied" in notice.lower()
+    workspace_path = tmp_path / "workspace.json"
+    workspace_before = workspace_path.read_bytes()
+    try:
+        workspace_path.write_text("{not-json", encoding="utf-8")
+        with _app.app_context():
+            notice = native_routes._demote_read_only_connected_account(
+                _app.config["CREDENTIAL_STORE"],
+                _app.config["REGISTRY"],
+                adapter_id="upstox",
+                account_id="UPXCORRUPTWS",
+                fallback_label="Upstox corrupt-ws",
+            )
+        assert notice is not None
+        assert "could not be applied" in notice.lower()
+    finally:
+        workspace_path.write_bytes(workspace_before)
 
 
 # ---------------------------------------------------------------------------
@@ -2406,22 +2422,25 @@ def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
-    response = c.post(
-        "/api/v1/native/accounts",
-        headers=_h(),
-        json={
-            "adapter_id": "upstox",
-            "account_id": "DRAINCONNECT",
-            "credentials": {"access_token": "candidate"},
-        },
-    )
+    try:
+        response = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": "DRAINCONNECT",
+                "credentials": {"access_token": "candidate"},
+            },
+        )
 
-    assert response.status_code == 502
-    assert router.calls >= 1
-    assert app.config["BROKER_ROUTER"] is None
-    assert app.config["BROKER_ROUTER_DRAINING"] is router
-    assert app.config["CREDENTIAL_STORE"].list_accounts() == []
-    assert _workspace_brokers(tmp_path) == brokers_before
+        assert response.status_code == 502
+        assert router.calls >= 1
+        assert app.config["BROKER_ROUTER"] is None
+        assert app.config["BROKER_ROUTER_DRAINING"] is router
+        assert app.config["CREDENTIAL_STORE"].list_accounts() == []
+        assert _workspace_brokers(tmp_path) == brokers_before
+    finally:
+        router.result = True
 
 
 def test_connect_generation_conflict_revokes_retained_router_before_unpublish(
@@ -2671,16 +2690,19 @@ def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
-    response = c.post(
-        "/api/v1/native/accounts/upstox/DRAINRELOGIN/login",
-        headers=_h(),
-        json={"credentials": {"access_token": "candidate"}},
-    )
+    try:
+        response = c.post(
+            "/api/v1/native/accounts/upstox/DRAINRELOGIN/login",
+            headers=_h(),
+            json={"credentials": {"access_token": "candidate"}},
+        )
 
-    assert response.status_code == 503
-    assert router.calls >= 1
-    assert store.retrieve_for("upstox", "DRAINRELOGIN") == {"access_token": "prior"}
-    assert _test_handle(registry, "upstox", "DRAINRELOGIN").version == prior_session.version
+        assert response.status_code == 503
+        assert router.calls >= 1
+        assert store.retrieve_for("upstox", "DRAINRELOGIN") == {"access_token": "prior"}
+        assert _test_handle(registry, "upstox", "DRAINRELOGIN").version == prior_session.version
+    finally:
+        router.result = True
 
 
 def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client, monkeypatch):
@@ -2746,7 +2768,8 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
         _wait_for_candidate_attempt_to_finish()
 
 
-def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
+def test_remove_rejects_without_mutation_when_router_cannot_drain(client: tuple[Any, Any, Any]) -> None:
+    """Refuse mutation while the owned drain is held, then release only that synthetic hold."""
     c, app, tmp_path = client
     connected = c.post(
         "/api/v1/native/accounts",
@@ -2764,16 +2787,20 @@ def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
-    response = c.delete(
-        "/api/v1/native/accounts/upstox/DRAINREMOVE",
-        headers=_h(),
-    )
+    try:
+        response = c.delete(
+            "/api/v1/native/accounts/upstox/DRAINREMOVE",
+            headers=_h(),
+        )
 
-    assert response.status_code == 503
-    assert router.calls >= 1
-    assert store.retrieve_for("upstox", "DRAINREMOVE") == {"access_token": "prior"}
-    assert _test_handle(registry, "upstox", "DRAINREMOVE").version == prior_session.version
-    assert "upstox:DRAINREMOVE" in _workspace_brokers(tmp_path)["registered"]
+        assert response.status_code == 503
+        assert router.calls >= 1
+        assert store.retrieve_for("upstox", "DRAINREMOVE") == {"access_token": "prior"}
+        assert _test_handle(registry, "upstox", "DRAINREMOVE").version == prior_session.version
+        assert "upstox:DRAINREMOVE" in _workspace_brokers(tmp_path)["registered"]
+    finally:
+        # End this test-owned synthetic hold before the real factory drains it.
+        router.result = True
 
 
 def test_relogin_does_not_persist_fresh_credentials_until_probe_succeeds(client, monkeypatch):

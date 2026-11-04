@@ -97,6 +97,128 @@ failure/error/skip records, and requires exactly boolean `true` for all seven
 accepted windows. It does **not** replace full body/geometry/native-scope/raw-window
 joins, original endpoint checks or the parent's final source/runtime acceptance.
 
+## Command lifetime and timeout receipts
+
+Every maintained mode uses a fresh Linux subreaper for each command. Custody is
+established before spawn; detached groups/sessions and double-forked children
+remain descendants of that owner. Cleanup signals only its kernel-declared
+children through generation-checked pidfds, then reaps adopted descendants until
+`waitpid` reports no children. The caller is not a subreaper and unrelated
+processes are never discovered by name, session, or a host-wide census.
+
+Normal exits (including nonzero and signal exits), deadlines, cancellation and
+controller EOF all drain owned descendants **before** the native port probes.
+`TimeoutExpired` still propagates as failure. Each command is appended in
+`finally`, even without a final browser JSON report. `*.ownership.json` records
+native exit/signal, executor outcome, deadline, PID/start/group/session identities,
+signals and reaps independently of the final `acceptance-execution.json`.
+
+Owner startup consumes the supplied execution budget. Cleanup has a separate
+five-second termination/reaping ceiling and one second for receipt delivery; it
+does not grant additional execution time. Elapsed cleanup also consumes any
+remaining shared browser budget (the existing 1,200-second deadline is unchanged).
+Incomplete cleanup or missing custody fails closed. Killing the owner itself or
+an unkillable kernel task cannot be reported as clean; outer isolation remains
+containment, not proof of inner cleanup.
+
+The normal `contracts.py` gate includes `ExecutorLifecycle` controls with real
+ready listeners and an unrelated same-namespace process. CI now executes every
+`Reports`, `Registrations` and `ExecutorLifecycle` body, plus the registered
+`PythonSandbox` and `PythonCarrier` controls, through the Python prerequisite
+profile below. Importing a class or collecting its names does not count as
+execution: the carrier reconciles exact identities and setup/body/teardown
+entry/return records, and refuses skips, failures, duplicates and omissions.
+
+## Native-v2 / risk foundation registration
+
+These gates require the installed **full** Python/Node environment. They are
+not part of the stdlib-only CI projection and must not be passed to the
+`python-tests` profile as substitutes for full qualification.
+
+- `python-invariants` runs
+  `uv run --offline --no-sync python scripts/generate-native-autonomy-v2-contracts.py --check`.
+  The generator first compares the canonical Python fixture at
+  `packages/core/core/tests/fixtures/native-autonomy-v2.json` with the projection
+  at `packages/apps/terminal/src/generated/__tests__/fixtures/native-autonomy-v2.json`,
+  then checks both generated artefacts without writing or repairing either.
+- From the terminal package, `pnpm run contracts:native-v2:check` reaches the same
+  generator in the workspace's selected Python environment. Run it inside the
+  full authorised runtime for local verification.
+- The normal `test:base` and CI `node-core-tests` enumerations both include
+  `src/generated`; this retains the generated validator fixture and cold no-eval
+  controls rather than merely compiling their imports.
+- The unchanged four-way Python package shard selector `packages/*/*/tests/`
+  discovers `test_native_risk_v2.py`, `test_native_autonomy_contracts_v2.py`,
+  `test_native_autonomy_contracts_v2_generator.py` and
+  `test_native_autonomy_contracts_v2_http.py`, along with newly added risk test
+  modules such as the separately owned options-risk foundation. There is no
+  filename allowlist, keyword/marker filter or ignored module in this selector.
+  Normal root and package-local pytest invocations retain existing configuration;
+  final composition must verify the new modules' actual collected identities.
+
+Registration checks are not evidence of executed bodies. Retain native reports
+for the real generator, Python and Node commands separately; local execution
+never represents hosted required-context success or trading readiness.
+
+## Python-only CI prerequisites
+
+`isolated.py` defaults to **`--profile full`**. Its explicit assets, Node, pnpm,
+installed dependency and optional browser requirements remain in effect; missing
+inputs never select a different profile. **`--profile python-tests`** instead
+requires `--source`, `--state-root`, `--uv` and an explicit `--python-root` matching
+`source/.venv/bin/python`. It refuses full-profile assets/browser inputs, installed
+venv site-packages, private/checkout metadata, escaping links and broad runtime
+roots. The Python profile accepts only the selected Python command. It is a
+prerequisite profile, not a claim that every non-Python `/usr` binary disappears.
+
+Both profiles use the **same** bubblewrap construction and pre-exec guard:
+separate user/network/mount/PID namespaces, private loopback without external
+routes, fresh HOME/XDG/tmp/state, cleared environment, hidden operator state,
+read-only source/tools, all five capability sets zero and `NoNewPrivs`. The guard
+records actual supplementary groups; it does not claim they are empty. Source
+write-open must fail with `EROFS`. Existing timeouts and outer containment remain
+unchanged. The application/Reticle guards are not weakened or replaced.
+
+After the existing acquisition step (`uv sync --frozen`), the CI step runs:
+
+```sh
+uv run --offline --no-sync python -B -I -S tools/acceptance/ci_python_contracts.py --state-root "$RUNNER_TEMP/acceptance-python"
+```
+
+The carrier checks the **actual uv-selected Python 3.14.8**, not the setup action's
+bootstrap label. Host preparation imports only the standard library (`-B -I -S`),
+projects an explicit list of public test/helper and inert registration operands
+from the real checkout, and creates a real `venv --without-pip` with that selected
+interpreter. `-B` is explicit at every host Python startup: `-I` ignores the
+`PYTHONDONTWRITEBYTECODE` environment setting and would otherwise permit stdlib
+cache writes. It never copies a relocated venv, rewrites installer provenance,
+imports a product/factory/conftest on the host, or acquires dependencies. Git
+metadata, graph output, operator files and the original installed environment are
+not mounted. The complete selected import closure is verified after isolated
+execution against the selected stdlib and projected public tools.
+
+Linux must already provide `/usr/bin/bwrap`, `/usr/sbin/ip`, `/usr/bin/readlink`,
+`/etc/ld.so.cache`, usable unprivileged namespaces and the required kernel process
+APIs. Missing prerequisites fail closed with retained diagnostics; this step does
+not install packages, use sudo, change host policy or retry outside isolation.
+Local parity is not proof that a hosted runner supplies these prerequisites.
+
+`ci-receipt.json` links exact source and uv/interpreter bytes to the launcher
+receipt and `contracts-execution.json` (including every executed identity, phase
+and imported helper). `isolation.json` records the kernel boundary; native
+lifecycle receipts retain real negative signals, nonzero status, unknown exits,
+canary observations and cleanup results. Failed preparations and logs are kept
+in the explicit disposable state root. They are private artefacts, not source.
+
+The registered isolation tests use the real CLI for cold preflight/namespace
+refusals and replay the *same* maintained guard for kernel tamper controls. A
+second, nested user namespace is deliberately not a prerequisite: it may be
+unavailable after the outer capability drop. The actual outer CI launch provides
+the positive namespace witness; guard replays are labelled separately. The full
+package-local gate still runs every original class and does not become the
+smaller CI selection. Its factory/dependency requirements remain full-profile
+requirements.
+
 ## Diagnostics and integration
 
 `diagnostic-default --python PATH`, `diagnostic-policy --python PATH` and
@@ -113,3 +235,21 @@ terminal's aggregate e2e dispatch. Preserve its existing lanes and the shared-co
 carrier registrations. Do not make default `pnpm e2e` green by ignoring/skipping
 normal-factory specs. Collection, fixture unit tests and diagnostic results alone
 are not acceptance of the final installed runtime.
+
+### Bounded owner handoff
+
+Request delivery shares the original absolute execution-plus-cleanup-plus-delivery
+ceiling with every owner wait. Owner startup still consumes the execution budget;
+the owner refuses native startup after that earlier deadline. Exec-valid large
+environments remain supported. Cancellation closes the control channel (EOF),
+rather than attempting another write behind a full request. Early cancellation
+uses at most the existing cleanup/delivery remainder, not a renewed execution
+window. No timeout, grace, retry or browser budget is added.
+
+`run_owned` returns the real native exit or negative signal only for an ordinary
+exit with complete custody. Its mutable `CommandRecord` separates `exit`,
+`outcome` and `ownership`. If request delivery times out before the owner can
+write a receipt, the public runner still writes a command failure record with
+unknown native exit and no invented ownership, reaped children or cleanup proof.
+A stopped or lost owner is not a clean drain, even if outer containment later
+removes it. The maintained controls witness failure before exact owned rescue.

@@ -171,6 +171,9 @@ export function RenameInput({ label, initialValue, onConfirm, onCancel }: Rename
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
+    // Reveal the replacement from the start of the real tab scroller; focus
+    // alone can leave its trailing edge under the adjacent dock splitter.
+    inputRef.current?.scrollIntoView({ block: "nearest", inline: "start", behavior: "instant" });
   }, []);
 
   const commit = useCallback(() => {

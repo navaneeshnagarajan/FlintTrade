@@ -134,6 +134,7 @@ describe("ftApi.native envelope unwrapping", () => {
       account_id: "A1",
       credentials: { access_token: "t" },
     }, actionKey);
+    if ("receipt" in r) throw new Error("Expected legacy fixture");
     expect(r.connected).toBe(true);
     expect(r.login).toBe("ok");
   });
@@ -192,6 +193,7 @@ describe("ftApi.native envelope unwrapping", () => {
   it("reloginNativeAccount resolves a live session from {data:{session}}", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ login: "ok", session: { has_session: true, expires_at: 1, read_only: true } }));
     const s = await reloginNativeAccount("dhan", "A1", undefined, actionKey);
+    if ("receipt" in s) throw new Error("Expected legacy fixture");
     expect(s.has_session).toBe(true);
     expect(s.read_only).toBe(true);
   });

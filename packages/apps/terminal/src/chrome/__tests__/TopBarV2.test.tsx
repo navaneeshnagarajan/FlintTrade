@@ -666,12 +666,14 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(mode.closest("button")).toBeEnabled();
   });
 
-  it("does not use horizontal TopBar scroll at ~390px", () => {
+  it("wraps the skinny TopBar rather than scrolling or clipping account and mode controls", () => {
     renderTopBarV2();
 
     const bar = screen.getByTestId("topbar-v2");
-    expect(bar.className).not.toMatch(/overflow-x-auto/);
-    expect(bar.className).toMatch(/overflow-x-hidden/);
+    expect(bar.className).not.toMatch(/overflow-x-(?:auto|hidden)/);
+    expect(bar.className).toMatch(/flex-wrap/);
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
+    expect(screen.getByRole("button", { name: "More" })).toBeEnabled();
   });
 
   it("does not host a ticker rail on the skinny TopBar", () => {
@@ -716,6 +718,21 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(screen.getByTestId("fullscreen-btn")).toBeVisible();
     expect(screen.getByLabelText("Current time in IST")).toBeVisible();
     useBrokerStore.setState({ accounts: [] });
+  });
+
+  it("keeps the same advisory AI action reachable from More without changing execution mode", () => {
+    useModeStore.setState({ mode: "explore" });
+    const listener = vi.fn();
+    window.addEventListener(TOGGLE_AI_TUTOR_EVENT, listener);
+    renderTopBarV2();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open profile and settings" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(screen.queryByRole("dialog", { name: "More" })).not.toBeInTheDocument();
+    window.removeEventListener(TOGGLE_AI_TUTOR_EVENT, listener);
   });
 
   it("leaves the Account row out of More until a broker account exists", () => {

@@ -1030,6 +1030,15 @@ class AccountTransactionStore:
                         "UPDATE accounts SET is_primary=0 WHERE adapter_id=? AND account_id=?",
                         (request.selector.adapter_id, request.selector.account_id),
                     )
+                if request.kind is AccountMutationKind.RECONNECT and request.credentials is not None:
+                    # Fresh authentication + this exact committed witness adopts
+                    # historical material atomically with its new generation.
+                    # Interim/candidate origins are deliberately not promoted.
+                    conn.execute(
+                        "UPDATE credential_selector_versions SET origin='managed' "
+                        "WHERE adapter_id=? AND account_id=? AND origin='legacy_pre_workspace_authority'",
+                        (request.selector.adapter_id, request.selector.account_id),
+                    )
                 version = self._credentials._bump(conn, request.selector)
             receipt = AccountMutationReceipt(
                 operation_id,

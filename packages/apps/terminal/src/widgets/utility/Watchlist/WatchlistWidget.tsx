@@ -496,7 +496,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
                     setTabCtxMenu({ x: rect.left, y: rect.bottom, idx });
                   }
                 }}
-                className={`text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
+                className={`h-6 text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
                   idx === activeTabIdx
                     ? "bg-accent/20 text-accent border border-accent/40"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover border border-transparent"
@@ -509,8 +509,10 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         ))}
         </div>
 
+        {/* Match the tab's 24px slot so its 16px editor has an exact centre,
+            including when it replaces the only tab in the strip. */}
         {renamingIdx !== null && tabs[renamingIdx] && (
-          <div className="shrink-0 flex items-center" style={{ order: renamingIdx }}>
+          <div className="h-6 shrink-0 flex items-center" style={{ order: renamingIdx }}>
           <RenameInput
             label={`Rename ${tabs[renamingIdx].name}`}
             initialValue={tabs[renamingIdx].name}

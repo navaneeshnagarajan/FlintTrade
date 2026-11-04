@@ -7,6 +7,7 @@ import struct
 import pytest
 
 from flinttrade_core.models import Order
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_gateway.brokers.dhan_mapping import (
     DhanMappingError,
     decode_dhan_tick,
@@ -274,11 +275,15 @@ def test_expiry_list_parse():
     assert from_dhan_expiry_list({"status": "success", "data": []}) == []
 
 
-def test_statement_list_parse():
-    rows = from_dhan_statement_list({"status": "success", "data": [{"a": 1}, "junk", {"b": 2}]})
-    assert rows == [{"a": 1}, {"b": 2}]  # only dict rows survive
+def test_statement_list_parse() -> None:
+    """Preserve valid statement shapes and refuse unavailable response envelopes."""
+    rows = from_dhan_statement_list({"status": "success", "data": [{"a": 1}, {"b": 2}]})
+    assert rows == [{"a": 1}, {"b": 2}]
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_dhan_statement_list({"status": "success", "data": [{"a": 1}, "junk", {"b": 2}]})
     assert from_dhan_statement_list({"status": "success", "data": []}) == []
-    assert from_dhan_statement_list({"status": "error"}) == []
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_dhan_statement_list({"status": "error"})
 
 
 def test_modify_order_kwargs():
@@ -344,7 +349,9 @@ def test_to_candles_dict():
     }}
     cd = to_candles_dict("RELIANCE", "NSE", "5m", resp)
     assert cd["symbol"] == "RELIANCE" and len(cd["bars"]) == 2
-    assert cd["bars"][0] == {"timestamp": "1", "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "volume": 1000}
+    assert cd["bars"][0] == {
+        "timestamp": "1", "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "volume": 1000,
+    }
 
 
 def test_quote_mapping():
