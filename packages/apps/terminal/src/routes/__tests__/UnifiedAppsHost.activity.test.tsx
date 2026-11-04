@@ -242,7 +242,9 @@ it("closes the widget catalogue after a widget is added", async () => {
   render(<QueryClientProvider client={client}><BrowserRouter><UnifiedAppsHost /></BrowserRouter></QueryClientProvider>);
   const app = await screen.findByRole("region", { name: "Terminal app" });
   // Overview exposes the Welcome and Positions leaves used by this journey.
-  fireEvent.click(within(app).getByRole("button", { name: "Apply Overview layout", exact: true }));
+  fireEvent.click(within(app).getByText("Layout actions"));
+  fireEvent.change(within(app).getByRole("combobox", { name: "Terminal preset" }), { target: { value: "overview" } });
+  fireEvent.click(within(app).getByText("Layout actions"));
   // A tab label is not proof that its real content rendered successfully.
   expect(await within(app).findByTestId("welcome-card")).toBeVisible();
   const existingPositions = await within(app).findByRole("region", { name: "Positions book" });
@@ -264,7 +266,9 @@ it("closes the widget catalogue when Enter adds the first search match", async (
   render(<QueryClientProvider client={client}><BrowserRouter><UnifiedAppsHost /></BrowserRouter></QueryClientProvider>);
   const app = await screen.findByRole("region", { name: "Terminal app" });
   // The fresh default selects Watchlist; use the catalogue-backed Overview.
-  fireEvent.click(within(app).getByRole("button", { name: "Apply Overview layout", exact: true }));
+  fireEvent.click(within(app).getByText("Layout actions"));
+  fireEvent.change(within(app).getByRole("combobox", { name: "Terminal preset" }), { target: { value: "overview" } });
+  fireEvent.click(within(app).getByText("Layout actions"));
   // A tab label is not proof that its real content rendered successfully.
   expect(await within(app).findByTestId("welcome-card")).toBeVisible();
   fireEvent.click(within(app).getByRole("button", { name: "Add widget" }));

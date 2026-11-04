@@ -16,6 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { KillSwitchPill } from "./TerminalRoute";
 import { InstrumentLinks } from "@/chrome/InstrumentLinks";
+import { WorkspaceChrome } from "@/chrome/WorkspaceChrome";
+import { LayoutChooser } from "@/chrome/LayoutChooser";
+import { rowJson, tabsetJson, workspaceJson } from "@/layout/flexLayoutAdapter";
 import { PracticeLaterSetup } from "./SetupAccountRoute";
 
 interface WidgetRequest { widgetId?: string; props?: Record<string, unknown>; title?: string }
@@ -48,10 +51,15 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const account = useBrokerStore(s => s.activeAccountId);
   const theme = useThemeStore(s => s.getResolvedMode());
   const [initial] = useState(() => {
-    try { return { model: Model.fromJson(readAppLayouts(app)["Current"] ?? buildAppPreset(app, "default")), error: "" }; }
-    catch (error) { return { model: Model.fromJson(buildAppPreset(app, "default")), error: String(error) }; }
+    try {
+      const saved = readAppLayouts(app);
+      const existing = saved["Current"] ?? Object.values(saved)[0];
+      return { model: Model.fromJson(existing ?? buildAppPreset(app, "default")), error: "", choose: app === "terminal" && !existing };
+    } catch (error) { return { model: Model.fromJson(buildAppPreset(app, "default")), error: String(error), choose: false }; }
   });
   const [model, setModel] = useState(initial.model);
+  const [choosing, setChoosing] = useState(initial.choose);
+  const [hasWorkspace, setHasWorkspace] = useState(!initial.choose);
   const modelRef = useRef(model);
   modelRef.current = model;
   const [error, setError] = useState(initial.error);
@@ -69,6 +77,8 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
 
   const replaceLayout = useCallback((layout: IJsonModel, message: string) => {
     setModel(Model.fromJson(layout));
+    setChoosing(false);
+    setHasWorkspace(true);
     setError("");
     setNotice(message);
   }, []);
@@ -93,7 +103,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     if (!active) setPicker(false);
   }, [active]);
   useEffect(() => {
-    if (!active) return;
+    if (!active || choosing) return;
     // Replacing/restoring a model is itself a presentation change. The old
     // effect's cleanup flushes its model; publish the replacement afterwards
     // even when the user performs no subsequent docking action before reload.
@@ -101,7 +111,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const listener = () => { persist(model); setRevision(v => v + 1); };
     model.addChangeListener(listener);
     return () => { model.removeChangeListener(listener); persist(model); };
-  }, [active, model, persist]);
+  }, [active, choosing, model, persist]);
   useEffect(() => {
     if (!active || !host.current) return;
     const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760 || entry.contentRect.height < 330));
@@ -205,13 +215,13 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }
   return <section className="ft-app flex h-full min-h-0 min-w-0 flex-col" aria-label={`${meta.name} app`} data-app={app} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
-    <div className="ft-app-toolbar">
-      <div className="ft-app-title"><h1 className="font-heading text-sm font-semibold">{meta.name}</h1><span className="text-xs text-text-muted">{tabs.length} panels</span></div>
-      <div className="ft-layout-shortcuts" role="group" aria-label={`${meta.name} layouts`}>
-        {APP_PRESETS[app].map(preset => <Button key={preset.id} type="button" variant="ghost" size="sm" aria-label={`Apply ${preset.name} layout`} onClick={() => applyPreset(preset.id)}>{preset.name}</Button>)}
-      </div>
-      {/* Presets are repeatable actions, not identities for custom compositions. */}
-      <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
+    <h1 className="sr-only">{meta.name}</h1>
+    <WorkspaceChrome>
+    <div className="ft-app-toolbar" hidden={!active} data-app-chrome={app} aria-label={`${meta.name} layout controls`}>
+      <span className="ft-current-layout">Current layout <span className="text-text-muted">{tabs.length} panels</span></span>
+      <label className="ft-layout-restore">Saved layouts
+          <select aria-label="Restore saved layout" value="" onChange={e => { if (!e.target.value) return; setNotice(""); setError(""); try { const saved = readAppLayouts(app)[e.target.value]; if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app."); replaceLayout(saved, `Restored ${e.target.value}`); } catch (e) { setError(String(e)); } }}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
+        </label>
       <Button variant="outline" size="sm" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" />Widget</Button>
     <details className="ft-layout-management" onKeyDown={event => {
       if (event.key !== "Escape") return;
@@ -220,13 +230,14 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     }}>
       <summary><SlidersHorizontal aria-hidden="true" /><span>Layout actions</span><span className="ft-layout-hint" aria-hidden="true">Save, restore or transfer</span></summary>
       <div className="ft-layout-management-body">
+        {app === "terminal" && <Button size="sm" variant="outline" onClick={event => { setChoosing(true); const details = event.currentTarget.closest("details"); if (details) details.open = false; }}>Browse layout templates</Button>}
+        {/* Templates are actions, never identities of a customised workspace. */}
+        <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
         <div className="ft-layout-save" role="group" aria-label="Save a named layout">
           <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 min-w-0" />
           <Button variant="outline" size="sm" onClick={() => { setNotice(""); setError(""); try { saveAppLayout(app, layoutName, wideJson(model)); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
         </div>
-        <label className="ft-layout-restore">Saved layouts
-          <select aria-label="Restore saved layout" value="" onChange={e => { if (!e.target.value) return; setNotice(""); setError(""); try { const saved = readAppLayouts(app)[e.target.value]; if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app."); replaceLayout(saved, `Restored ${e.target.value}`); } catch (e) { setError(String(e)); } }}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
-        </label>
+
         <div className="ft-layout-transfer" role="group" aria-label="Transfer or reset layout">
           <Button size="sm" variant="outline" onClick={exportLayout}><Download aria-hidden="true" />Export layout</Button>
           <label className="ft-layout-import">Import layout <input aria-label="Import app layout" type="file" accept="application/json,.json" onChange={event => {
@@ -239,22 +250,30 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
           <Button size="sm" variant="ghost" onClick={resetLayout}><RotateCcw aria-hidden="true" />Reset app layout</Button>
         </div>
         <p className="ft-layout-explanation">Presentation only. Saved named layouts and all non-layout records are retained.</p>
+        {notice && <p className="text-xs text-text-secondary" aria-hidden="true">{notice}</p>}
       </div>
     </details>
+    {compact && <label className="ft-compact-panel">Panel <select aria-label="Compact panel" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
     </div>
+    </WorkspaceChrome>
     <div className="ft-app-scope-row">
     <p className="ft-app-context" data-testid="app-execution-scope">
       {app === "testing" ? "Testing · Practice research scope only. Terminal account and Live authority are unchanged." : `${mode === "live" ? "Live" : mode === "practice" ? "Practice" : "Example"} · ${account || "No execution account selected"}`}
       {app === "terminal" ? " · Linking changes selections, never execution authority." : ""}
+
     </p>
     <InstrumentLinks app={app} />
     </div>
     {app === "terminal" && <PracticeLaterSetup />}
     {error && <p role="alert" className="shrink-0 px-3 py-2 text-xs text-warning">{error}</p>}
-    {notice && <p role="status" className="shrink-0 px-3 text-xs text-text-secondary">{notice}</p>}
-    {compact && <label className="ft-compact-panel">Panel <select aria-label="Compact panel" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
+    {notice && <p role="status" className="sr-only">{notice}</p>}
+
     </Activity>
-    <div ref={host} className={`ft-app-panels relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
+    {active && choosing && <LayoutChooser app={app} canReturn={hasWorkspace} onChoose={applyPreset} onReturn={() => setChoosing(false)} onCustom={() => {
+      replaceLayout(workspaceJson(rowJson(100, [tabsetJson(100, [])])), "Started empty presentation layout; execution unchanged.");
+      setPicker(true);
+    }} />}
+    <div ref={host} hidden={choosing} className={`ft-app-panels relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
       <Layout model={model} factory={factory} onRenderTab={renderWorkspaceTabExtras} onRenderTabSet={renderWorkspaceTabSetExtras} realtimeResize />
       {!tabs.length && <div className="absolute inset-0 grid place-items-center"><Button onClick={() => setPicker(true)}>Add your first widget</Button></div>}
     </div>

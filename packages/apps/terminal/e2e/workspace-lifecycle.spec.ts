@@ -47,31 +47,34 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await page.goto("/trade");
   await expect(page).toHaveURL("http://localhost:5173/terminal");
   const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
-  const preset = workspace.getByRole("combobox", { name: "Terminal preset", exact: true });
-  const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
+  const chrome = page.locator('[data-app-chrome="terminal"]');
+  const preset = chrome.getByRole("combobox", { name: "Terminal preset", exact: true });
+  const restore = chrome.getByRole("combobox", { name: "Restore saved layout", exact: true });
   await expect(workspace).toBeVisible();
-  await expect(preset.locator("option")).toHaveText(["Choose layout", "Watchlist driven", "Chart focus", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+  await expect(preset.locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
+  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   await preset.selectOption("trader");
-  await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
+  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
   const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
   await catalogue.getByRole("button", { name: "Add Risk", exact: true }).click();
   await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
   // Named-layout controls remain native, inside the public disclosure.
-  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
-  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
+  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
+  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(workspace.getByRole("status")).toHaveText("Saved Trading Desk");
   const original = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk"], LAYOUT_KEY);
 
   // Save-as is the clone owner. Prove identity first, then edit only the copy.
-  await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk (Copy)");
-  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
+  await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk (Copy)");
+  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY)).toEqual(original);
   await preset.selectOption("options-scalper");
-  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   await expect(workspace.getByRole("tab", { name: "Option Chain", exact: true })).toBeVisible();
-  await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
+  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
   const copy = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY);
   expect(copy).not.toEqual(original);
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk"], LAYOUT_KEY)).toEqual(original);
@@ -79,10 +82,10 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
 
   for (const [name, expected, label] of [["Trading Desk", original, "Risk"], ["Trading Desk (Copy)", copy, "Option Chain"], ["Trading Desk", original, "Risk"]] as const) {
     await restore.selectOption({ label: name });
-    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
+    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
     await expect(workspace.getByRole("tab", { name: label, exact: true })).toBeVisible();
     await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key)!).Current, LAYOUT_KEY)).toEqual(expected);
-    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
+    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   }
   await page.reload();
   await expect(workspace).toBeVisible();
@@ -175,21 +178,22 @@ for (const draftMode of ["new", "edit"] as const) {
     await page.goto("/settings#presets");
     await expect(page).toHaveURL("http://localhost:5173/terminal");
     const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
+  const chrome = page.locator('[data-app-chrome="terminal"]');
     await expect(workspace).toBeVisible();
-    await workspace.locator("summary").filter({ hasText: "Layout actions" }).click();
-    const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
+    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+    const restore = chrome.getByRole("combobox", { name: "Restore saved layout", exact: true });
     await expect(restore.locator("option")).toHaveText(["Restore layout", "Synthetic saved layout"]);
     const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Synthetic saved layout"], LAYOUT_KEY);
     if (draftMode === "edit") await restore.selectOption({ label: "Synthetic saved layout" });
-    else await workspace.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("trader");
+    else await chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("trader");
     const draftName = `Unsaved ${draftMode} browser draft`;
-    await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill(draftName);
-    await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
+    await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill(draftName);
+    await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
     const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
     await catalogue.getByRole("button", { name: "Add Risk", exact: true }).click();
     const expectDraft = async (): Promise<void> => {
       await expect(workspace).toBeVisible();
-      await expect(workspace.getByRole("textbox", { name: "Layout name", exact: true })).toHaveValue(draftName);
+      await expect(chrome.getByRole("textbox", { name: "Layout name", exact: true })).toHaveValue(draftName);
       await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
       await expect.poll(() => page.evaluate(key => JSON.stringify(JSON.parse(localStorage.getItem(key)!).Current), LAYOUT_KEY)).toContain('"riskdashboard"');
       const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
@@ -216,7 +220,7 @@ for (const draftMode of ["new", "edit"] as const) {
     await expectDraft();
 
     for (const dismissal of ["Close", "Escape"] as const) {
-      await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
+      await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
       await expect(catalogue).toBeVisible();
       await expect(catalogue.getByRole("button", { name: "Add Risk", exact: true })).toBeVisible();
       if (dismissal === "Close") await catalogue.getByRole("button", { name: "Close widget catalogue", exact: true }).click();

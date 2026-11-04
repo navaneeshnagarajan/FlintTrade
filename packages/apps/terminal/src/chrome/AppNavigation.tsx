@@ -114,12 +114,14 @@ export function SystemStatusBar() {
   const metric = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
   return <footer className="ft-system-status flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-default bg-surface-base px-3 py-0.5 text-xs text-text-secondary" data-testid="system-status-bar">
     <Link className="font-medium text-accent" to="/system">System</Link>
+    <details className="ft-system-details"><summary>Host diagnostics · {data ? "Last received" : "Unavailable"}</summary><div>
     <span>Core: {data ? health.isError ? "Last known · refresh failed" : String(data.status ?? "Unmeasured") : "Unavailable"}</span>
     <span>Host CPU: {percent(metric(data?.cpu).used_pct, metric(data?.cpu).scope)}</span>
     <span>RAM: {percent(metric(data?.memory).used_pct, metric(data?.memory).scope)}</span>
     <span>GPU: {percent(metric(data?.gpu).used_pct, metric(data?.gpu).scope)}</span>
     <span title="No measured browser-to-core timing source is connected to this bar">Browser RTT: Unmeasured</span>
     <span className="ml-auto">{data && health.dataUpdatedAt ? `Received ${new Date(health.dataUpdatedAt).toLocaleTimeString()}` : "No host measurement"}</span>
+    </div></details>
     <HelpFooterSlot />
   </footer>;
 }

@@ -10,8 +10,17 @@ export const DEFAULT_APP_WIDGETS: Record<AppId, string[]> = {
   reports: ["trade-review"], learn: ["learning"], brokers: ["broker-connections", "broker-roles"],
   settings: ["preferences"], system: ["core-diagnostics"],
 };
-export const APP_PRESETS: Record<AppId, readonly { id: string; name: string }[]> = {
-  terminal: [{ id: "watchlist-driven", name: "Watchlist driven" }, { id: "chart-focus", name: "Chart focus" }, { id: "overview", name: "Overview" }, { id: "trader", name: "Trader" }, { id: "market-watch", name: "Market watch" }, { id: "options-scalper", name: "Option Scalper" }, { id: "multi-chart", name: "Multi chart" }],
+export const APP_PRESETS: Record<AppId, readonly { id: string; name: string; template?: boolean }[]> = {
+  terminal: [
+    { id: "scalper-zone", name: "Scalper zone", template: true },
+    { id: "volatility-trading", name: "Volatility trading", template: true },
+    { id: "classic", name: "Classic", template: true },
+    { id: "watchlist-driven", name: "Watchlist driven", template: true },
+    { id: "market-overview", name: "Market watch", template: true },
+    { id: "chart-focus", name: "Chart focus" }, { id: "overview", name: "Overview" },
+    { id: "trader", name: "Trader" }, { id: "market-watch", name: "Market watch (FlintTrade)" },
+    { id: "options-scalper", name: "Option Scalper" }, { id: "multi-chart", name: "Multi chart" },
+  ],
   testing: [{ id: "default", name: "Research" }, { id: "data", name: "Data library" }],
   portfolio: [{ id: "default", name: "Investments" }, { id: "allocation", name: "Allocation" }],
   automation: [{ id: "default", name: "Operations" }, { id: "ai", name: "AI and knowledge" }],
@@ -20,6 +29,16 @@ export const APP_PRESETS: Record<AppId, readonly { id: string; name: string }[]>
   settings: [{ id: "default", name: "Preferences" }], system: [{ id: "default", name: "Health" }, { id: "diagnostics", name: "Diagnostics" }],
 };
 export function buildAppPreset(app: AppId, preset: string): IJsonModel {
+  // Captured desktop compositions use this same app-local layout owner.
+  // Existing saved JSON and the earlier FlintTrade presets are not migrated.
+  if (app === "terminal" && ["scalper-zone", "volatility-trading", "classic", "market-overview"].includes(preset)) {
+    const tab = (id: string) => tabJson(id, APP_WIDGETS.find(widget => widget.id === id)!.name, { id: `${app}:${id}`, params: { channel: "none" } });
+    const group = (weight: number, ids: string[]) => tabsetJson(weight, ids.map(tab));
+    if (preset === "scalper-zone") return workspaceJson(rowJson(100, [group(75, ["scalper"]), group(25, ["positions", "orders", "optionchain"])]));
+    if (preset === "classic") return workspaceJson(rowJson(100, [group(52, ["chart"]), group(23, ["positions", "orders"]), group(25, ["optionchain", "watchlist"])]));
+    if (preset === "volatility-trading") return workspaceJson(rowJson(100, [rowJson(63, [group(50, ["chart", "straddle"]), rowJson(50, [group(52, ["oichart"]), group(48, ["positions", "orders"])])]), group(37, ["optionchain", "watchlist"])]));
+    return workspaceJson(rowJson(100, [group(48, ["chart"]), rowJson(52, [group(50, ["straddle"]), group(50, ["oichart"])])]));
+  }
   // Fresh desks follow the captured watchlist-left, chart-right composition.
   // Persisted Current/named compositions are read before this fallback; no
   // migration, reset or account/channel mutation. Chart focus is an opt-in mirror.

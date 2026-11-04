@@ -1906,7 +1906,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
           drawingsLocked={drawingsLocked}
           orientation={workspaceLayout.toolbarOrientation}
         />
-        <div className="relative flex-1 min-w-0">
+        <div className="relative flex-1 min-h-0 min-w-0">
           <div
             ref={containerRef}
             className="w-full h-full"

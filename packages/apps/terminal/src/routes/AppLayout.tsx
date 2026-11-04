@@ -33,7 +33,8 @@ import { useChromeCollapse } from "@/chrome/useChromeCollapse";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { isPublicDemoBuild } from "@/lib/demoSession";
-import { PublicPreviewHeader } from "@/chrome/PublicPreviewHeader";
+import { WorkspaceChromeTarget } from "@/chrome/WorkspaceChrome";
+import { PublicPreviewHeader, PublicPreviewSafety } from "@/chrome/PublicPreviewHeader";
 import { loadInstrumentLotRows } from "@/lib/instrumentLots";
 import "@/styles/trading-workspace.css";
 
@@ -108,6 +109,7 @@ export default function AppLayout() {
   // content boundary rather than remaining wherever focus was before navigation.
   // preventScroll avoids a visual jump when the main area is already in view.
   const mainRef = useRef<HTMLDivElement>(null);
+  const [workspaceChrome, setWorkspaceChrome] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
   }, [location.pathname]);
@@ -247,6 +249,7 @@ export default function AppLayout() {
   }
 
   return (
+    <WorkspaceChromeTarget.Provider value={workspaceChrome}>
     <div className="ft-workspace relative flex h-dvh min-h-0 flex-col bg-surface-base">
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
@@ -261,12 +264,14 @@ export default function AppLayout() {
         <div className="ft-product-bar">
           {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
           <AppNavigation />
+          <div ref={setWorkspaceChrome} className="ft-workspace-chrome" />
         </div>
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
         {!isPublicDemoBuild() && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
+        {isPublicDemoBuild() && <PublicPreviewSafety />}
       </header>
       {/* Navigation is chrome only; the retained host stays in its owner. */}
       {/* Issue #54: aria-label on main landmark mirrors the route title. Each
@@ -309,5 +314,6 @@ export default function AppLayout() {
         onClose={handleCloseCommandPalette}
       />
     </div>
+    </WorkspaceChromeTarget.Provider>
   );
 }

@@ -18,6 +18,20 @@ it("keeps presentation layouts per app, ignores old layouts and never deletes ot
   expect(APP_LAYOUT_NAMESPACE).not.toBe("flinttrade:layouts");
 });
 describe("purpose-safe presets", () => {
+  it.each([
+    ["scalper-zone", ["scalper", "positions", "orders", "optionchain"]],
+    ["volatility-trading", ["chart", "straddle", "oichart", "positions", "orders", "optionchain", "watchlist"]],
+    ["classic", ["chart", "positions", "orders", "optionchain", "watchlist"]],
+    ["watchlist-driven", ["watchlist", "chart", "positions", "orders"]],
+    ["market-overview", ["chart", "straddle", "oichart"]],
+  ] as const)("builds the captured %s template through the canonical owner", (id, expected) => {
+    const json = buildAppPreset("terminal", id);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+    const components: string[] = [];
+    Model.fromJson(json).visitNodes(node => { if (node.getType() === "tab") components.push((node as TabNode).getComponent()!); });
+    expect(components).toEqual(expected);
+  });
+
   it("starts a fresh Terminal with the captured watchlist-left geometry and retains the overview tab", () => {
     const json = buildAppPreset("terminal", "default");
     expect(json.layout.children).toMatchObject([
@@ -30,7 +44,7 @@ describe("purpose-safe presets", () => {
     expect(validateAppLayout("terminal", json)).toBe(true);
   });
   it("offers the captured watchlist-left geometry as an explicit repeatable preset", () => {
-    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist driven" });
+    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist driven", template: true });
     const json = buildAppPreset("terminal", "watchlist-driven");
     expect(json.layout.children).toMatchObject([
       { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },

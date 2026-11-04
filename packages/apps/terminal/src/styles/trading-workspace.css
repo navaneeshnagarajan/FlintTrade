@@ -278,3 +278,93 @@ html[data-mode="dark"] .ft-workspace.ft-workspace {
   .ft-workspace .ft-watchlist-search { min-height: 44px; }
   .ft-workspace .ft-preview-provenance p { left: auto; right: 0; }
 }
+
+/* Compact shared chrome: a stable portal, not a second layout/state owner. */
+.ft-workspace .ft-product-bar { display: flex; flex-wrap: nowrap; gap: 8px; min-height: 44px; padding-inline: 10px; }
+.ft-workspace .ft-product-bar > .ft-public-preview { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 0; font-size: 10px; }
+.ft-workspace .ft-app-nav { margin-left: 0; padding: 2px; border: 0; }
+.ft-workspace .ft-app-nav-groups:not([hidden]) { left: 0; right: auto; }
+.ft-workspace .ft-workspace-chrome { min-width: 0; flex: 1; }
+.ft-workspace .ft-app-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 0; min-height: 36px; border: 0; }
+.ft-workspace .ft-app-toolbar[hidden] { display: none; }
+.ft-workspace .ft-current-layout { white-space: nowrap; font-size: 12px; }
+.ft-workspace .ft-app-toolbar > .ft-layout-restore { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 11px; }
+.ft-workspace .ft-app-toolbar > .ft-layout-restore select { width: 132px; }
+.ft-workspace .ft-layout-management { flex-shrink: 0; }
+.ft-workspace .ft-layout-management-body { width: min(42rem, calc(100vw - 24px)); z-index: 140; overflow-y: auto; }
+.ft-workspace .ft-layout-management-body .ft-app-preset { margin: 0; }
+.ft-workspace .ft-preview-safety { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 3px 10px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-text-secondary); font-size: 11px; }
+.ft-workspace .ft-preview-provenance { margin-left: auto; }
+.ft-workspace .ft-preview-details { position: absolute; right: 0; top: 100%; width: min(22rem, 85vw); padding: 12px; border: 1px solid var(--color-border-default); background: var(--color-surface-card); z-index: 150; }
+.ft-workspace .ft-preview-details p { position: static; width: auto; margin: 0 0 8px; padding: 0; border: 0; }
+.ft-workspace .ft-preview-details a + a { margin-left: 16px; }
+.ft-workspace .ft-app-context { flex: 1 1 auto; font-size: 11px; padding-block: 2px; }
+.ft-workspace .ft-app-scope-row [data-testid="instrument-links"] { font-size: 11px; padding-block: 2px; }
+.ft-workspace .ft-workspace-body { min-height: 0; }
+.ft-workspace .ft-system-status { flex-wrap: nowrap; gap: 12px; min-height: 26px; font-size: 11px; }
+.ft-workspace .ft-system-details { position: relative; }
+.ft-workspace .ft-system-details summary { cursor: pointer; }
+.ft-workspace .ft-system-details > div { position: absolute; bottom: 100%; left: 0; display: grid; gap: 8px; width: min(22rem, 80vw); background: var(--color-surface-card); border: 1px solid var(--color-border-default); padding: 12px; z-index: 100; }
+.ft-workspace .ft-system-status > :last-child { margin-left: auto; }
+.ft-workspace .ft-chart-chrome { grid-template-columns: minmax(0, 1fr) auto; }
+.ft-workspace .ft-chart-symbol-line { grid-column: 1 / -1; min-height: 30px; padding: 2px 8px; flex-wrap: nowrap; }
+.ft-workspace .ft-chart-interval-line { grid-column: 1; grid-row: 2; padding: 0 4px; min-height: 30px; }
+.ft-workspace .ft-chart-toolbar { grid-column: 2; grid-row: 2; padding: 0 4px; min-height: 30px; border-top: 1px solid var(--color-border-subtle); }
+.ft-workspace .ft-watchlist-tabs { min-height: 40px; padding-inline: 12px; }
+.ft-workspace .ft-watchlist-header { padding: 10px 12px 12px; }
+@container (max-width: 620px) {
+  .ft-workspace .ft-chart-chrome { grid-template-columns: minmax(0, 1fr); }
+  .ft-workspace .ft-chart-symbol-line { flex-wrap: wrap; gap: 4px 8px; }
+  .ft-workspace .ft-chart-interval-line { grid-column: 1; grid-row: 2; }
+  .ft-workspace .ft-chart-toolbar { grid-column: 1; grid-row: 3; }
+}
+@media (max-width: 1100px) {
+  .ft-workspace .ft-current-layout { display: none; }
+  .ft-workspace .ft-app-toolbar > .ft-layout-restore { font-size: 0; }
+}
+@media (max-width: 767px) {
+  .ft-workspace .ft-product-bar { flex-wrap: wrap; gap: 0 4px; padding: 2px 8px; }
+  .ft-workspace .ft-product-bar > .ft-public-preview { flex-basis: auto; flex: 1; }
+  .ft-workspace .ft-app-nav { margin-left: auto; }
+  .ft-workspace .ft-app-nav-groups:not([hidden]) { left: auto; right: 0; }
+  .ft-workspace .ft-app-nav-toggle, .ft-workspace .ft-app-nav-link { height: 40px; min-height: 40px; }
+  .ft-workspace .ft-workspace-chrome { flex: 1 0 100%; }
+  .ft-workspace .ft-app-toolbar { min-height: 40px; gap: 4px; }
+  .ft-workspace .ft-app-toolbar > .ft-layout-restore { margin-left: 0; }
+  .ft-workspace .ft-app-toolbar > .ft-layout-restore select { width: 92px; font-size: 11px; padding-inline: 4px; }
+  .ft-workspace .ft-app-toolbar > button { font-size: 11px; padding-inline: 6px; }
+  .ft-workspace .ft-app-toolbar > button, .ft-workspace .ft-app-toolbar select, .ft-workspace .ft-layout-management > summary { min-height: 36px; height: 36px; }
+  .ft-workspace .ft-layout-management > summary { gap: 4px; padding-inline: 6px; font-size: 11px; }
+  .ft-workspace .ft-layout-management > summary svg { display: none; }
+  .ft-workspace .ft-compact-panel { flex: 1; min-width: 0; padding: 0; gap: 4px; font-size: 0; border: 0; }
+  .ft-workspace .ft-compact-panel select { width: 100%; min-width: 0; font-size: 11px; padding-inline: 4px; }
+  .ft-workspace .ft-preview-safety { gap: 2px 8px; padding-block: 3px; }
+  .ft-workspace .ft-app-context { flex-basis: auto; }
+  .ft-workspace .ft-app-scope-row [data-testid="instrument-links"] { margin-left: 0; }
+  .ft-workspace .ft-layout-management-body { right: 0; }
+  .ft-workspace .ft-system-status { padding-inline: 8px; gap: 8px; }
+}
+
+
+/* Captured chooser hierarchy: centred title, preview tiles, labels below.
+   Own canonical panel diagrams; no copied brand imagery or invented prices. */
+.ft-workspace .ft-layout-chooser { flex: 1; min-height: 0; overflow: auto; padding: clamp(20px, 5vh, 64px) 24px; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 24px; }
+.ft-workspace .ft-layout-chooser-heading { text-align: center; }
+.ft-workspace .ft-layout-chooser-heading h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+.ft-workspace .ft-layout-chooser-heading p, .ft-workspace .ft-template-caption { font-size: 12px; color: var(--color-text-muted); }
+.ft-workspace .ft-template-grid { display: grid; width: min(900px, 100%); grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 32px; }
+.ft-workspace .ft-template-choice { min-width: 0; display: flex; flex-direction: column; gap: 10px; text-align: center; cursor: pointer; font-size: 12px; }
+.ft-workspace .ft-template-choice:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 5px; }
+.ft-workspace .ft-template-preview { height: 112px; width: 100%; display: flex; padding: 6px; border: 1px solid var(--color-border-default); border-radius: 5px; background: var(--color-surface-card); }
+.ft-workspace .ft-template-choice:hover .ft-template-preview { border-color: var(--color-accent); }
+.ft-workspace .ft-template-empty { align-items: center; justify-content: center; }
+.ft-workspace .ft-template-empty svg { width: 32px; height: 32px; padding: 6px; border-radius: 50%; background: var(--color-surface-elevated); }
+.ft-workspace .ft-template-row { min-width: 0; min-height: 0; display: flex; gap: 3px; }
+.ft-workspace .ft-template-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 3px; padding: 5px; overflow: hidden; background: var(--chart-bg, var(--color-surface-base)); border: 1px solid var(--color-border-subtle); font-size: 9px; color: var(--color-text-secondary); text-align: left; }
+.ft-workspace .ft-template-pane span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-workspace .ft-app-panels[hidden] { display: none; }
+@media (max-width: 767px) {
+  .ft-workspace .ft-layout-chooser { padding: 24px 16px; justify-content: flex-start; gap: 20px; }
+  .ft-workspace .ft-template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 16px; }
+  .ft-workspace .ft-template-preview { height: 92px; }
+}
