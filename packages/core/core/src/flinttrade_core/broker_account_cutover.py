@@ -1,4 +1,4 @@
-"""Temporary account-mutation admission until the reviewed Task 9D cutover.
+"""Account mutations stay disabled until native broker sessions are available.
 
 Production is unconditionally unavailable. The callable dependency is only an
 explicit composition seam for isolated tests of retained legacy internals; it
@@ -22,7 +22,7 @@ class BrokerAccountCutoverUnavailable(RuntimeError):
 
 
 def require_broker_account_mutations() -> None:
-    """Reject production mutations until Task 9D removes this guard."""
+    """Reject production mutations until native broker sessions are available."""
     raise BrokerAccountCutoverUnavailable
 
 

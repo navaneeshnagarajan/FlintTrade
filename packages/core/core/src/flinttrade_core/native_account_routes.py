@@ -65,7 +65,7 @@ from flinttrade_gateway.credentials import (
     SelectorSnapshot,
 )
 from flinttrade_gateway.log_safety import selector_ref
-from flinttrade_gateway.monday_read_smoke import monday_read_connectable
+from flinttrade_gateway.connected_read_smoke import connected_read_connectable
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 
 from .workspace import workspace_dir
@@ -109,7 +109,7 @@ _NATIVE_BROKER_IDS = {info.name for info in BROKER_CATALOG.values() if info.nati
 _CONNECTABLE_BROKER_IDS = {
     info.name
     for info in BROKER_CATALOG.values()
-    if info.native and monday_read_connectable(info.name, info.connectable)
+    if info.native and connected_read_connectable(info.name, info.connectable)
 }
 
 native_accounts_bp = Blueprint("native_accounts", __name__, url_prefix="/api/v1/native")
@@ -1809,7 +1809,7 @@ def list_native_brokers() -> Any:
         row = {
             "adapter_id": info.name,
             "display_name": info.display_name,
-            "connectable": monday_read_connectable(info.name, info.connectable),
+            "connectable": connected_read_connectable(info.name, info.connectable),
             "requires_static_ip": info.requires_static_ip,
             "native_connect_blockers": list(info.native_connect_blockers),
             "exchanges": list(info.exchanges),

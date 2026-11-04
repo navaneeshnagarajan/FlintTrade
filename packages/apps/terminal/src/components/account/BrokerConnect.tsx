@@ -68,13 +68,13 @@ import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
-  isMondayReadBroker,
-  mondayReadChrome,
-  mondayReadConnectable,
+  isConnectedReadBroker,
+  connectedReadChrome,
+  connectedReadConnectable,
 } from "@/lib/connectedReadChrome";
 
 function brokerSelectable(broker: Pick<NativeBroker, "adapter_id" | "connectable">): boolean {
-  return mondayReadConnectable(broker.adapter_id, broker.connectable);
+  return connectedReadConnectable(broker.adapter_id, broker.connectable);
 }
 
 const BROKERS_KEY = ["native", "brokers"] as const;
@@ -913,11 +913,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
               const canSetPrimary = canPromotePrimaryAccount(a);
-              const monday = isMondayReadBroker(a.broker);
+              const monday = isConnectedReadBroker(a.broker);
               const honest = honestBrokerStatus({
                 connected,
-                connectedRead: connected && mondayReadChrome(a) !== null,
-                nativeMonday: monday,
+                connectedRead: connected && connectedReadChrome(a) !== null,
+                nativeConnectedRead: monday,
                 incident: operatorIncident,
               });
               const moneyPathChrome = honest !== null
@@ -950,7 +950,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                           : ""}
                       {moneyPathChrome
                         ? ` · ${honest}`
-                        : connected && mondayReadChrome(a)
+                        : connected && connectedReadChrome(a)
                         ? ` · ${CONNECTED_READ_LABEL}${
                             a.broker === "kotakneo" ? ` · ${NEO_OPERATOR_COPY}` : ""
                           }${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`

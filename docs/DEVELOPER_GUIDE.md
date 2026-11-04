@@ -1,10 +1,7 @@
 # FlintTrade Developer Guide
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 
 This guide is for contributors and integrators. It assumes you have read
@@ -993,7 +990,5 @@ screen-reader list, `Positions without a heat map tile`.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
 
-Active design specs for in-flight work live under
-[docs/superpowers/specs/](superpowers/specs/). If you are about to start
-non-trivial work, check the specs folder first — there may already be
-an approved design.
+The public roadmap is [ROADMAP.md](../../ROADMAP.md). Shipped behaviour
+belongs in the changelog.

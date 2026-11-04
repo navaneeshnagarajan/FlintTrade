@@ -81,11 +81,11 @@ Electron Linux directory verification has one authoritative Test lane: bootstrap
 
 Visual checks remain advisory while `VISUAL_AXE_GATE` is `0`; they do not prove application state or network behaviour. Manual baseline updates commit only after successful regeneration. Reticle verifies running user flows when application behaviour changes; CI/tooling-only changes do not require an unrelated UI session.
 
-Dependency version PRs remain grouped and are staggered across Monday–Thursday, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Concurrency cancellation supersedes older runs for the same ref. Draft PRs skip runnable quality jobs until marked ready for review.
+Dependency version PRs remain grouped across the week, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Concurrency cancellation supersedes older runs for the same ref. Draft PRs skip runnable quality jobs until marked ready for review.
 
 ## Verification and review
 
-The canonical pipeline is **build agents (Codex or other supported agents) → independent multi-agent review panels → maintainer**. After a build/commit wave, fix actionable findings and re-audit. Use Conventional Commits, stage explicit files and keep the full pre-push gate. Never push or merge without explicit maintainer permission; never bypass hooks.
+Use Conventional Commits, stage explicit files, and keep the full pre-push gate. Never push or merge without explicit maintainer permission; never bypass hooks.
 
 Workflow changes must retain timeouts, least-privilege permissions, pinned actions and frozen installs. Frequent checks remain Linux-only; expensive native runners belong on weekly/manual workflows. `tests/test_workflow_policy.py`, `test_required_check_reachability.py`, `test_check_changes.py`, `test_check_workflow_efficiency.py` and the Python/Vitest partition guards enforce these contracts.
 
@@ -97,4 +97,4 @@ python scripts/ft.py test-fast tests/test_workflow_policy.py tests/test_required
 
 A shard failure is investigated using the named test and uploaded JUnit evidence. An unexpected skip is a failure to schedule required work, not a passing test. Do not weaken an assertion, timeout or safety guard to get a green result.
 
-The October 2026 audit sampled successful documentation and code PRs taking about 19–21 minutes overall. Full pytest used about 19 minutes while dependency installation took under a minute. Four-way sharding and focused invariant lanes address that measured bottleneck; actual hosted improvement must be measured after an authorised CI run. Local timings do not establish GitHub runner timings.
+Four-way sharding and focused invariant lanes keep the per-push suite inside the hosted job budget. Local timings do not establish GitHub runner timings.

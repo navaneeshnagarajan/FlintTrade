@@ -1,7 +1,6 @@
 # FlintTrade API Reference
 
-FlintTrade owns the terminal’s authenticated HTTP transport. Native broker
-reads and account mutations remain frozen; Practice uses the local sandbox.
+FlintTrade owns the terminal’s authenticated HTTP transport. A broker session cannot be started from the terminal today. Practice mode uses the local sandbox. Broker writes return 503 and broker reads return 409.
 
 | Surface | Base URL (production) | Base URL (Vite dev proxy) | Purpose |
 |---|---|---|---|
@@ -113,13 +112,13 @@ These endpoints are the first-party native broker HTTP surface the terminal
 still calls from Setup → Brokers and Settings → Brokers. **They are not a working operator path
 on this unreleased line.** Account-management writes
 (POST / DELETE / PUT / PATCH, plus the GET OAuth callback) return `503`
-`broker_account_cutover_unavailable` until Task 9D. Account and market-data reads
-return `409` with zero provider calls until the Task 7C.2 / 8B
-read-port cutover onto the in-process `BrokerReadPort`. Exact broker reads
+`broker_account_cutover_unavailable`. Account and market-data reads
+return `409` with zero provider calls. Broker writes and broker reads are not
+available in the terminal. Exact reads that already exist use the in-process `BrokerReadPort`. Exact broker reads
 that already exist are that in-process port, not this HTTP family and not
 terminal UX. Brokers that are built but not cleared for activation stay
 `connectable=false` while any declared `native_connect_blocker` remains.
-Legacy gateway `/v1` account/auth mutations are likewise frozen (`503`) and
+Legacy gateway `/v1` account/auth mutations are likewise unavailable (`503`) and
 still reject native broker ids with `data.native_connect_blockers` when a
 catalogued native broker is evidence-gated.
 
@@ -127,14 +126,14 @@ catalogued native broker is evidence-gated.
 |---|---|
 | `native/brokers` (**GET**) | Native broker catalogue with connectability, native-connect blocker reasons, static-outbound-IP requirement, login-method schemas, OAuth/postback URLs, and MCP metadata. |
 | `native/accounts` (**GET**) | Vault-backed native account list (metadata only). Not a live session refresh. |
-| `native/accounts` (**POST**) | Frozen connect. Returns `503` until Task 9D. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
-| `native/oauth/start` (**POST**) | Frozen. Returns `503` until Task 9D. |
-| `native/oauth/callback` (**GET**) | Frozen before state consumption. Returns `503` until Task 9D. |
+| `native/accounts` (**POST**) | Broker connect is unavailable. Returns `503`. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
+| `native/oauth/start` (**POST**) | Unavailable. Returns `503`. |
+| `native/oauth/callback` (**GET**) | Unavailable before state consumption. Returns `503`. |
 | `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. Not an account-mutation cutover route. |
-| `native/accounts/<adapter>/<account>/login` (**POST**) | Frozen re-authentication. Returns `503` until Task 9D. |
-| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Frozen native HTTP read. Returns `409` with zero provider calls until Task 7C.2. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended post-cutover surface, not a current live-session API. |
-| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Frozen. Returns `503` until Task 9D. After Task 9D this remains the write-default gate for a connected, non-read-only native session. |
-| `native/accounts/<adapter>/<account>` (**DELETE**) | Frozen removal. Returns `503` until Task 9D. |
+| `native/accounts/<adapter>/<account>/login` (**POST**) | Re-authentication is unavailable. Returns `503`. |
+| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Native HTTP read is unavailable. Returns `409` with zero provider calls. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended surface once broker sessions exist, not a current live-session API. |
+| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Unavailable. Returns `503`. When broker sessions exist, this remains the write-default gate for a connected, non-read-only native session. |
+| `native/accounts/<adapter>/<account>` (**DELETE**) | Removal is unavailable. Returns `503`. |
 
 Broker-hosted MCP setup catalogue: `broker/mcp` (**GET**). Metadata only; FlintTrade does not proxy MCP tool calls.
 
@@ -187,7 +186,7 @@ returns only `{"deleted": true}`. Every service-connection-family response is
 
 The in-process `BrokerReadPort` (quotes, depth, history, account books, and
 related exact reads) is not this HTTP surface and is not terminal UX. Native
-HTTP reads stay `409` until Task 7C.2 migrates callers onto that port. See
+HTTP reads stay `409`. Callers use the in-process port, not this HTTP family. See
 [ARCHITECTURE.md](ARCHITECTURE.md#broker-reads-versus-gated-writes).
 
 ### News (`/api/v1/news`)

@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "FlintTrade Electron desktop shell.",
-  "author": "navaneeshnagarajan <259833042+navaneeshnagarajan@users.noreply.github.com>",
+  "author": "FlintTrade",
   "type": "module",
   "main": "dist/electron-main.mjs",
   "engines": {

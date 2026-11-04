@@ -320,10 +320,10 @@ def get_strategy_trades(strategy_id: str) -> Response:
     Returns:
         JSON with ``status``, ``strategy_id``, and ``trades`` (list).
 
-    TODO: Forward trade tracking is a future feature.  The strategy runner
-    will need to persist executed trades against each strategy UUID so they
-    can be retrieved here.  For now returns an empty list so the frontend
-    call succeeds without a 404.
+    Forward trade tracking is not stored yet. The strategy runner will need
+    to persist executed trades against each strategy UUID before this route
+    can return them. For now it returns an empty list so the frontend call
+    succeeds without a 404.
     """
     # Verify the strategy exists so unknown IDs still return 404.
     runner, err = _runner_required()

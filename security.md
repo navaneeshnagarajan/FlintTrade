@@ -4,14 +4,11 @@ Thank you for helping keep FlintTrade and its users safe.
 
 ## Supported versions
 
-FlintTrade is pre-1.0 (`v0.0.1` on `main`). Only the current `0.0.x` line
-receives patches. The earlier `v0.1.0`…`v0.6.0-beta.13` tags were deleted in
-the 2026-07-23 clean-slate reset and are not supported.
+FlintTrade is pre-release (`v0.0.1`). Only the latest release receives security fixes.
 
 | Version | Supported |
 |---------|-----------|
-| 0.0.x (latest on `main`) | Yes |
-| Retired `0.1.x`…`0.6.x` tags | No |
+| 0.0.x (latest) | Yes |
 
 When 1.0 ships, this policy will expand to cover the previous minor for a defined window.
 

@@ -141,7 +141,7 @@ describe("operator incident classifier", () => {
       const chrome = honestBrokerStatus({
         connected: true,
         connectedRead: true,
-        nativeMonday: true,
+        nativeConnectedRead: true,
         incident,
       });
       expect(chrome).not.toMatch(/Connected/);
@@ -191,7 +191,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: true,
-        nativeMonday: false,
+        nativeConnectedRead: false,
         incident,
       }),
     ).toBe("Connected (read)");
@@ -284,12 +284,12 @@ describe("operator incident classifier", () => {
     expect(incident?.nativeHttpFreeze).toBe(true);
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
-    expect(incident?.rectify.toLowerCase()).toContain("cutover");
+    expect(incident?.rectify.toLowerCase()).toContain("not available in the terminal");
     expect(
       honestBrokerStatus({
         connected: true,
         connectedRead: true,
-        nativeMonday: true,
+        nativeConnectedRead: true,
         incident,
       }),
     ).toBe("Unavailable — backend unreachable");
@@ -297,7 +297,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: false,
-        nativeMonday: false,
+        nativeConnectedRead: false,
         incident,
       }),
     ).toBe("Connected");
@@ -341,7 +341,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: false,
-        nativeMonday: false,
+        nativeConnectedRead: false,
         incident,
       }),
     ).toBe("Connected");
@@ -358,7 +358,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: false,
-        nativeMonday: false,
+        nativeConnectedRead: false,
         incident,
       }),
     ).toBe("Connected");
@@ -387,7 +387,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: true,
-        nativeMonday: true,
+        nativeConnectedRead: true,
         incident,
       }),
     ).toBe("Connected (read)");
@@ -414,7 +414,7 @@ describe("operator incident classifier", () => {
       honestBrokerStatus({
         connected: true,
         connectedRead: true,
-        nativeMonday: false,
+        nativeConnectedRead: false,
         incident,
       }),
     ).not.toMatch(/Connected/);

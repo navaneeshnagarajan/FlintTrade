@@ -1,7 +1,6 @@
 /**
  * Marketing-only copy must not sell native brokers as a working path.
- * Native HTTP is frozen until
- * Task 9D (mutations) and Task 7C.2 (read-port cutover). Generated docs
+ * Broker sessions are not available in the terminal today. Generated docs
  * are out of scope here.
  */
 
@@ -35,13 +34,14 @@ describe('site marketing copy after the native HTTP freeze', () => {
 
   it('presents only native adapters with evidence-gated availability', () => {
     expect(homepage).toMatch(/Six native adapters with evidence-gated availability/);
-    expect(homepage).toContain('Native connections remain frozen');
+    expect(homepage).toContain('Broker sessions are not available in the terminal yet.');
   });
 
-  it('mentions native only as evidence-gated and frozen until Task 9D and Task 7C.2', () => {
-    expect(homepage).toContain('Task 9D');
-    expect(homepage).toContain('Task 7C.2');
-    expect(homepage).toMatch(/frozen until Task 9D and Task 7C\.2/);
+  it('states that a broker session cannot be started from the terminal today', () => {
+    expect(homepage).toContain('A broker session cannot be started from the terminal today');
+    expect(homepage).toContain('Practice mode works without a broker');
+    expect(homepage).not.toContain('Task 9D');
+    expect(homepage).not.toContain('Task 7C.2');
     expect(homepage).toMatch(/evidence-gated/);
   });
 });
