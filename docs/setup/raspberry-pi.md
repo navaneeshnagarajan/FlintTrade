@@ -37,7 +37,7 @@ Python 3.14.
 
 ## Setup (ARM64 server — advanced)
 
-`setup-production.sh` is an Ubuntu 26.04 / Python >= 3.14 host provisioner
+`setup-production.sh` is an Ubuntu 26.04 LTS / Python >= 3.14 host provisioner
 only. It is not the Bookworm path. It provisions `/opt/flinttrade` to match
 `infra/systemd/flinttrade.service`, creates a repo-local `.venv`, builds the
 terminal, provisions the vault secret as `www-data`, and chowns only runtime

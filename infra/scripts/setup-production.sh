@@ -1,5 +1,5 @@
 #!/bin/bash
-# FlintTrade First-Time Setup (Ubuntu 26.04)
+# FlintTrade First-Time Setup (Ubuntu 26.04 LTS)
 # Run once only. Provisions the host (system packages, Node 22, data and log
 # directories) and installs FlintTrade as a systemd service.
 # Absorbed infra/scripts/setup-ubuntu.sh (host-provisioning steps) — this is

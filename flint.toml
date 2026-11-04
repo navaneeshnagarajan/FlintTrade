@@ -53,12 +53,11 @@ python_target = "3.14"
 # the target runs ahead of the floor rather than dragging it up.
 node_requires = ">=22.22.2"
 node_target = "24"
-# Derived, not chosen: the floor is whichever release provides Python >= 3.14.
-# Ubuntu 26.04 LTS ships Python 3.14. Earlier Ubuntu releases do not meet the
-# floor with their system interpreter. The one-line installer sidesteps this
-# by provisioning its own managed Python, so this constrains source installs only.
-os_requires = "Ubuntu 26.04 LTS or any platform providing Python >= 3.14"
-os_target = "Ubuntu 26.04 LTS"
+# Derived from the Python floor: Ubuntu 26.04 LTS is the release that ships
+# Python 3.14. The one-line installer still provisions its own interpreter, so
+# this constrains source installs only.
+os_requires = "Ubuntu 26.04 LTS"
+os_target = "26.04"
 
 [packages]
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, native broker boundary, config, models, logging" }

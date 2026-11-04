@@ -3,7 +3,7 @@
 The shipped unit is `infra/systemd/flinttrade.service`. It is a **server**
 template for the production prefix, not a drop-in for a developer checkout.
 
-`infra/scripts/setup-production.sh` is the first-time Ubuntu 26.04 installer
+`infra/scripts/setup-production.sh` is the first-time Ubuntu 26.04 LTS installer
 (Python >= 3.14): it provisions `/opt/flinttrade`, creates that tree's
 `.venv`, installs the hashed `requirements.lock` into it, builds the React
 terminal, provisions the credential-vault `master_password` as `www-data`,

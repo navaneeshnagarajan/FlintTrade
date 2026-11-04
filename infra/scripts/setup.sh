@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FlintTrade first-time setup script
-# Works on Ubuntu 26.04 (primary), macOS, and other Linux distros
+# Works on Ubuntu 26.04 LTS (primary), macOS, and other Linux distros
 set -euo pipefail
 
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -45,7 +45,7 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     echo "OS: $PRETTY_NAME"
     if [[ "${ID:-}" != "ubuntu" || ! "${VERSION_ID:-}" =~ ^24 ]]; then
-        warn "Tested on Ubuntu 26.04. Your OS may work but is not verified."
+        warn "Tested on Ubuntu 26.04 LTS. Your OS may work but is not verified."
     fi
 elif [[ "$(uname)" == "Darwin" ]]; then
     echo "OS: macOS $(sw_vers -productVersion)"

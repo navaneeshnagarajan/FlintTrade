@@ -150,7 +150,7 @@ every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
 
-`infra/scripts/setup-production.sh` is the Ubuntu 26.04 production installer
+`infra/scripts/setup-production.sh` is the Ubuntu 26.04 LTS production installer
 (Python >= 3.14). A checkout of this repository is only the *script* source;
 the installer provisions `/opt/flinttrade` itself. The unit is hardcoded to
 that prefix (`ProtectHome=true`). There is no directory override.

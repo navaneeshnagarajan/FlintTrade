@@ -63,7 +63,7 @@ if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 14) e
     apt-get install -y -qq python3 python3-venv python3-dev
 fi
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)' \
-    || die "Python >= 3.14 is required (Ubuntu 26.04)."
+    || die "Python >= 3.14 is required (Ubuntu 26.04 LTS)."
 ok "Python: $(python3 --version)"
 
 # Node.js

@@ -15,7 +15,7 @@ disagrees. Per-push CI runs the **floor**; nightly
 |---|---|---|---|
 | Python | `>=3.14` | 3.14 on every lane | The one-line installer provisions its own Python 3.14. Optional sklearn / LightGBM extras can still skip when a platform wheel is missing; that does not lower the floor. |
 | Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
-| Operating system | Any platform that can provide Python `>=3.14` (Ubuntu 26.04 LTS is the Linux system-interpreter floor) | Per-push and release Linux legs: `ubuntu-26.04` (and `ubuntu-26.04-arm` for the arm64 installer). Nightly: macOS and Windows as well. | Earlier Ubuntu releases do not ship Python 3.14 as the system interpreter. The one-line installer sidesteps this by provisioning `~/.flinttrade/tools`. |
+| Operating system | Ubuntu 26.04 LTS | Per-push and release Linux legs: `ubuntu-26.04` (and `ubuntu-26.04-arm` for the arm64 installer). Nightly: macOS and Windows as well. Target 26.04. | The OS floor is the release that ships Python 3.14. The one-line installer provisions its own interpreter under `~/.flinttrade/tools`. |
 
 The Electron 44 desktop shell additionally requires **macOS 13 (Ventura) or
 later** on Apple Silicon and Intel. Electron 44 dropped macOS 12 support; this

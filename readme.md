@@ -45,32 +45,24 @@ sandbox. Funded Live placement remains unproven and fail-closed.
 
 ## Supported versions
 
-FlintTrade tracks current stable releases rather than deferring upgrades into
-periodic migrations. Two numbers per runtime, and the difference matters:
+Each runtime has a floor and a target. The floor is the lowest version that
+must work. The target is what development and CI exercise. Both are declared
+once, in `flint.toml`'s `[requirements]` table.
+`tests/test_minimum_requirements_single_source.py` fails if a manifest
+disagrees with that table.
 
-| | Minimum (the floor) | Target (what CI builds and the installer pins) |
+| | Floor | Target |
 |---|---|---|
 | Python | `>=3.14` | 3.14 |
 | Node | `>=22.22.2` | 24 |
-| OS | Ubuntu 26.04 LTS, or any platform providing Python >= 3.14 | Ubuntu 26.04 LTS |
+| OS | Ubuntu 26.04 LTS | 26.04 |
 
-The **floor** is the lowest version that actually works — set by what the
-dependency tree genuinely needs, never by ambition. Node's floor comes from
-jsdom 30's `engines` field, and the OS floor is derived rather than
-chosen: Ubuntu 26.04 ships Python 3.14. Earlier Ubuntu releases cannot meet
-the Python floor with their system interpreter.
+Python's floor and target are the same 3.14 series. The OS floor follows from
+that: Ubuntu 26.04 LTS is the release that ships Python 3.14. Node's floor
+comes from jsdom 30, and its target stays ahead at 24.
 
-The **target** is where development, CI and the pinned bootstrap toolchain live,
-so early adopters of newer releases are supported rather than merely tolerated.
-
-If you use the one-line installer below, none of this constrains you: it
-provisions its own SHA-256-verified Python, Node and pnpm under
-`~/.flinttrade/tools` and never touches your system toolchain. The floors apply
-to source installs and contributors.
-
-These values are declared once, in `flint.toml`'s `[requirements]` table.
-`tests/test_minimum_requirements_single_source.py` fails if any manifest, or
-this table, disagrees with it.
+The one-line installer provisions its own Python, Node and pnpm under
+`~/.flinttrade/tools`. The floors apply to source installs and contributors.
 
 ## Quickstart
 
