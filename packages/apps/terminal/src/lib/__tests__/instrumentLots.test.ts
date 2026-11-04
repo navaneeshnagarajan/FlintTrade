@@ -57,6 +57,46 @@ describe("lotSizeFromMaster", () => {
     expect(scalperLotLabel("SENSEX", rows, "2026-09-25")).toBeNull();
   });
 
+  it("names the last agreed lot when the current month is missing", () => {
+    const rows: ScripRow[] = [
+      {
+        SEM_SMST_SECURITY_ID: "OLD-NIFTY",
+        SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX",
+        SEM_TRADING_SYMBOL: "NIFTY-Oct2026-FUT",
+        SEM_EXPIRY_DATE: "2026-10-27",
+        SEM_LOT_UNITS: "65",
+      },
+    ];
+    expect(lotSizeForContract("OLD-NIFTY", rows, "2026-11-04")).toBeNull();
+    expect(lotSizeFromMaster("NIFTY", rows, "2026-11-04")).toBeNull();
+    expect(scalperLotLabel("NIFTY", rows, "2026-11-04")).toBeNull();
+    expect(indexLotLine(rows, "2026-11-04")).toBe(
+      "NIFTY 65 (last listed Oct) · BANKNIFTY — · SENSEX —",
+    );
+  });
+
+  it("does not guess a lot when the expired contracts disagree", () => {
+    const rows: ScripRow[] = [
+      {
+        SEM_SMST_SECURITY_ID: "NIFTY-SEP",
+        SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX",
+        SEM_EXPIRY_DATE: "2026-09-29",
+        SEM_LOT_UNITS: "75",
+      },
+      {
+        SEM_SMST_SECURITY_ID: "NIFTY-OCT",
+        SEM_CUSTOM_SYMBOL: "NIFTY",
+        SEM_INSTRUMENT_NAME: "FUTIDX",
+        SEM_EXPIRY_DATE: "2026-10-27",
+        SEM_LOT_UNITS: "65",
+      },
+    ];
+    expect(lotSizeFromMaster("NIFTY", rows, "2026-11-04")).toBeNull();
+    expect(indexLotLine(rows, "2026-11-04").startsWith("NIFTY —")).toBe(true);
+  });
+
   it("does not invent a lot size for a symbol the master does not list", () => {
     expect(lotSizeFromMaster("FINNIFTY")).toBeNull();
     expect(scalperLotLabel("FINNIFTY")).toBeNull();
@@ -102,8 +142,9 @@ describe("lotSizeFromMaster", () => {
       },
     ];
     const shipped = fixture as { rows: ScripRow[] };
-    expect(lotSizeFromMaster("NIFTY", shipped.rows, asOf)).toBe(65);
-    expect(scalperLotLabel("NIFTY", shipped.rows, asOf)).toBe("65 · Sep expiry");
+    expect(lotSizeFromMaster("NIFTY", shipped.rows, "2026-11-04")).toBe(65);
+    expect(scalperLotLabel("NIFTY", shipped.rows, "2026-11-04")).toBe("65 · Nov expiry");
+    expect(lotSizeFromMaster("BANKNIFTY", shipped.rows, "2026-11-04")).toBe(30);
 
     setInstrumentLotRows([]);
     const fetchMock = vi.fn().mockResolvedValue({

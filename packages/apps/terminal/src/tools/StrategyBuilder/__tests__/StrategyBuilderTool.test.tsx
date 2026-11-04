@@ -6,10 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows } from "@/test-utils/futureIndexLotRows";
 import { UNDERLYINGS } from "../types";
 import { formatINR } from "../utils";
 
-const niftyLot = UNDERLYINGS[0].lotSize ?? 0;
+let niftyLot = 0;
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -56,6 +58,9 @@ describe("StrategyBuilderTool", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionStorage.clear();
+    setInstrumentLotRows(futureIndexLotRows());
+    niftyLot = UNDERLYINGS[0].lotSize ?? 0;
+    expect(niftyLot).toBeGreaterThan(0);
   });
 
   it("renders without crashing", () => {
