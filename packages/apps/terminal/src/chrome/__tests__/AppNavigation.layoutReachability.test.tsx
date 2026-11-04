@@ -78,6 +78,45 @@ function renderShell(path = "/settings") {
 }
 
 describe("compact app navigation and layout ownership", () => {
+  it("restores saved layout tabs while retaining Current and isolates edits from named snapshots", async () => {
+    const user = userEvent.setup();
+    const view = renderShell();
+    await screen.findByLabelText("Settings navigation canary");
+    const chrome = within(screen.getByLabelText("Settings layout controls"));
+    const tab = (name: string) => chrome.getByRole("tab", { name });
+    expect(tab("Current")).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(chrome.getByText("Layout actions"));
+    fireEvent.change(chrome.getByRole("textbox", { name: "Layout name" }), { target: { value: "Base" } });
+    fireEvent.click(chrome.getByRole("button", { name: "Save layout" }));
+    const base = readAppLayouts("settings").Base;
+    expect(tab("Base")).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(chrome.getByRole("button", { name: "Add widget" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Shared knowledge" }));
+    await screen.findByText("Knowledge leaf");
+    expect(tab("Current")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Current")).toHaveTextContent("Modified");
+    const current = readAppLayouts("settings").Current;
+    expect(readAppLayouts("settings").Base).toEqual(base);
+    fireEvent.click(tab("Base"));
+    expect(screen.queryByText("Knowledge leaf")).not.toBeInTheDocument();
+    expect(readAppLayouts("settings").Current).toEqual(current);
+    fireEvent.click(tab("Current"));
+    expect(await screen.findByText("Knowledge leaf")).toBeVisible();
+    tab("Current").focus();
+    await user.keyboard("{End}");
+    expect(tab("Base")).toHaveFocus();
+    expect(tab("Current")).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+    expect(tab("Base")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByText("Knowledge leaf")).not.toBeInTheDocument();
+    view.unmount();
+    renderShell();
+    expect(await screen.findByText("Knowledge leaf")).toBeVisible();
+    expect(within(screen.getByLabelText("Settings layout controls")).getByRole("tab", { name: "Current" })).toHaveAttribute("aria-selected", "true");
+    expect(readAppLayouts("settings").Base).toEqual(base);
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+    expect(useModeStore.getState().mode).toBe("explore");
+  });
   it("groups every app exactly once in the header switcher and focuses the newly selected app", async () => {
     renderShell();
     await screen.findByLabelText("Settings navigation canary");
@@ -218,7 +257,7 @@ describe("compact app navigation and layout ownership", () => {
     fireEvent.click(chrome.getByRole("button", { name: "Reset app layout" }));
     expect(app.getByRole("status")).toHaveTextContent("Reset app layout");
     expect(preset).toHaveValue("");
-    expect(chrome.getByText("1 panels")).toBeVisible();
+    expect(chrome.getByText("1 panel")).toBeVisible();
     expect(chrome.getByRole("combobox", { name: "Compact panel" })).toHaveTextContent("Preferences");
     expect(screen.queryByText("Knowledge leaf")).not.toBeInTheDocument();
     fireEvent.change(chrome.getByRole("combobox", { name: "Restore saved layout" }), { target: { value: "Compact saved" } });
@@ -390,7 +429,7 @@ describe("compact app navigation and layout ownership", () => {
     }
     expect(await screen.findByText("Chart leaf")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Choose a layout" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Terminal layout controls")).toHaveTextContent("1 panels");
+    expect(screen.getByLabelText("Terminal layout controls")).toHaveTextContent("1 panel");
     const json = JSON.stringify(readAppLayouts("terminal").Current);
     expect(json.match(/"component":"chart"/g)).toHaveLength(1);
     expect(json).not.toContain('"component":"watchlist"');

@@ -346,6 +346,22 @@ html[data-mode="dark"] .ft-workspace.ft-workspace {
 }
 
 
+/* Saved snapshots share the existing toolbar row, never another header. */
+.ft-workspace .ft-saved-layout-tabs { display: flex; flex: 1 1 0; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+.ft-workspace .ft-saved-layout-tabs > button { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; max-width: 100%; min-height: 30px; padding: 5px 10px; border: 1px solid transparent; border-radius: 5px; background: var(--color-surface-elevated); color: var(--color-text-secondary); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.ft-workspace .ft-saved-layout-tabs > button > span { overflow: hidden; text-overflow: ellipsis; }
+.ft-workspace .ft-saved-layout-tabs > button[aria-selected="true"] { background: var(--color-surface-base); border-color: var(--color-border-default); color: var(--color-text-primary); }
+.ft-workspace .ft-saved-layout-tabs > button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.ft-workspace .ft-saved-layout-tabs small { font-size: 9px; color: var(--color-text-muted); }
+.ft-workspace .ft-layout-management-body .ft-layout-restore { display: flex; gap: 8px; align-items: center; font-size: 11px; }
+.ft-workspace .ft-no-layout { display: block; margin-right: auto; }
+@media (max-width: 767px) {
+  .ft-workspace .ft-saved-layout-tabs > button { min-height: 36px; padding-inline: 7px; }
+  .ft-workspace .ft-compact-panel { flex: 0 1 76px; }
+  .ft-workspace .ft-saved-layout-tabs small { display: none; }
+  .ft-workspace .ft-no-layout { font-size: 11px; }
+}
+
 /* Captured chooser hierarchy: centred title, preview tiles, labels below.
    Own canonical panel diagrams; no copied brand imagery or invented prices. */
 .ft-workspace .ft-layout-chooser { flex: 1; min-height: 0; overflow: auto; padding: clamp(20px, 5vh, 64px) 24px; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 24px; }

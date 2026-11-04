@@ -68,6 +68,11 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const [picker, setPicker] = useState(false);
   const [search, setSearch] = useState("");
   const [layoutName, setLayoutName] = useState("");
+  // Current is the canonical autosaved draft. Named tabs are immutable
+  // snapshots until an explicit Save; editing one returns to Current.
+  const [selectedLayout, setSelectedLayout] = useState("Current");
+  const [draftFrom, setDraftFrom] = useState("");
+  const namedBaseline = useRef("");
   const [savedNames, setSavedNames] = useState(() => { try { return Object.keys(readAppLayouts(app)).filter(name => name !== "Current"); } catch { return []; } });
   const [notice, setNotice] = useState("");
   const [compact, setCompact] = useState(false);
@@ -77,8 +82,12 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   // while that Enter is still down, or the trigger opens the dialog again.
   const closeFromSearchRef = useRef(false);
 
-  const replaceLayout = useCallback((layout: IJsonModel, message: string) => {
-    setModel(Model.fromJson(layout));
+  const replaceLayout = useCallback((layout: IJsonModel, message: string, name = "Current") => {
+    const next = Model.fromJson(layout);
+    namedBaseline.current = JSON.stringify(wideJson(next));
+    setSelectedLayout(name);
+    if (name === "Current") setDraftFrom("");
+    setModel(next);
     setChoosing(false);
     setHasWorkspace(true);
     setError("");
@@ -98,9 +107,10 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }, [app, replaceLayout]);
 
   const persist = useCallback((current: Model) => {
+    if (selectedLayout !== "Current") return;
     try { saveAppLayout(app, "Current", wideJson(current)); setError(""); }
     catch (problem) { setError(String(problem)); }
-  }, [app]);
+  }, [app, selectedLayout]);
   useEffect(() => {
     if (!active) setPicker(false);
   }, [active]);
@@ -110,10 +120,17 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     // effect's cleanup flushes its model; publish the replacement afterwards
     // even when the user performs no subsequent docking action before reload.
     persist(model);
-    const listener = () => { persist(model); setRevision(v => v + 1); };
+    const listener = () => {
+      if (selectedLayout !== "Current" && JSON.stringify(wideJson(model)) !== namedBaseline.current) {
+        setDraftFrom(selectedLayout);
+        setSelectedLayout("Current");
+      }
+      persist(model);
+      setRevision(v => v + 1);
+    };
     model.addChangeListener(listener);
     return () => { model.removeChangeListener(listener); persist(model); };
-  }, [active, choosing, model, persist]);
+  }, [active, choosing, model, persist, selectedLayout]);
   useEffect(() => {
     if (!active || !host.current) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -222,15 +239,38 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     closeFromSearchRef.current = false;
     event.preventDefault();
   }
+  function restoreLayout(name: string) {
+    if (!name) return;
+    setNotice(""); setError("");
+    if (name === "Current" && selectedLayout === "Current") { setChoosing(false); return; }
+    try {
+      const saved = readAppLayouts(app)[name];
+      if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app.");
+      replaceLayout(saved, `Restored ${name}`, name);
+    } catch (problem) { setError(String(problem)); }
+  }
+  function layoutTabKey(event: KeyboardEvent<HTMLDivElement>) {
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const index = controls.indexOf(event.target as HTMLButtonElement);
+    if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + controls.length) % controls.length;
+    controls[next].focus();
+    controls[next].scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
   return <section className="ft-app flex h-full min-h-0 min-w-0 flex-col" aria-label={`${meta.name} app`} data-app={app} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
     <h1 className="sr-only">{meta.name}</h1>
     <WorkspaceChrome>
     <div className="ft-app-toolbar" hidden={!active} data-app-chrome={app} aria-label={`${meta.name} layout controls`}>
-      <span className="ft-current-layout">{hasWorkspace ? <>Current layout <span className="text-text-muted">{tabs.length} panels</span></> : "No layout selected"}</span>
-      <label className="ft-layout-restore">Saved layouts
-          <select aria-label="Restore saved layout" value="" onChange={e => { if (!e.target.value) return; setNotice(""); setError(""); try { const saved = readAppLayouts(app)[e.target.value]; if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app."); replaceLayout(saved, `Restored ${e.target.value}`); } catch (e) { setError(String(e)); } }}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
-        </label>
+      {hasWorkspace ? <>
+        <div className="ft-saved-layout-tabs" role="tablist" aria-label={`${meta.name} saved layouts`} onKeyDown={layoutTabKey}>
+          {["Current", ...savedNames].map((name, index) => <button key={name} type="button" role="tab" id={`${app}-layout-tab-${index}`} aria-label={name} aria-selected={selectedLayout === name} aria-controls={`${app}-layout-panel`} tabIndex={selectedLayout === name ? 0 : -1} title={name === "Current" ? `Autosaved working draft${draftFrom ? ` · modified from ${draftFrom}` : ""}` : `Restore ${name}; edits create a Current draft`} onFocus={event => event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })} onClick={() => restoreLayout(name)}>
+            <span>{name}</span>{name === "Current" && draftFrom && <small>Modified</small>}
+          </button>)}
+        </div>
+        <span className="ft-current-layout"><span className="text-text-muted">{tabs.length} {tabs.length === 1 ? "panel" : "panels"}</span></span>
+      </> : <span className="ft-current-layout ft-no-layout">No layout selected</span>}
       <Button variant="outline" size="sm" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" />Widget</Button>
     <details className="ft-layout-management" onKeyDown={event => {
       if (event.key !== "Escape") return;
@@ -239,12 +279,15 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     }}>
       <summary><SlidersHorizontal aria-hidden="true" /><span>Layout actions</span><span className="ft-layout-hint" aria-hidden="true">Save, restore or transfer</span></summary>
       <div className="ft-layout-management-body">
+        <label className="ft-layout-restore">Saved layouts
+          <select aria-label="Restore saved layout" value="" onChange={e => restoreLayout(e.target.value)}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
+        </label>
         {app === "terminal" && <Button size="sm" variant="outline" onClick={event => { setChoosing(true); const details = event.currentTarget.closest("details"); if (details) details.open = false; }}>Browse layout templates</Button>}
         {/* Templates are actions, never identities of a customised workspace. */}
         <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
         <div className="ft-layout-save" role="group" aria-label="Save a named layout">
           <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 min-w-0" />
-          <Button variant="outline" size="sm" disabled={!hasWorkspace} onClick={() => { setNotice(""); setError(""); try { saveAppLayout(app, layoutName, wideJson(model)); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
+          <Button variant="outline" size="sm" disabled={!hasWorkspace} onClick={() => { setNotice(""); setError(""); try { const snapshot = wideJson(model); saveAppLayout(app, layoutName, snapshot); namedBaseline.current = JSON.stringify(snapshot); setSelectedLayout(layoutName); setDraftFrom(""); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
         </div>
 
         <div className="ft-layout-transfer" role="group" aria-label="Transfer or reset layout">
@@ -259,6 +302,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
           <Button size="sm" variant="ghost" onClick={resetLayout}><RotateCcw aria-hidden="true" />Reset app layout</Button>
         </div>
         <p className="ft-layout-explanation">Presentation only. Saved named layouts and all non-layout records are retained.</p>
+        <p className="ft-layout-explanation">Current autosaves your working draft and returns on reload. Named tabs restore snapshots; edits become a modified Current draft. Save explicitly to update a name, or use a new name to keep a copy.</p>
         {notice && <p className="text-xs text-text-secondary" aria-hidden="true">{notice}</p>}
       </div>
     </details>
@@ -282,7 +326,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       replaceLayout(workspaceJson(rowJson(100, [tabsetJson(100, [])])), "Started empty presentation layout; execution unchanged.");
       setPicker(true);
     }} />}
-    <div ref={host} hidden={choosing} className={`ft-app-panels relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
+    <div ref={host} id={`${app}-layout-panel`} role="tabpanel" aria-label={`${selectedLayout} layout`} hidden={choosing} className={`ft-app-panels relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
       <Layout model={model} factory={factory} onRenderTab={renderWorkspaceTabExtras} onRenderTabSet={renderWorkspaceTabSetExtras} realtimeResize />
       {!tabs.length && <div className="absolute inset-0 grid place-items-center"><Button onClick={() => setPicker(true)}>Add your first widget</Button></div>}
     </div>
