@@ -36,7 +36,8 @@ else:
 ROOT = Path(__file__).resolve().parents[2]
 CI_CLASSES = ("Reports", "Registrations", "ExecutorLifecycle", "FixturePublication", "PythonSandbox", "PythonCarrier")
 WORKFLOW_COMMAND = (
-    'uv run --offline --no-sync python -B -I -S tools/acceptance/ci_python_contracts.py '
+    'env "$(uv python find --offline --managed-python --no-project 3.14.8)" '
+    '-B -I -S tools/acceptance/ci_python_contracts.py '
     '--state-root "$RUNNER_TEMP/acceptance-python"'
 )
 # Explicit import + inert registration operands, not a copy of the worktree,

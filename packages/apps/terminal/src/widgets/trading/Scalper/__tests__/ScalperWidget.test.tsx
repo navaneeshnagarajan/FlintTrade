@@ -806,7 +806,9 @@ describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
     expect(scalperIndexValue()).toBe("NIFTY");
     expect(store.get(selectedSymbolAtom)).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    // The row's accessible name includes its exchange and live quote cells;
+    // anchor the instrument prefix without matching the sibling Buy/Sell buttons.
+    await userEvent.click(screen.getByRole("button", { name: /^BANKNIFTY\s*NSE_INDEX\b/ }));
 
     await waitFor(() => expect(scalperIndexValue()).toBe("BANKNIFTY"));
     expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });

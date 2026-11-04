@@ -132,8 +132,12 @@ jobs:
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
       - run: uv sync --frozen
+      # Keep the floor-test .venv on 3.12; the isolated stdlib carrier has
+      # its own exact interpreter contract and must not resolve that .venv.
+      - name: Prepare the isolated acceptance interpreter
+        run: uv python install 3.14.8
       - name: Synthetic acceptance report and registration contracts
-        run: uv run --offline --no-sync python -B -I -S tools/acceptance/ci_python_contracts.py --state-root "$RUNNER_TEMP/acceptance-python"
+        run: env "$(uv python find --offline --managed-python --no-project 3.14.8)" -B -I -S tools/acceptance/ci_python_contracts.py --state-root "$RUNNER_TEMP/acceptance-python"
       - name: Check native-v2 generated contracts and canonical fixture projection
         run: uv run --offline --no-sync python scripts/generate-native-autonomy-v2-contracts.py --check
       - name: Verify pre-restructure baseline artefacts
@@ -443,11 +447,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # libtest embeds Python: use the selected installation's libpython,
+      # not a cached PyO3 configuration for the runner image's system Python.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: ticks-python
+        with: { python-version: '3.12' }
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: packages/core/ticks
+          key: python-${{ steps.ticks-python.outputs.python-version }}
       - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.ticks-python.outputs.python-path }}
 
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux

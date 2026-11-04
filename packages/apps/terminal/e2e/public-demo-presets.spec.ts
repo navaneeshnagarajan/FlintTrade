@@ -54,13 +54,20 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
   const layouts = async (): Promise<Record<string, Layout>> => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "{}"), storageKey);
   const currentTabs = async () => tabs((await layouts())["Current"].layout);
   const chartIds = async () => (await currentTabs()).filter(tab => tab.component === "chart").map(tab => tab.id);
+  const openLayoutActions = async () => {
+    const disclosure = app.locator("details").filter({ has: page.getByText("Layout actions", { exact: true }) });
+    if (await disclosure.getAttribute("open") === null) await disclosure.locator("summary").click();
+    await expect(disclosure).toHaveAttribute("open", "");
+  };
   const save = async (name: string) => {
+    await openLayoutActions();
     await app.getByRole("textbox", { name: "Layout name", exact: true }).fill(name);
     await app.getByRole("button", { name: "Save layout", exact: true }).click();
     await expect(app.getByRole("status")).toHaveText(`Saved ${name}`);
     expect((await layouts())[name]).toEqual((await layouts())["Current"]);
   };
   const restore = async (name: string) => {
+    await openLayoutActions();
     await app.getByRole("combobox", { name: "Restore saved layout", exact: true }).selectOption({ label: name });
     await expect(app.getByRole("status")).toHaveText(`Restored ${name}`);
     await expect.poll(async () => (await layouts())["Current"]).toEqual((await layouts())[name]);
@@ -114,7 +121,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await save("Charts and risk");
     expect(tabs((await layouts())["Charts and watchlist"].layout).some(tab => tab.component === "watchlist")).toBe(true);
     const edited = (await layouts())["Charts and risk"];
-    await app.getByText("Layout actions", { exact: true }).click();
+    await openLayoutActions();
     await expect(app.getByText("Presentation only. Saved named layouts and all non-layout records are retained.", { exact: true })).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
     await app.getByRole("button", { name: "Export layout", exact: true }).click();
