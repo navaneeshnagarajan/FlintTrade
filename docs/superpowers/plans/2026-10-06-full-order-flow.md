@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement FT-GTT-001 in independently reviewable slices, starting with conservative status/quantity handling and truthful UI, then broker-specific native-feature parity.
+**Goal:** Implement native order capabilities in independently reviewable slices, starting with conservative status/quantity handling and truthful UI, then broker-specific native-feature parity.
 
 **Architecture:** Keep intent, execution attempts and native protection resources distinct. First repair independent classifiers and presentation without changing any runtime gate; then establish pure evidence/capability contracts before six separate adapter plans. Durable reconciliation, dispatch and enablement are a blocked integration stage, not a side effect of capability work.
 
 **Tech Stack:** Python 3.12, pytest, React/TypeScript, TanStack Query, Vitest and Playwright; existing dependencies only.
 
-**Spec:** [Approved FT-GTT-001](https://github.com/navaneeshnagarajan/FlintTrade/blob/b74a9434eaf5e0a318ebf730398527f16347af7e/docs/acceptance/FT-GTT-001.md). Read it alongside this plan.
+**Spec:** [Native order capabilities](../../acceptance/native-order-capabilities.md). Read it alongside this plan.
 
 ## Global Constraints
 
@@ -131,7 +131,7 @@ The input booleans are an explicit trust boundary, not a new way to assert readi
 
 ## Task 5: Establish a versioned native-feature inventory
 
-**Create:** `G/src/flinttrade_gateway/order_feature_contract.py`, `G/tests/test_order_feature_contract.py`, `docs/acceptance/FT-GTT-001-capabilities.json`.
+**Create:** `G/src/flinttrade_gateway/order_feature_contract.py`, `G/tests/test_order_feature_contract.py`, `docs/acceptance/native-order-capabilities.json`.
 
 **Interfaces:** `OrderFeatureRecord` is a frozen dataclass with fields `schema_version: int`, `broker: str`, `api_version: str`, `checked_on: str`, `family: str`, `operation: str`, `product: str`, `segment: str`, `documented: str`, `implemented: str`, `readiness: str`, `supported_fields: tuple[str, ...]`, `quantity_unit: str`, `limitations: tuple[str, ...]`, `sources: tuple[str, ...]`. `validate_feature_records(records: Sequence[OrderFeatureRecord]) -> None` raises `ValueError` on invalid records. Schema version is 1. Support values are `yes/no/unknown`; readiness is `unverified/blocked/verified` and begins `unverified` or `blocked`, never inferred from `documented=yes`.
 

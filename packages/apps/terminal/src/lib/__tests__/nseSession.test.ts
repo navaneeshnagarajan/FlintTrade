@@ -1,7 +1,7 @@
 /**
  * nseSession.test.ts
  *
- * CAS-aware NSE cash session clock (FT-CORE-001, as of Aug 2026).
+ * CAS-aware NSE cash session clock (as of Aug 2026).
  * Phase chips are Continuous · CAS · Matching · Post-close · Closed.
  * Cash is never green "open" after 15:15; CAS is not Closed.
  */

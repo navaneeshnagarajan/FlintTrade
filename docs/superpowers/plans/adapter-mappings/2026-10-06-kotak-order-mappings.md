@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pytest, Decimal; existing dependencies.
 
-**Spec:** `FT-GTT-001-revised.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Source baseline: `ad059991d7164c934676808f54550659051ed9d5`.
+**Spec:** `native-order-capabilities.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Source baseline: `ad059991d7164c934676808f54550659051ed9d5`.
 
 ## Global Constraints
 
@@ -31,7 +31,7 @@ Current v3 removes CO/BO, their leg parameters, GTC/GTD/EOS and spread/2L/3L. Th
 - Modify `packages/integrations/gateway/src/flinttrade_gateway/brokers/kotakneo_mapping.py` (M below).
 - Create `packages/integrations/gateway/tests/brokers/test_kotakneo_order_contract.py` (T below): independent mapping fixtures, no adapter imports.
 - Existing `test_kotakneo_mapping.py` supplies regression examples; `test_kotakneo_adapter.py` and `test_kotakneo_sdk_contract.py` are later integration evidence, outside these commands.
-- Read-only dependencies: `order_feature_contract.py`, `exit_evidence.py`, `docs/acceptance/FT-GTT-001-capabilities.json`; no production registration or inventory-readiness promotion.
+- Read-only dependencies: `order_feature_contract.py`, `exit_evidence.py`, `docs/acceptance/native-order-capabilities.json`; no production registration or inventory-readiness promotion.
 
 ## Review Focus
 

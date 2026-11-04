@@ -40,7 +40,7 @@ describe("MarketClockWidget", () => {
     expect(screen.getByText("Market Clock")).toBeTruthy();
   });
 
-  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+  it("shows a Sample feed-source chip in Explore", () => {
     render(<MarketClockWidget />);
     const chip = screen.getByTestId("feed-freshness-chip");
     expect(chip.textContent).toBe("Example");
@@ -211,7 +211,7 @@ describe("computeMarketState — sessions crossing IST midnight", () => {
   });
 });
 
-describe("computeNseMarketState — CAS honesty (FT-CORE-001)", () => {
+describe("computeNseMarketState — CAS honesty", () => {
   const nse = MARKET_DEFS.find((d) => d.name === "NSE")!;
 
   function istWeekday(hour: number, minute: number): Date {

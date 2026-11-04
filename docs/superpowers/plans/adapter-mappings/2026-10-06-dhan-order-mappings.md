@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pytest; existing dependencies, dhanhq 2.2.0 pinned by `brokers.lock`.
 
-**Spec:** `docs/acceptance/FT-GTT-001.md`; parent plan `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Baseline: `ad059991d7164c934676808f54550659051ed9d5`.
+**Spec:** `docs/acceptance/native-order-capabilities.md`; parent plan `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Baseline: `ad059991d7164c934676808f54550659051ed9d5`.
 
 Main advanced to `e658b50ab6753d63e64df250dfefabb91cc4630d`; filename-only comparison found no pure mapping/test changes. Runtime drift was not assessed.
 
@@ -18,7 +18,7 @@ Main advanced to `e658b50ab6753d63e64df250dfefabb91cc4630d`; filename-only compa
 - “Unknown capability is not proof of support.”
 - “ACK, HTTP success and an order ID establish neither a fill nor a closed position.”
 - No runtime integration, dependency changes, broker sessions, release, tag or release-PR merge. Release actions require specific owner approval.
-- Keep `docs/acceptance/FT-GTT-001-capabilities.json` readiness unchanged. Mapping coverage cannot establish account/product/session eligibility.
+- Keep `docs/acceptance/native-order-capabilities.json` readiness unchanged. Mapping coverage cannot establish account/product/session eligibility.
 
 ## Review Focus
 

@@ -1,4 +1,4 @@
-# FT-DESK-ROUTES-001 — Desk route aliases, one Practice place path
+# Desk route aliases, one Practice place path
 
 Bookmark paths resolve to the desk that owns the content. Practice places
 go through one admission path. A missing price is a plain sentence, not a

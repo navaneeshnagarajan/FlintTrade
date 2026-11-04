@@ -1,7 +1,7 @@
 /**
  * CronSection.test.tsx
  *
- * Schedules tab (FT-AUTO-004) — Explore seeded jobs must not look
+ * Schedules tab — Explore seeded jobs must not look
  * production-Active, and Pause stays gated. Practice/Live keep Pause/Resume.
  */
 

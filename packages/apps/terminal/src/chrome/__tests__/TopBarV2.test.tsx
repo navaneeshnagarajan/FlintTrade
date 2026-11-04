@@ -293,7 +293,7 @@ describe("TopBarV2", () => {
   });
 
   it("shows Continuous for Explore HHMM timings at Thursday mid-session IST", () => {
-    // 10 Sep 2026 12:08 IST — the FT-TRADE-004 observation window.
+    // 10 Sep 2026 12:08 IST — the observation window.
     setIstInstant("2026-09-10T06:38:00.000Z");
     setExploreHhmmTimings();
 
@@ -610,7 +610,7 @@ describe("TopBarV2", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FT-MOBILE-002 — defensive skinny-window chrome (~390px)
+// defensive skinny-window chrome (~390px)
 // ---------------------------------------------------------------------------
 
 function stubViewportWidth(width: number) {
@@ -638,7 +638,7 @@ function stubViewportWidth(width: number) {
   });
 }
 
-describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
+describe("TopBarV2 skinny-window collapse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;
@@ -813,7 +813,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(more).toHaveAttribute("aria-expanded", "false");
   });});
 
-describe("FT-UX-001 Compact desk chrome at 1280", () => {
+describe("Compact desk chrome at 1280", () => {
   beforeEach(() => {
     useSettingsStore.setState({ density: "compact", tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
@@ -908,7 +908,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
   });
 });
 
-describe("FT-UX-002 TopBar chrome consolidation", () => {
+describe("TopBar chrome consolidation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;

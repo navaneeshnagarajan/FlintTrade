@@ -1,4 +1,4 @@
-# FT-CORE-TICKER-001 — Ticker venue badges
+# Ticker venue badges
 
 UX has confirmed these bars, and the product tip implements them on the
 dedicated ticker strip. Pinned venue badges follow the marquee. A

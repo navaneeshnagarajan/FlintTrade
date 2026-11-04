@@ -1,4 +1,4 @@
-"""FT-MONDAY-001 — Practice SandboxEngine E2E + no live leak.
+"""— Practice SandboxEngine E2E + no live leak.
 
 Acceptance lock (2026-09-20):
 
@@ -57,7 +57,7 @@ def _laya_ready_for_open_place() -> None:
 
 def _practice_token() -> str:
     """Mint a Practice JWT against the module scratch-workspace secret."""
-    return _create_token("ft-monday-001", mode="practice", live_mode_unlocked=False)
+    return _create_token("practice-sandbox", mode="practice", live_mode_unlocked=False)
 
 
 def _practice_headers(**extra: str) -> dict[str, str]:
@@ -69,7 +69,7 @@ def _practice_headers(**extra: str) -> dict[str, str]:
     return headers
 
 
-def _monday_app(db_path: Path) -> Flask:
+def _practice_app(db_path: Path) -> Flask:
     """Minimal Flask app: real sandbox + order routes + desk read routes."""
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -88,9 +88,9 @@ def _monday_app(db_path: Path) -> Flask:
 
 
 @pytest.fixture
-def monday_app(tmp_path: Path) -> Flask:
+def practice_app(tmp_path: Path) -> Flask:
     """Isolated Practice app with its own sandbox database."""
-    return _monday_app(tmp_path / "monday-sandbox.sqlite3")
+    return _practice_app(tmp_path / "practice-sandbox.sqlite3")
 
 
 def _assert_live_path_dark(app: Flask) -> None:
@@ -101,10 +101,10 @@ def _assert_live_path_dark(app: Flask) -> None:
 
 
 @pytest.mark.unit
-def test_practice_place_records_sandbox_fill_for_desk_reads(monday_app: Flask) -> None:
+def test_practice_place_records_sandbox_fill_for_desk_reads(practice_app: Flask) -> None:
     """Practice place → COMPLETE fill → desk sandbox book can read it."""
-    client = monday_app.test_client()
-    sandbox = monday_app.config["DATA_SANDBOX_ENGINE"]
+    client = practice_app.test_client()
+    sandbox = practice_app.config["DATA_SANDBOX_ENGINE"]
 
     resp = client.post(
         "/api/v1/orders/place",
@@ -148,14 +148,14 @@ def test_practice_place_records_sandbox_fill_for_desk_reads(monday_app: Flask) -
     assert desk_positions.status_code == 200
     assert len(desk_positions.get_json()["data"]["positions"]) == 1
 
-    _assert_live_path_dark(monday_app)
+    _assert_live_path_dark(practice_app)
 
 
 @pytest.mark.unit
-def test_practice_path_cannot_submit_live_broker_orders(monday_app: Flask) -> None:
+def test_practice_path_cannot_submit_live_broker_orders(practice_app: Flask) -> None:
     """A Practice JWT cannot retarget Live or wake the routed live path."""
-    client = monday_app.test_client()
-    sandbox = monday_app.config["DATA_SANDBOX_ENGINE"]
+    client = practice_app.test_client()
+    sandbox = practice_app.config["DATA_SANDBOX_ENGINE"]
 
     forged = client.post(
         "/api/v1/orders/place",
@@ -176,4 +176,4 @@ def test_practice_path_cannot_submit_live_broker_orders(monday_app: Flask) -> No
     assert sandbox.get_orders() == []
     assert sandbox.get_trades() == []
 
-    _assert_live_path_dark(monday_app)
+    _assert_live_path_dark(practice_app)

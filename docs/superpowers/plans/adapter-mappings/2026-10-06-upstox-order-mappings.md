@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pytest; existing dependencies, upstox-python-sdk 2.30.0 from `brokers.lock`.
 
-**Spec:** `docs/acceptance/FT-GTT-001.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Reviewed mapping baseline: `ad059991d7164c934676808f54550659051ed9d5`.
+**Spec:** `docs/acceptance/native-order-capabilities.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Reviewed mapping baseline: `ad059991d7164c934676808f54550659051ed9d5`.
 
 Main: `e658b50ab6753d63e64df250dfefabb91cc4630d`; filename-only comparison shows unchanged mapping/tests. Runtime drift unassessed.
 
@@ -36,7 +36,7 @@ Modify only M; use literal/SimpleNamespace fixtures in T, without production Ord
 
 Already supported: V3 slicing, DAY/IOC, requested AMO, positional multi-order correlations, ENTRY/TARGET/STOPLOSS construction, trigger overrides, STOPLOSS trailing gap, complete GTT modification, D-product segment disambiguation and strict cancel/exit envelope validation. Preserve those behaviours.
 
-Inventory `docs/acceptance/FT-GTT-001-capabilities.json` records missing V3/rule protection. Further gaps: conflated `entry_status`, dropped messages, unconditional LIMIT, lossy quantities and batch filtering. Runtime remains unverified.
+Inventory `docs/acceptance/native-order-capabilities.json` records missing V3/rule protection. Further gaps: conflated `entry_status`, dropped messages, unconditional LIMIT, lossy quantities and batch filtering. Runtime remains unverified.
 
 Official references rechecked 2026-10-06: [V3 placement](https://upstox.com/developer/api-documentation/v3/place-order/), [GTT placement](https://upstox.com/developer/api-documentation/place-gtt-order/), [GTT detail](https://upstox.com/developer/api-documentation/get-gtt-order-details/), [multi-order](https://upstox.com/developer/api-documentation/place-multi-order/). SDK compatibility remains unverified. Below are newly specified mapping interfaces, not existing Order fields or SDK constructors.
 

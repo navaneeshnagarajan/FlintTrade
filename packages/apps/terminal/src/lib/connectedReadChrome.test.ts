@@ -4,30 +4,30 @@ import {
   API_SMOKE_LABEL,
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
-  isMondayReadBroker,
-  mondayAccountStatusLine,
-  mondayReadChrome,
-  mondayReadConnectable,
+  isConnectedReadBroker,
+  connectedReadAccountStatusLine,
+  connectedReadChrome,
+  connectedReadConnectable,
 } from "./connectedReadChrome";
 
-describe("mondayReadChrome", () => {
+describe("connectedReadChrome", () => {
   it("labels Dhan and Neo Connected (read) only when connected", () => {
-    expect(isMondayReadBroker("dhan")).toBe(true);
-    expect(isMondayReadBroker("kotakneo")).toBe(true);
-    expect(isMondayReadBroker("upstox")).toBe(false);
-    expect(mondayReadChrome({ broker: "dhan", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
-    expect(mondayReadChrome({ broker: "kotakneo", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
-    expect(mondayReadChrome({ broker: "dhan", status: "connected" })).toBeNull();
-    expect(mondayReadChrome({ broker: "dhan", status: "disconnected", read_smoke_ok: true })).toBeNull();
-    expect(mondayReadChrome({ broker: "upstox", status: "connected", read_smoke_ok: true })).toBeNull();
-    expect(mondayReadConnectable("kotakneo", false)).toBe(true);
-    expect(mondayReadConnectable("dhan", false)).toBe(true);
-    expect(mondayReadConnectable("groww", false)).toBe(false);
-    expect(mondayReadConnectable("upstox", true)).toBe(true);
+    expect(isConnectedReadBroker("dhan")).toBe(true);
+    expect(isConnectedReadBroker("kotakneo")).toBe(true);
+    expect(isConnectedReadBroker("upstox")).toBe(false);
+    expect(connectedReadChrome({ broker: "dhan", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
+    expect(connectedReadChrome({ broker: "kotakneo", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
+    expect(connectedReadChrome({ broker: "dhan", status: "connected" })).toBeNull();
+    expect(connectedReadChrome({ broker: "dhan", status: "disconnected", read_smoke_ok: true })).toBeNull();
+    expect(connectedReadChrome({ broker: "upstox", status: "connected", read_smoke_ok: true })).toBeNull();
+    expect(connectedReadConnectable("kotakneo", false)).toBe(true);
+    expect(connectedReadConnectable("dhan", false)).toBe(true);
+    expect(connectedReadConnectable("groww", false)).toBe(false);
+    expect(connectedReadConnectable("upstox", true)).toBe(true);
   });
 
   it("never implies live order capability and never offers Neo Practice", () => {
-    const neo = mondayAccountStatusLine({
+    const neo = connectedReadAccountStatusLine({
       account_id: "N1",
       broker: "kotakneo",
       label: "Neo",

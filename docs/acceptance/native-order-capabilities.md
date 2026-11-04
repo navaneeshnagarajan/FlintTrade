@@ -1,4 +1,4 @@
-# FT-GTT-001 — full order flow and native broker capabilities
+# full order flow and native broker capabilities
 
 ## Status and purpose
 

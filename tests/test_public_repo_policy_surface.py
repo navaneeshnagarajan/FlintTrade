@@ -131,8 +131,8 @@ def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
     assert stale_indstocks_phrase not in guide
 
 
-def test_monday_003_ai_live_read_acceptance_lock() -> None:
-    """FT-MONDAY-003 / #254: Chat live-read acceptance is locked in public docs."""
+def test_ai_live_read_acceptance_lock() -> None:
+    """Chat live-read acceptance is locked in public docs."""
     guide = _read(ROOT / "docs/USER_GUIDE.md")
     changelog = _read(ROOT / "changelog.md")
     plan = _read(ROOT / "PLAN.md")
@@ -142,7 +142,7 @@ def test_monday_003_ai_live_read_acceptance_lock() -> None:
         assert "Suggest stays labelled illustrative" in text
         assert "profitable alphas are not a release criterion" in text
 
-    # Operator-facing docs use product language. Tracking IDs stay in maintainer docs.
+    # Public docs use product language and do not carry internal task IDs.
     operator_docs = (
         ROOT / "docs" / "USER_GUIDE.md",
         ROOT / "readme.md",
@@ -152,9 +152,9 @@ def test_monday_003_ai_live_read_acceptance_lock() -> None:
         ROOT / "docs" / "setup" / "static-ip-setup.md",
     )
     for path in operator_docs:
-        assert "FT-MONDAY-" not in _read(path), path
-    assert "FT-MONDAY-003" in changelog
-    assert "FT-MONDAY-003" in plan
+        assert re.search(r"FT-[A-Z]+-[0-9]+", _read(path)) is None, path
+    assert re.search(r"FT-[A-Z]+-[0-9]+", changelog) is None
+    assert re.search(r"FT-[A-Z]+-[0-9]+", plan) is None
 
     assert "never shows green **Connected** without a real LLM" in guide
     assert "never shows green **Connected** without a real LLM" in changelog

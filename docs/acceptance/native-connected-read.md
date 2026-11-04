@@ -1,4 +1,4 @@
-# FT-MONDAY-002 — Native Dhan + Kotak Neo Connected (read) / API smoke
+# Native Dhan + Kotak Neo Connected (read) / API smoke
 
 Product tip for GitHub issue [#253](https://github.com/navaneeshnagarajan/FlintTrade/issues/253)
 on tracking PR #257. Native Dhan + Kotak Neo Connected (read) / API smoke
@@ -56,8 +56,8 @@ Settings / fallback only. Not the primary connect CTA.
 ## AI (shared acceptance bar)
 
 Chat may use live reads when an LLM is configured. Suggest stays
-illustrative. Never paint green Connected without a real LLM
-(FT-AI-004). AI-on-live-reads is the FT-MONDAY-003 / #256 product tip.
+illustrative. Never paint green Connected without a real LLM.
+AI on live reads is the #256 product tip.
 
 ## Acceptance
 
@@ -85,7 +85,7 @@ illustrative. Never paint green Connected without a real LLM
 
 - Native HTTP cutover (Task 9D / Task 7C.2) — freeze stays.
 - Funded Live order placement.
-- AI Chat on live reads (FT-MONDAY-003 / #256) — shipped on that tip.
+- AI Chat on live reads (#256) — shipped on that tip.
 - Live-account and market-hours SFeed/order-feed proof, Live catalogue
   promotion, and cross-platform v3 lifecycle proof. Broker sandbox proof is
   unavailable because Neo offers no sandbox.

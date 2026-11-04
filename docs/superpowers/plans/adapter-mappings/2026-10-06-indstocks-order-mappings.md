@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pytest, Decimal; existing dependencies.
 
-**Spec:** `FT-GTT-001-revised.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Reviewed source: `ad059991d7164c934676808f54550659051ed9d5`. Later main `e658b50ab6753d63e64df250dfefabb91cc4630d` changes runtime code; pure mappings are unchanged, integration correspondence unassessed.
+**Spec:** `native-order-capabilities.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C. Reviewed source: `ad059991d7164c934676808f54550659051ed9d5`. Later main `e658b50ab6753d63e64df250dfefabb91cc4630d` changes runtime code; pure mappings are unchanged, integration correspondence unassessed.
 
 ## Global Constraints
 
@@ -24,7 +24,7 @@ Sources, 2026-10-06: [normal orders](https://api-docs.indstocks.com/normal_order
 
 Modify `packages/integrations/gateway/src/flinttrade_gateway/brokers/indmoney_mapping.py` (M). Create `packages/integrations/gateway/tests/brokers/test_indmoney_order_contract.py` (T), importing only pure mappings/core exceptions and `SimpleNamespace`; exclude adapter-catalogue imports.
 
-Read-only foundations are `order_feature_contract.py`, `exit_evidence.py` and `docs/acceptance/FT-GTT-001-capabilities.json`. Retain blocked/unverified readiness. Keep normal IOC/BSE smart translations unverified because documentation conflicts. Lot/tick/freeze, CMP, funds/holdings, sessions and permissions need integration evidence.
+Read-only foundations are `order_feature_contract.py`, `exit_evidence.py` and `docs/acceptance/native-order-capabilities.json`. Retain blocked/unverified readiness. Keep normal IOC/BSE smart translations unverified because documentation conflicts. Lot/tick/freeze, CMP, funds/holdings, sessions and permissions need integration evidence.
 
 ## Review Focus
 

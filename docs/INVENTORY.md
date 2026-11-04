@@ -9,7 +9,7 @@ between buckets.
 `v0.0.1` is not production ready. The native adapter code for six
 adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange) is present and
 mock-tested. Dhan, Upstox, and Kotak Neo are the current connectable native set
-(Kotak Neo for Connected (read) / API smoke on FT-MONDAY-002 — Live place stays
+(Kotak Neo for Connected (read) / API smoke on Live place stays
 fail-closed; Neo has no sandbox). INDmoney is read-verified with a locally
 verified fail-closed planner, but remains disabled until restart-time
 regular/smart-parent cancellation can be resolved authoritatively and a

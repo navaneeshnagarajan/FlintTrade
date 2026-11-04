@@ -1,5 +1,5 @@
 /**
- * Explore Schedules Pause gate (FT-AUTO-004).
+ * Explore Schedules Pause gate.
  *
  * Banner owns Sample disclosure. Seeded / leaked Explore jobs must not look
  * production-Active, and Pause stays unavailable.

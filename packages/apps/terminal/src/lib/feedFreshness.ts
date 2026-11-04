@@ -1,5 +1,5 @@
 /**
- * FT-CORE-002 — feed-freshness honesty.
+ * feed-freshness honesty.
  *
  * Execution mode (Explore / Practice / Live) is independent of quote
  * provenance. Explore is always Example. Practice and Live may show Live,

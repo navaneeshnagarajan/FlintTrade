@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pytest, existing dependencies.
 
-**Spec:** `FT-GTT-001-revised.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C; repository `docs/acceptance/FT-GTT-001-capabilities.json`.
+**Spec:** `native-order-capabilities.md`; `docs/superpowers/plans/2026-10-06-full-order-flow.md`, Stage C; repository `docs/acceptance/native-order-capabilities.json`.
 
 ## Global Constraints
 

@@ -1,6 +1,6 @@
 /**
  * Source chip — Live · Delayed · Sample, or muted Stale/Unknown + age.
- * Feed provenance, not execution mode (FT-CORE-002).
+ * Feed provenance, not execution mode.
  */
 
 import { useFeedFreshness } from "@/hooks/useFeedFreshness";

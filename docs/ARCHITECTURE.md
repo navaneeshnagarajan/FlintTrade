@@ -175,7 +175,7 @@ duplicated:
 - **Zustand stores** — derived and UI state only (connection status,
   active layout, settings mirror, aggregated P&L, current mode).
 
-### Market session clock (FT-CORE-001)
+### Market session clock
 
 TopBar market status and the Market Clock widget are CAS-aware (as of
 Aug 2026). Phases are Continuous, CAS, Matching, Post-close, and Closed

@@ -1,5 +1,5 @@
 /**
- * homeAuthEntry.test.tsx — FT-HOME-003
+ * homeAuthEntry.test.tsx —
  *
  * Direct `/home` while signed in must render Home, not the password
  * Welcome Back gate. Unauthenticated `/home` is the gate only.
@@ -54,7 +54,7 @@ function resetAuth() {
   });
 }
 
-describe("direct /home auth entry (FT-HOME-003)", () => {
+describe("direct /home auth entry", () => {
   beforeEach(() => {
     resetAuth();
     sessionStorage.clear();

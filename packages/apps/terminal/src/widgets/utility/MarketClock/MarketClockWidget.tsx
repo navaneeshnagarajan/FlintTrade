@@ -177,7 +177,7 @@ const PHASE_TO_STATUS: Record<NseCashSessionPhase, MarketStatus> = {
 };
 
 /**
- * NSE cash row — same CAS clock as the TopBar (FT-CORE-001).
+ * NSE cash row — same CAS clock as the TopBar.
  * Continuous is the only green "open". CAS / Matching / Post-close are live
  * phases, not Closed.
  */

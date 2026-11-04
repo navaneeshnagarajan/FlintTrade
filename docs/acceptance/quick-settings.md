@@ -1,4 +1,4 @@
-# FT-UX-QUICK-SETTINGS-001 — Tools Quick Settings for desk controls
+# Tools Quick Settings for desk controls
 
 ## Locked bars
 

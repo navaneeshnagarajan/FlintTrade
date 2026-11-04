@@ -429,7 +429,7 @@ impl SessionTracker {
     }
 }
 
-/// NSE cash session phase (FT-CORE-001, as of Aug 2026).
+/// NSE cash session phase (as of Aug 2026).
 ///
 /// Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
 /// Post-close 15:50–16:00. Never treat 15:20 as Closed or as green Continuous.

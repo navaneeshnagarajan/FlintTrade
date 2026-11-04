@@ -167,7 +167,7 @@ def is_special_session(
 
 
 def nse_cash_phase(minutes_from_midnight: int) -> str:
-    """Return the NSE cash session phase (FT-CORE-001, as of Aug 2026).
+    """Return the NSE cash session phase (as of Aug 2026).
 
     Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
     Post-close 15:50–16:00. Cash is never Continuous after 15:15; CAS is

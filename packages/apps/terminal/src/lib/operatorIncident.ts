@@ -195,11 +195,11 @@ export function brokerSessionDarkened(incident: OperatorIncident | null): boolea
 export function honestBrokerStatus(input: {
   connected: boolean;
   connectedRead: boolean;
-  nativeMonday: boolean;
+  nativeConnectedRead: boolean;
   incident: OperatorIncident | null;
 }): string | null {
   const incident = input.incident;
-  if (incident?.nativeHttpFreeze && input.nativeMonday) {
+  if (incident?.nativeHttpFreeze && input.nativeConnectedRead) {
     return "Unavailable — backend unreachable";
   }
   if (

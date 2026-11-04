@@ -1,4 +1,4 @@
-# FT-MONDAY-003 — AI on live broker reads
+# AI on live broker reads
 
 Product tip for GitHub issue [#254](https://github.com/navaneeshnagarajan/FlintTrade/issues/254)
 on tracking PR #256. AI Chat may use Practice fills and
@@ -16,8 +16,7 @@ Wire AI to Practice + native live-read feeds for analysis (not
   Practice fills and native live-read feeds for analysis
 - **Suggest stays labelled illustrative** — local filter UI; not the
   Chat live-read path; never sold as live alpha
-- **Never green Connected without a real LLM** — same honesty bar as
-  FT-AI-002 / FT-AI-004
+- **Never green Connected without a real LLM** — same honesty bar as an unconfigured model
 - **Not a “profitable alphas” release criterion** — analysis context only;
   measure later
 - AI may consume Dhan/Neo Connected (read) / Practice
@@ -33,7 +32,7 @@ Wire AI to Practice + native live-read feeds for analysis (not
 3. Suggest remains illustrative labelling.
 4. No Live place from AI path.
 5. Tests covering honesty + read-context wiring + fail-closed place.
-6. Changelog Unreleased FT-MONDAY-003.
+6. Changelog Unreleased.
 7. British English.
 
 ## Out of scope

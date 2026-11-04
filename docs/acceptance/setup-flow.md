@@ -1,4 +1,4 @@
-# FT-SETUP-FLOW-001 — Simplify first-run Setup to the Practice desk
+# Simplify first-run Setup to the Practice desk
 
 The mandatory first-run path creates the operator, affirms Practice, and
 lands on the Practice desk. The vault step is included when the vault is
@@ -73,7 +73,7 @@ primary button and opens `/welcome`.
 
 ## Out of scope
 
-- Operator-copy scrub for weekday or pack names (**FT-SETUP-COPY-001** /
+- Operator-copy scrub for weekday or pack names (/
   #281).
 - Which brokers can connect, the native broker HTTP freeze, and funded
   Live place. Those stay on their existing acceptance tips.

@@ -1,6 +1,6 @@
 # Broker-specific order mapping plans
 
-These six plans describe the mapping-only stage of FT-GTT-001. Draft PR #308 now publishes foundation code and six standalone pure companions. They are not operational broker features or evidence of live readiness; repairs to the legacy interfaces named in several plans remain separate unfinished work.
+These six plans describe the mapping-only stage of. Draft PR #308 now publishes foundation code and six standalone pure companions. They are not operational broker features or evidence of live readiness; repairs to the legacy interfaces named in several plans remain separate unfinished work.
 
 | Broker | Plan focus |
 |---|---|
