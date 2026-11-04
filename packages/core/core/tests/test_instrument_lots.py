@@ -14,6 +14,7 @@ from flinttrade_core.indian_charges import round_trip
 from flinttrade_core.instrument_lots import (
     contract_quantity_message,
     fixture_path,
+    future_index_rows,
     load_fixture_rows,
     lot_size_for_contract,
     index_lot_line,
@@ -26,6 +27,19 @@ _ROOT = Path(__file__).resolve().parents[4]
 _REVISION_PATH = Path(__file__).parent / "data" / "instrument_lot_revision_window.json"
 _AS_OF = date(2026, 9, 1)
 _SYNTHETIC_IDS = ("13", "14", "25", "51", "9013", "9014", "9025", "9051")
+
+
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    import importlib.util
+
+    path = _ROOT / "tests" / "lot_clock.py"
+    spec = importlib.util.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _revision_window() -> tuple[list[dict[str, str]], dict[str, str]]:
@@ -214,13 +228,71 @@ def test_index_lot_line_uses_the_scalper_rows_and_marks_gaps() -> None:
 
 @pytest.mark.unit
 def test_risk_skill_lot_line_matches_the_scalper_labels() -> None:
-    """The skill states the same near-month labels the Scalper reads from the master."""
-    line = index_lot_line()
-    assert line == "NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)"
+    """The skill states the same multipliers the Scalper reads from the master.
+
+    Expiries are generated from the test clock, so a shipped month cannot
+    blank the line. ``FLINTTRADE_CLOCK_OFFSET_MONTHS`` moves that clock.
+    """
+    day = _lot_clock().clock_day()
+    line = index_lot_line(future_index_rows(day), as_of=day)
+    head = "NIFTY 65 · BANKNIFTY 30 · SENSEX 20"
+    assert re.fullmatch(
+        r"NIFTY 65 · BANKNIFTY 30 · SENSEX 20 \((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) expiry\)",
+        line,
+    )
     assert "—" not in line
-    assert re.search(r"\bNIFTY\b", line) and re.search(r"\bBANKNIFTY\b", line) and re.search(r"\bSENSEX\b", line)
+    assert "last listed" not in line
+    assert line.startswith(head)
     skill = (_ROOT / "packages/services/ai/skills/risk_management.md").read_text(encoding="utf-8")
-    assert line in skill
+    assert head in skill
+
+
+@pytest.mark.unit
+def test_a_missing_month_uses_the_last_agreed_lot_and_names_it() -> None:
+    """An expired-only underlying keeps its lot when every retained row agrees."""
+    rows = [
+        {
+            "SEM_SMST_SECURITY_ID": "OLD-NIFTY",
+            "SEM_CUSTOM_SYMBOL": "NIFTY",
+            "SEM_INSTRUMENT_NAME": "FUTIDX",
+            "SEM_TRADING_SYMBOL": "NIFTY-Oct2026-FUT",
+            "SEM_EXPIRY_DATE": "2026-10-27",
+            "SEM_LOT_UNITS": "65",
+        }
+    ]
+    as_of = date(2026, 11, 4)
+    assert lot_size_for_contract("OLD-NIFTY", rows, as_of=as_of) is None
+    assert lot_size_from_master("NIFTY", rows, as_of=as_of) is None
+    assert scalper_lot_label("NIFTY", rows, as_of=as_of) is None
+    assert index_lot_line(rows, as_of=as_of) == (
+        "NIFTY 65 (last listed Oct) · BANKNIFTY — · SENSEX —"
+    )
+
+
+@pytest.mark.unit
+def test_a_missing_month_stays_unverified_when_old_lots_disagree() -> None:
+    """A revision the current month did not record is not guessed."""
+    rows = [
+        {
+            "SEM_SMST_SECURITY_ID": "NIFTY-SEP",
+            "SEM_CUSTOM_SYMBOL": "NIFTY",
+            "SEM_INSTRUMENT_NAME": "FUTIDX",
+            "SEM_TRADING_SYMBOL": "NIFTY-Sep2026-FUT",
+            "SEM_EXPIRY_DATE": "2026-09-29",
+            "SEM_LOT_UNITS": "75",
+        },
+        {
+            "SEM_SMST_SECURITY_ID": "NIFTY-OCT",
+            "SEM_CUSTOM_SYMBOL": "NIFTY",
+            "SEM_INSTRUMENT_NAME": "FUTIDX",
+            "SEM_TRADING_SYMBOL": "NIFTY-Oct2026-FUT",
+            "SEM_EXPIRY_DATE": "2026-10-27",
+            "SEM_LOT_UNITS": "65",
+        },
+    ]
+    as_of = date(2026, 11, 4)
+    assert lot_size_from_master("NIFTY", rows, as_of=as_of) is None
+    assert index_lot_line(rows, as_of=as_of).startswith("NIFTY —")
 
 
 def _security_ids(payload: dict[str, object]) -> set[str]:
@@ -305,9 +377,9 @@ def test_ui_label_and_order_check_agree_after_a_revision(
     from flinttrade_core.instrument_lot_routes import instrument_lots_bp
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-    as_of = date(2026, 9, 29)
+    as_of = date(2026, 11, 4)
     assert lot_size_from_master("NIFTY", load_fixture_rows(), as_of=as_of) == 65
-    assert scalper_lot_label("NIFTY", load_fixture_rows(), as_of=as_of) == "65 · Sep expiry"
+    assert scalper_lot_label("NIFTY", load_fixture_rows(), as_of=as_of) == "65 · Nov expiry"
     cache = tmp_path / "instrument_lot_cache.json"
     cache.write_text(
         json.dumps(

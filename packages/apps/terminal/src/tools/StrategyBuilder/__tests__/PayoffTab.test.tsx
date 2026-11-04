@@ -3,14 +3,22 @@
  */
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
+import { setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows } from "@/test-utils/futureIndexLotRows";
 import { PayoffTab } from "../PayoffTab";
 import { UNDERLYINGS, type Leg } from "../types";
 import { formatINR } from "../utils";
 
 const nifty = UNDERLYINGS[0];
-const lot = nifty.lotSize ?? 0;
+let lot = 0;
+
+beforeEach(() => {
+  setInstrumentLotRows(futureIndexLotRows());
+  lot = nifty.lotSize ?? 0;
+  expect(lot).toBeGreaterThan(0);
+});
 
 function callLeg(premium: number | null, extra: Partial<Leg> = {}): Leg {
   return {

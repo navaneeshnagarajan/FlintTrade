@@ -18,6 +18,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { statutoryLeg } from "@/lib/indianCharges";
 import { instrumentLotRows, lotSizeFromMaster, setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows } from "@/test-utils/futureIndexLotRows";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
@@ -166,6 +167,7 @@ function selectMethod(name: string): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setInstrumentLotRows(futureIndexLotRows());
   accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
   apiMocks.getMargin.mockReset().mockResolvedValue(LIVE_MARGIN);
   apiMocks.getFunds.mockReset().mockResolvedValue(ACCOUNT_A_FUNDS);

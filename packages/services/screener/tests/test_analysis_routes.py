@@ -19,6 +19,26 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 
+def _lot_clock():
+    """Load the repo clock helper. A per-package run binds ``tests`` locally."""
+    import importlib.util
+
+    path = Path(_REPO_ROOT) / "tests" / "lot_clock.py"
+    spec = importlib.util.spec_from_file_location("flinttrade_lot_clock", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _clocked_index_master(monkeypatch: pytest.MonkeyPatch):
+    """Index lots follow the test clock, not the shipped expiries."""
+    with _lot_clock().open_clocked_master(monkeypatch):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

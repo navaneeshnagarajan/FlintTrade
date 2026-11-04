@@ -900,21 +900,26 @@ uses the workspace disk cache `instrument_lot_cache.json` when that file
 has rows, and otherwise the shipped excerpt
 `packages/core/core/src/flinttrade_core/data/instrument_lot_fixture.json`.
 `instrument_lot_master.build_excerpt` builds that excerpt from the public
-Dhan scrip master and the Kotak Neo F&O master (near month and next month
-of NIFTY, BANKNIFTY, and SENSEX futures). The document carries `source`
-and `fetched_at`. `refresh_master_cache_if_due` downloads again when the
-cache is missing or from an earlier IST day; `start_instrument_master_refresh`
-runs that at startup and again at each IST midnight. A failed download
-leaves a previous non-empty cache in place. Contracts whose expiry is
-before today (IST) are dropped. `contracts_from_rows` raises only when
-the same contract (underlying, expiry month, and kind) has two sizes
-across Dhan and Neo. A later expiry with a different size is kept.
+Dhan scrip master and the Kotak Neo F&O master (near, next and far month
+of NIFTY, BANKNIFTY, and SENSEX futures, the three-month cycle NSE lists).
+The document carries `source` and `fetched_at`. `refresh_master_cache_if_due`
+downloads again when the cache is missing or from an earlier IST day;
+`start_instrument_master_refresh` runs that at startup and again at each
+IST midnight. A failed download leaves a previous non-empty cache in place.
+Contracts whose expiry is before today (IST) are dropped from a per-contract
+lookup. `contracts_from_rows` raises only when the same contract (underlying,
+expiry month, and kind) has two sizes across Dhan and Neo. A later expiry
+with a different size is kept.
 
-`scalper_lot_label` returns `size · expiry` (for example `65 · Sep expiry`
+`scalper_lot_label` returns `size · expiry` (for example `65 · Nov expiry`
 per the broker instrument master). When the next month’s size differs,
 both months are named. `index_lot_line` is the risk line, for example
-`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Oct expiry)` on the shipped
-excerpt, with `—` for an underlying the master does not list.
+`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Nov expiry)` on the shipped
+excerpt, with `—` for an underlying the master does not list. When every
+retained contract for an underlying has expired and they share one lot,
+the line names that size as last listed instead of dropping the name.
+Disagreeing old sizes stay `—`, and an expired security id still cannot
+be ordered.
 `missing_lot_refusal` is the order text:
 `Not placed. The lot size for <contract> isn't in the instrument master, so this order can't be sized.`
 Order Pad shows that string when a derivative has no lot in the lookup.
