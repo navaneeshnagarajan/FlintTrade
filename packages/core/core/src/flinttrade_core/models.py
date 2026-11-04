@@ -6,6 +6,7 @@ intention to its broker protocol; these models do not define a transport.
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
@@ -83,6 +84,7 @@ class Order(BaseModel):
     admission_note: str = ""
     variety: str = "regular"
     validity: str | None = None
+    amo_time: str | None = Field(default=None, strict=True)
     # Generic on/off intent, not a broker's percentage or automatic strategy.
     market_protection: bool | None = Field(default=None, strict=True)
     # Native advanced-order controls participate in the same gate signature.
@@ -267,6 +269,13 @@ class OrderStatus(BaseModel):
     trigger_price: str = ""
     disclosed_quantity: str = ""
     timestamp: str = ""
+    broker_account_id: str | None = None
+    broker_exchange_segment: str | None = None
+    correlation_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    exchange_time: str | None = None
+    broker_fields: dict[str, Any] | None = None
 
 
 class _InventoryEvidence(BaseModel):
@@ -321,6 +330,82 @@ class Trade(BaseModel):
     multiplier: float | None = None
     fx_rate: float | None = None
     cross_currency: bool | None = None
+    # Native observations remain independent of the normalised display fields.
+    fill_id: str | None = None
+    fill_leg: str | None = None
+    exchange_order_id: str | None = None
+    broker_account_id: str | None = None
+    broker_exchange_segment: str | None = None
+    broker_product_type: str | None = None
+    trade_date: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    exchange_time: str | None = None
+    fill_time: str | None = None
+    broker_fields: dict[str, Any] | None = None
+
+    @field_validator(
+        "fill_id",
+        "fill_leg",
+        "exchange_order_id",
+        "broker_account_id",
+        "broker_exchange_segment",
+        "broker_product_type",
+        "trade_date",
+        "created_at",
+        "updated_at",
+        "exchange_time",
+        "fill_time",
+        mode="before",
+    )
+    @classmethod
+    def native_text_is_exact(cls, value: object) -> object:
+        """Reject coercion of independent native text observations.
+
+        Args:
+            value: Supplied native field or explicit absence.
+
+        Returns:
+            The unchanged exact string or None.
+
+        Raises:
+            ValueError: If supplied evidence is not exact text.
+        """
+        if value is not None and type(value) is not str:
+            raise ValueError("native trade evidence requires exact text")
+        return value
+
+    @field_validator("broker_fields", mode="before")
+    @classmethod
+    def native_json_is_exact(cls, value: object) -> object:
+        """Detach exact native JSON without invoking arbitrary conversion hooks.
+
+        Args:
+            value: Supplied native observation object or explicit absence.
+
+        Returns:
+            A detached exact JSON object or None, preserving raw presence.
+
+        Raises:
+            ValueError: If evidence is noncanonical, cyclic, too deep or nonfinite.
+        """
+        def validate(item: object, ancestors: frozenset[int]) -> object:
+            if item is None or type(item) is str or type(item) is int or type(item) is bool:
+                return item
+            if type(item) is float and math.isfinite(item):
+                return item
+            if id(item) in ancestors or len(ancestors) >= 64:
+                raise ValueError("native trade JSON is cyclic or too deep")
+            ancestors = ancestors | {id(item)}
+            if type(item) is list:
+                return [validate(child, ancestors) for child in item]
+            if type(item) is dict and all(type(key) is str for key in item):
+                return {key: validate(child, ancestors) for key, child in item.items()}
+            raise ValueError("native trade evidence requires exact JSON")
+
+        if value is not None and type(value) is not dict:
+            raise ValueError("native trade evidence requires an exact JSON object")
+        return validate(value, frozenset())
 
 
 class Quote(BaseModel):

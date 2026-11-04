@@ -801,6 +801,8 @@ def test_margin_response_maps_ord_margin_as_common_required_margin():
         "available_balance": "38.19",
         "insufficient_balance": "0.00",
         "rms_validated": "OK",
+        "broker_fields": {"stat": "Ok", "stCode": 200, "avlCash": "38.190000", "ordMrgn": "15.500000",
+                          "reqdMrgn": "0.000000", "insufFund": "0.000000", "rmsVldtd": "OK"},
     }
 
 
@@ -1717,6 +1719,14 @@ def test_option_response_merges_legs_by_numeric_strike_and_maps_only_observed_fi
         requested_expiry="2026-06-23",
     )
 
+    metadata = mapped.pop("broker_fields")
+    original = _official_option_chain_response()["data"]
+    assert metadata == {
+        "common_data": original["common_data"],
+        "call": [{"instrument": row["instrument"]} for row in original["call"]],
+        "put": [{"instrument": row["instrument"]} for row in original["put"]],
+        "expiry_selection": "explicit",
+    }
     assert mapped == {
         "underlying": "NIFTY",
         "exchange": "NSE_INDEX",

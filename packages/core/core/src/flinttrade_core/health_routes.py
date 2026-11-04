@@ -389,6 +389,76 @@ def start_laya() -> tuple[Any, int]:
     return jsonify({"status": "ok"}), 200
 
 
+@health_bp.route("/api/v1/laya/qualification/configuration", methods=["PUT"])
+@health_bp.route("/api/v1/laya/qualification", methods=["POST", "DELETE"])
+def laya_qualification_control() -> tuple[Any, int]:
+    """Configure, explicitly measure or retire the existing qualification owner.
+
+    PUT requires schema_version=1, labelled cases and max_age_seconds. There is
+    no default suite/lifetime or caller-supplied verdict. POST accepts only an
+    empty object and measures the already-running managed runtime. DELETE
+    retires evidence; none of these actions starts a model or a broker session.
+    Only a current operator with admin.services.write may use this control.
+    """
+    from flask import current_app, request
+    from werkzeug.exceptions import Unauthorized
+
+    from .auth_routes import _OperatorSessionVerificationError, verify_operator_session_token
+    from .auth_scopes import _session_token
+    from .laya_qualification import LayaQualificationOwner
+
+    token = _session_token() or ""
+    try:
+        principal = verify_operator_session_token(token)
+    except (Unauthorized, _OperatorSessionVerificationError):
+        return jsonify({"error": "qualification_session_required"}), 401
+    if "admin.services.write" not in principal.scopes:
+        return jsonify({"error": "qualification_scope_required"}), 403
+    owner = current_app.config.get("LAYA_QUALIFICATION_OWNER")
+    if type(owner) is not LayaQualificationOwner or owner.app is not current_app._get_current_object():
+        return jsonify({"error": "qualification_owner_unavailable"}), 503
+
+    def authority() -> None:
+        """Reject changed principals and owners before and after each model read."""
+        current = verify_operator_session_token(token)
+        if (current.actor_ref != principal.actor_ref or current.session_binding != principal.session_binding
+                or "admin.services.write" not in current.scopes
+                or current_app.config.get("LAYA_QUALIFICATION_OWNER") is not owner
+                or current_app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True):
+            raise ValueError("qualification_authority_changed")
+
+    try:
+        authority()
+        if request.method == "DELETE":
+            owner.retire()
+            result = {"qualified": False}
+        else:
+            if not request.is_json or request.content_length is None or request.content_length > 65536:
+                return jsonify({"error": "qualification_request_invalid"}), 400
+            body = request.get_json(silent=True)
+            if request.method == "PUT":
+                if (type(body) is not dict or set(body) != {"schema_version", "cases", "max_age_seconds"}
+                        or body["schema_version"] != "1" or type(body["cases"]) is not list
+                        or any(type(case) is not list for case in body["cases"])):
+                    return jsonify({"error": "qualification_configuration_invalid"}), 400
+                try:
+                    owner.configure(cases=tuple(tuple(case) for case in body["cases"]),
+                                    max_age_seconds=body["max_age_seconds"])
+                except ValueError:
+                    return jsonify({"error": "qualification_configuration_invalid"}), 400
+                result = {"configured": True, "qualified": False}
+            else:
+                if type(body) is not dict or body:
+                    return jsonify({"error": "qualification_request_invalid"}), 400
+                result = owner.qualify(verify_authority=authority)
+    except (ValueError, RuntimeError, Unauthorized, _OperatorSessionVerificationError):
+        owner.retire()
+        return jsonify({"error": "qualification_unavailable", "qualified": False}), 409
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response, 200
+
+
 @health_bp.route("/api/v1/health", methods=["GET"])
 def health_aggregated() -> tuple[Any, int]:
     """Return aggregated subsystem health status.

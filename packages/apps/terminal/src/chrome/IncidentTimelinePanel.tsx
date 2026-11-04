@@ -1,33 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Timeline, deliveryLabels, incidentAction, submitBrowserIncident } from '@/services/systemIncidents';
+import { Timeline, browserIncidentQueue, deliveryLabels, incidentAction } from '@/services/systemIncidents';
 import { useAuthStore } from '@/stores/authStore';
 import { useModeStore } from '@/stores/modeStore';
 import { IncidentChannelSettings } from './IncidentChannelSettings';
 
 export function IncidentTimelinePanel({ value, current, refresh }: { value: unknown; current:boolean; refresh:()=>unknown }) {
   const parsed = useMemo(() => Timeline.safeParse(value), [value]);
-  const attempted = useRef(new Set<string>());
+  const client = useQueryClient();
   const authenticated = useAuthStore(s => s.status === 'logged-in');
   const mode = useModeStore(s => s.mode);
   const [error, setError] = useState<string|null>(null);
   const refreshRef = useRef(refresh); refreshRef.current = refresh;
   useEffect(() => {
-    if (!parsed.success || !current || !authenticated || mode === 'explore') return;
-    const controller = new AbortController();
-    const pending = parsed.data.incidents.flatMap(i=>i.deliveries).filter(r=>r.channel==='desktop' && r.state==='browser_pending' && !attempted.current.has(`${r.id}:${r.attempts}`));
-    if (pending.length === 0) return;
-    void (async () => {
-      for (const receipt of pending) {
-        if (controller.signal.aborted) break;
-        attempted.current.add(`${receipt.id}:${receipt.attempts}`);
-        try { await submitBrowserIncident(receipt, controller.signal); }
-        catch { if (!controller.signal.aborted) setError('Desktop delivery or receipt unavailable. No automatic resend.'); }
-      }
-      if (!controller.signal.aborted) void refreshRef.current();
-    })();
-    return () => controller.abort();
-  }, [parsed, current, authenticated, mode]);
+    if (!parsed.success) return;
+    const owner = browserIncidentQueue(client);
+    const pending = owner.discover(parsed.data, current && authenticated && mode !== 'explore');
+    let visible = true;
+    void pending?.then(() => {
+      if (!visible) return;
+      const result = owner.takeRefresh();
+      if (result.unavailable) setError('Desktop delivery or receipt unavailable. No automatic resend.');
+      if (result.needed) void refreshRef.current();
+    });
+    // Replay, a fresh object and Activity hiding detach presentation only.
+    // The finite owner observes real scope/freshness/application retirement.
+    return () => { visible = false; };
+  }, [client, parsed, current, authenticated, mode]);
   if (!parsed.success) return <section aria-label="Incident timeline"><h3>Incident timeline</h3><p>Durable timeline unavailable. No delivery success can be inferred.</p></section>;
   async function act(id:string, action:'retry'|'cancel') {
     setError(null);

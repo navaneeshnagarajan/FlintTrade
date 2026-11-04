@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "./fixture-registry";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 import { registerExampleDeskReads, registerPracticeOrderPadReads } from "./visual/desk-mocks";
 
@@ -295,6 +296,8 @@ for (const width of [1440, 2560] as const) {
         })),
       };
       await testInfo.attach(`axe-${width}-${theme}`, { body: JSON.stringify(axeReport, null, 2), contentType: "application/json" });
+      await testInfo.attach(`axe-${width}-${theme}-raw`, { body: JSON.stringify(axe, null, 2), contentType: "application/json" });
+      expect(axe.violations.filter(violation => violation.id === "color-contrast"), "desk text must meet WCAG AA contrast").toEqual([]);
     });
   }
 }

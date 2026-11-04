@@ -84,6 +84,7 @@ class _Operation:
     retirements: dict[object, tuple[object, CleanupTicket]] = field(default_factory=dict)
     retirement_worker: Future | None = None
     durable_claim_release: Callable[[], None] | None = None
+    durable_claim_ready: Callable[[], bool] | None = None
 
 
 @dataclass(repr=False)
@@ -201,9 +202,16 @@ class BrokerAccountLifecycleOwner:
         return operation
 
     def begin(
-        self, operation_id: UUID, selector: BrokerSelector, *, durable_claim_release: Callable[[], None] | None = None
+        self, operation_id: UUID, selector: BrokerSelector, *,
+        durable_claim_release: Callable[[], None] | None = None,
+        durable_claim_ready: Callable[[], bool] | None = None,
     ) -> AccountMutationLease:
-        """Borrow the one active lane; same exact identity returns its original lease."""
+        """Borrow the one active lane; exact identity retains its original lease.
+
+        A coordinator may retain its terminal-receipt reader for shutdown
+        continuation. The original store release callback still performs the
+        actual durable stage/claim CAS; neither callback grants publication.
+        """
         self._require_process()
         if type(operation_id) is not UUID or operation_id.version != 4 or operation_id.variant != RFC_4122:
             raise ValueError("account_operation_id_invalid")
@@ -212,6 +220,11 @@ class BrokerAccountLifecycleOwner:
             not callable(durable_claim_release) or inspect.iscoroutinefunction(durable_claim_release)
         ):
             raise TypeError("account_durable_claim_callback_invalid")
+        if durable_claim_ready is not None and (
+            durable_claim_release is None or not callable(durable_claim_ready)
+            or inspect.iscoroutinefunction(durable_claim_ready)
+        ):
+            raise TypeError("account_durable_claim_readiness_invalid")
         with self._rebuild_lock:
             require_backend_lease_proof(self._proof)
             with self._condition:
@@ -228,7 +241,8 @@ class BrokerAccountLifecycleOwner:
                     raise RuntimeError("account_mutation_already_settled")
                 lease = AccountMutationLease()
                 self._operations[lease] = _Operation(
-                    operation_id, selector, durable_claim_release=durable_claim_release
+                    operation_id, selector, durable_claim_release=durable_claim_release,
+                    durable_claim_ready=durable_claim_ready
                 )
                 self._active = lease
                 return lease
@@ -887,6 +901,7 @@ class BrokerAccountLifecycleOwner:
                     if result is not None:
                         raise RuntimeError("account_durable_disposition_incomplete")
                     operation.durable_claim_release = None
+                    operation.durable_claim_ready = None
                 operation.settled = True
                 operation.workers.clear()
                 if self._active is lease:
@@ -932,10 +947,22 @@ class BrokerAccountLifecycleOwner:
                 payload = candidate.payload
                 binding = candidate.registry_binding
                 current = publication.live_candidate_version(payload)
-                if current == binding:
+                # Expiry shortening advances the registry generation but keeps
+                # this exact payload and all durable account witnesses. Recover
+                # that owner's current version, never a successor's payload or
+                # changed credential/workspace authority. Removal still uses CAS.
+                if (
+                    current is not None and binding is not None
+                    and current.selector == binding.selector
+                    and current.credential_version == binding.credential_version
+                    and current.workspace_version == binding.workspace_version
+                    and current.broker_workspace_version == binding.broker_workspace_version
+                    and current.registry_version.registry_incarnation == binding.registry_version.registry_incarnation
+                    and current.registry_version.generation >= binding.registry_version.generation
+                ):
                     try:
                         result = publication.remove_session_for_exact(
-                            binding.selector, expected_registry=binding.registry_version
+                            binding.selector, expected_registry=current.registry_version
                         )
                     except RegistryVersionConflict:
                         receipt = publication.retirement_for_candidate(payload)
@@ -950,6 +977,28 @@ class BrokerAccountLifecycleOwner:
                 self._transfer_retirement(lease, operation, publication, receipt, None)
         finally:
             self._rebuild_lock.release()
+
+    def _settle_completed_claim(self, lease: AccountMutationLease, operation: _Operation) -> None:
+        """Resume only a coordinator-proved terminal claim after actual local drain.
+
+        The existing store callback proves COMMITTED/REJECTED and performs its
+        original exact-claim CAS. Unknown/blocked claims remain held; cleanup
+        completion or a caller label never substitutes for durable disposition.
+        """
+        with self._condition:
+            ready = operation.durable_claim_ready
+            drained = (ready is not None and operation.durable_claim_release is not None
+                       and self._generations_drained(operation)
+                       and all(worker.done() for worker in operation.workers)
+                       and all(item.complete and (item.worker is None or item.worker.done())
+                               for item in operation.candidates.values()))
+        if not drained or ready is None:
+            return
+        result = ready()
+        if type(result) is not bool:
+            raise TypeError("account_durable_claim_readiness_invalid")
+        if result:
+            self.settle(lease, durable_disposition=True)
 
     def close_and_drain(self, timeout: float) -> bool:
         """Close admission first, then drain without holding completion/publication locks."""
@@ -994,8 +1043,9 @@ class BrokerAccountLifecycleOwner:
             if retirement.done() and retirement.exception() is None and retirement.result() is True:
                 self._retire_live_candidates(deadline)
             operations = tuple(self._operations.items())
-            for _, operation in operations:
+            for lease, operation in operations:
                 self._start_cleanup(operation, attempted)
+                self._settle_completed_claim(lease, operation)
             with self._condition:
                 ready = (
                     self._rebuild_intent is None

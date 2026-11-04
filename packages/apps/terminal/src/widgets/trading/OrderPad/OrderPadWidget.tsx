@@ -357,7 +357,7 @@ function NumField({ label, value, onChange, disabled = false, placeholder = "", 
 
 function ExchangeBadge({ exchange }: { exchange: string }) {
   return (
-    <span className="px-1.5 py-0.5 text-xxs font-semibold rounded bg-accent/10 border border-accent/20 text-accent uppercase tracking-wider">
+    <span className="px-1.5 py-0.5 text-xxs font-semibold rounded bg-accent/10 border border-accent/20 text-accent [[data-mode=light]_&]:text-text-primary uppercase tracking-wider">
       {exchange}
     </span>
   );
@@ -393,7 +393,7 @@ function Toast({ msg, onRetry }: ToastProps) {
       }`}
     >
       {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
-      <span className="flex-1 min-w-0 leading-tight [overflow-wrap:anywhere]">{msg.text}</span>
+      <span className="flex-1 min-w-0 leading-tight text-text-primary [overflow-wrap:anywhere]">{msg.text}</span>
       {showRetry && (
         <Button
           type="button"

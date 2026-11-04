@@ -58,7 +58,6 @@ export function SymbolRow({
     <div role="listitem" className="relative group/wl">
     <button
       type="button"
-      aria-label={item.symbol}
       className="w-full text-left flex items-center gap-2 px-2 py-1.5 hover:bg-surface-hover cursor-pointer border-b border-border-subtle transition-colors group"
       onClick={() => onSelect(item)}
       onContextMenu={(e) => {
@@ -123,7 +122,7 @@ export function SymbolRow({
         <div className="flex min-w-16 shrink-0 flex-col items-end">
           {visible.has("price") && (
             <span
-              aria-label={`${item.symbol} LTP`}
+              data-testid={`${item.symbol} LTP`}
               className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight"
             >
               {pending ? "…" : fmtPrice(ltp)}
@@ -131,7 +130,7 @@ export function SymbolRow({
           )}
           {visible.has("changePct") && (
             <span
-              aria-label={`${item.symbol} % change`}
+              data-testid={`${item.symbol} % change`}
               className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}
             >
               {pending ? "…" : chgPct != null ? fmtPct(chgPct) : "—"}

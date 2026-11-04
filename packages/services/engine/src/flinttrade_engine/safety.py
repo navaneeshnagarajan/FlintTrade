@@ -2659,6 +2659,16 @@ class KillSwitch:
             return self._reason
 
     @property
+    def activation_sequence(self) -> int:
+        """Monotonic activation identity; reset cannot resurrect prior qualification.
+
+        Returns:
+            The current monotonic activation counter under the kill-switch condition lock.
+        """
+        with self._condition:
+            return self._activation_sequence
+
+    @property
     def last_emergency_result(self) -> EmergencyDispatchResult | None:
         """Most recent bounded L5 broker-action result, if activation ran."""
         with self._condition:

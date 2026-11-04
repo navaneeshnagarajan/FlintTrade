@@ -560,7 +560,10 @@ class StagedCredentialStore:
 class CredentialStore:
     """One owner-only vault incarnation; each operation owns and closes its connection."""
 
-    def __init__(self, db_path: Path, master_password: str) -> None:
+    def __init__(self, db_path: Path, master_password: str, *, verify_existing_credentials: bool = False) -> None:
+        if type(verify_existing_credentials) is not bool:
+            raise CredentialVaultInvalidError
+        self._verify_existing_credentials = verify_existing_credentials
         self._db_path = Path(db_path).absolute()
         self._master_password = master_password.encode("utf-8")
         self._incarnation: UUID | None = None
@@ -746,6 +749,12 @@ class CredentialStore:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             marker = conn.execute("PRAGMA user_version").fetchone()[0]
             legacy = not fresh and marker == 0 and tables == {"accounts"}
+            if not fresh and self._verify_existing_credentials:
+                # Production migration authenticates every retained payload with
+                # this consumer's real key derivation BEFORE changing schema or
+                # creating an authority key. Failure rolls back this transaction.
+                for row in conn.execute("SELECT salt,encrypted_creds FROM accounts"):
+                    self._decrypt(row)
             if fresh:
                 if tables or marker:
                     raise CredentialVaultInvalidError

@@ -11,8 +11,11 @@ from __future__ import annotations
 import json
 import math
 import struct
-from datetime import date
+import time
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
@@ -151,7 +154,7 @@ def _response_json_copy(value: Any) -> Any:
 
 
 def _response_decimal(value: Any) -> Decimal:
-    if type(value) is bool or type(value) not in (int, float, str):
+    if not (type(value) is int or type(value) is float or type(value) is str):
         raise BrokerReadResponseInvalid from None
     if type(value) is float and not math.isfinite(value):
         raise BrokerReadResponseInvalid from None
@@ -279,15 +282,23 @@ def _order_quantity(value: Any, *, field: str, allow_zero: bool = False) -> int:
 
 
 def _order_price(value: Any, *, field: str, allow_zero: bool = False) -> float:
-    """Validate a supplied economic value rather than inventing a zero."""
-    if type(value) not in (int, float, str):
+    """Require exact economic equality through the pinned float/JSON encoding.
+
+    The SDK converts numeric prices to float then emits JSON numbers. Compare
+    their decimal values, not binary float equality or a trading-value cap.
+    Decimal construction/comparison do not round under the caller's context.
+    """
+    if not (type(value) is int or type(value) is float or type(value) is str):
         raise DhanMappingError(f"Dhan {field} must be a finite price")
     try:
+        requested = Decimal(str(value))
         number = float(value)
-    except (ValueError, OverflowError):
+    except (InvalidOperation, ValueError, OverflowError):
         raise DhanMappingError(f"Dhan {field} must be a finite price") from None
     if not math.isfinite(number) or number < 0 or (number == 0 and not allow_zero):
         raise DhanMappingError(f"Dhan {field} must be a finite {'non-negative' if allow_zero else 'positive'} price")
+    if not requested.is_finite() or Decimal(json.dumps(number, allow_nan=False)) != requested:
+        raise DhanMappingError(f"Dhan {field} cannot be preserved exactly by the pinned numeric serialiser")
     return number
 
 
@@ -387,13 +398,25 @@ def _norm_amo_time(amo_time: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
+def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = None,
+                          contract: dict[str, Any] | None = None) -> dict[str, Any]:
     """Translate a FlintTrade ``Order`` into ``dhanhq.place_order`` keyword args.
 
     ``security_id`` is resolved by the adapter (Dhan trades by numeric id, not
     symbol). Active target, stop-loss or trailing fields are refused: ordinary,
     AMO and sliced writes cannot consume them, and this builder never changes
     the order family to Super/BO/CO. Omitted and numeric-zero fields stay valid.
+
+    Args:
+        order: Canonical proposal or equivalent explicit request terms.
+        security_id: Native address resolved in the requested venue namespace.
+        tag: Optional correlation tag; None omits it from the SDK kwargs.
+        contract: Exact versioned listing and independent tick evidence. None
+            performs shape-only mapping, never derivative qualification. The
+            adapter supplies this evidence for native NFO/BFO invocations.
+
+    Returns:
+        Exact pinned-resource keyword arguments, without authority metadata.
 
     Raises:
         DhanMappingError: Unmappable enums/quantities or unconsumed protection.
@@ -413,6 +436,11 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     except KeyError as exc:
         raise DhanMappingError(f"No Dhan segment for exchange {order.exchange!r}") from exc
 
+    if segment in {"NSE_FNO", "BSE_FNO"}:
+        if product not in {"MIS", "NRML"}:
+            raise DhanMappingError("Dhan derivatives require MIS or NRML")
+        if contract is not None:
+            validate_derivative_order(order, security_id, contract)
     kwargs: dict[str, Any] = {
         "security_id": str(security_id),
         "exchange_segment": segment,
@@ -420,8 +448,8 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
         "quantity": _order_quantity(getattr(order, "quantity", None), field="quantity"),
         "order_type": ORDER_TYPE_MAP[ptype],
         "product_type": PRODUCT_MAP[product],
-        "price": _num(getattr(order, "price", 0)),
-        "trigger_price": _num(getattr(order, "trigger_price", 0)),
+        "price": _order_price(getattr(order, "price", 0), field="price", allow_zero=True),
+        "trigger_price": _order_price(getattr(order, "trigger_price", 0), field="trigger_price", allow_zero=True),
         "disclosed_quantity": _order_quantity(getattr(order, "disclosed_quantity", 0),
                                               field="disclosed_quantity", allow_zero=True),
         # The SDK defaults validity='DAY', so an IOC order would silently rest as
@@ -443,6 +471,66 @@ def to_place_order_kwargs(order: Any, security_id: str, *, tag: str | None = Non
     return kwargs
 
 
+def validate_derivative_order(order: Any, security_id: str, contract: dict[str, Any]) -> None:
+    """Pure preflight shared by adapter invocation and the ingress hook.
+
+    No inference from a symbol suffix; contract class/lot/expiry/tick come from
+    the versioned resolver. Missing expiry-day session boundary fails closed.
+    """
+    if contract.get("security_id") != security_id or contract.get("exchange") != order.exchange:
+        raise DhanMappingError("Dhan contract address mismatch")
+    if type(contract.get("symbol")) is not str or contract["symbol"] != order.symbol:
+        raise DhanMappingError("Dhan contract literal symbol mismatch")
+    revision = contract.get("source_revision")
+    if type(revision) is not str or not revision.strip():
+        raise DhanMappingError("Dhan contract source revision unavailable")
+    if str(order.product).upper() not in {"MIS", "NRML"}:
+        raise DhanMappingError("Dhan derivatives require MIS or NRML")
+    quantity = _order_quantity(order.quantity, field="quantity")
+    lot = _order_quantity(contract.get("lot_size"), field="lot_size")
+    if quantity % lot:
+        raise DhanMappingError("Dhan quantity must be exact lot units")
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    try:
+        if date.fromisoformat(contract["expiry"]) <= today:
+            raise ValueError
+    except (KeyError, ValueError, TypeError):
+        raise DhanMappingError("Dhan contract expired or expiry-session boundary unavailable") from None
+    ptype = _norm_pricetype(getattr(order, "pricetype", "MARKET"))
+    # NSE FAOP49677 (options); BSE 20230921-43 (derivatives).
+    if ptype == "SLM" and (contract.get("instrument") in {"OPTIDX", "OPTSTK"} or order.exchange == "BFO"):
+        raise DhanMappingError("Exchange does not permit SL-M for this contract")
+    try:
+        tick = _response_decimal(contract.get("tick_size"))
+        price = _response_decimal(getattr(order, "price", 0))
+        trigger = _response_decimal(getattr(order, "trigger_price", 0))
+        if tick <= 0 or price < 0 or trigger < 0:
+            raise ValueError
+        if Fraction(price) % Fraction(tick) or Fraction(trigger) % Fraction(tick):
+            raise ValueError
+        if ptype in {"LIMIT", "SL"} and price <= 0:
+            raise ValueError
+        if ptype in {"SL", "SLM"} and trigger <= 0:
+            raise ValueError
+        if ptype not in {"SL", "SLM"} and trigger != 0:
+            raise ValueError
+        if ptype in {"MARKET", "SLM"} and price != 0:
+            raise ValueError
+        if ptype == "SL" and ((order.action.upper() == "BUY" and trigger > price)
+                               or (order.action.upper() == "SELL" and trigger < price)):
+            raise ValueError
+        # BSE 20260114-28 applies to entry AND modification. 20260116-61
+        # defers effectiveness to 2026-02-09; these are exchange constraints,
+        # not operator stop distances or an inferred trading-session schedule.
+        if (ptype == "SL" and order.exchange == "BFO" and contract.get("instrument") == "OPTIDX"
+                and today >= date(2026, 2, 9)):
+            permitted = Fraction(10) if trigger <= 50 else Fraction(trigger) / 5
+            if abs(Fraction(price) - Fraction(trigger)) > permitted:
+                raise ValueError
+    except (BrokerReadResponseInvalid, ValueError):
+        raise DhanMappingError("Dhan price/trigger or independently evidenced tick unavailable/invalid") from None
+
+
 def to_amo_order_payload(order: Any, security_id: str, *, tag: str | None = None) -> dict[str, Any]:
     """Translate an ``amo`` ``Order`` into a Dhan ``POST /orders`` REST payload.
 
@@ -451,13 +539,10 @@ def to_amo_order_payload(order: Any, security_id: str, *, tag: str | None = None
     (``order.amo_time``, default ``OPEN`` — annexure.md; valid PRE_OPEN/OPEN/
     OPEN_30/OPEN_60 per orders.md).
 
-    NOTE: this does NOT go through ``dhanhq.place_order``. The pinned dhanhq
-    2.2.0 ``place_order`` both rejects ``PRE_OPEN`` and — critically — omits
-    ``amoTime`` from the wire payload entirely (``_order.py:113``), so the pump
-    window never reaches the broker. To deliver real AMO parity we build the
-    documented ``/orders`` body ourselves and POST it via the SDK's
-    ``DhanHTTP`` transport, exactly as the v2.5 endpoints do. Field names are
-    camelCase to match orders.md.
+    NOTE: this does NOT go through ``dhanhq.place_order``. Pin 2.3.0rc1
+    serialises ``amoTime`` but still rejects ``PRE_OPEN``. Retain the reviewed
+    direct ``/orders`` body through ``DhanHTTP`` for the full documented timing
+    enum. Field names are camelCase to match orders.md.
     """
     kwargs = to_place_order_kwargs(order, security_id, tag=tag)
     payload: dict[str, Any] = {
@@ -501,7 +586,7 @@ def _validated_core(order: Any, security_id: str) -> dict[str, Any]:
         "quantity": _order_quantity(getattr(order, "quantity", None), field="quantity"),
         "order_type": ORDER_TYPE_MAP[ptype],
         "product_type": PRODUCT_MAP[product],
-        "price": _num(getattr(order, "price", 0)),
+        "price": _order_price(getattr(order, "price", 0), field="price", allow_zero=True),
     }
 
 
@@ -631,6 +716,10 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
 def to_margin_kwargs(order: Any, security_id: str) -> dict[str, Any]:
     """Translate an ``Order`` into ``dhanhq.margin_calculator`` kwargs (pre-trade)."""
     core = _validated_core(order, security_id)
+    trigger = getattr(order, "trigger_price", 0)
+    # Existing cash snapshot callers stringify absent, inactive triggers. Keep
+    # their legacy representation; an active stop still needs exact money.
+    active_trigger = _norm_pricetype(getattr(order, "pricetype", "MARKET")) in {"SL", "SLM"}
     return {
         "security_id": core["security_id"],
         "exchange_segment": core["exchange_segment"],
@@ -638,26 +727,77 @@ def to_margin_kwargs(order: Any, security_id: str) -> dict[str, Any]:
         "quantity": core["quantity"],
         "product_type": core["product_type"],
         "price": core["price"],
-        "trigger_price": _num(getattr(order, "trigger_price", 0)),
+        "trigger_price": (
+            _order_price(trigger, field="trigger_price", allow_zero=True) if active_trigger else _num(trigger)
+        ),
     }
+
+
+def _observed_number(record: dict[str, Any], *keys: str, required: bool = False) -> str | object:
+    """Same-meaning aliases must agree; supplied null/malformed is not absence."""
+    values = [_response_decimal(record[key]) for key in keys if key in record]
+    if not values:
+        if required:
+            raise BrokerReadResponseInvalid from None
+        return _RESPONSE_MISSING
+    if any(value != values[0] for value in values):
+        raise BrokerReadResponseInvalid from None
+    return str(next(record[key] for key in keys if key in record))
+
+
+def observation_data(resp: Any) -> Any:
+    """Peel one SDK envelope without accepting an unknown success status."""
+    if type(resp) is list:
+        return resp
+    _response_record(resp, field="envelope")
+    if "status" in resp and (type(resp["status"]) is not str or resp["status"] != "success"):
+        raise BrokerReadResponseInvalid from None
+    return resp["data"] if "data" in resp else resp
 
 
 def from_dhan_margin(resp: Any) -> dict[str, Any]:
-    """Normalise a Dhan ``/margincalculator`` response into FlintTrade fields."""
-    data = unwrap(resp)
-    if not isinstance(data, dict):
-        data = {}
-    total = str(data.get("totalMargin", data.get("total_margin", 0)))
-    return {
-        "required_margin": total,  # common key across all three native adapters
-        "total_margin": total,
-        "span_margin": str(data.get("spanMargin", 0)),
-        "exposure_margin": str(data.get("exposureMargin", 0)),
-        "available_balance": str(data.get("availableBalance", 0)),
-        "insufficient_balance": str(data.get("insufficientBalance", 0)),
-        "brokerage": str(data.get("brokerage", 0)),
-        "leverage": str(data.get("leverage", 0)),
+    """Preserve a single indicative estimate, never invent missing money/fees."""
+    data = _response_record(observation_data(resp), field="margin")
+    total = _observed_number(data, "totalMargin", "total_margin", required=True)
+    if _response_decimal(total) < 0:
+        raise BrokerReadResponseInvalid from None
+    result = {"required_margin": total, "total_margin": total, "observation_kind": "estimate"}
+    fields = {
+        "span_margin": "spanMargin", "exposure_margin": "exposureMargin",
+        "variable_margin": "variableMargin", "available_balance": "availableBalance",
+        "insufficient_balance": "insufficientBalance", "brokerage": "brokerage", "leverage": "leverage",
     }
+    for target, native in fields.items():
+        _put_present(result, target, _observed_number(data, native))
+    result["broker_fields"] = _response_json_copy({
+        key: data[key] for key in ("totalMargin", "total_margin", *fields.values()) if key in data
+    })
+    return result
+
+
+def from_dhan_multi_margin(resp: Any) -> dict[str, Any]:
+    """Retain the historical snake-case estimate, not a qualified provider basis.
+
+    Current operation Markdown instead names camelCase totals and numeric
+    currency margin, while OpenAPI retains snake_case and currency-code text.
+    These incompatible versions are not aliases. Currency stays raw, with no
+    inferred unit or arithmetic. No total/hedge formula or paid fee is derived.
+    """
+    data = _response_record(observation_data(resp), field="multi margin")
+    if any(key in data for key in ("clientId", "totalMargin", "spanMargin", "exposure",
+                                   "equityMargin", "foMargin", "commodity")):
+        raise BrokerReadResponseInvalid from None
+    total = _observed_number(data, "total_margin", required=True)
+    if _response_decimal(total) < 0:
+        raise BrokerReadResponseInvalid from None
+    fields = ("total_margin", "span_margin", "exposure_margin", "equity_margin",
+              "fo_margin", "commodity_margin", "hedge_benefit")
+    result = {"required_margin": total, "observation_kind": "estimate",
+              "provider_contract": "unverified_snake_case_observation"}
+    for field in fields:
+        _put_present(result, field, _observed_number(data, field))
+    result["broker_fields"] = _response_json_copy(data)
+    return result
 
 
 def from_dhan_expiry_list(resp: Any) -> list[str]:
@@ -670,29 +810,93 @@ def from_dhan_expiry_list(resp: Any) -> list[str]:
     return []
 
 
-def from_dhan_statement_list(resp: Any) -> list[dict[str, Any]]:
-    """Unwrap a Dhan statement response (trade history / ledger) to a row list.
+class DhanStatementPage(list):
+    """List-compatible observations with explicit non-authoritative coverage.
 
-    Statement rows are returned as the broker provides them (informational
-    reads), so we surface the unwrapped ``data`` list rather than imposing a
-    bespoke normalisation that could mis-key the many statement columns.
+    Serialisers must carry ``coverage`` explicitly; bare list JSON discards it.
+    An empty page is genuine empty evidence for that page, not a terminal page.
+
+    Args:
+        rows: Detached native observations for this response only.
+        resource: Exact statement resource name.
+        from_date: Requested inclusive date-window start.
+        to_date: Requested date-window end, retained without inferring coverage.
+        account_id: Account bound by the calling session.
+        page: Requested page when applicable. None omits page metadata; it does
+            not assert a terminal or complete history.
     """
-    data = unwrap(resp)
-    if isinstance(data, dict):
-        data = data.get("data", [])
-    return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+    def __init__(self, rows: list[dict], *, resource: str, from_date: str, to_date: str,
+                 account_id: str, page: int | None = None) -> None:
+        super().__init__(rows)
+        self.coverage: dict[str, Any] = {
+            "resource": resource, "from_date": from_date, "to_date": to_date,
+            "complete": False, "terminal": "undocumented", "broker_account_id": account_id,
+        }
+        if page is not None:
+            self.coverage["page"] = page
 
 
-def to_modify_order_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
-    """Translate modify ``changes`` into ``dhanhq.modify_order`` keyword args."""
+def from_dhan_statement_list(resp: Any, *, allow_object: bool = False) -> list[dict[str, Any]]:
+    """Strict statement containers; ledger alone documents a flat object."""
+    data = observation_data(resp)
+    if type(data) is dict and set(data) == {"data"}:
+        data = data["data"]
+    if allow_object and type(data) is dict and "vouchernumber" in data:
+        data = [data]
+    rows = _response_rows(data, field="statement")
+    for row in rows:
+        if not row:
+            raise BrokerReadResponseInvalid from None
+        for key in ("debit", "credit", "runbal", "sebiTax", "stt", "brokerageCharges",
+                    "serviceTax", "exchangeTransactionCharges", "stampDuty"):
+            if key in row:
+                _response_decimal(row[key])
+    return _response_json_copy(rows)
+
+
+def to_modify_order_kwargs(
+    order_id: str, changes: dict[str, Any], *, contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Translate a replacement without fetching or guessing its contract.
+
+    Args:
+        order_id: Exact native resource address from the signed request.
+        changes: Replacement terms. Omitted type/price/trigger/validity retain
+            legacy LIMIT/zero/zero/DAY semantics; supplied malformed or null
+            economic values are not omission. Contract-qualified callers must
+            also supply symbol, exchange, action and product.
+        contract: Exact versioned evidence from the adapter. None provides
+            shape-only legacy validation, never native option qualification.
+
+    Returns:
+        Pinned SDK kwargs, with no contract metadata added to the wire.
+
+    Raises:
+        DhanMappingError: Conflicting aliases or invalid replacement evidence.
+    """
     ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    if ptype not in ORDER_TYPE_MAP:
+        raise DhanMappingError("Dhan replacement order type is invalid")
+    if "order_type" in changes and _norm_pricetype(changes["order_type"]) != ptype:
+        raise DhanMappingError("Dhan replacement order type aliases conflict")
+    if contract is not None:
+        if any(key not in changes or changes[key] is None for key in ("symbol", "exchange", "action", "product")):
+            raise DhanMappingError("Dhan replacement needs exact signed contract context")
+        if changes["symbol"] != contract.get("symbol") or changes["exchange"] != contract.get("exchange"):
+            raise DhanMappingError("Dhan replacement contract identity mismatch")
+        for key in ("security_id", "securityId"):
+            if key in changes and changes[key] != contract.get("security_id"):
+                raise DhanMappingError("Dhan replacement security identity mismatch")
+        terms = SimpleNamespace(**(changes | {"pricetype": ptype}))
+        to_place_order_kwargs(terms, contract["security_id"], contract=contract)
     return {
         "order_id": str(order_id),
-        "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
+        "order_type": ORDER_TYPE_MAP[ptype],
         "leg_name": str(changes.get("leg_name", "ENTRY_LEG")),
         "quantity": _order_quantity(changes.get("quantity"), field="quantity"),
-        "price": _num(changes.get("price", 0)),
-        "trigger_price": _num(changes.get("trigger_price", 0)),
+        "price": _order_price(changes.get("price", 0), field="price", allow_zero=True),
+        "trigger_price": _order_price(changes.get("trigger_price", 0), field="trigger_price", allow_zero=True),
         "disclosed_quantity": _order_quantity(changes.get("disclosed_quantity", 0),
                                               field="disclosed_quantity", allow_zero=True),
         "validity": _norm_place_validity(changes.get("validity")),
@@ -749,8 +953,8 @@ def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str
     if ptype not in ORDER_TYPE_MAP:
         raise DhanMappingError(f"Unsupported forever order type {ptype!r}")
     quantity = _order_quantity(changes["quantity"], field="quantity")
-    price = _num(changes["price"], -1)
-    trigger_price = _num(changes["trigger_price"], 0)
+    price = _order_price(changes["price"], field="price", allow_zero=True)
+    trigger_price = _order_price(changes["trigger_price"], field="trigger_price")
     disclosed_quantity = _order_quantity(changes["disclosed_quantity"], field="disclosed_quantity", allow_zero=True)
     validity = str(changes["validity"]).upper()
     if quantity <= 0 or price < 0 or trigger_price <= 0 or disclosed_quantity < 0:
@@ -961,7 +1165,9 @@ def from_dhan_super_order(d: dict[str, Any]) -> dict[str, Any]:
         "expiry": expiry,
         "underlying": underlying,
     }
-    for field, source in (("created_at", "createTime"), ("updated_at", "updateTime"), ("exchange_time", "exchangeTime")):
+    for field, source in (
+        ("created_at", "createTime"), ("updated_at", "updateTime"), ("exchange_time", "exchangeTime"),
+    ):
         _put_present(order, field, _response_text(d, source))
     if strike_price is not None:
         order["strike_price"] = strike_price
@@ -1564,17 +1770,48 @@ def from_dhan_trade(d: dict[str, Any]) -> dict[str, Any]:
         "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
         "action": _response_text_or_empty(d, "transactionType"),
-        "quantity": _response_number(d, "tradedQuantity", "quantity", required=True),
-        "price": _response_number(d, "tradedPrice", "price", required=True),
+        "quantity": _observed_number(d, "tradedQuantity", "quantity", required=True),
+        "price": _observed_number(d, "tradedPrice", "price", required=True),
         "product": DHAN_TO_PRODUCT.get(product, product),
         "timestamp": _response_text_or_empty(d, "exchangeTime", "createTime"),
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("rbiReferenceRate", d.get("referenceRate")),
     }
+    quantity = _response_decimal(trade["quantity"])
+    if quantity < 0 or quantity != quantity.to_integral_value() or _response_decimal(trade["price"]) < 0:
+        raise BrokerReadResponseInvalid from None
+    text_fields = {
+        "fill_id": "exchangeTradeId", "exchange_order_id": "exchangeOrderId",
+        "broker_account_id": "dhanClientId", "broker_exchange_segment": "exchangeSegment",
+        "broker_product_type": "productType", "created_at": "createTime",
+        "updated_at": "updateTime", "exchange_time": "exchangeTime", "expiry": "drvExpiryDate",
+    }
+    for target, native in text_fields.items():
+        _put_present(trade, target, _response_text(
+            d, native, required=native == "dhanClientId" and native in d,
+        ))
+    raw_right = _response_text(d, "drvOptionType")
+    if type(raw_right) is str:
+        rights = {"CALL": "CE", "PUT": "PE", "CE": "CE", "PE": "PE", "NA": ""}
+        if raw_right not in rights:
+            raise BrokerReadResponseInvalid from None
+        trade["option_type"] = rights[raw_right]
+    _put_present(trade, "strike_price", _observed_number(d, "drvStrikePrice"))
+    numeric_fields = ("sebiTax", "stt", "brokerageCharges", "serviceTax",
+                      "exchangeTransactionCharges", "stampDuty", "multiplier", "rbiReferenceRate", "referenceRate")
+    for native in numeric_fields:
+        if native in d:
+            _response_decimal(d[native])
     if "crossCurrency" in d and d["crossCurrency"] is not None:
         if type(d["crossCurrency"]) is not bool:
             raise BrokerReadResponseInvalid from None
         trade["cross_currency"] = d["crossCurrency"]
+    for native in ("customSymbol", "isin", "instrument", "orderType"):
+        _response_text(d, native)
+    evidence_fields = (*text_fields.values(), *numeric_fields, "orderId", "securityId", "tradingSymbol",
+                       "transactionType", "orderType", "tradedQuantity", "quantity", "tradedPrice", "price",
+                       "drvOptionType", "drvStrikePrice", "crossCurrency", "customSymbol", "isin", "instrument")
+    trade["broker_fields"] = _response_json_copy({key: d[key] for key in evidence_fields if key in d})
     return trade
 
 
@@ -2169,11 +2406,128 @@ class _ScripMasterSecurityResolver:
         self,
         forward: dict[tuple[str, str], str],
         reverse: dict[tuple[str, str], dict[str, Any]],
+        *, raw: dict[tuple[str, str], dict[str, Any]], source_revision: str | None,
+        observed_at: float | None, valid_until: float | None, clock: Callable[[], float],
+        tick_rules: dict[tuple[str, str], dict[str, Any]],
     ) -> None:
         self._forward = forward
         self._reverse = reverse
+        self._raw = raw
+        self._source_revision = source_revision
+        self._observed_at = observed_at
+        self._valid_until = valid_until
+        self._clock = clock
+        self._tick_rules = tick_rules
+
+    def _fresh(self, *, required: bool = False) -> None:
+        if self._source_revision is None and not required:
+            return  # Legacy display identity is not versioned contract evidence.
+        try:
+            if type(self._source_revision) is not str or not self._source_revision.strip():
+                raise ValueError
+            now = _response_decimal(self._clock())
+            start = _response_decimal(self._observed_at)
+            end = _response_decimal(self._valid_until)
+            if not start <= now < end:
+                raise ValueError
+        except (BrokerReadResponseInvalid, ValueError):
+            raise DhanMappingError("Dhan contract snapshot is unversioned, stale or future-dated") from None
+
+    def contract(self, symbol: str, exchange: str) -> dict[str, Any]:
+        """Exact dated contract evidence; raw CSV tick scale remains unavailable."""
+        self._fresh(required=True)
+        security_id = self(symbol, exchange)
+        exchange = exchange.upper().strip()
+        row = self._raw[(security_id, exchange)]
+
+        def field(*keys: str, required: bool = True) -> str:
+            values = [row[key] for key in keys if key in row]
+            if any(type(value) is not str for value in values):
+                raise DhanMappingError("Dhan contract column is not exact text")
+            values = [value.strip() for value in values]
+            if len(set(values)) > 1 or (required and (not values or not values[0])):
+                raise DhanMappingError("Dhan contract column is missing or conflicting")
+            return values[0] if values else ""
+
+        native_exchange = field("SEM_EXM_EXCH_ID", "EXCH_ID")
+        native_segment = field("SEM_SEGMENT", "SEGMENT")
+        if _SCRIP_EXCHANGE.get((native_exchange, native_segment)) != exchange:
+            raise DhanMappingError("Dhan contract native exchange/segment mismatch")
+        instrument = field("SEM_INSTRUMENT_NAME", "INSTRUMENT")
+        expiry = field("SEM_EXPIRY_DATE", "SM_EXPIRY_DATE", required=exchange in {"NFO", "BFO"})
+        expiry = _normalise_scrip_expiry(expiry)
+        lot = _order_quantity(field("SEM_LOT_UNITS", "LOT_SIZE"), field="lot_size")
+        result = {
+            "broker_id": "dhan", "security_id": security_id,
+            "symbol": field("SEM_TRADING_SYMBOL", "TRADING_SYMBOL"),
+            "exchange": exchange, "exchange_segment": to_dhan_segment(exchange), "instrument": instrument,
+            "expiry": expiry, "lot_size": lot, "raw_tick_size": field("SEM_TICK_SIZE", "TICK_SIZE", required=False),
+            "tick_size": None, "tick_scale": "unavailable", "source_revision": self._source_revision,
+            "observed_at": self._observed_at, "valid_until": self._valid_until,
+        }
+        if exchange in {"NFO", "BFO"}:
+            if not expiry:
+                raise DhanMappingError("Dhan derivative contract needs exact expiry")
+            if instrument not in {"OPTIDX", "OPTSTK", "FUTIDX", "FUTSTK"}:
+                raise DhanMappingError("Dhan derivative contract class unavailable")
+            if instrument.startswith("OPT"):
+                right = field("SEM_OPTION_TYPE", "OPTION_TYPE")
+                if right not in {"CE", "PE", "CALL", "PUT"}:
+                    raise DhanMappingError("Dhan option right unavailable")
+                strike = field("SEM_STRIKE_PRICE", "STRIKE_PRICE")
+                try:
+                    if _response_decimal(strike) <= 0:
+                        raise ValueError
+                except (BrokerReadResponseInvalid, ValueError):
+                    raise DhanMappingError("Dhan option strike invalid") from None
+                result.update(option_type={"CALL": "CE", "PUT": "PE"}.get(right, right), strike_price=strike)
+                parts = result["symbol"].split("-")
+                if len(parts) >= 4 and parts[-1] in {"CE", "PE"}:
+                    try:
+                        if (parts[-1] != result["option_type"]
+                                or _response_decimal(parts[-2]) != _response_decimal(strike)):
+                            raise ValueError
+                    except (BrokerReadResponseInvalid, ValueError):
+                        raise DhanMappingError("Dhan contract symbol contradicts native right/strike") from None
+            result["underlying"] = field("UNDERLYING_SYMBOL") if "UNDERLYING_SYMBOL" in row else field("SM_SYMBOL_NAME")
+            result["underlying_security_id"] = field("UNDERLYING_SECURITY_ID", required=False)
+        rule = self._tick_rules.get((security_id, exchange))
+        if rule is not None:
+            try:
+                if (rule.get("source_kind") != "exchange_rule"
+                        or rule.get("contract_source_revision") != self._source_revision):
+                    raise ValueError
+                if any(type(rule.get(key)) is not str or not rule[key].strip()
+                       for key in ("source_revision", "source_url")):
+                    raise ValueError
+                if not (
+                    _response_decimal(rule.get("observed_at"))
+                    <= _response_decimal(self._clock())
+                    < _response_decimal(rule.get("valid_until"))
+                ):
+                    raise ValueError
+                if _response_decimal(rule.get("tick_size")) <= 0:
+                    raise ValueError
+            except (BrokerReadResponseInvalid, ValueError):
+                raise DhanMappingError("Dhan independently sourced tick rule is invalid or stale") from None
+            result["tick_size"] = str(rule["tick_size"])
+            result["tick_rule"] = _response_json_copy(rule)
+        return result
 
     def __call__(self, symbol: str, exchange: str) -> str:
+        """Resolve a forward address or preserve the explicit reverse protocol.
+
+        Args:
+            symbol: Requested symbol or the existing encoded reverse request.
+            exchange: Canonical venue namespace, never inferred from the token.
+
+        Returns:
+            Exact native ID, or encoded reverse evidence for that protocol.
+
+        Raises:
+            DhanMappingError: Missing, ambiguous or stale snapshot identity.
+        """
+        self._fresh()
         raw_symbol = str(symbol)
         if raw_symbol.startswith(_REVERSE_LOOKUP_PREFIX):
             security_id = raw_symbol.removeprefix(_REVERSE_LOOKUP_PREFIX)
@@ -2186,6 +2540,19 @@ class _ScripMasterSecurityResolver:
             raise DhanMappingError(f"Scrip master has no security_id for {symbol}/{exchange}") from exc
 
     def reverse(self, security_id: str, exchange: str) -> dict[str, Any]:
+        """Return detached observed identity for one native ID and venue.
+
+        Args:
+            security_id: Exact native security address.
+            exchange: Canonical exchange namespace.
+
+        Returns:
+            Observed reverse identity; unversioned data is display-only.
+
+        Raises:
+            DhanMappingError: Missing, ambiguous or stale snapshot identity.
+        """
+        self._fresh()
         key = (str(security_id).strip(), str(exchange).upper().strip())
         try:
             return dict(self._reverse[key])
@@ -2243,7 +2610,12 @@ def reverse_security_id(
     return dict(identity)
 
 
-def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], str]:
+def build_security_resolver(
+    rows: list[dict[str, Any]], *, source_revision: str | None = None,
+    observed_at: float | None = None, valid_until: float | None = None,
+    clock: Callable[[], float] = time.time,
+    tick_rules: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> _ScripMasterSecurityResolver:
     """Build a callable forward resolver with a fail-closed reverse lookup.
 
     Accepts both compact (``SEM_*``) and detailed column tags. Symbols are
@@ -2251,14 +2623,44 @@ def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], 
     canonical exchange. Normal calls retain the existing
     ``resolver(symbol, exchange) -> security_id`` contract; ``resolver.reverse``
     and :func:`reverse_security_id` expose canonical identity by security id.
+
+    Args:
+        rows: Compact/detailed native records. Supplied same-meaning IDs must
+            agree before a versioned record is indexed; venues remain separate.
+        source_revision: Exact source identity. None retains legacy display-only
+            lookup and cannot qualify contract(), lots or derivative execution.
+        observed_at: Explicit snapshot observation time in epoch seconds; None
+            is unavailable, not a default clock observation.
+        valid_until: Explicit exclusive validity bound; None is unavailable.
+        clock: Freshness clock, defaulting to time.time; tests may inject one.
+        tick_rules: Independent dated exchange-rule evidence keyed by native ID
+            and venue. None leaves tick scale unavailable; raw master ticks are
+            never promoted into a guessed canonical price increment.
+
+    Returns:
+        Detached forward/reverse resolver. Contract reads require all explicit
+        source-validity facts and enforce any supplied tick-rule provenance.
+
+    Raises:
+        DhanMappingError: Conflicting versioned native identity.
+        BrokerReadResponseInvalid: Malformed non-JSON native observations.
     """
     index: dict[tuple[str, str], str] = {}
     ambiguous_forward_keys: set[tuple[str, str]] = set()
     reverse_index: dict[tuple[str, str], dict[str, Any]] = {}
+    raw_index: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        sec_id = _scrip_field(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID")
+        row = _response_json_copy(row)
+        if source_revision is not None:
+            ids = [row[key] for key in ("SEM_SMST_SECURITY_ID", "SECURITY_ID") if key in row]
+            if (not ids or any(type(value) is not str or not value or value != value.strip() for value in ids)
+                    or any(value != ids[0] for value in ids)):
+                raise DhanMappingError("Dhan versioned security ID columns are missing or conflicting")
+            sec_id = ids[0]
+        else:
+            sec_id = _scrip_field(row, "SEM_SMST_SECURITY_ID", "SECURITY_ID")
         if not sec_id:
             continue
         exch = _scrip_field(row, "SEM_EXM_EXCH_ID", "EXCH_ID").upper()
@@ -2267,6 +2669,10 @@ def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], 
         if exchange is None:
             continue
         identity = _scrip_security_identity(row, sec_id, exchange)
+        raw_key = (sec_id, exchange)
+        if source_revision is not None and raw_key in raw_index and raw_index[raw_key] != row:
+            raise DhanMappingError("Dhan versioned master has conflicting contract rows")
+        raw_index[raw_key] = _response_json_copy(row)
         if identity is not None:
             reverse_key = (sec_id, exchange)
             existing = reverse_index.get(reverse_key)
@@ -2276,7 +2682,7 @@ def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], 
         for symbol in {
             _scrip_field(row, "SEM_TRADING_SYMBOL", "TRADING_SYMBOL").upper(),
             _scrip_field(row, "SEM_CUSTOM_SYMBOL", "DISPLAY_NAME").upper(),
-            _scrip_field(row, "SM_SYMBOL_NAME", "SYMBOL_NAME").upper(),
+            _scrip_field(row, "SM_SYMBOL_NAME", "SYMBOL_NAME").upper() if exchange not in {"NFO", "BFO"} else "",
         }:
             if symbol:
                 key = (symbol, exchange)
@@ -2288,7 +2694,11 @@ def build_security_resolver(rows: list[dict[str, Any]]) -> Callable[[str, str], 
                 elif existing_security_id != sec_id:
                     index.pop(key, None)
                     ambiguous_forward_keys.add(key)
-    return _ScripMasterSecurityResolver(index, reverse_index)
+    return _ScripMasterSecurityResolver(
+        index, reverse_index, raw=raw_index, source_revision=source_revision,
+        observed_at=observed_at, valid_until=valid_until, clock=clock,
+        tick_rules={key: _response_json_copy(rule) for key, rule in (tick_rules or {}).items()},
+    )
 
 
 def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str, Any]:

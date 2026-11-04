@@ -8,7 +8,7 @@
 #     - advisory: "GHSA-xxxx-xxxx-xxxx"
 #       package: "some-node-dep"
 #       reason: "dev-only tooling; not shipped to the browser bundle"
-#       accepted_by: "navaneesh"
+#       accepted_by: "synthetic-approver"
 #       expires: "2026-08-23"
 #
 # No live entries. GHSA-qwww-vcr4-c8h2 (react-router) expired on 2026-10-26.

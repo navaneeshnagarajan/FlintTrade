@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { buildHeaders, getBase } from './ftApi.helpers';
-import { captureAuthSessionFence, isAuthSessionFenceCurrent } from '@/stores/authStore';
+import { onlineManager, type QueryClient } from '@tanstack/react-query';
+import { captureAuthSessionFence, isAuthSessionFenceCurrent, useAuthStore } from '@/stores/authStore';
+import { useBrokerStore } from '@/stores/brokerStore';
+import { useModeStore } from '@/stores/modeStore';
+import { useConnectionStore } from '@/stores/connectionStore';
+import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from '@/lib/operatorIncidentScope';
 
 export const Delivery = z.object({
   id: z.uuid(), channel: z.enum(['desktop', 'telegram', 'email']),
@@ -28,6 +33,79 @@ export const deliveryLabels: Record<DeliveryReceipt['state'], string> = {
   failed:'Failed — explicit retry required', disabled:'Disabled — explicit opt-in required', cancelled:'Cancelled before send',
   revoked:'Binding revoked — not sent', backpressure:'Delivery paused by backpressure — incident retained',
 };
+
+export const SYSTEM_DIAGNOSTICS_KEY = ['system', 'diagnostics'] as const;
+export const SYSTEM_DIAGNOSTICS_STALE_MS = 25_000;
+
+/** Finite work belongs to the app's query owner, not a panel effect generation.
+ * Nothing is discovered here: only a visible panel may admit its parsed census.
+ * Subscriptions exist only while draining that fixed census, and never retry it.
+ */
+function createDeliveryQueue(client: QueryClient) {
+  const attempted = new Set<string>();
+  let pending: Promise<void> | undefined;
+  let controller: AbortController | undefined;
+  let refreshNeeded = false;
+  let unavailable = false;
+  const fresh = () => {
+    const query = client.getQueryCache().find({ queryKey: SYSTEM_DIAGNOSTICS_KEY, exact: true });
+    return !!query && onlineManager.isOnline() && query.state.status === 'success'
+      && query.state.fetchStatus !== 'paused' && !query.isStaleByTime(SYSTEM_DIAGNOSTICS_STALE_MS)
+      && z.object({ operational_events: Timeline }).safeParse(query.state.data).success;
+  };
+  return {
+    discover(timeline: IncidentTimeline, current: boolean): Promise<void> | undefined {
+      if (!current || !fresh()) { controller?.abort(); return; }
+      if (useAuthStore.getState().status !== 'logged-in' || useModeStore.getState().mode === 'explore') return;
+      if (pending) return pending;
+      const queue = timeline.incidents.flatMap(row => row.deliveries).filter(row => {
+        const key = `${row.id}:${row.attempts}`;
+        if (row.channel !== 'desktop' || row.state !== 'browser_pending' || attempted.has(key)) return false;
+        attempted.add(key); // Admission consumes the slot, including uncertain/retired work.
+        return true;
+      });
+      if (!queue.length) return refreshNeeded ? Promise.resolve() : undefined;
+      const batch = new AbortController(); controller = batch;
+      const auth = captureAuthSessionFence();
+      const scope = captureOperatorIncidentScope();
+      const retire = () => batch.abort();
+      const check = () => { if (!isAuthSessionFenceCurrent(auth) || !isOperatorIncidentScopeCurrent(scope) || !fresh()) retire(); };
+      // These task-owned subscriptions remain connected through Activity hiding.
+      const dispose = [useAuthStore.subscribe(check), useBrokerStore.subscribe(check), useModeStore.subscribe(check),
+        useConnectionStore.subscribe(check), onlineManager.subscribe(check), client.getQueryCache().subscribe(check)];
+      const updated = client.getQueryState(SYSTEM_DIAGNOSTICS_KEY)?.dataUpdatedAt ?? 0;
+      const expiry = setTimeout(retire, Math.max(0, updated + SYSTEM_DIAGNOSTICS_STALE_MS - Date.now()));
+      window.addEventListener('pagehide', retire);
+      pending = (async () => {
+        try {
+          for (const receipt of queue) {
+            check();
+            if (batch.signal.aborted) break;
+            try { await submitBrowserIncident(receipt, batch.signal); }
+            catch { unavailable = true; } // Unknown is not permission to repeat a claim.
+          }
+          if (!batch.signal.aborted) refreshNeeded = true;
+        } finally {
+          clearTimeout(expiry); window.removeEventListener('pagehide', retire);
+          dispose.forEach(unsubscribe => unsubscribe());
+          pending = undefined; controller = undefined;
+        }
+      })();
+      return pending;
+    },
+    takeRefresh() {
+      const needed = refreshNeeded; refreshNeeded = false;
+      return { needed, unavailable };
+    },
+  };
+}
+// Weak application-instance custody, not a global dispatcher or authority source.
+const queues = new WeakMap<QueryClient, ReturnType<typeof createDeliveryQueue>>();
+export function browserIncidentQueue(client: QueryClient) {
+  let queue = queues.get(client);
+  if (!queue) { queue = createDeliveryQueue(client); queues.set(client, queue); }
+  return queue;
+}
 
 export async function submitBrowserIncident(receipt: DeliveryReceipt, signal: AbortSignal): Promise<void> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);

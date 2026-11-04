@@ -246,7 +246,7 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
+    <div className="ft-workspace relative flex h-dvh min-h-0 flex-col bg-surface-base">
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
@@ -258,18 +258,17 @@ export default function AppLayout() {
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
         {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
-        <AppNavigation />
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
         {!isPublicDemoBuild() && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
-      {/* Content area: DockSidebar + main panel side by side */}
+      {/* One navigation owner beside the retained app host. */}
       {/* Issue #54: aria-label on main landmark mirrors the route title. Each
           route renders its own single H1 (PageHeader, or Trade's sr-only H1). */}
-      <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
-
+      <div className="ft-workspace-body relative z-10 min-h-0 flex-1">
+        <AppNavigation />
         <main
           id="main-content"
           ref={mainRef}

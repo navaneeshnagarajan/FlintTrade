@@ -7,6 +7,8 @@ descriptor`` and DuckDB then refused every later open of the same path.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from flinttrade_core.app import _cleanup_stale_duckdb_wals
@@ -23,7 +25,9 @@ def _enqueue(queue: PendingOrderQueue, request_id: str) -> None:
 
 
 @pytest.mark.unit
-def test_wal_recovery_closes_the_live_writer_before_checkpoint(tmp_path, monkeypatch) -> None:
+def test_wal_recovery_closes_the_live_writer_before_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The next boot must not checkpoint over a connection the last app left open."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     database = tmp_path / "action_center.duckdb"
@@ -46,7 +50,9 @@ def test_wal_recovery_closes_the_live_writer_before_checkpoint(tmp_path, monkeyp
 
 
 @pytest.mark.unit
-def test_repeated_boots_do_not_invalidate_the_shared_database(tmp_path, monkeypatch) -> None:
+def test_repeated_boots_do_not_invalidate_the_shared_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Many leaked app instances on one module workspace must keep the file usable."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     database = tmp_path / "action_center.duckdb"

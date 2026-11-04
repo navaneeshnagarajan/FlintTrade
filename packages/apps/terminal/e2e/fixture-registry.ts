@@ -64,7 +64,20 @@ export interface SyntheticFixtureRegistry {
   dispose(): Promise<void>;
 }
 
+export interface PeriodicReadRegistration {
+  name: string;
+  path: string;
+  cadenceMs: number;
+  activeWindowMs: number;
+  attemptsPerTick: number;
+  expectedStatus: 200 | 503;
+  classify(request: Request): Promise<boolean>;
+  handler: SyntheticHandlerRegistration["handler"];
+}
+
 export interface SyntheticPhasedFixtureRegistry extends SyntheticFixtureRegistry {
+  registerPeriodicRead(registration: PeriodicReadRegistration): void;
+  periodicReadCounts(path: string): SyntheticReadCounts;
   readCounts(path: string): SyntheticReadCounts;
   retireRead(path: string): Promise<SyntheticReadCounts>;
 }
@@ -82,6 +95,7 @@ interface ReadCompletion {
   url: string;
   responseStatus?: number;
   notFoundConsole: boolean;
+  periodicConsole?: boolean;
   errorText?: string;
   settled: Promise<void>;
 }
@@ -92,6 +106,7 @@ interface RegisteredHandler extends Omit<SyntheticHandlerRegistration, "expected
   calls: number;
   reads: ReadCompletion[];
   failureConsoleCalls: number;
+  periodicStatus?: 200 | 503;
 }
 
 interface RegisteredBenignConsoleError extends BenignConsoleError {
@@ -185,6 +200,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
   private readonly closePageOnDispose: boolean;
   private readonly handlers = new Map<string, RegisteredHandler>();
   private readonly retiredReads: RegisteredHandler[] = [];
+  private readonly periodicReads = new Map<string, { registration: PeriodicReadRegistration; handler: RegisteredHandler }>();
   private readonly failures: CapturedFailure[] = [];
   private readonly inFlightRouteHandlers = new Set<Promise<void>>();
   private disposalPromise: Promise<void> | undefined;
@@ -220,7 +236,17 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
       return;
     }
 
-    const registered = this.handlers.get(key);
+    let registered = this.handlers.get(key);
+    const periodic = this.periodicReads.get(key);
+    if (periodic) {
+      try {
+        if (await periodic.registration.classify(request)) registered = periodic.handler;
+      } catch (error) {
+        this.failures.push({ kind: "handler error", evidence: `periodic provenance: ${key}: ${String(error)}` });
+        await this.abortRoute(route);
+        return;
+      }
+    }
 
     if (!registered) {
       this.captureRequestMismatch(method, path);
@@ -317,6 +343,14 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
         read.notFoundConsole = true;
         return;
       }
+    }
+    // A periodic diagnostic is admitted only against its own real HTTP response.
+    // Initial acquisition allowances remain exact and are never incremented here.
+    if (message.args().length === 0 && text === "Failed to load resource: the server responded with a status of 503 (Service Unavailable)") {
+      const handler = [...this.periodicReads.values()].map(value => value.handler)
+        .find(value => value.periodicStatus === 503 && url === `${this.frontendOrigin}${value.path}`);
+      const read = handler?.reads.find(value => value.url === url && value.responseStatus === 503 && !value.periodicConsole);
+      if (read) { read.periodicConsole = true; return; }
     }
     const allowance = this.benignConsoleErrors.find(
       (candidate) => candidate.text === text && candidate.url === url,
@@ -465,6 +499,32 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     });
   }
 
+  registerPeriodicRead(registration: PeriodicReadRegistration): void {
+    this.assertActive();
+    const { path, cadenceMs, activeWindowMs, attemptsPerTick, expectedStatus } = registration;
+    const key = methodAndPath("GET", path);
+    if (!path.startsWith("/") || path.startsWith("//") || /[?#]/.test(path)
+      || ![cadenceMs, activeWindowMs, attemptsPerTick].every(value => Number.isSafeInteger(value) && value > 0)
+      || activeWindowMs > 90_000 || attemptsPerTick > 3 || ![200, 503].includes(expectedStatus)
+      || this.periodicReads.has(key) || !registration.name.trim()) {
+      throw new Error("Invalid or duplicated finite periodic read registration");
+    }
+    const maximumCalls = Math.floor(activeWindowMs / cadenceMs) * attemptsPerTick;
+    if (maximumCalls < 1) throw new Error("Periodic window must contain a tick");
+    this.periodicReads.set(key, { registration, handler: {
+      name: registration.name, method: "GET", path, handler: registration.handler,
+      minimumCalls: 0, maximumCalls, calls: 0, reads: [], failureConsoleCalls: 0, periodicStatus: expectedStatus,
+    } });
+  }
+
+  periodicReadCounts(path: string): SyntheticReadCounts {
+    this.assertActive();
+    const handler = this.periodicReads.get(methodAndPath("GET", path))?.handler;
+    const counts: SyntheticReadCounts = { calls: handler?.calls ?? 0, completed: 0, cancelled: 0, pending: 0, failed: 0 };
+    for (const read of handler?.reads ?? []) counts[read.outcome] += 1;
+    return counts;
+  }
+
   callCount(method: HttpMethod, path: string): number {
     this.assertActive();
     return (this.handlers.get(methodAndPath(method, path))?.calls ?? 0)
@@ -532,8 +592,8 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
     await this.waitForInFlightRouteHandlers();
 
-    await Promise.all([...this.handlers.values(), ...this.retiredReads]
-      .flatMap((handler) => handler.readPhase ? handler.reads.map((read) => read.settled) : []));
+    await Promise.all([...this.handlers.values(), ...this.retiredReads, ...[...this.periodicReads.values()].map(value => value.handler)]
+      .flatMap((handler) => handler.readPhase || handler.periodicStatus ? handler.reads.map((read) => read.settled) : []));
     const assertionError = this.buildAssertionError();
     this.disposed = true;
 
@@ -574,9 +634,16 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticPhasedFixtureRegist
     }
   }
 
-  private buildAssertionError(handlers = [...this.handlers.values(), ...this.retiredReads], finalObligations = true): Error | undefined {
+  private buildAssertionError(handlers = [...this.handlers.values(), ...this.retiredReads,
+    ...[...this.periodicReads.values()].map(value => value.handler)], finalObligations = true): Error | undefined {
     const evidence = this.failures.map((failure) => failure.evidence);
     for (const handler of handlers) {
+      if (handler.periodicStatus) {
+        const complete = handler.reads.filter(read => read.outcome === "completed"
+          && read.responseStatus === handler.periodicStatus
+          && (handler.periodicStatus !== 503 || read.periodicConsole)).length;
+        if (complete !== handler.calls) evidence.push(`periodic completion/status/console mismatch: ${handler.path}`);
+      }
       if (handler.expectedNotFound) {
         const matching = handler.reads.filter((read) => read.outcome === "completed"
           && read.url === `${this.frontendOrigin}${handler.path}` && read.responseStatus === 404 && read.notFoundConsole).length;

@@ -1,0 +1,2330 @@
+{
+  "$comment": "Transport validation is not qualification, a grant, or Start. x-v2-refinement requires the accompanying Python/Zod validator.",
+  "$defs": {
+    "BrokerReadProvenanceV2": {
+      "additionalProperties": false,
+      "description": "Flattened successful BrokerReadProvenance, never a read capability.\n\nSelector is shared by registry and credential versions; workspace incarnation\nis shared by both workspace counters. Generations exceeding JS safe integers\nrefuse transport rather than silently lose identity. The read owner must\nresolve the actual versions and permissions; syntax is not provenance proof.",
+      "properties": {
+        "account_id": {
+          "pattern": "^(?=[A-Za-z0-9._:@+\\-]*[A-Za-z0-9])[A-Za-z0-9._:@+\\-]{1,128}(?![\\s\\S])",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "broker": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])",
+          "title": "Broker",
+          "type": "string"
+        },
+        "broker_workspace_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Broker Workspace Generation",
+          "type": "integer"
+        },
+        "credential_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Credential Generation",
+          "type": "integer"
+        },
+        "registry_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Registry Generation",
+          "type": "integer"
+        },
+        "registry_incarnation": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+          "title": "Registry Incarnation",
+          "type": "string"
+        },
+        "requested_role": {
+          "anyOf": [
+            {
+              "enum": [
+                "quote",
+                "historical",
+                "option_chains",
+                "global_indices"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requested Role"
+        },
+        "vault_incarnation": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+          "title": "Vault Incarnation",
+          "type": "string"
+        },
+        "workspace_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Workspace Generation",
+          "type": "integer"
+        },
+        "workspace_instance_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "title": "Workspace Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "broker",
+        "account_id",
+        "registry_incarnation",
+        "registry_generation",
+        "vault_incarnation",
+        "credential_generation",
+        "workspace_instance_id",
+        "workspace_generation",
+        "broker_workspace_generation",
+        "requested_role"
+      ],
+      "title": "BrokerReadProvenanceV2",
+      "type": "object"
+    },
+    "ConfigureRequestV2": {
+      "additionalProperties": false,
+      "description": "Versioned configuration request without caller-issued authority.\n\nThe receiving owner authenticates the principal and resolves all selections;\nno request field supplies trusted evidence, credentials or readiness.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/NativeRunConfigV2"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "config"
+      ],
+      "title": "ConfigureRequestV2",
+      "type": "object"
+    },
+    "CoverageV2": {
+      "additionalProperties": false,
+      "description": "Supplied read-family window and pagination/completeness description.\n\nWindows are ordered; complete requires completed pages. Only the read owner\ncan establish that a real broker surface and required history are complete.",
+      "properties": {
+        "availability": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable",
+            "unsupported",
+            "stale",
+            "conflicting"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "family": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Family",
+          "type": "string"
+        },
+        "pages_complete": {
+          "title": "Pages Complete",
+          "type": "boolean"
+        },
+        "surface": {
+          "enum": [
+            "orders",
+            "positions",
+            "holdings",
+            "trades",
+            "fees",
+            "broker_protection",
+            "quotes"
+          ],
+          "title": "Surface",
+          "type": "string"
+        },
+        "window_end_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Window End Ms",
+          "type": "integer"
+        },
+        "window_start_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Window Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "surface",
+        "family",
+        "availability",
+        "pages_complete",
+        "window_start_ms",
+        "window_end_ms"
+      ],
+      "title": "CoverageV2",
+      "type": "object",
+      "x-v2-refinement": "coverage"
+    },
+    "CustodyPolicyV2": {
+      "additionalProperties": false,
+      "description": "Selected pre-entry acceptance and no-post-stop-write policy.\n\nTrusted owners must verify broker-held protection or receiving-operator\nacceptance before entry. Parsing cannot establish custody or bypass kill.",
+      "properties": {
+        "after_entry_retirement": {
+          "const": "broker_held_or_operator_handback_no_agent_writes",
+          "title": "After Entry Retirement",
+          "type": "string"
+        },
+        "fallback": {
+          "const": "receiving_operator_acceptance_before_entry",
+          "title": "Fallback",
+          "type": "string"
+        },
+        "global_kill": {
+          "const": "blocks_all_agent_writes",
+          "title": "Global Kill",
+          "type": "string"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        }
+      },
+      "required": [
+        "policy_ref",
+        "fallback",
+        "after_entry_retirement",
+        "global_kill"
+      ],
+      "title": "CustodyPolicyV2",
+      "type": "object"
+    },
+    "DutyViewV2": {
+      "additionalProperties": false,
+      "description": "Retained duty/custody description with local census consistency.\n\nAttributes:\n    possible_entry_quantity: Exact sum of the supplied possible_entry\n        quantities when known. Null if any entry quantity or write direction\n        is unknown. Independently executable exits do not offset entries.\n    unknown_possible_writes: Matches unknown_write items, independently of\n        whether a known entry's quantity is unknown.\n    obligations: Supplied unresolved census with unique obligation IDs.\n\nFills need references and exits cannot exceed cumulative entries. Settled\nrequires an empty census and matching fills; transfer does not mean flat.\nOwners still prove real census completeness, allocation, protection and\nacceptance. This DTO cannot discover an omitted broker attempt.",
+      "properties": {
+        "coverage": {
+          "enum": [
+            "verified_broker_held",
+            "operator_accepted",
+            "absent",
+            "stale",
+            "conflicting",
+            "unknown"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        },
+        "cumulative_entry_fill": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Cumulative Entry Fill",
+          "type": "integer"
+        },
+        "cumulative_exit_fill": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Cumulative Exit Fill",
+          "type": "integer"
+        },
+        "custody": {
+          "enum": [
+            "run_retained",
+            "broker_held",
+            "operator"
+          ],
+          "title": "Custody",
+          "type": "string"
+        },
+        "custody_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Custody Revision",
+          "type": "string"
+        },
+        "duty_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "entry_fill_refs": {
+          "items": {
+            "$ref": "#/$defs/RevisionRefV2"
+          },
+          "maxItems": 1000,
+          "title": "Entry Fill Refs",
+          "type": "array"
+        },
+        "exit_fill_refs": {
+          "items": {
+            "$ref": "#/$defs/RevisionRefV2"
+          },
+          "maxItems": 1000,
+          "title": "Exit Fill Refs",
+          "type": "array"
+        },
+        "model_obligations": {
+          "items": {
+            "$ref": "#/$defs/ModelDutyV2"
+          },
+          "maxItems": 1000,
+          "title": "Model Obligations",
+          "type": "array"
+        },
+        "obligation_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Obligation Revision",
+          "type": "string"
+        },
+        "obligations": {
+          "items": {
+            "$ref": "#/$defs/OutstandingObligationV2"
+          },
+          "maxItems": 1000,
+          "title": "Obligations",
+          "type": "array"
+        },
+        "possible_entry_quantity": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Possible Entry Quantity"
+        },
+        "reasons": {
+          "items": {
+            "enum": [
+              "evidence_missing",
+              "evidence_stale",
+              "evidence_conflicting",
+              "unsupported_profile",
+              "synthetic_only",
+              "demo_only",
+              "custody_required",
+              "fees_unknown",
+              "producer_unavailable",
+              "qualification_required",
+              "grant_required",
+              "entry_retired",
+              "global_kill",
+              "loss_threshold_latched",
+              "unknown_possible_writes",
+              "reconciliation_required"
+            ],
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "receiving_acceptance_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevisionRefV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "state": {
+          "enum": [
+            "contingent",
+            "open",
+            "handback_required",
+            "transferred",
+            "reconciliation_required",
+            "settled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "unknown_possible_writes": {
+          "title": "Unknown Possible Writes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "duty_ref",
+        "scope",
+        "obligation_revision",
+        "possible_entry_quantity",
+        "cumulative_entry_fill",
+        "cumulative_exit_fill",
+        "entry_fill_refs",
+        "exit_fill_refs",
+        "obligations",
+        "model_obligations",
+        "unknown_possible_writes",
+        "coverage",
+        "custody",
+        "custody_revision",
+        "receiving_acceptance_ref",
+        "state",
+        "reasons"
+      ],
+      "title": "DutyViewV2",
+      "type": "object",
+      "x-v2-refinement": "duty"
+    },
+    "EntryGrantV2": {
+      "additionalProperties": false,
+      "description": "Server grant description, never an execution port.\n\nIssuer, policy and duration must agree locally. The authenticated grant\nowner must resolve current qualification, usage and expiry independently;\nthe string state ``active`` cannot confer execution authority.",
+      "properties": {
+        "expires_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "grant_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "issued_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Issued At Ms",
+          "type": "integer"
+        },
+        "issued_by": {
+          "pattern": "^operator:[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Issued By",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/EntryLimitsV2"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "report_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskPolicyV2"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "retired",
+            "expired",
+            "revoked"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "grant_ref",
+        "scope",
+        "report_ref",
+        "policy_ref",
+        "risk",
+        "limits",
+        "issued_by",
+        "issued_at_ms",
+        "expires_at_ms",
+        "state"
+      ],
+      "title": "EntryGrantV2",
+      "type": "object",
+      "x-v2-refinement": "entry_grant"
+    },
+    "EntryLimitsV2": {
+      "additionalProperties": false,
+      "description": "Explicit finite entry limits with unique instruments and actions.\n\nPer-order quantity cannot exceed total quantity, and place must be selected.\nOwners enforce cumulative usage and expiry; decoding allocates no budget.",
+      "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "place",
+              "cancel_unfilled"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Actions",
+          "type": "array"
+        },
+        "instruments": {
+          "items": {
+            "$ref": "#/$defs/InstrumentV2"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Instruments",
+          "type": "array"
+        },
+        "max_commands": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Commands",
+          "type": "integer"
+        },
+        "max_duration_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Duration Ms",
+          "type": "integer"
+        },
+        "max_order_quantity": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Order Quantity",
+          "type": "integer"
+        },
+        "max_reads": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Reads",
+          "type": "integer"
+        },
+        "max_total_quantity": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Total Quantity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "instruments",
+        "actions",
+        "max_order_quantity",
+        "max_total_quantity",
+        "max_commands",
+        "max_reads",
+        "max_duration_ms"
+      ],
+      "title": "EntryLimitsV2",
+      "type": "object",
+      "x-v2-refinement": "entry_limits"
+    },
+    "EvidenceFactV2": {
+      "additionalProperties": false,
+      "description": "Status/provenance/time description of one evidence dimension.\n\nVerified/stale facts require timed references; reviewed exemptions retain\ndocumented-contract provenance. Owners must verify genuine evidence and\ncurrent freshness rather than trusting these well-formed descriptions.",
+      "properties": {
+        "coverage": {
+          "items": {
+            "enum": [
+              "orders",
+              "positions",
+              "holdings",
+              "trades",
+              "fees",
+              "broker_protection",
+              "quotes"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Coverage",
+          "type": "array"
+        },
+        "evidence_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevisionRefV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At Ms"
+        },
+        "observed_at_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed At Ms"
+        },
+        "operation": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Operation",
+          "type": "string"
+        },
+        "profile_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "provenance": {
+          "enum": [
+            "documented_contract",
+            "reviewed_software",
+            "installed_runtime",
+            "operator_policy",
+            "broker_read",
+            "demonstrated_broker_action",
+            "synthetic",
+            "demo_broker"
+          ],
+          "title": "Provenance",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "missing",
+            "stale",
+            "conflicting",
+            "unsupported",
+            "not_required"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "verifier_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        }
+      },
+      "required": [
+        "status",
+        "provenance",
+        "verifier_ref",
+        "profile_ref",
+        "evidence_ref",
+        "observed_at_ms",
+        "expires_at_ms",
+        "operation",
+        "coverage"
+      ],
+      "title": "EvidenceFactV2",
+      "type": "object",
+      "x-v2-refinement": "evidence_fact"
+    },
+    "GrantRequestV2": {
+      "additionalProperties": false,
+      "description": "Explicit grant selection and limits, separate from Start.\n\nAuthentication, report/policy resolution and current qualification belong\nto the grant owner. A caller cannot submit its own trusted grant object.",
+      "properties": {
+        "expected_binding_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Expected Binding Revision",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "limits": {
+          "$ref": "#/$defs/EntryLimitsV2"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "report_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "run_id",
+        "expected_binding_revision",
+        "report_ref",
+        "policy_ref",
+        "limits",
+        "expires_at_ms"
+      ],
+      "title": "GrantRequestV2",
+      "type": "object"
+    },
+    "HistoricalTransferReceiptV2": {
+      "additionalProperties": false,
+      "description": "Historical receipt shape before the explicit model-duty census.\n\nAbsence of model duties in this old shape is not proof of their resolution.\nThis readback-only nominal variant preserves the exact originally accepted\npayload; it must never qualify a new finite grant.\n\nAccount/generation agree and obligations require reconciliation. Real\nreceiver authentication, continuing lineage and durable custody must be\nverified by the owner; this receipt cannot erase unknown writes.",
+      "properties": {
+        "accepted_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Accepted At Ms",
+          "type": "integer"
+        },
+        "accepted_payload_digest": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Accepted Payload Digest",
+          "type": "string"
+        },
+        "account_provenance": {
+          "$ref": "#/$defs/BrokerReadProvenanceV2"
+        },
+        "custody": {
+          "const": "operator",
+          "title": "Custody",
+          "type": "string"
+        },
+        "custody_location_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "duty_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "obligation_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Obligation Revision",
+          "type": "string"
+        },
+        "obligations": {
+          "items": {
+            "$ref": "#/$defs/OutstandingObligationV2"
+          },
+          "maxItems": 1000,
+          "title": "Obligations",
+          "type": "array"
+        },
+        "outcome": {
+          "const": "custody_transferred_not_flatness",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "receiving_operator": {
+          "pattern": "^operator:[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Receiving Operator",
+          "type": "string"
+        },
+        "reconciliation_required": {
+          "title": "Reconciliation Required",
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "transfer_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "unknown_possible_writes": {
+          "title": "Unknown Possible Writes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "transfer_ref",
+        "duty_ref",
+        "scope",
+        "account_provenance",
+        "obligation_revision",
+        "accepted_payload_digest",
+        "receiving_operator",
+        "accepted_at_ms",
+        "custody_location_ref",
+        "obligations",
+        "unknown_possible_writes",
+        "reconciliation_required",
+        "custody",
+        "outcome"
+      ],
+      "title": "HistoricalTransferReceiptV2",
+      "type": "object",
+      "x-v2-refinement": "historical_transfer"
+    },
+    "InspectRequestV2": {
+      "additionalProperties": false,
+      "description": "Versioned request for explicit, bounded owner-backed inspection.\n\nThe owner validates the binding and read permission before gathering facts;\nthis request cannot upload trusted reports or silently create a grant.",
+      "properties": {
+        "expected_binding_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Expected Binding Revision",
+          "type": "string"
+        },
+        "read_plan": {
+          "$ref": "#/$defs/ReadPlanV2"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "run_id",
+        "expected_binding_revision",
+        "read_plan"
+      ],
+      "title": "InspectRequestV2",
+      "type": "object"
+    },
+    "InstrumentV2": {
+      "additionalProperties": false,
+      "description": "Exact instrument, exchange and product selection.\n\nThe instrument owner must resolve these case-sensitive IDs and eligibility;\ntransport syntax alone does not establish a tradable instrument.",
+      "properties": {
+        "exchange": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Exchange",
+          "type": "string"
+        },
+        "instrument_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Instrument Id",
+          "type": "string"
+        },
+        "product": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Product",
+          "type": "string"
+        }
+      },
+      "required": [
+        "instrument_id",
+        "exchange",
+        "product"
+      ],
+      "title": "InstrumentV2",
+      "type": "object"
+    },
+    "ModelAttemptDutyV2": {
+      "additionalProperties": false,
+      "description": "Exact service-attempt observation; unknown cost is never broker quantity.",
+      "properties": {
+        "attempt_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "cost_micros_reserved": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Cost Micros Reserved",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}(?![\\s\\S])",
+          "title": "Currency",
+          "type": "string"
+        },
+        "observed_cost_micros": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Cost Micros"
+        },
+        "observed_tokens": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed Tokens"
+        },
+        "receipt_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "state": {
+          "enum": [
+            "PREPARED",
+            "INVOKED",
+            "UNKNOWN",
+            "SETTLED",
+            "CANCELLED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "tokens_reserved": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Tokens Reserved",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "receipt_ref",
+        "state",
+        "tokens_reserved",
+        "cost_micros_reserved",
+        "observed_tokens",
+        "observed_cost_micros",
+        "currency"
+      ],
+      "title": "ModelAttemptDutyV2",
+      "type": "object",
+      "x-v2-refinement": "model_attempt_duty"
+    },
+    "ModelDutyV2": {
+      "additionalProperties": false,
+      "description": "Outstanding model task responsibility, separate from broker-write duty.\n\nReservations remain lifetime budget debits even after this outstanding\nprojection resolves. The existing service ledger alone settles attempts.",
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/ModelAttemptDutyV2"
+          },
+          "maxItems": 1000,
+          "title": "Attempts",
+          "type": "array"
+        },
+        "cost_micros_reserved": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Cost Micros Reserved",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}(?![\\s\\S])",
+          "title": "Currency",
+          "type": "string"
+        },
+        "request_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "task_outcome": {
+          "enum": [
+            "reserved",
+            "pending",
+            "completed",
+            "refused"
+          ],
+          "title": "Task Outcome",
+          "type": "string"
+        },
+        "tokens_reserved": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Tokens Reserved",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_ref",
+        "task_outcome",
+        "tokens_reserved",
+        "cost_micros_reserved",
+        "currency",
+        "attempts"
+      ],
+      "title": "ModelDutyV2",
+      "type": "object",
+      "x-v2-refinement": "model_duty"
+    },
+    "ModelPinV2": {
+      "additionalProperties": false,
+      "description": "Selected model/connection revisions and explicit request budgets.\n\nProvider identity, privacy, tariff and readiness require trusted resolution.\nReading this record must not acquire a model or send a readiness request.",
+      "properties": {
+        "connection_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "cost_cap": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "effort": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Effort",
+          "type": "string"
+        },
+        "max_requests": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "model_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "protocol": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Protocol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection_ref",
+        "model_ref",
+        "protocol",
+        "effort",
+        "max_requests",
+        "max_tokens",
+        "cost_cap"
+      ],
+      "title": "ModelPinV2",
+      "type": "object"
+    },
+    "NativeRunConfigV2": {
+      "additionalProperties": false,
+      "description": "Exact run/account/environment and reviewed policy selections.\n\nConfiguration is not qualification, grant or Start. Owners resolve the\nproducer/profile/policies and retain the immutable binding independently.",
+      "properties": {
+        "account_id": {
+          "pattern": "^(?=[A-Za-z0-9._:@+\\-]*[A-Za-z0-9])[A-Za-z0-9._:@+\\-]{1,128}(?![\\s\\S])",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "broker": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])",
+          "title": "Broker",
+          "type": "string"
+        },
+        "custody": {
+          "$ref": "#/$defs/CustodyPolicyV2"
+        },
+        "environment": {
+          "enum": [
+            "production",
+            "synthetic",
+            "demo_broker"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "operation_profile_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "producer": {
+          "$ref": "#/$defs/ProducerPinV2"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskPolicyV2"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "broker",
+        "account_id",
+        "environment",
+        "operation_profile_ref",
+        "producer",
+        "risk",
+        "custody"
+      ],
+      "title": "NativeRunConfigV2",
+      "type": "object"
+    },
+    "ObservationRefV2": {
+      "additionalProperties": false,
+      "description": "Versioned observation selection with coherent supplied coverage.\n\nSurface/family pairs are unique and times cannot exceed collection time.\nRequired nullable broker fields retain absence. Freshness, scope, allocation\nand actual completeness must be independently checked by the evidence owner.",
+      "properties": {
+        "availability": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable",
+            "unsupported",
+            "stale",
+            "conflicting"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "broker_as_of_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Broker As Of Ms"
+        },
+        "broker_source_sequence": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Broker Source Sequence"
+        },
+        "canonical_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Canonical Generation",
+          "type": "integer"
+        },
+        "collected_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Collected At Ms",
+          "type": "integer"
+        },
+        "collection_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "coverage": {
+          "items": {
+            "$ref": "#/$defs/CoverageV2"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Coverage",
+          "type": "array"
+        },
+        "identity_namespace": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Identity Namespace",
+          "type": "string"
+        },
+        "observation_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "provenance": {
+          "$ref": "#/$defs/BrokerReadProvenanceV2"
+        }
+      },
+      "required": [
+        "observation_ref",
+        "provenance",
+        "canonical_generation",
+        "collection_id",
+        "collected_at_ms",
+        "availability",
+        "coverage",
+        "identity_namespace",
+        "broker_source_sequence",
+        "broker_as_of_ms"
+      ],
+      "title": "ObservationRefV2",
+      "type": "object",
+      "x-v2-refinement": "observation"
+    },
+    "OptionsConfigureRequestV2": {
+      "additionalProperties": false,
+      "description": "Explicit derivative transport version; no uploaded evidence/authority.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/OptionsNativeRunConfigV2"
+        },
+        "schema_version": {
+          "const": "2-options-1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "config"
+      ],
+      "title": "OptionsConfigureRequestV2",
+      "type": "object"
+    },
+    "OptionsEntryGrantV2": {
+      "additionalProperties": false,
+      "description": "Options grant description ONLY, retaining the original local invariants.\n\nParsing this object never issues a grant or enables native execution.",
+      "properties": {
+        "expires_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "grant_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "issued_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Issued At Ms",
+          "type": "integer"
+        },
+        "issued_by": {
+          "pattern": "^operator:[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Issued By",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/EntryLimitsV2"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "report_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "risk": {
+          "$ref": "#/$defs/OptionsRiskPolicyV2"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "retired",
+            "expired",
+            "revoked"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "grant_ref",
+        "scope",
+        "report_ref",
+        "policy_ref",
+        "risk",
+        "limits",
+        "issued_by",
+        "issued_at_ms",
+        "expires_at_ms",
+        "state"
+      ],
+      "title": "OptionsEntryGrantV2",
+      "type": "object",
+      "x-v2-refinement": "options_entry_grant"
+    },
+    "OptionsNativeRunConfigV2": {
+      "additionalProperties": false,
+      "description": "Options-only configuration; deliberately not a cash-model subclass.\n\nThe owner resolves this version separately. A parsed options instance cannot\nbypass the cash decoder through Pydantic's preconstructed-instance fast path.",
+      "properties": {
+        "account_id": {
+          "pattern": "^(?=[A-Za-z0-9._:@+\\-]*[A-Za-z0-9])[A-Za-z0-9._:@+\\-]{1,128}(?![\\s\\S])",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "broker": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])",
+          "title": "Broker",
+          "type": "string"
+        },
+        "custody": {
+          "$ref": "#/$defs/CustodyPolicyV2"
+        },
+        "environment": {
+          "enum": [
+            "production",
+            "synthetic",
+            "demo_broker"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "operation_profile_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "producer": {
+          "$ref": "#/$defs/ProducerPinV2"
+        },
+        "risk": {
+          "$ref": "#/$defs/OptionsRiskPolicyV2"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "broker",
+        "account_id",
+        "environment",
+        "operation_profile_ref",
+        "producer",
+        "risk",
+        "custody"
+      ],
+      "title": "OptionsNativeRunConfigV2",
+      "type": "object"
+    },
+    "OptionsRiskPolicyV2": {
+      "additionalProperties": false,
+      "description": "Versioned index-options budgeting, separate from the accepted cash policy.\n\nLong premiums and standalone short margin commitments plus fees consume a\nnon-replenishing lifetime budget. Premium receipts/profits are not credits.\nExposure is gross underlying notional: different contracts never net, even\nwhen a strategy is hedged. Independent possible writes and fee liabilities\nremain. A finite cap is NOT a maximum realised loss, especially for shorts.\nNumeric values are mandatory operator selections, not broker qualification.\nPaid fees leave only exposure when exact attribution proves full closure;\nlifetime capital/loss retain them. This DTO supplies no trusted evidence.",
+      "properties": {
+        "capital_basis": {
+          "const": "non_replenishing_long_premium_short_standalone_margin_plus_fees",
+          "title": "Capital Basis",
+          "type": "string"
+        },
+        "capital_cap": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "exposure_basis": {
+          "const": "gross_underlying_notional_no_cross_contract_netting_plus_liabilities",
+          "title": "Exposure Basis",
+          "type": "string"
+        },
+        "exposure_cap": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "fee_policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "loss_action_threshold": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "loss_basis": {
+          "const": "run_lifetime_net_realised_plus_unrealised_after_fees",
+          "title": "Loss Basis",
+          "type": "string"
+        },
+        "max_mark_age_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Mark Age Ms",
+          "type": "integer"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "profile_version": {
+          "const": "index_options_v1",
+          "title": "Profile Version",
+          "type": "string"
+        },
+        "threshold_action": {
+          "const": "latch_entry_retirement_and_broker_held_or_handback",
+          "title": "Threshold Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_version",
+        "policy_ref",
+        "capital_basis",
+        "exposure_basis",
+        "loss_basis",
+        "threshold_action",
+        "capital_cap",
+        "exposure_cap",
+        "loss_action_threshold",
+        "max_mark_age_ms",
+        "fee_policy_ref"
+      ],
+      "title": "OptionsRiskPolicyV2",
+      "type": "object",
+      "x-v2-refinement": "options_risk_currency"
+    },
+    "OptionsRunViewV2": {
+      "additionalProperties": false,
+      "description": "Versioned derivative view with unchanged custody/authority separation.\n\nShared supplied-census and cross-object invariants still apply; no report,\nreference, boolean or successfully decoded view is owner-issued authority.\nThis separate nominal class cannot pass a cash decoder as an instance.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/OptionsNativeRunConfigV2"
+        },
+        "duty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DutyViewV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duty_state": {
+          "enum": [
+            "none",
+            "retained",
+            "broker_held",
+            "operator",
+            "reconciliation_required"
+          ],
+          "title": "Duty State",
+          "type": "string"
+        },
+        "effective_authority": {
+          "enum": [
+            "none",
+            "bounded_entry"
+          ],
+          "title": "Effective Authority",
+          "type": "string"
+        },
+        "entry_state": {
+          "enum": [
+            "ungranted",
+            "granted",
+            "started",
+            "retired"
+          ],
+          "title": "Entry State",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RevisionRefV2"
+          },
+          "maxItems": 1000,
+          "title": "Events",
+          "type": "array"
+        },
+        "global_kill": {
+          "title": "Global Kill",
+          "type": "boolean"
+        },
+        "grant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OptionsEntryGrantV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loss_threshold_latched": {
+          "title": "Loss Threshold Latched",
+          "type": "boolean"
+        },
+        "next_actions": {
+          "items": {
+            "enum": [
+              "configure",
+              "inspect",
+              "review_evidence",
+              "request_grant",
+              "start",
+              "stop_entries",
+              "reconcile",
+              "accept_transfer",
+              "wait_for_observation"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Next Actions",
+          "type": "array"
+        },
+        "observation_freshness": {
+          "enum": [
+            "missing",
+            "fresh",
+            "stale",
+            "conflicting"
+          ],
+          "title": "Observation Freshness",
+          "type": "string"
+        },
+        "producer_state": {
+          "enum": [
+            "not_started",
+            "running",
+            "stopping",
+            "stopped",
+            "failed"
+          ],
+          "title": "Producer State",
+          "type": "string"
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationReportV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_authority": {
+          "enum": [
+            "none",
+            "bounded_entry"
+          ],
+          "title": "Requested Authority",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "2-options-1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "transfer_receipts": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TransferReceiptV2"
+              },
+              {
+                "$ref": "#/$defs/HistoricalTransferReceiptV2"
+              }
+            ]
+          },
+          "maxItems": 1000,
+          "title": "Transfer Receipts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "scope",
+        "config",
+        "requested_authority",
+        "effective_authority",
+        "entry_state",
+        "producer_state",
+        "duty_state",
+        "observation_freshness",
+        "report",
+        "grant",
+        "duty",
+        "transfer_receipts",
+        "global_kill",
+        "loss_threshold_latched",
+        "events",
+        "next_actions"
+      ],
+      "title": "OptionsRunViewV2",
+      "type": "object",
+      "x-v2-refinement": "options_run_view"
+    },
+    "OutstandingObligationV2": {
+      "additionalProperties": false,
+      "description": "One supplied possible entry, executable exit or unknown write.\n\nAttributes:\n    obligation_id: Unique within a supplied census, not proof of allocation.\n    attempt_ref: Owner-resolved dispatch lineage, not proof of non-invocation.\n    possible_quantity: Remaining possible quantity; null retains uncertainty.\n\nThe owner must retain all unresolved obligations across Stop and transfer.",
+      "properties": {
+        "attempt_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "kind": {
+          "enum": [
+            "possible_entry",
+            "independently_executable_exit",
+            "unknown_write"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "obligation_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Obligation Id",
+          "type": "string"
+        },
+        "possible_quantity": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Possible Quantity"
+        }
+      },
+      "required": [
+        "obligation_id",
+        "attempt_ref",
+        "kind",
+        "possible_quantity"
+      ],
+      "title": "OutstandingObligationV2",
+      "type": "object"
+    },
+    "PositiveMoneyV2": {
+      "additionalProperties": false,
+      "description": "Canonical positive decimal text with an explicit currency code.\n\nThe grammar bounds representation, not operator risk. Currency eligibility,\nvaluation and exact arithmetic remain the consuming owner's obligations.\n\nAttributes:\n    amount: Positive decimal without exponents or redundant zeroes.\n    currency: Three uppercase letters; not proof of a supported currency.",
+      "properties": {
+        "amount": {
+          "pattern": "^(?:[1-9][0-9]{0,17}(?:\\.[0-9]{0,7}[1-9])?|0\\.[0-9]{0,7}[1-9])(?![\\s\\S])",
+          "title": "Amount",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}(?![\\s\\S])",
+          "title": "Currency",
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "title": "PositiveMoneyV2",
+      "type": "object"
+    },
+    "ProducerPinV2": {
+      "additionalProperties": false,
+      "description": "Producer/source/config pins with a model pin only for model runs.\n\nRegistration, availability and runtime identity remain owner checks; the\ndiscriminator cannot start a worker or establish model qualification.",
+      "properties": {
+        "config_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Config Revision",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "deterministic",
+            "model"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelPinV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "producer_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "source_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Source Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "producer_ref",
+        "source_revision",
+        "config_revision",
+        "model"
+      ],
+      "title": "ProducerPinV2",
+      "type": "object",
+      "x-v2-refinement": "producer_pin"
+    },
+    "QualificationDimensionsV2": {
+      "additionalProperties": false,
+      "description": "Separate software, account, read, action, custody, fee and producer facts.\n\nNo individual verified dimension establishes whole-run eligibility. The\nqualification owner resolves each fact and the reviewed operation profile.",
+      "properties": {
+        "account_eligibility": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "custody": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "demonstrated_action": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "fees": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "observations": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "producer": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        },
+        "software": {
+          "$ref": "#/$defs/EvidenceFactV2"
+        }
+      },
+      "required": [
+        "software",
+        "account_eligibility",
+        "observations",
+        "demonstrated_action",
+        "custody",
+        "fees",
+        "producer"
+      ],
+      "title": "QualificationDimensionsV2",
+      "type": "object"
+    },
+    "QualificationReportV2": {
+      "additionalProperties": false,
+      "description": "Coherent server report description, not trusted qualification.\n\nEligible descriptions require matching profiles, covering evidence times\nand environment-appropriate provenance; blocked reports retain reasons.\nOwners independently authenticate, resolve and verify every referenced fact.\nSynthetic examples and arbitrary fee references are never production proof.",
+      "properties": {
+        "blocking_reasons": {
+          "items": {
+            "enum": [
+              "evidence_missing",
+              "evidence_stale",
+              "evidence_conflicting",
+              "unsupported_profile",
+              "synthetic_only",
+              "demo_only",
+              "custody_required",
+              "fees_unknown",
+              "producer_unavailable",
+              "qualification_required",
+              "grant_required",
+              "entry_retired",
+              "global_kill",
+              "loss_threshold_latched",
+              "unknown_possible_writes",
+              "reconciliation_required"
+            ],
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Blocking Reasons",
+          "type": "array"
+        },
+        "dimensions": {
+          "$ref": "#/$defs/QualificationDimensionsV2"
+        },
+        "expires_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "generated_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Generated At Ms",
+          "type": "integer"
+        },
+        "next_actions": {
+          "items": {
+            "enum": [
+              "configure",
+              "inspect",
+              "review_evidence",
+              "request_grant",
+              "start",
+              "stop_entries",
+              "reconcile",
+              "accept_transfer",
+              "wait_for_observation"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Next Actions",
+          "type": "array"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "profile_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "report_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "status": {
+          "enum": [
+            "blocked",
+            "eligible"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "report_ref",
+        "scope",
+        "profile_ref",
+        "policy_ref",
+        "generated_at_ms",
+        "expires_at_ms",
+        "status",
+        "dimensions",
+        "blocking_reasons",
+        "next_actions"
+      ],
+      "title": "QualificationReportV2",
+      "type": "object",
+      "x-v2-refinement": "qualification_report"
+    },
+    "ReadPlanV2": {
+      "additionalProperties": false,
+      "description": "Explicit finite read plan with unique requested surfaces.\n\nThe read owner authenticates and enforces these bounds. Parsing neither\nperforms external I/O nor confers permission to inspect an account.",
+      "properties": {
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "max_pages": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Pages",
+          "type": "integer"
+        },
+        "max_reads": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Reads",
+          "type": "integer"
+        },
+        "surfaces": {
+          "items": {
+            "enum": [
+              "orders",
+              "positions",
+              "holdings",
+              "trades",
+              "fees",
+              "broker_protection",
+              "quotes"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Surfaces",
+          "type": "array"
+        }
+      },
+      "required": [
+        "surfaces",
+        "max_reads",
+        "max_pages",
+        "deadline_ms"
+      ],
+      "title": "ReadPlanV2",
+      "type": "object",
+      "x-v2-refinement": "read_plan"
+    },
+    "RevisionRefV2": {
+      "additionalProperties": false,
+      "description": "Case-sensitive identifier and digest-shaped revision selection.\n\nA well-formed reference proves neither existence nor integrity. Its owner\nmust resolve immutable content and compare the actual revision.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "title": "RevisionRefV2",
+      "type": "object"
+    },
+    "RiskPolicyV2": {
+      "additionalProperties": false,
+      "description": "Operator-valued, single-currency risk policy description.\n\nCapital commitments are non-replenishing and fee-inclusive. Exposure uses\nthe higher of entry cost and fresh mark, including possible fills and exit\nfees. Loss is run-lifetime net realised plus unrealised P&L after incurred\nfees and remaining reserved closing fees for already-filled exposure.\nAn incurred charge consumes its corresponding reserve: never count it twice.\nPending-entry allowances are capital/exposure reservations, not realised\nloss. Unknown fees must remain unknown, not become zero.\n\nAttributes:\n    fee_policy_ref: Immutable policy selection carrying those fee semantics.\n        The owner must resolve and verify its dated tariff, allocation and\n        reserve basis; a well-formed reference is not fee-policy proof.\n    loss_action_threshold: Required operator value, not a guaranteed loss cap.\n    threshold_action: Latched entry retirement and custody handling, never\n        automatic liquidation or independent post-stop agent authority.",
+      "properties": {
+        "capital_basis": {
+          "const": "non_replenishing_fee_inclusive_commitments",
+          "title": "Capital Basis",
+          "type": "string"
+        },
+        "capital_cap": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "exposure_basis": {
+          "const": "max_entry_cost_fresh_mark_plus_possible_fills_and_exit_fees",
+          "title": "Exposure Basis",
+          "type": "string"
+        },
+        "exposure_cap": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "fee_policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "loss_action_threshold": {
+          "$ref": "#/$defs/PositiveMoneyV2"
+        },
+        "loss_basis": {
+          "const": "run_lifetime_net_realised_plus_unrealised_after_fees",
+          "title": "Loss Basis",
+          "type": "string"
+        },
+        "max_mark_age_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Max Mark Age Ms",
+          "type": "integer"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "threshold_action": {
+          "const": "latch_entry_retirement_and_broker_held_or_handback",
+          "title": "Threshold Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy_ref",
+        "capital_basis",
+        "exposure_basis",
+        "loss_basis",
+        "threshold_action",
+        "capital_cap",
+        "exposure_cap",
+        "loss_action_threshold",
+        "max_mark_age_ms",
+        "fee_policy_ref"
+      ],
+      "title": "RiskPolicyV2",
+      "type": "object",
+      "x-v2-refinement": "risk_currency"
+    },
+    "RunScopeV2": {
+      "additionalProperties": false,
+      "description": "Exact run/operator/actor/account and generation binding description.\n\nThe bounded actor suffix must equal run_id with case preserved. An owner\nmust authenticate the operator and resolve account/generation identity.",
+      "properties": {
+        "account_id": {
+          "pattern": "^(?=[A-Za-z0-9._:@+\\-]*[A-Za-z0-9])[A-Za-z0-9._:@+\\-]{1,128}(?![\\s\\S])",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "actor": {
+          "pattern": "^bounded:[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}(?![\\s\\S])",
+          "title": "Actor",
+          "type": "string"
+        },
+        "binding_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Binding Revision",
+          "type": "string"
+        },
+        "broker": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])",
+          "title": "Broker",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "production",
+            "synthetic",
+            "demo_broker"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "operator": {
+          "pattern": "^operator:[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Operator",
+          "type": "string"
+        },
+        "registry_generation": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Registry Generation",
+          "type": "integer"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "operator",
+        "actor",
+        "broker",
+        "account_id",
+        "environment",
+        "registry_generation",
+        "binding_revision"
+      ],
+      "title": "RunScopeV2",
+      "type": "object",
+      "x-v2-refinement": "run_scope"
+    },
+    "RunViewV2": {
+      "additionalProperties": false,
+      "description": "Separate authority, entry, producer, freshness and custody descriptions.\n\nReferences and scopes must agree. Bounded-entry descriptions require a\ncoherent report/grant and finite known possible-entry census with custody;\nkill/loss retirement cannot describe effective entry authority. None of\nthese local checks authenticates, qualifies, starts or grants a real run.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/NativeRunConfigV2"
+        },
+        "duty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DutyViewV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duty_state": {
+          "enum": [
+            "none",
+            "retained",
+            "broker_held",
+            "operator",
+            "reconciliation_required"
+          ],
+          "title": "Duty State",
+          "type": "string"
+        },
+        "effective_authority": {
+          "enum": [
+            "none",
+            "bounded_entry"
+          ],
+          "title": "Effective Authority",
+          "type": "string"
+        },
+        "entry_state": {
+          "enum": [
+            "ungranted",
+            "granted",
+            "started",
+            "retired"
+          ],
+          "title": "Entry State",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RevisionRefV2"
+          },
+          "maxItems": 1000,
+          "title": "Events",
+          "type": "array"
+        },
+        "global_kill": {
+          "title": "Global Kill",
+          "type": "boolean"
+        },
+        "grant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntryGrantV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loss_threshold_latched": {
+          "title": "Loss Threshold Latched",
+          "type": "boolean"
+        },
+        "next_actions": {
+          "items": {
+            "enum": [
+              "configure",
+              "inspect",
+              "review_evidence",
+              "request_grant",
+              "start",
+              "stop_entries",
+              "reconcile",
+              "accept_transfer",
+              "wait_for_observation"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Next Actions",
+          "type": "array"
+        },
+        "observation_freshness": {
+          "enum": [
+            "missing",
+            "fresh",
+            "stale",
+            "conflicting"
+          ],
+          "title": "Observation Freshness",
+          "type": "string"
+        },
+        "producer_state": {
+          "enum": [
+            "not_started",
+            "running",
+            "stopping",
+            "stopped",
+            "failed"
+          ],
+          "title": "Producer State",
+          "type": "string"
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualificationReportV2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requested_authority": {
+          "enum": [
+            "none",
+            "bounded_entry"
+          ],
+          "title": "Requested Authority",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "transfer_receipts": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TransferReceiptV2"
+              },
+              {
+                "$ref": "#/$defs/HistoricalTransferReceiptV2"
+              }
+            ]
+          },
+          "maxItems": 1000,
+          "title": "Transfer Receipts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "scope",
+        "config",
+        "requested_authority",
+        "effective_authority",
+        "entry_state",
+        "producer_state",
+        "duty_state",
+        "observation_freshness",
+        "report",
+        "grant",
+        "duty",
+        "transfer_receipts",
+        "global_kill",
+        "loss_threshold_latched",
+        "events",
+        "next_actions"
+      ],
+      "title": "RunViewV2",
+      "type": "object",
+      "x-v2-refinement": "run_view"
+    },
+    "StartRequestV2": {
+      "additionalProperties": false,
+      "description": "Exact run/binding/grant selection for a separate Start request.\n\nThe existing execution owner must resolve authority, qualification, custody\nand current risk before Start; decoding creates neither a port nor worker.",
+      "properties": {
+        "expected_binding_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Expected Binding Revision",
+          "type": "string"
+        },
+        "grant_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "run_id",
+        "expected_binding_revision",
+        "grant_ref"
+      ],
+      "title": "StartRequestV2",
+      "type": "object"
+    },
+    "TransferAcceptRequestV2": {
+      "additionalProperties": false,
+      "description": "Exact preview and duty revision selected for acceptance.\n\nThe receiving owner must authenticate the receiver, resolve the preview and\nenforce one-use/current binding. Sender-supplied identity is not acceptance.",
+      "properties": {
+        "expected_duty_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Expected Duty Revision",
+          "type": "string"
+        },
+        "preview_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "schema_version": {
+          "const": "2",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "preview_ref",
+        "expected_duty_revision"
+      ],
+      "title": "TransferAcceptRequestV2",
+      "type": "object"
+    },
+    "TransferReceiptV2": {
+      "additionalProperties": false,
+      "description": "Non-flat custody-transfer description retaining unresolved scope.\n\nAccount/generation agree and obligations require reconciliation. Real\nreceiver authentication, continuing lineage and durable custody must be\nverified by the owner; this receipt cannot erase unknown writes.",
+      "properties": {
+        "accepted_at_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Accepted At Ms",
+          "type": "integer"
+        },
+        "accepted_payload_digest": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Accepted Payload Digest",
+          "type": "string"
+        },
+        "account_provenance": {
+          "$ref": "#/$defs/BrokerReadProvenanceV2"
+        },
+        "custody": {
+          "const": "operator",
+          "title": "Custody",
+          "type": "string"
+        },
+        "custody_location_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "duty_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "model_obligations": {
+          "items": {
+            "$ref": "#/$defs/ModelDutyV2"
+          },
+          "maxItems": 1000,
+          "title": "Model Obligations",
+          "type": "array"
+        },
+        "obligation_revision": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Obligation Revision",
+          "type": "string"
+        },
+        "obligations": {
+          "items": {
+            "$ref": "#/$defs/OutstandingObligationV2"
+          },
+          "maxItems": 1000,
+          "title": "Obligations",
+          "type": "array"
+        },
+        "outcome": {
+          "const": "custody_transferred_not_flatness",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "receiving_operator": {
+          "pattern": "^operator:[0-9a-f]{64}(?![\\s\\S])",
+          "title": "Receiving Operator",
+          "type": "string"
+        },
+        "reconciliation_required": {
+          "title": "Reconciliation Required",
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/RunScopeV2"
+        },
+        "transfer_ref": {
+          "$ref": "#/$defs/RevisionRefV2"
+        },
+        "unknown_possible_writes": {
+          "title": "Unknown Possible Writes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "transfer_ref",
+        "duty_ref",
+        "scope",
+        "account_provenance",
+        "obligation_revision",
+        "accepted_payload_digest",
+        "receiving_operator",
+        "accepted_at_ms",
+        "custody_location_ref",
+        "obligations",
+        "model_obligations",
+        "unknown_possible_writes",
+        "reconciliation_required",
+        "custody",
+        "outcome"
+      ],
+      "title": "TransferReceiptV2",
+      "type": "object",
+      "x-v2-refinement": "transfer"
+    }
+  },
+  "$id": "urn:flinttrade:native-autonomy:v2",
+  "$ref": "#/$defs/RunViewV2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

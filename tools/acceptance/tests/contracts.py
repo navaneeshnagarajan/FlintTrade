@@ -1,5 +1,6 @@
 """Synthetic report/dispatch boundary tests; no application or provider doubles."""
 from copy import deepcopy
+import ast
 import importlib.util
 import json
 import os
@@ -10,7 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
+
+from executor_lifecycle import FixturePublication as FixturePublication
 
 ROOT=Path(__file__).resolve().parents[3]
 spec=importlib.util.spec_from_file_location('validate_results',ROOT/'tools/reticle/validate_results.py')
@@ -147,9 +151,243 @@ class RuntimeDispatch(unittest.TestCase):
         self.assertIn('optimisation refused',result.stderr)
 
 class Registrations(unittest.TestCase):
-    def test_ci_runs_the_synthetic_contract_subset(self):
+    """Keep maintained command and complete-suite registrations executable."""
+    def test_native_v2_generator_check_is_maintained(self) -> None:
+        """Require read-only generation, including canonical fixture parity."""
         workflow = (ROOT / '.github/workflows/test.yml').read_text()
-        self.assertTrue('run: uv run python tools/acceptance/tests/contracts.py Reports Registrations' in workflow, 'CI is missing the synthetic report/registration contract step')
+        python_job = workflow.split('\n  python-invariants:', 1)[1].split('\n  python-shards:', 1)[0]
+        command = 'uv run --offline --no-sync python scripts/generate-native-autonomy-v2-contracts.py --check'
+        self.assertIn('run: ' + command, [line.strip() for line in python_job.splitlines()],
+                      'Missing maintained native-v2 generator --check')
+        scripts = json.loads((ROOT / 'packages/apps/terminal/package.json').read_text())['scripts']
+        self.assertEqual(shlex.split(scripts.get('contracts:native-v2:check', '')),
+                         ['uv', 'run', '--offline', '--no-sync', '--project', '../../..', 'python',
+                          '../../../scripts/generate-native-autonomy-v2-contracts.py', '--check'])
+
+    def test_native_v2_generated_tests_are_in_normal_and_ci_selection(self) -> None:
+        """Generated validators must execute in both enumerated Node gates."""
+        scripts = json.loads((ROOT / 'packages/apps/terminal/package.json').read_text())['scripts']
+        self.assertIn('src/generated', shlex.split(scripts['test:base']),
+                      'Missing generated tests from normal test:base')
+        workflow = (ROOT / '.github/workflows/test.yml').read_text()
+        node_job = workflow.split('\n  node-core-tests:', 1)[1].split('\n  node-widget-tests-1:', 1)[0]
+        selected = [line.strip()[5:] for line in node_job.splitlines()
+                    if line.strip().startswith('run: ') and 'vitest run ' in line]
+        self.assertEqual(len(selected), 1)
+        self.assertIn('src/generated/', shlex.split(selected[0]),
+                      'Missing generated tests from node-core-tests')
+
+    def test_native_v2_risk_tests_retain_python_package_discovery(self) -> None:
+        """Keep normal package discovery and the complete four-shard CI gate."""
+        workflow = (ROOT / '.github/workflows/test.yml').read_text()
+        job = workflow.split('\n  python-shards:', 1)[1].split('\n  python-tests:', 1)[0]
+        selected = [line.strip()[5:] for line in job.splitlines()
+                    if line.strip().startswith('run: ') and 'python -m pytest ' in line]
+        self.assertEqual(len(selected), 1)
+        argv = shlex.split(selected[0])
+        self.assertIn('packages/*/*/tests/', argv)
+        self.assertIn('--ft-shard-count=4', argv)
+        self.assertIn('--timeout=60', argv)
+        self.assertIn('--timeout-method=thread', argv)
+        hidden = ('-k', '-m', '--keyword', '--markexpr', '--ignore', '--ignore-glob',
+                  '--deselect', '--collect-only', '--co')
+        test_argv = argv[argv.index('pytest') + 1:]
+        self.assertFalse([arg for arg in test_argv if arg.split('=', 1)[0] in hidden or arg.startswith(("-k", "-m"))],
+                         'Hidden selection can exclude new risk test modules')
+
+    def test_native_v2_risk_discovery_rejects_hidden_selection(self) -> None:
+        """Future risk modules remain in the broad package discovery gate."""
+        target = ROOT / '.github/workflows/test.yml'
+        original = Path.read_text
+        for extra in ("-k 'not options'", '-m unit', '--ignore=packages/core/core/tests',
+                      '--ignore-glob=*options*', '--deselect=options', '--collect-only',
+                      "-ktest_keep", "-munit"):
+            with self.subTest(selection=extra):
+                def read(path, *args, **kwargs):
+                    text = original(path, *args, **kwargs)
+                    return text.replace('pytest packages/*/*/tests/ ',
+                                        'pytest packages/*/*/tests/ ' + extra + ' ') if path == target else text
+                with patch.object(Path, 'read_text', read):
+                    with self.assertRaisesRegex(AssertionError, 'Hidden selection'):
+                        self.test_native_v2_risk_tests_retain_python_package_discovery()
+
+    def test_incident_registration_methods_meet_public_standards(self) -> None:
+        """The two incident controls retain public annotations and purposes."""
+        tree = ast.parse((ROOT / 'tools/acceptance/tests/contracts.py').read_text())
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Registrations')
+        names = {'test_incident_protocol_control_inventory_and_runner',
+                 'test_incident_protocol_registration_omissions_fail'}
+        methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in names]
+        self.assertEqual({node.name for node in methods}, names)
+        for node in methods:
+            with self.subTest(method=node.name):
+                self.assertEqual(ast.dump(node.returns) if node.returns is not None else None,
+                                 'Constant(value=None)', 'Missing public return annotation')
+                self.assertTrue(ast.get_docstring(node), 'Missing public purpose docstring')
+
+    def test_desk_spec_is_registered_for_typecheck(self) -> None:
+        """Require the complete desk spec in the maintained compiler inventory."""
+        source = ROOT / 'packages/apps/terminal/tsconfig.e2e-infra.json'
+        self.assertIn('e2e/designer-desk-measure.spec.ts', json.loads(source.read_text())['include'],
+                      'Missing desk typecheck registration')
+
+    def test_desk_spec_is_registered_for_zero_warning_lint(self) -> None:
+        """Require the complete desk spec in the maintained zero-warning lint."""
+        source = ROOT / 'packages/apps/terminal/package.json'
+        argv = shlex.split(json.loads(source.read_text())['scripts']['e2e:infra:lint'])
+        self.assertIn('e2e/designer-desk-measure.spec.ts', argv, 'Missing desk lint registration')
+        self.assertIn('--max-warnings=0', argv)
+
+    def test_desk_typecheck_registration_omission_fails(self) -> None:
+        """Detect a compiler omission independently of the lint inventory."""
+        target = ROOT / 'packages/apps/terminal/tsconfig.e2e-infra.json'
+        original = Path.read_text
+        value = json.loads(original(target))
+        value['include'].remove('e2e/designer-desk-measure.spec.ts')
+        def read(path: Path, *args, **kwargs) -> str:
+            return json.dumps(value) if path == target else original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', read):
+            self.test_desk_spec_is_registered_for_zero_warning_lint()
+            with self.assertRaisesRegex(AssertionError, 'Missing desk typecheck registration'):
+                self.test_desk_spec_is_registered_for_typecheck()
+
+    def test_desk_lint_registration_omission_fails(self) -> None:
+        """Detect a lint omission independently of the compiler inventory."""
+        target = ROOT / 'packages/apps/terminal/package.json'
+        original = Path.read_text
+        value = json.loads(original(target))
+        argv = shlex.split(value['scripts']['e2e:infra:lint'])
+        argv.remove('e2e/designer-desk-measure.spec.ts')
+        value['scripts']['e2e:infra:lint'] = shlex.join(argv)
+        def read(path: Path, *args, **kwargs) -> str:
+            return json.dumps(value) if path == target else original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', read):
+            self.test_desk_spec_is_registered_for_typecheck()
+            with self.assertRaisesRegex(AssertionError, 'Missing desk lint registration'):
+                self.test_desk_spec_is_registered_for_zero_warning_lint()
+
+    def test_executor_lifecycle_controls_are_registered(self) -> None:
+        """Require the maintained lifecycle class in the complete package gate."""
+        source = (ROOT / 'tools/acceptance/tests/contracts.py').read_text()
+        self.assertIn('\nfrom executor_lifecycle import ExecutorLifecycle\n', source,
+                      'Missing maintained executor lifecycle registration')
+        controls = (ROOT / 'tools/acceptance/tests/executor_lifecycle.py').read_text()
+        self.assertIn('class ExecutorLifecycle(unittest.TestCase):', controls)
+
+    def test_executor_lifecycle_registration_omission_fails(self) -> None:
+        """Reject an omitted lifecycle registration without weakening its oracle."""
+        from unittest.mock import patch
+        original = Path.read_text
+        target = ROOT / 'tools/acceptance/tests/contracts.py'
+        def omitted(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            return (
+                text.replace('from executor_lifecycle import ExecutorLifecycle', '# omitted')
+                if path == target else text
+            )
+        with patch.object(Path, 'read_text', omitted):
+            with self.assertRaisesRegex(AssertionError, 'Missing maintained executor lifecycle registration'):
+                self.test_executor_lifecycle_controls_are_registered()
+
+    def test_incident_protocol_control_inventory_and_runner(self) -> None:
+        """Require every incident control and its maintained execution gate."""
+        terminal = ROOT / 'packages/apps/terminal'
+        source = (terminal / 'e2e/incident-delivery-protocol.control.ts').read_text()
+        match = re.search(r'const cases = (\[.*?\]) as const;', source)
+        if match is None:
+            self.fail('Missing explicit incident control inventory')
+        scenarios = json.loads(match.group(1))
+        expected = json.loads((ROOT / 'tools/reticle/incident-protocol-cases.json').read_text())
+        self.assertEqual(len(scenarios), 29)
+        self.assertEqual(sorted(expected), sorted('incident protocol ' + name for name in scenarios))
+        self.assertEqual(len(set(expected)), len(expected))
+        config = (terminal / 'playwright.incident-protocol.config.ts').read_text()
+        self.assertIn('testMatch: "incident-delivery-protocol.control.ts"', config)
+        self.assertIn('workers: 1, retries: 0, forbidOnly: true', config)
+        self.assertIn('serviceWorkers: "block"', config)
+        self.assertIn('"playwright.incident-protocol.config.ts"', (terminal / 'eslint.config.mjs').read_text())
+        runner = ast.parse((ROOT / 'tools/reticle/run.py').read_text())
+        def shape(source: str) -> str:
+            """Compare executable expressions without formatting or comments."""
+            return ast.dump(ast.parse(source, mode='eval').body, include_attributes=False)
+        nodes = list(ast.walk(runner))
+        self.assertIn(shape("terminal / 'playwright.incident-protocol.config.ts'"),
+                      [ast.dump(node, include_attributes=False) for node in nodes])
+        validation = [node for node in nodes if isinstance(node, ast.Call)
+                      and isinstance(node.func, ast.Name) and node.func.id == 'validate_cases'
+                      and node.args and ast.dump(node.args[0], include_attributes=False)
+                      == shape("OUT / 'incident-protocol-results.xml'")]
+        self.assertEqual(len(validation), 1)
+        controls = [node for node in nodes if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == 'run'
+                    and len(node.args) >= 2
+                    and [ast.dump(arg, include_attributes=False) for arg in node.args[:2]]
+                    == [shape('controls'), shape("'incident-protocol-controls'")]]
+        originals = [node for node in nodes if isinstance(node, ast.Assign)
+                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                     and node.targets[0].id == 'code' and isinstance(node.value, ast.Call)
+                     and isinstance(node.value.func, ast.Name) and node.value.func.id == 'run'
+                     and len(node.value.args) >= 2
+                     and [ast.dump(arg, include_attributes=False) for arg in node.value.args[:2]]
+                     == [shape('cmd'), shape("'original'")]]
+        self.assertEqual(len(controls), 1)
+        self.assertEqual(len(originals), 1)
+        self.assertLess(controls[0].lineno, originals[0].lineno)
+
+    def test_incident_protocol_registration_omissions_fail(self) -> None:
+        """Reject missing incident compiler, lint and runner registrations."""
+        terminal = ROOT / 'packages/apps/terminal'
+        original = Path.read_text
+        files = [
+            'e2e/incident-delivery-protocol.ts', 'e2e/incident-delivery-protocol.control.ts',
+            'playwright.incident-protocol.config.ts',
+        ]
+        for inventory in ['tsconfig.e2e-infra.json', 'package.json']:
+            for omitted in files:
+                with self.subTest(inventory=inventory, omitted=omitted):
+                    target = terminal / inventory
+                    content = json.loads(original(target))
+                    if inventory.startswith('tsconfig'):
+                        content['include'].remove(omitted)
+                    else:
+                        content['scripts']['e2e:infra:lint'] = content['scripts']['e2e:infra:lint'].replace(
+                            omitted + ' ', ''
+                        )
+                    def read(path, *args, **kwargs):
+                        return json.dumps(content) if path == target else original(path, *args, **kwargs)
+                    with patch.object(Path, 'read_text', read):
+                        with self.assertRaisesRegex(
+                            AssertionError, 'Missing (infra typecheck|zero-warning lint) registration'
+                        ):
+                            self.test_new_e2e_sources_are_in_typecheck_and_lint_inventories()
+        for relative, before, after in [
+            ('tools/reticle/run.py', "'playwright.incident-protocol.config.ts'", "'omitted.ts'"),
+            ('tools/reticle/run.py', "'incident-protocol-results.xml'", "'omitted.xml'"),
+            ('tools/reticle/run.py', "'incident-protocol-controls'", "'omitted-controls'"),
+            ('tools/reticle/run.py', "'original'", "'omitted-original'"),
+            ('packages/apps/terminal/eslint.config.mjs', '"playwright.incident-protocol.config.ts"', '"omitted.ts"'),
+            ('tools/reticle/incident-protocol-cases.json', 'incident protocol positive', 'incident protocol omitted'),
+        ]:
+            with self.subTest(omitted=relative):
+                target = ROOT / relative
+                content = original(target).replace(before, after)
+                self.assertNotEqual(content, original(target))
+                def read_runner(path, *args, **kwargs):
+                    return content if path == target else original(path, *args, **kwargs)
+                with patch.object(Path, 'read_text', read_runner):
+                    with self.assertRaises(AssertionError):
+                        self.test_incident_protocol_control_inventory_and_runner()
+
+    def test_ci_runs_the_synthetic_contract_subset(self) -> None:
+        """Require the maintained isolated carrier and every required CI class."""
+        workflow = (ROOT / '.github/workflows/test.yml').read_text()
+        from ci_python_contracts import WORKFLOW_COMMAND, CI_CLASSES
+        self.assertTrue(
+            'run: ' + WORKFLOW_COMMAND in workflow, 'CI is missing the synthetic report/registration contract step'
+        )
+        self.assertTrue(
+            {'Reports', 'Registrations', 'ExecutorLifecycle', 'PythonSandbox', 'PythonCarrier'} <= set(CI_CLASSES)
+        )
 
     def test_new_e2e_sources_are_in_typecheck_and_lint_inventories(self):
         terminal = ROOT / 'packages/apps/terminal'
@@ -158,7 +396,7 @@ class Registrations(unittest.TestCase):
         app = config('tsconfig.json')
         infra = config('tsconfig.e2e-infra.json')
         expected_app = {'e2e/incidents/fixture.tsx', 'e2e/service-oauth-handoff.fixture.tsx', 'e2e/service-oauth-handoff.entry.ts'}
-        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts', 'e2e/visual/help-placement.ts'}
+        expected_infra = {'e2e/incident-delivery-protocol.ts','e2e/incident-delivery-protocol.control.ts','playwright.incident-protocol.config.ts', 'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts', 'e2e/visual/help-placement.ts'}
         self.assertFalse(expected_app - set(app['include']), 'Missing app fixture typecheck registration: ' + str(expected_app - set(app['include'])))
         self.assertFalse(expected_infra - set(infra['include']), 'Missing infra typecheck registration: ' + str(expected_infra - set(infra['include'])))
         self.assertIs(app['compilerOptions']['allowImportingTsExtensions'], True)
@@ -405,7 +643,7 @@ class BrowserRoles(unittest.TestCase):
                     elif mutation == 'reordered-frames':
                         lines = primary['stack'].splitlines(); lines[-2:] = reversed(lines[-2:]); primary['stack'] = '\n'.join(lines)
                     elif mutation == 'extra-frame': primary['stack'] += '\n    at unrelated (/unrelated.ts:1:1)'
-                    elif mutation == 'rendered-stack-mismatch': rendered['message'] = rendered['message'].replace(':537:33)', ':538:33)')
+                    elif mutation == 'rendered-stack-mismatch': rendered['message'] = rendered['message'].replace(':597:33)', ':598:33)')
                     elif mutation == 'location-mismatch': rendered['location'] = dict(rendered['location'], line=640)
                     elif mutation == 'snippet-suffix':
                         primary['snippet'] += '\nUNEXPECTED EXTRA FAILURE'
@@ -510,5 +748,10 @@ class BrowserRoles(unittest.TestCase):
             with self.assertRaises(ValueError): module.collect({},execute)
             self.assertEqual(calls,['default-collection','default-infra-collection'])
 
+# Both the normal package gate and the isolated CI carrier execute these bodies.
+from executor_lifecycle import ExecutorLifecycle
+from isolated_python import PythonSandbox, PythonCarrier
+
 if __name__=='__main__':
-    unittest.main(verbosity=2)
+    from ci_python_contracts import contract_main
+    contract_main()

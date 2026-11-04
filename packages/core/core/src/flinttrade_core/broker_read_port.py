@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
+from datetime import date
 from enum import StrEnum
 from typing import Literal, Protocol, TypeAlias, TypeVar
 from uuid import UUID
@@ -453,6 +454,19 @@ class InstrumentLotSizeSnapshot:
     exchange: str
     lot_size: int
     instrument_id: str | None = None
+    underlying: str | None = None
+    expiry: str | None = None
+    option_type: str | None = None
+    strike_price: str | None = None
+    tick_size: str | None = None
+    tick_unit: str | None = None
+    raw_tick_size: str | None = None
+    raw_tick_unit: str | None = None
+    source_revision: str | None = None
+    source_digest: str | None = None
+    observed_at: str | None = None
+    valid_until: str | None = None
+    raw_observation_json: str | None = None
 
     def __post_init__(self) -> None:
         _required_str(self.symbol)
@@ -460,6 +474,9 @@ class InstrumentLotSizeSnapshot:
         _optional_str(self.instrument_id)
         if type(self.lot_size) is not int or not 1 <= self.lot_size <= 1_000_000:
             _invalid()
+        for item in fields(self):
+            if item.name not in {"symbol", "exchange", "lot_size", "instrument_id"}:
+                _optional_str(getattr(self, item.name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,11 +538,24 @@ class MarginRequest:
 @dataclass(frozen=True, slots=True)
 class MarginSnapshot:
     required_margin: float
+    request: MarginRequest | None = None
+    provider_additional_margin: str | None = None
+    rms_validated: str | None = None
+    raw_observation_json: str | None = None
+    estimate_kind: Literal["provider_order_estimate"] = "provider_order_estimate"
 
     def __post_init__(self) -> None:
         _float(self.required_margin)
         if self.required_margin < 0:
             _invalid()
+        if type(self.estimate_kind) is not str or self.estimate_kind != "provider_order_estimate":
+            _invalid()
+        if self.request is not None:
+            if type(self.request) is not MarginRequest:
+                _invalid()
+            self.request.__post_init__()
+        for value in (self.provider_additional_margin, self.rms_validated, self.raw_observation_json):
+            _optional_str(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -686,8 +716,35 @@ class TradeSnapshot:
     multiplier: float | None
     fx_rate: float | None
     cross_currency: bool | None
+    fill_id: str | None = None
+    fill_leg: str | None = None
+    exchange_order_id: str | None = None
+    broker_account_id: str | None = None
+    broker_exchange_segment: str | None = None
+    broker_product_type: str | None = None
+    trade_date: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    exchange_time: str | None = None
+    fill_time: str | None = None
+    raw_observation_json: str | None = None
 
     def __post_init__(self) -> None:
+        for name in (
+            "fill_id",
+            "fill_leg",
+            "exchange_order_id",
+            "broker_account_id",
+            "broker_exchange_segment",
+            "broker_product_type",
+            "trade_date",
+            "created_at",
+            "updated_at",
+            "exchange_time",
+            "fill_time",
+            "raw_observation_json",
+        ):
+            _optional_str(getattr(self, name))
         for value in (self.symbol, self.exchange, self.action, self.quantity, self.price, self.product, self.timestamp):
             _required_str(value)
         _optional_str(self.orderid)
@@ -807,6 +864,9 @@ class OrderStateSnapshot:
     # Presence-sensitive resource/rule observations, not child execution or
     # effective protection. Immutable JSON retains native null/blank values.
     raw_observation_json: str | None = None
+    broker_account_id: str | None = None
+    broker_exchange_segment: str | None = None
+    correlation_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.family) is not BrokerOrderFamily:
@@ -837,6 +897,9 @@ class OrderStateSnapshot:
             self.exchange_order_id,
             self.leg_name,
             self.broker_product,
+            self.broker_account_id,
+            self.broker_exchange_segment,
+            self.correlation_id,
             self.broker_order_type,
             self.validity,
             self.created_at,
@@ -858,6 +921,262 @@ class OrderStateSnapshot:
         ):
             _invalid()
         _tuple_of(self.legs, OrderLegStateSnapshot)
+
+
+@dataclass(frozen=True, slots=True)
+class TradeHistoryRequest:
+    """Bounded date/page read; no claimed provider terminal-page guarantee."""
+
+    start_date: str
+    end_date: str
+    max_pages: int
+    start_page: int = 0
+    max_rows: int = 10000
+
+    def __post_init__(self) -> None:
+        for value in (self.start_date, self.end_date):
+            _required_str(value)
+            if date.fromisoformat(value).isoformat() != value:
+                _invalid()
+        if not 0 <= (date.fromisoformat(self.end_date) - date.fromisoformat(self.start_date)).days <= 31:
+            _invalid()
+        if type(self.max_pages) is not int or not 1 <= self.max_pages <= 16:
+            _invalid()
+        if type(self.start_page) is not int or not 0 <= self.start_page <= 10000:
+            _invalid()
+        if type(self.max_rows) is not int or not 1 <= self.max_rows <= 10000:
+            _invalid()
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationCoverage:
+    """Observed resource scope, never an assertion of lifetime absence."""
+
+    resource: str
+    availability: Literal[
+        "available", "invalid_request", "target_unavailable", "target_ambiguous", "target_stale",
+        "unauthorised", "revoked", "disconnected", "unsupported", "provider_failure", "malformed_response",
+    ]
+    query_start: str | None
+    query_end: str | None
+    trading_date: str | None
+    timezone: str | None
+    page_model: str
+    pages: tuple[int, ...]
+    observed_count: int
+    source_digest: str | None
+    source_revision: str
+    completeness: Literal["unknown", "partial", "window_only", "requested_scope"]
+    terminal_evidence: str | None = None
+    missing_intervals: tuple[str, ...] = ()
+    issues: tuple[str, ...] = ()
+    atomic: bool = False
+    generation: int | None = None
+    provider_account_id: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    provenance_json: str | None = None
+    provider_coverage_json: str | None = None
+    returned_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerRequest:
+    """Bounded date-window request for account postings, never paid allocations."""
+
+    start_date: str
+    end_date: str
+    max_rows: int = 10000
+
+    def __post_init__(self) -> None:
+        TradeHistoryRequest(self.start_date, self.end_date, 1, max_rows=self.max_rows)
+
+
+@dataclass(frozen=True, slots=True)
+class AccountPostingSnapshot:
+    """One raw account posting; debit or credit is not payment attribution."""
+
+    voucher_number: str | None
+    voucher_date: str | None
+    debit: str | None
+    credit: str | None
+    raw_observation_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerSnapshot:
+    """Copied account postings with their explicit coverage uncertainty."""
+
+    postings: tuple[AccountPostingSnapshot, ...]
+    coverage: ObservationCoverage
+
+
+@dataclass(frozen=True, slots=True)
+class TradeHistorySnapshot:
+    """Accepted historical trade prefix and bounded collection coverage."""
+
+    trades: tuple[TradeSnapshot, ...]
+    coverage: ObservationCoverage
+
+
+@dataclass(frozen=True, slots=True)
+class TradeBookSnapshot:
+    """Copied daily trades with optional exact producer coverage evidence."""
+
+    trades: tuple[TradeSnapshot, ...]
+    provider_coverage_json: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BrokerObservationSnapshot:
+    """One bounded owner capture. Provider evidence is not eligibility."""
+
+    provenance: BrokerReadProvenance
+    provider_account_id: str
+    started_at: str
+    finished_at: str
+    trades: tuple[TradeSnapshot, ...]
+    coverage: tuple[ObservationCoverage, ...]
+    contracts: tuple[InstrumentLotSizeSnapshot, ...] = ()
+    margins: tuple[MarginSnapshot, ...] = ()
+    account_postings: tuple[AccountPostingSnapshot, ...] = ()
+    surfaces: tuple[CapturedReadSurface, ...] = ()
+    read_budget_json: str | None = None
+    native_scope_json: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedReadSurface:
+    """Detached typed-projection JSON, not a complete-book or permission claim."""
+
+    surface: str
+    family: str | None
+    value_json: str | None
+    coverage: ObservationCoverage
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedReadSurface:
+    """A surface from one durable capture with its exact source generation."""
+
+    generation: int
+    provider_account_id: str
+    provenance_json: str
+    observation: CapturedReadSurface
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalFillSnapshot:
+    """One exact scoped execution and its independently evidenced attempt owner."""
+
+    namespace: tuple[str, ...]
+    trade: TradeSnapshot
+    owner_attempt_id: str | None
+    native_order_scope: tuple[str, ...] | None = None
+
+
+class FeeObservationState(StrEnum):
+    """Distinct fee/payment observations; unknown amounts never imply payment."""
+
+    ESTIMATED = "estimated"
+    BROKER_HOLD = "broker_hold"
+    ACCRUED_UNPAID = "accrued_unpaid"
+    OBSERVED_PAID = "observed_paid"
+    ADJUSTMENT = "adjustment"
+    REVERSED = "reversed"
+    PAYMENT_UNKNOWN = "payment_unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class FeeObservationSnapshot:
+    """A reported amount, not a tariff, paid allocation or IncurredCharge.
+
+    Current reviewed producers cannot attest paid, held, unpaid or reversal
+    allocation. Those states stay distinct and unavailable, not inferred from
+    timestamps, signs, a contract-note amount or caller-supplied references.
+    """
+
+    namespace: tuple[str, ...]
+    component: str
+    amount: str
+    state: FeeObservationState
+    source_digest: str
+    payment_reference: None = None
+    policy_reference: None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalObservationSnapshot:
+    """Immutable view of the existing lifecycle owner's retained observations.
+
+    No source, SDK or runtime assertion supplies broker eligibility, custody,
+    payment, or a native admission grant. Inspection remains possible offline.
+    """
+
+    selector: BrokerSelector
+    generation: int
+    fills: tuple[CanonicalFillSnapshot, ...]
+    coverage: tuple[ObservationCoverage, ...]
+    conflicts: tuple[str, ...]
+    missing_evidence: tuple[str, ...]
+    source_current: bool = False
+    admission_available: bool = False
+    evidence_json: str = "{}"
+    fees: tuple[FeeObservationSnapshot, ...] = ()
+    contracts: tuple[InstrumentLotSizeSnapshot, ...] = ()
+    margins: tuple[MarginSnapshot, ...] = ()
+    order_fills: tuple[OrderFillReconciliation, ...] = ()
+    account_postings: tuple[AccountPostingSnapshot, ...] = ()
+    coverage_history: tuple[ObservationCoverage, ...] = ()
+    unallocated_trades: tuple[RetainedTradeObservation, ...] = ()
+    contract_history: tuple[RetainedContractObservation, ...] = ()
+    margin_history: tuple[RetainedMarginObservation, ...] = ()
+    trade_history: tuple[RetainedTradeObservation, ...] = ()
+    surfaces: tuple[CapturedReadSurface, ...] = ()
+    surface_history: tuple[RetainedReadSurface, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedTradeObservation:
+    """An unchanged independent trade observation with its source generation."""
+
+    generation: int
+    provider_account_id: str
+    provenance_json: str
+    trade: TradeSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedContractObservation:
+    """One retained contract observation and exact owner provenance."""
+
+    generation: int
+    provider_account_id: str
+    provenance_json: str
+    contract: InstrumentLotSizeSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class RetainedMarginObservation:
+    """One retained order-margin estimate, not standalone short capital."""
+
+    generation: int
+    provider_account_id: str
+    provenance_json: str
+    margin: MarginSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class OrderFillReconciliation:
+    """Cumulative evidence is a high-water constraint, not another execution."""
+
+    orderid: str
+    unique_quantity: str
+    cumulative_high_water: str
+    unexplained_quantity: str
+    native_order_scope: tuple[str, ...] | None = None
+    owner_attempt_id: str | None = None
+    observation_scope: tuple[str, ...] | None = None
 
 
 class BrokerReadPort(Protocol):
@@ -888,3 +1207,25 @@ class BrokerReadPort(Protocol):
     async def order_states(self, request: OrderStateRequest) -> BrokerReadOutcome[tuple[OrderStateSnapshot, ...]]: ...
 
     async def trades(self) -> BrokerReadOutcome[tuple[TradeSnapshot, ...]]: ...
+
+    async def trade_history(self, request: TradeHistoryRequest) -> BrokerReadOutcome[TradeHistorySnapshot]:
+        """Read a bounded history prefix without asserting terminal completeness.
+
+        Args:
+            request: Explicit bounded native date window and collection budget.
+
+        Returns:
+            Copied observations with coverage, or a typed read refusal.
+        """
+        ...
+
+    async def ledger(self, request: LedgerRequest) -> BrokerReadOutcome[LedgerSnapshot]:
+        """Read account postings without inferring paid fee allocations.
+
+        Args:
+            request: Explicit bounded native date window and collection budget.
+
+        Returns:
+            Copied observations with coverage, or a typed read refusal.
+        """
+        ...

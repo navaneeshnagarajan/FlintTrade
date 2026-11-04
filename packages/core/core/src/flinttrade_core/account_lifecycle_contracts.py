@@ -520,15 +520,43 @@ class AccountOperationSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadOnlyRecoveryOutcome:
+    """Complete owner census reference; neither read ACL nor account flatness."""
+
+    selector: BrokerSelector
+    census_revision: str
+    run_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """Validate the exact selector and complete publication-time census reference."""
+        _validate_selector(self.selector)
+        if (type(self.selector) is not BrokerSelector or type(self.census_revision) is not str
+                or len(self.census_revision) != 64 or any(c not in "0123456789abcdef" for c in self.census_revision)
+                or type(self.run_ids) is not tuple or not self.run_ids
+                or any(type(value) is not str or not value for value in self.run_ids)
+                or len(set(self.run_ids)) != len(self.run_ids)):
+            raise AccountContractError
+
+
+@dataclass(frozen=True, slots=True)
 class AccountMutationOutcome:
     receipt: AccountMutationReceipt
     runtime_status: str
+    recovery: ReadOnlyRecoveryOutcome | None = None
 
     def __post_init__(self) -> None:
+        """Keep durable disposition separate from the typed installed recovery outcome."""
         if (
             type(self.receipt) is not AccountMutationReceipt
             or type(self.runtime_status) is not str
-            or self.runtime_status not in {"ready", "removed", "session_unavailable", "cleanup_pending", "blocked"}
+            or self.runtime_status not in {
+                "ready", "removed", "session_unavailable", "cleanup_pending", "blocked", "read_only_recovery"
+            }
+            or self.recovery is not None and type(self.recovery) is not ReadOnlyRecoveryOutcome
+            or (self.runtime_status == "read_only_recovery") != (type(self.recovery) is ReadOnlyRecoveryOutcome)
+            or self.recovery is not None and self.recovery.selector != self.receipt.selector
         ):
             raise AccountContractError
         self.receipt.__post_init__()
+        if self.recovery is not None:
+            self.recovery.__post_init__()

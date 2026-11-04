@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from flinttrade_gateway.account_transaction_store import AccountTransactionStore
@@ -64,6 +64,7 @@ class _Attempt:
     ticket: CleanupTicket | None = None
     borrowing: bool = False
     settled: bool = False
+    recovery: object | None = None
 
 
 class BrokerAccountReadRuntime:
@@ -78,6 +79,7 @@ class BrokerAccountReadRuntime:
         adapters: dict[str, object],
         rate_limiter: object,
         runtime_accepting_requests: Callable[[], bool],
+        publish_generation: Callable[[WorkspaceSnapshot], None] | None = None,
     ) -> None:
         self.registry = registry
         self.workspace_path = Path(workspace_path)
@@ -85,6 +87,7 @@ class BrokerAccountReadRuntime:
         self._adapters = dict(adapters)
         self._rate_limiter = rate_limiter
         self._accepting = runtime_accepting_requests
+        self._publish_generation = publish_generation
         self.read_owner: BrokerReadOwner | None = None
         self._retiring: list[BrokerReadOwner] = []
         self._provider: AuthenticatingSessionProvider | None = None
@@ -137,7 +140,9 @@ class BrokerAccountReadRuntime:
             for state in self.registry.list_exact_states()
         )
         if not usable:
-            self._provider = None
+            self._provider = provider if self._publish_generation is not None else None
+            if self._publish_generation is not None:
+                self._publish_generation(snapshot)
             return
         self._provider = provider
         self.read_owner = BrokerReadOwner(
@@ -148,6 +153,8 @@ class BrokerAccountReadRuntime:
             rate_limiter=self._rate_limiter,
             runtime_accepting_requests=self._accepting,
         )
+        if self._publish_generation is not None:
+            self._publish_generation(snapshot)
 
     def ready(self, selector: BrokerSelector, version: CredentialVersion) -> bool:
         if self.read_owner is None or self._provider is None or self._accepting() is not True:
@@ -177,7 +184,11 @@ class BrokerAccountTransactionCoordinator:
         *,
         audit_sink: Callable[[AccountMutationAudit], UUID] | None = None,
         verify_current_actor: Callable[[], AccountActorContext] | None = None,
+        legacy_reconnect_admission: Callable[[AccountMutationRequest], None] | None = None,
+        mutation_fence: Callable[[AccountMutationLease], Any] | None = None,
+        recovery_fence: Callable[[AccountMutationRequest, _Attempt, str], Any] | None = None,
     ) -> None:
+        """Bind existing store, lifecycle, registry and optional phase-aware custody fences."""
         if (
             type(store) is not AccountTransactionStore
             or type(workspace) is not BrokerAccountWorkspace
@@ -199,8 +210,29 @@ class BrokerAccountTransactionCoordinator:
         self.runtime = runtime_builder
         self._admission = mutation_admission
         self._verify_actor = verify_current_actor
+        self._legacy_reconnect_admission = legacy_reconnect_admission
         self._audit_sink = audit_sink
+        self._mutation_fence = mutation_fence
+        self._recovery_fence = recovery_fence
         self._attempts: dict[object, _Attempt] = {}
+
+    def _publish_native_fenced(
+        self, lease: AccountMutationLease, callback: Callable[[], Any], *,
+        request: AccountMutationRequest | None = None, phase: str = "prepare",
+    ) -> Any:
+        """Hold the exact request/phase-aware fence only across local publication."""
+        from contextlib import nullcontext
+
+        def publish() -> Any:
+            """Revalidate the actual request witness inside its existing account lease."""
+            if (request is not None and request.kind is AccountMutationKind.RECONNECT
+                    and self._recovery_fence is not None):
+                fence = self._recovery_fence(request, self._attempts[request.operation_id], phase)
+            else:
+                fence = nullcontext() if self._mutation_fence is None else self._mutation_fence(lease)
+            with fence:
+                return callback()
+        return self.lifecycle.publish_if_current(lease, publish)
 
     def _principal(self, request: AccountMutationRequest) -> None:
         try:
@@ -219,8 +251,12 @@ class BrokerAccountTransactionCoordinator:
             record = self.registry.snapshot_exact_state(request.selector)
             if state.present or record is not None and record.binding is not None:
                 raise BrokerAccountWorkspaceUnavailable
-        elif not state.present or not state.credential_present or state.origin != "managed":
+        elif not state.present or not state.credential_present:
             raise BrokerAccountWorkspaceUnavailable
+        elif state.origin != "managed":
+            if self._legacy_reconnect_admission is None:
+                raise BrokerAccountWorkspaceUnavailable
+            self._legacy_reconnect_admission(request)
 
     def _validate_new(self, request: AccountMutationRequest) -> WorkspaceSnapshot:
         snapshot = self.workspace.assert_coherent()
@@ -235,7 +271,9 @@ class BrokerAccountTransactionCoordinator:
     def _outcome(
         self, receipt: AccountMutationReceipt, request: AccountMutationRequest | None = None
     ) -> AccountMutationOutcome:
+        """Return the original receipt with independently rechecked current availability."""
         attempt = self._attempts.get(receipt.operation_id)
+        recovery = None
         if receipt.state in (AccountOperationStage.BLOCKED, AccountOperationStage.AUTHENTICATION_UNKNOWN):
             status = "blocked"
         elif attempt is not None and not attempt.settled:
@@ -271,7 +309,24 @@ class BrokerAccountTransactionCoordinator:
                     )
             except Exception:
                 status = "session_unavailable"
-        return AccountMutationOutcome(receipt, status)
+        if status == "ready":
+            from .account_lifecycle_contracts import ReadOnlyRecoveryOutcome
+            try:
+                if self.runtime._provider is None:
+                    raise BrokerAccountWorkspaceUnavailable
+                authority = self.runtime._provider.current_authority_for(receipt.selector)
+                handle = self.registry.get_connected_session_for(receipt.selector, current_authority=authority)
+                if type(handle.read_only_recovery) is ReadOnlyRecoveryOutcome and handle.is_read_only:
+                    recovery, status = handle.read_only_recovery, "read_only_recovery"
+            except Exception:
+                status = "session_unavailable"
+        return AccountMutationOutcome(receipt, status, recovery)
+
+    def _terminal_claim(self, operation_id: UUID) -> bool:
+        """Read the exact durable receipt; unknown authentication never releases custody."""
+        operation = self.store.operation(operation_id)
+        return (operation.receipt is not None and operation.receipt.operation_id == operation_id
+                and operation.receipt.state in (AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED))
 
     async def _settle(self, receipt: AccountMutationReceipt, attempt: _Attempt, deadline: float) -> None:
         if receipt.state not in (AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED):
@@ -352,14 +407,26 @@ class BrokerAccountTransactionCoordinator:
             raise BrokerAccountWorkspaceUnavailable
 
     def _publish(self, request: AccountMutationRequest, attempt: _Attempt) -> None:
-        def publish(snapshot, version):
+        """Publish only the retained candidate through exact registry and workspace CAS."""
+        def publish(snapshot: WorkspaceSnapshot, version: CredentialVersion) -> WorkspaceSnapshot:
+            """Recheck principal and candidate before adopting its exact prepared registry receipt."""
             self._principal(request)
+            if attempt.recovery is not None:
+                attempt.candidate.require_identity(
+                    attempt.candidate.identity_evidence.adapter, request.selector.account_id
+                )
+                if not attempt.candidate.session.read_only_lifetime or not attempt.candidate.is_read_only:
+                    raise ValueError("native_recovery_write_restriction_changed")
             authority = ManagedSessionAuthority(version, snapshot.version, broker_workspace_version(snapshot))
             prepared = None
             try:
                 prepared = self.registry_owner.prepare_session_candidate(
                     request.selector,
                     attempt.candidate.session,
+                    # Native adapters already retain their installed SDK on this
+                    # exact candidate. Carry it into the managed registry binding
+                    # used by preflight/provenance; never create a second client.
+                    client=attempt.candidate.session.extra.get("client"),
                     expected_registry=attempt.tombstone,
                     authority=authority,
                     broker=request.broker,
@@ -451,13 +518,17 @@ class BrokerAccountTransactionCoordinator:
                 if self.store.existing_request(request) is not None:
                     self.store.release_claim(request.operation_id)
 
-            lease = self.lifecycle.begin(request.operation_id, request.selector, durable_claim_release=release_claim)
+            lease = self.lifecycle.begin(
+                request.operation_id, request.selector, durable_claim_release=release_claim,
+                durable_claim_ready=lambda: self._terminal_claim(request.operation_id),
+            )
             attempt = _Attempt(lease, expected_registry=self.registry.snapshot_selector(request.selector))
             self._attempts[request.operation_id] = attempt
         attempt.borrowing = True
         admitted = existing is not None
         try:
             if existing is None:
+                self._publish_native_fenced(attempt.lease, lambda: None, request=request)
                 self._validate_new(request)
                 existing = self.store.admit(request)
                 admitted = True
@@ -467,11 +538,12 @@ class BrokerAccountTransactionCoordinator:
                     await self._settle(receipts[0], attempt, deadline)
                     return self._outcome(receipts[0], request)
                 raise BrokerAccountWorkspaceUnavailable
+            self._publish_native_fenced(attempt.lease, lambda: None, request=request)
             if not await self.lifecycle.retire_generations_async(attempt.lease, max(0.0, deadline - time.monotonic())):
                 receipt = self._disposition(request, attempt, "generation_drain_timeout")
                 await self._settle(receipt, attempt, deadline)
                 return self._outcome(receipt, request)
-            self.lifecycle.publish_if_current(attempt.lease, lambda: self._retire_target(request, attempt))
+            self._publish_native_fenced(attempt.lease, lambda: self._retire_target(request, attempt), request=request)
             self._principal(request)
             snapshot = self.workspace.assert_coherent()
             self._provenance(request)
@@ -514,6 +586,7 @@ class BrokerAccountTransactionCoordinator:
                     return self._outcome(receipt, request)
                 if attempt.candidate.probe_error is not None:
                     raise ValueError("account_candidate_probe_unknown")
+            self._publish_native_fenced(attempt.lease, lambda: None, request=request)
             read_only = None if request.kind is AccountMutationKind.REMOVE else attempt.candidate.is_read_only
             patch = BrokerAccountPatch(request.kind, request.selector, request.data_roles, read_only)
             self.store.stage_plan(
@@ -525,8 +598,9 @@ class BrokerAccountTransactionCoordinator:
                 before_digest=broker_account_digest(snapshot),
                 after_digest=broker_account_digest(patch.apply(snapshot.config)),
             )
-            receipt = self.lifecycle.publish_if_current(
-                attempt.lease, lambda: self._commit_and_publish(request, attempt, patch)
+            receipt = self._publish_native_fenced(
+                attempt.lease, lambda: self._commit_and_publish(request, attempt, patch),
+                request=request, phase="publish"
             )
             await self._settle(receipt, attempt, deadline)
             return self._outcome(receipt, request)
@@ -564,6 +638,7 @@ class BrokerAccountTransactionCoordinator:
                     active.operation_id,
                     active.selector,
                     durable_claim_release=lambda: self.store.release_claim(active.operation_id),
+                    durable_claim_ready=lambda: self._terminal_claim(active.operation_id),
                 ),
                 expected_registry=self.registry.snapshot_selector(active.selector),
             )

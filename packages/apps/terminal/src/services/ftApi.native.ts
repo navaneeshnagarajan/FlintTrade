@@ -9,6 +9,7 @@
 
 import { get, accountMutation } from "./ftApi.helpers";
 import { discoverNativeAccounts } from "./nativeAccountDiscovery";
+import { decodeConnectResult, decodeReloginResult, type ManagedAccountResult, type LegacyConnectResult, type LegacyReloginResult } from "./nativeAccountResult";
 
 export interface NativeAuthField {
   name: string;
@@ -214,10 +215,7 @@ export async function readNativeAccount<T>(
   );
 }
 
-export interface ConnectResult {
-  connected: boolean;
-  login: string;
-}
+export type ConnectResult = ManagedAccountResult | LegacyConnectResult;
 
 export async function connectNativeAccount(input: {
   adapter_id: string;
@@ -226,12 +224,11 @@ export async function connectNativeAccount(input: {
   credentials: Record<string, string>;
   is_primary?: boolean;
 }, idempotencyKey: string): Promise<ConnectResult> {
-  // A failed connect is a non-2xx, so `post` throws the backend message before
-  // returning; a 2xx always carries connected:true.
-  const r = await accountMutation<{ connected: boolean; login: string }>(
+  const target = { broker: input.adapter_id, accountId: input.account_id };
+  const r = await accountMutation<unknown>(
     "api/v1", "POST", "native/accounts", idempotencyKey, input,
   );
-  return { connected: !!r?.connected, login: r?.login ?? "" };
+  return decodeConnectResult(r, idempotencyKey, target);
 }
 
 export interface OAuthStartResult {
@@ -264,12 +261,7 @@ export async function setPrimaryNativeAccount(adapterId: string, accountId: stri
     `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/set-primary`, idempotencyKey, {});
 }
 
-export interface ReloginResult {
-  has_session: boolean;
-  expires_at?: number | null;
-  read_only?: boolean;
-  login?: string;
-}
+export type ReloginResult = ManagedAccountResult | LegacyReloginResult;
 
 /**
  * Re-authenticate a connected account (daily re-auth / expired token, G5).
@@ -282,14 +274,10 @@ export async function reloginNativeAccount(
   credentials: Record<string, string> | undefined,
   idempotencyKey: string,
 ): Promise<ReloginResult> {
-  const r = await accountMutation<{ session: ReloginResult; login?: string }>(
+  const r = await accountMutation<unknown>(
     "api/v1", "POST", `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/login`,
     idempotencyKey,
     credentials ? { credentials } : {},
   );
-  const session = r?.session;
-  if (!session?.has_session) {
-    throw new Error("Re-login did not establish a session — enter fresh credentials.");
-  }
-  return session;
+  return decodeReloginResult(r, idempotencyKey, { broker: adapterId, accountId });
 }

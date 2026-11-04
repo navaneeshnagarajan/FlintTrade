@@ -28,7 +28,7 @@ def _ctx(**overrides) -> RequestContext:
     base = dict(
         jti="jti-1",
         actor_type="human",
-        actor_id="navaneesh",
+        actor_id="synthetic-operator",
         mode="live",
         intent_source=None,
         external_nonce_hash=None,

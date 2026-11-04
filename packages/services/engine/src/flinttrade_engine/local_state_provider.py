@@ -18,7 +18,9 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_EVEN, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 from zoneinfo import ZoneInfo
@@ -27,6 +29,16 @@ from flinttrade_core.db import open_sqlite
 from flinttrade_core.secure_file import harden
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.broker_read_port import (
+        BrokerReadPort,
+        CanonicalObservationSnapshot,
+        LedgerRequest,
+        LotSizeRequest,
+        MarginRequest,
+        TradeHistoryRequest,
+    )
+    from flinttrade_gateway.broker_read_service import BrokerReadOwner
     from flinttrade_gateway.reconciliation import LocalStateSnapshot
 
 _SCHEMA_VERSION = 8
@@ -1403,6 +1415,113 @@ class OrderLifecycleLedger:
             ),
         )
 
+    @staticmethod
+    def _append_native_writer_manifest(
+        connection: sqlite3.Connection, adapter: str, account: str, observed: str, facts: dict[str, Any],
+    ) -> None:
+        """Append immutable writer facts in the existing generation transaction."""
+        payload = {"schema": "flinttrade.native-writer.v1", **facts}
+        previous = connection.execute(
+            "SELECT generation, observed_at FROM snapshot_generations WHERE adapter_id=? AND account_id=?",
+            (adapter, account),
+        ).fetchone()
+        generation = (previous["generation"] if previous else 0) + 1
+        stamp = max(observed, previous["observed_at"]) if previous else observed
+        digest = _fingerprint(payload)
+        connection.execute(
+            "INSERT INTO snapshot_generation_manifests VALUES (?, ?, ?, ?, ?, ?)",
+            (adapter, account, generation, stamp, digest, _canonical_json(payload)),
+        )
+        connection.execute(
+            """INSERT INTO snapshot_generations VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(adapter_id, account_id) DO UPDATE SET generation=excluded.generation,
+            observed_at=excluded.observed_at, content_digest=excluded.content_digest""",
+            (adapter, account, generation, stamp, digest),
+        )
+
+    def native_dispatch_evidence(self, attempt_id: str) -> list[dict[str, Any]]:
+        """Read retained non-secret writer facts, checking every relevant seal.
+
+        Native order date and resource/leg identifiers remain unknown unless
+        independently observed. This read neither resolves a current account
+        alias nor establishes that an acknowledged order executed.
+
+        Args:
+            attempt_id: Exact durable attempt identifier.
+
+        Returns:
+            Detached chronological prepared/ACK facts; empty for an unknown attempt.
+
+        Raises:
+            LifecycleStateError: If a retained manifest fails its integrity check.
+        """
+        with self._connection() as connection:
+            attempt = connection.execute(
+                "SELECT adapter_id, account_id FROM dispatch_attempts WHERE attempt_id=?", (attempt_id,),
+            ).fetchone()
+            if attempt is None:
+                return []
+            return self._native_writer_rows(connection, attempt["adapter_id"], attempt["account_id"], attempt_id)
+
+    @staticmethod
+    def _native_writer_rows(
+        connection: sqlite3.Connection, adapter: str, account: str, attempt_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        result = []
+        for row in connection.execute(
+            "SELECT generation, evidence_json, content_digest FROM snapshot_generation_manifests "
+            "WHERE adapter_id=? AND account_id=? ORDER BY generation", (adapter, account),
+        ):
+            try:
+                if row["evidence_json"]:
+                    payload = json.loads(row["evidence_json"])
+                    if type(payload) is not dict or _canonical_json(payload) != row["evidence_json"]:
+                        raise ValueError
+                else:
+                    payload = OrderLifecycleLedger._snapshot_payload_from_tables(
+                        connection, adapter_id=adapter, account_id=account, generation=row["generation"],
+                    )
+                if _fingerprint(payload) != row["content_digest"]:
+                    raise ValueError
+            except (ValueError, TypeError) as exc:
+                raise LifecycleStateError("native writer manifest integrity failure") from exc
+            if (payload.get("schema") == "flinttrade.native-writer.v1"
+                    and (attempt_id is None or payload.get("attempt_id") == attempt_id)):
+                result.append(payload)
+        return result
+
+    def record_native_acknowledgement(self, attempt_id: str, result: Any, *, native_source: object) -> None:
+        """Retain a genuine full ACK set independently of legacy state projection.
+
+        A late or multi-ID ACK is still evidence of the same attempt; it cannot
+        clear uncertainty or regress a reconciled state. Projection continues
+        through the unchanged acknowledge method with its existing guards.
+
+        Args:
+            attempt_id: The attempt created in the same verified invocation frame.
+            result: Actual scalar or recognised typed adapter acknowledgement.
+            native_source: Retained active invocation witness, never a request DTO.
+
+        Raises:
+            ValueError: If there is no authentic active ACK frontier or full ID set.
+            LifecycleStateError: If the durable attempt/receipt correspondence fails.
+        """
+        from flinttrade_gateway.writer_provenance import acknowledged_facts  # noqa: PLC0415
+
+        facts = acknowledged_facts(native_source, attempt_id, result)
+        with self._connection(write=True) as connection:
+            attempt = connection.execute(
+                "SELECT adapter_id, account_id FROM dispatch_attempts WHERE attempt_id=?", (attempt_id,),
+            ).fetchone()
+            if attempt is None:
+                raise LifecycleStateError("native acknowledgement attempt is missing")
+            rows = self._native_writer_rows(connection, attempt["adapter_id"], attempt["account_id"], attempt_id)
+            prepared = [row for row in rows if row["kind"] == "prepared"]
+            if len(prepared) != 1 or prepared[0]["facts"]["invocation_id"] != facts["invocation_id"]:
+                raise LifecycleStateError("native acknowledgement does not match its original writer")
+            self._append_native_writer_manifest(connection, attempt["adapter_id"], attempt["account_id"],
+                                                _utc_iso(), facts)
+
     def prepare_dispatch(
         self,
         *,
@@ -1412,8 +1531,9 @@ class OrderLifecycleLedger:
         request_context: Any,
         payload: Any,
         observed_at: datetime | str | None = None,
+        native_source: object | None = None,
     ) -> str:
-        """Durably record one broker-write attempt before adapter invocation."""
+        """Durably record one broker-write attempt and verified native facts atomically."""
         adapter = _text(adapter_id).lower()
         account = _normalise_account(account_id)
         operation = _text(operation)
@@ -1434,7 +1554,16 @@ class OrderLifecycleLedger:
         business_day = _business_date(observed_at)
         jti = _text(getattr(request_context, "jti", ""))
         attempt_id = uuid.uuid4().hex
+        native_facts = None
+        if native_source is not None:
+            from flinttrade_gateway.writer_provenance import prepared_facts  # noqa: PLC0415
+
+            native_facts = prepared_facts(native_source, adapter_id=adapter, account_id=account,
+                                          operation=operation, request_context=request_context,
+                                          payload=payload, attempt_id=attempt_id)
         with self._connection(write=True) as connection:
+            if native_facts is not None:
+                self._append_native_writer_manifest(connection, adapter, account, observed, native_facts)
             modify_baseline: dict[str, Any] = {}
             if operation == "modify_order" and requested_modify_fields:
                 target_id = intent["broker_order_id"]
@@ -3349,6 +3478,515 @@ class OrderLifecycleLedger:
                         )
         return generation
 
+    async def refresh_observations(
+        self,
+        read_owner: BrokerReadOwner,
+        port: BrokerReadPort,
+        *,
+        history: TradeHistoryRequest | None = None,
+        lots: LotSizeRequest | None = None,
+        margin: MarginRequest | None = None,
+        ledger: LedgerRequest | None = None,
+        timeout_seconds: float = 30.0,
+        read_plan: object | None = None,
+        quotes: object | None = None,
+    ) -> CanonicalObservationSnapshot:
+        """Append an authorised read capture to this owner's existing manifest.
+
+        There is intentionally no JSON/upload/paid-boolean ingestion interface.
+        This does not advance dispatch state, clear unknown writes, or release
+        holds. The old order reconciliation/resolution evidence stays separate.
+
+        Args:
+            read_owner: Exact current registry-bound observation owner.
+            port: Its exact account-bound read port.
+            history: Optional bounded native history selection.
+            lots: Optional exact contract selection.
+            margin: Optional order-margin estimate selection.
+            ledger: Optional bounded account-posting selection.
+            timeout_seconds: Finite positive collector deadline, at most sixty seconds.
+
+        Returns:
+            The reconstructed immutable retained view, without admission authority.
+
+        Raises:
+            LifecycleStateError: If ownership, capture type, source generation or
+                manifest integrity cannot be established.
+            sqlite3.Error: If the atomic durable append fails.
+        """
+        from flinttrade_core.broker_read_port import BrokerObservationSnapshot, BrokerReadFailure
+        from flinttrade_gateway.broker_read_service import BrokerReadOwner
+
+        if type(read_owner) is not BrokerReadOwner:
+            raise LifecycleStateError("canonical refresh requires the bound read owner")
+        captured = await read_owner.capture_observations(
+            port, history=history, lots=lots, margin=margin, ledger=ledger, timeout_seconds=timeout_seconds,
+            read_plan=read_plan, quotes=quotes,
+        )
+        if type(captured) is BrokerReadFailure:
+            raise LifecycleStateError(f"observation refresh refused: {captured.code.value}")
+        if type(captured) is not BrokerObservationSnapshot:
+            raise LifecycleStateError("invalid owner observation")
+        binding = (captured.provenance, captured.provider_account_id)
+        if read_owner.observation_binding(port) != binding:
+            raise LifecycleStateError("observation source retired")
+        selector = captured.provenance.selector
+        payload = json.loads(json.dumps(asdict(captured), default=self._observation_json_default))
+        payload["schema"] = "flinttrade.canonical-observations.v1"
+        evidence_json = _canonical_json(payload)
+        digest = _fingerprint(payload)
+        with self._outcome_resolution_lock, self._connection(write=True) as connection:
+            previous = connection.execute(
+                "SELECT generation, observed_at FROM snapshot_generations WHERE adapter_id=? AND account_id=?",
+                (selector.adapter_id, selector.account_id),
+            ).fetchone()
+            if previous is not None and _utc_datetime(previous["observed_at"]) > _utc_datetime(captured.finished_at):
+                raise LifecycleStateError("observation precedes current canonical generation")
+            generation = (previous["generation"] if previous else 0) + 1
+            if read_owner.observation_binding(port) != binding:
+                raise LifecycleStateError("observation source retired")
+            connection.execute(
+                "INSERT INTO snapshot_generation_manifests VALUES (?, ?, ?, ?, ?, ?)",
+                (selector.adapter_id, selector.account_id, generation, captured.finished_at, digest, evidence_json),
+            )
+            connection.execute(
+                """INSERT INTO snapshot_generations VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(adapter_id, account_id) DO UPDATE SET generation=excluded.generation,
+                observed_at=excluded.observed_at, content_digest=excluded.content_digest""",
+                (selector.adapter_id, selector.account_id, generation, captured.finished_at, digest),
+            )
+        return self.observation_snapshot(selector)
+
+    @staticmethod
+    def _observation_json_default(value):
+        if type(value) is uuid.UUID:
+            return str(value)
+        raise TypeError("noncanonical observation primitive")
+
+    def observation_snapshot(
+        self,
+        selector: BrokerSelector,
+        *,
+        read_owner: BrokerReadOwner | None = None,
+        port: BrokerReadPort | None = None,
+        max_age_seconds: float | None = None,
+    ) -> CanonicalObservationSnapshot:
+        """Read immutable retained observations; no refresh, login or authority.
+
+        Args:
+            selector: Exact public account selector whose retained facts are inspected.
+            read_owner: Optional actual owner for a local current-source check.
+            port: That owner's bound port, required for a current-source check.
+            max_age_seconds: Explicit finite positive freshness bound when an owner is supplied.
+
+        Returns:
+            Retained executions, independent histories, constraints and uncertainty.
+            Source freshness never grants entry permission or clears obligations.
+
+        Raises:
+            ValueError: If the selector, owner or requested freshness bound is invalid.
+            LifecycleStateError: If a stored generation fails its integrity check.
+            sqlite3.Error: If the durable owner cannot read its existing ledger.
+        """
+        from flinttrade_core.broker_identity import BrokerSelector
+        from flinttrade_core.broker_read_port import (
+            AccountPostingSnapshot,
+            CanonicalFillSnapshot,
+            CanonicalObservationSnapshot,
+            CapturedReadSurface,
+            FeeObservationSnapshot,
+            FeeObservationState,
+            InstrumentLotSizeSnapshot,
+            MarginRequest,
+            MarginSnapshot,
+            ObservationCoverage,
+            OrderFillReconciliation,
+            RetainedContractObservation,
+            RetainedMarginObservation,
+            RetainedReadSurface,
+            RetainedTradeObservation,
+            TradeSnapshot,
+        )
+
+        if type(selector) is not BrokerSelector:
+            raise ValueError("exact selector required")
+        selector.__post_init__()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT generation, evidence_json, content_digest FROM snapshot_generation_manifests
+                WHERE adapter_id=? AND account_id=? ORDER BY generation""",
+                (selector.adapter_id, selector.account_id),
+            ).fetchall()
+            all_orders = connection.execute(
+                "SELECT * FROM orders_current WHERE adapter_id=? AND account_id=?",
+                (selector.adapter_id, selector.account_id),
+            ).fetchall()
+            writer_rows = self._native_writer_rows(connection, selector.adapter_id, selector.account_id)
+            verified = []
+            for row in rows:
+                try:
+                    if row["evidence_json"]:
+                        payload = json.loads(row["evidence_json"])
+                        if type(payload) is not dict or _canonical_json(payload) != row["evidence_json"]:
+                            raise ValueError
+                    else:
+                        # Legacy v8 manifests may lack the immutable payload.
+                        # Their independent generation rows must still explain
+                        # the original digest; a lost modern capture cannot.
+                        payload = self._snapshot_payload_from_tables(
+                            connection,
+                            adapter_id=selector.adapter_id,
+                            account_id=selector.account_id,
+                            generation=row["generation"],
+                        )
+                    if _fingerprint(payload) != row["content_digest"]:
+                        raise ValueError
+                except (ValueError, TypeError) as exc:
+                    raise LifecycleStateError("canonical observation manifest integrity failure") from exc
+                verified.append((row, payload))
+        from .native_scope_reducer import NativeScopeIndex
+
+        native_scopes = NativeScopeIndex(writer_rows, verified, selector.adapter_id)
+        fills = {}
+        immutable_facts = {}
+        trade_history = []
+        fees = {}
+        postings = {}
+        coverage_history = []
+        unallocated = {}
+        retained_contracts, retained_margins = {}, {}
+        contract_history, margin_history = [], []
+        surface_history = []
+        provider_accounts = set()
+        conflicts = set()
+        missing = {"lifetime_coverage_unavailable", "paid_allocation_producer_unavailable", "custody_not_evaluated"}
+        latest = {}
+        generation = 0
+        for row, payload in verified:
+            if payload.get("schema") != "flinttrade.canonical-observations.v1":
+                continue
+            latest = payload
+            generation = row["generation"]
+            provider_accounts.add(payload["provider_account_id"])
+            provenance_json = _canonical_json(payload["provenance"])
+            for item in payload.get("contracts", ()):
+                contract = InstrumentLotSizeSnapshot(**item)
+                retained_contracts[
+                    (payload["provider_account_id"], contract.symbol, contract.exchange, contract.instrument_id or "")
+                ] = contract
+                contract_history.append(
+                    RetainedContractObservation(generation, payload["provider_account_id"], provenance_json, contract)
+                )
+            for item in payload.get("margins", ()):
+                margin = MarginSnapshot(**{**item, "request": MarginRequest(**item["request"])})
+                retained_margins[(payload["provider_account_id"], _fingerprint(item["request"]))] = margin
+                margin_history.append(
+                    RetainedMarginObservation(generation, payload["provider_account_id"], provenance_json, margin)
+                )
+            for item in payload["coverage"]:
+                coverage_history.append(
+                    ObservationCoverage(
+                        **{
+                            **item,
+                            "pages": tuple(item["pages"]),
+                            "missing_intervals": tuple(item["missing_intervals"]),
+                            "issues": tuple(item["issues"]),
+                            "generation": generation,
+                            "provider_account_id": payload["provider_account_id"],
+                            "started_at": payload["started_at"],
+                            "finished_at": payload["finished_at"],
+                            "provenance_json": _canonical_json(payload["provenance"]),
+                        }
+                    )
+                )
+            for item in payload.get("surfaces", ()):
+                original = item["coverage"]
+                surface_coverage = ObservationCoverage(**{
+                    **original, "pages": tuple(original["pages"]),
+                    "missing_intervals": tuple(original["missing_intervals"]), "issues": tuple(original["issues"]),
+                    "generation": generation, "provider_account_id": payload["provider_account_id"],
+                    "provenance_json": provenance_json,
+                })
+                surface_history.append(RetainedReadSurface(
+                    generation, payload["provider_account_id"], provenance_json,
+                    CapturedReadSurface(item["surface"], item["family"], item["value_json"], surface_coverage),
+                ))
+            for posting in payload.get("account_postings", ()):
+                postings.setdefault(_fingerprint(posting), AccountPostingSnapshot(**posting))
+            for raw in payload["trades"]:
+                trade = TradeSnapshot(**raw)
+                owner_attempt, native_order_scope = native_scopes.allocation(payload["provider_account_id"], trade)
+                trade_history.append(
+                    RetainedTradeObservation(generation, payload["provider_account_id"], provenance_json, trade)
+                )
+                complete_identity = all((trade.fill_id, trade.orderid, trade.trade_date, trade.broker_exchange_segment))
+                namespace = (
+                    (
+                        selector.adapter_id,
+                        payload["provider_account_id"],
+                        trade.trade_date,
+                        trade.broker_exchange_segment,
+                        trade.orderid,
+                        trade.fill_id,
+                        trade.fill_leg or "",
+                        *(native_order_scope or ()),
+                    )
+                    if complete_identity
+                    else (
+                        "unallocated_observation",
+                        selector.adapter_id,
+                        payload["provider_account_id"],
+                        _fingerprint(raw),
+                    )
+                )
+                native = json.loads(trade.raw_observation_json or "{}").get("broker_fields", {})
+                if selector.adapter_id == "dhan":
+                    for component in (
+                        "sebiTax",
+                        "stt",
+                        "brokerageCharges",
+                        "serviceTax",
+                        "exchangeTransactionCharges",
+                        "stampDuty",
+                    ):
+                        if component not in native:
+                            continue
+                        value = native[component]
+                        try:
+                            if type(value) not in (str, int, float) or not Decimal(str(value)).is_finite():
+                                raise ValueError
+                            amount = str(value)
+                        except (ValueError, InvalidOperation):
+                            missing.add("malformed_fee_observation")
+                            continue
+                        fee_key = (*namespace, component, amount)
+                        if fee_key not in fees:
+                            fees[fee_key] = FeeObservationSnapshot(
+                                namespace,
+                                component,
+                                amount,
+                                FeeObservationState.PAYMENT_UNKNOWN,
+                                hashlib.sha256(trade.raw_observation_json.encode()).hexdigest(),
+                            )
+                if not complete_identity:
+                    missing.add("fill_identity_unavailable")
+                    unallocated.setdefault(
+                        namespace,
+                        RetainedTradeObservation(generation, payload["provider_account_id"], provenance_json, trade),
+                    )
+                    continue
+                quantity = Decimal(trade.quantity)
+                if (
+                    not quantity.is_finite()
+                    or quantity <= 0
+                    or quantity.adjusted() > 18
+                    or quantity != quantity.to_integral_value()
+                    or len(trade.quantity) > 64
+                ):
+                    missing.add("fill_quantity_unavailable")
+                    unallocated.setdefault(
+                        namespace,
+                        RetainedTradeObservation(generation, payload["provider_account_id"], provenance_json, trade),
+                    )
+                    continue
+                if owner_attempt is None:
+                    missing.add("unallocated_fills")
+                fill = CanonicalFillSnapshot(namespace, trade, owner_attempt, native_order_scope)
+                established = immutable_facts.setdefault(namespace, {})
+                observation = json.loads(trade.raw_observation_json or "{}")
+                for section, observed, keys in (
+                    ("semantic", asdict(trade), (
+                        "orderid",
+                        "symbol",
+                        "instrument_id",
+                        "exchange",
+                        "action",
+                        "quantity",
+                        "price",
+                        "product",
+                        "exchange_order_id",
+                        "broker_exchange_segment",
+                        "broker_product_type",
+                        "multiplier",
+                        "fx_rate",
+                    )),
+                    ("raw", observation, ("option_type", "expiry", "strike_price", "underlying")),
+                    ("native", observation.get("broker_fields", {}),
+                            (
+                                "drvExpiryDate",
+                                "drvOptionType",
+                                "drvStrikePrice",
+                                "optTp",
+                                "exp",
+                                "expDt",
+                                "stkPrc",
+                                "lotSz",
+                                "brdLtQty",
+                                "multiplier",
+                                "genNum",
+                                "genDen",
+                                "prcNum",
+                                "prcDen",
+                                "precision",
+                                "securityId",
+                                "tok",
+                                "exSeg",
+                                "exchangeSegment",
+                                "prod",
+                                "productType",
+                            ),
+                    ),
+                ):
+                    for key in keys:
+                        if key not in observed or observed[key] is None:
+                            continue
+                        fact_key = (section, key)
+                        if fact_key in established and established[fact_key] != observed[key]:
+                            conflicts.add("immutable_fill_conflict:" + _fingerprint({"namespace": namespace}))
+                        else:
+                            established[fact_key] = observed[key]
+                # Keep one execution and the latest compatible independent
+                # observation. Raw originals and disagreements remain in history;
+                # a missing field never erases an established comparison fact.
+                if namespace not in fills or (
+                    "immutable_fill_conflict:" + _fingerprint({"namespace": namespace}) not in conflicts
+                ):
+                    fills[namespace] = fill
+        conflicts.update(native_scopes.conflicts)
+        if len(provider_accounts) > 1:
+            conflicts.add("provider_account_rebound")
+            fills = {key: replace(fill, owner_attempt_id=None) if fill.native_order_scope is None else fill
+                     for key, fill in fills.items()}
+        coverage = tuple(item for item in coverage_history if item.generation == generation)
+        contracts = tuple(retained_contracts[key] for key in sorted(retained_contracts))
+        margins = tuple(retained_margins[key] for key in sorted(retained_margins))
+        if contracts and not latest.get("contracts"):
+            missing.add("contract_not_recollected")
+        if margins and not latest.get("margins"):
+            missing.add("margin_not_recollected")
+        for contract in contracts:
+            if not all((contract.source_revision, contract.source_digest, contract.observed_at, contract.valid_until)):
+                missing.add("contract_version_or_freshness_unavailable")
+            else:
+                try:
+                    if (
+                        not _utc_datetime(contract.observed_at)
+                        <= datetime.now(UTC)
+                        <= _utc_datetime(contract.valid_until)
+                    ):
+                        missing.add("contract_stale")
+                except (ValueError, TypeError):
+                    missing.add("contract_freshness_invalid")
+            if contract.raw_tick_unit in (None, "unknown"):
+                missing.add("contract_raw_tick_unit_unavailable")
+        for estimate in margins:
+            missing.add("standalone_short_margin_unverified")
+            raw = json.loads(estimate.raw_observation_json or "{}")
+            value = raw.get("brokerage")
+            if type(value) in (str, int, float):
+                try:
+                    if Decimal(str(value)).is_finite():
+                        key = ("margin_estimate", _fingerprint(asdict(estimate.request)))
+                        fees[key] = FeeObservationSnapshot(
+                            key,
+                            "brokerage",
+                            str(value),
+                            FeeObservationState.ESTIMATED,
+                            hashlib.sha256(estimate.raw_observation_json.encode()).hexdigest(),
+                        )
+                except InvalidOperation:
+                    missing.add("malformed_fee_estimate")
+        source_current = False
+        order_fills = []
+        # This reducer never adds the cumulative order value to unique fills.
+        # It retains the unexplained remainder independently for qualification.
+        context = Context(
+            prec=128,
+            rounding=ROUND_HALF_EVEN,
+            Emin=-999999,
+            Emax=999999,
+            capitals=1,
+            clamp=0,
+            flags=[],
+            traps=[InvalidOperation],
+        )
+        with localcontext(context):
+            for scope, resource in sorted(native_scopes.resources.items()):
+                unique = sum((Decimal(fill.trade.quantity) for fill in fills.values()
+                              if fill.native_order_scope == scope and fill.owner_attempt_id == resource["attempt"]),
+                             Decimal(0))
+                cumulative = resource["high_water"]
+                if cumulative is None:
+                    missing.add("native_cumulative_quantity_unavailable")
+                    cumulative = Decimal(0)
+                remainder = max(Decimal(0), cumulative - unique)
+                if remainder:
+                    missing.add("cumulative_fill_not_explained_by_unique_fills")
+                order_fills.append(OrderFillReconciliation(resource["resource"]["order_id"], str(unique),
+                    str(cumulative), str(remainder), scope, None if resource["ambiguous"] else resource["attempt"]))
+            scoped_attempts = {resource["attempt"] for resource in native_scopes.resources.values()}
+            for row in sorted(all_orders, key=lambda item: (item["business_date"], item["broker_order_id"])):
+                cumulative = Decimal(str(row["filled_quantity"]))
+                if row["attempt_id"] in scoped_attempts and cumulative == 0:
+                    continue  # Empty legacy ACK is not an additional native resource.
+                missing.add("cumulative_native_scope_unavailable")
+                if cumulative:
+                    missing.add("cumulative_fill_not_explained_by_unique_fills")
+                observation_scope = ("legacy-business-date", selector.adapter_id, selector.account_id,
+                                     row["business_date"], row["broker_order_id"])
+                order_fills.append(OrderFillReconciliation(row["broker_order_id"], "0", str(cumulative),
+                                                          str(cumulative), observation_scope=observation_scope))
+            unscoped = {}
+            for fill in fills.values():
+                if fill.native_order_scope is not None:
+                    continue
+                # Even unallocated executions must never merge across account,
+                # execution day, segment or fill leg merely by scalar order ID.
+                key = (fill.namespace[1], fill.trade.trade_date or "", fill.trade.broker_exchange_segment or "",
+                       fill.trade.orderid, fill.trade.fill_leg or "")
+                unscoped[key] = unscoped.get(key, Decimal(0)) + Decimal(fill.trade.quantity)
+            for key, quantity in sorted(unscoped.items()):
+                order_fills.append(OrderFillReconciliation(key[3], str(quantity), "0", "0",
+                                                          observation_scope=("unallocated-execution", *key)))
+        if read_owner is not None and latest:
+            from flinttrade_gateway.broker_read_service import BrokerReadOwner
+
+            if type(read_owner) is not BrokerReadOwner:
+                raise ValueError("exact read owner required")
+            if type(max_age_seconds) not in (int, float) or not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
+                raise ValueError("explicit positive freshness bound required")
+            current = read_owner.observation_binding(port)
+            if type(current) is tuple:
+                current_provenance = json.loads(json.dumps(asdict(current[0]), default=self._observation_json_default))
+                age = (datetime.now(UTC) - _utc_datetime(latest["started_at"])).total_seconds()
+                source_current = (
+                    current_provenance == latest["provenance"]
+                    and current[1] == latest["provider_account_id"]
+                    and 0 <= age <= max_age_seconds
+                )
+        return CanonicalObservationSnapshot(
+            selector,
+            generation,
+            tuple(fills[key] for key in sorted(fills)),
+            coverage,
+            tuple(sorted(conflicts)),
+            tuple(sorted(missing)),
+            source_current=source_current,
+            evidence_json=_canonical_json(latest),
+            fees=tuple(fees[key] for key in sorted(fees)),
+            contracts=contracts,
+            margins=margins,
+            order_fills=tuple(order_fills),
+            account_postings=tuple(postings[key] for key in sorted(postings)),
+            coverage_history=tuple(coverage_history),
+            unallocated_trades=tuple(unallocated[key] for key in sorted(unallocated)),
+            contract_history=tuple(contract_history),
+            margin_history=tuple(margin_history),
+            trade_history=tuple(trade_history),
+            surfaces=tuple(item.observation for item in surface_history if item.generation == generation),
+            surface_history=tuple(surface_history),
+        )
+
     def latest_snapshot_generation(self, *, adapter_id: str, account_id: str) -> int | None:
         """Return the latest adopted broker snapshot generation for one selector."""
         adapter = _text(adapter_id).lower()
@@ -3398,6 +4036,179 @@ class OrderLifecycleLedger:
             for row in rows
         )
         return LocalStateSnapshot(orders=orders)
+
+    def native_command_observation(
+        self, selector: BrokerSelector, *, actor: str, intent_source: str,
+        intent: dict[str, Any], generation: int, evidence_digest: str, max_age_seconds: float,
+    ) -> dict[str, Any]:
+        """Resolve one command against this ledger's bounded, sealed observation.
+
+        This read never dispatches, acknowledges or invents a native identity
+        day. All acknowledged children require exact invocation/resource scope
+        and independent quantity observations. Missing production date producers
+        remain unavailable; synthetic native scope stays explicitly synthetic.
+
+        Args:
+            selector: Exact historical account selected by the command owner.
+            actor: Original authenticated bounded producer identity.
+            intent_source: Original command correlation, not a caller label.
+            intent: Complete canonical order retained before invocation.
+            generation: Already inspected canonical generation.
+            evidence_digest: Digest of that generation's complete payload.
+            max_age_seconds: Explicit configured freshness limit.
+
+        Returns:
+            Detached evidence, including terminal status and a monotonic fill
+            constraint; it is not financial settlement or permission. A complete
+            exact-resource semantic contradiction is explicitly conflicting,
+            never zero-fill settlement evidence even when its fills are zero.
+
+        Raises:
+            ValueError: Required source, child, date, identity or comparison
+                operands are unavailable, partial, stale or not attributable.
+        """
+        from fractions import Fraction
+
+        from flinttrade_gateway.native_scope_primitives import scope_key, validate_resources
+
+        snapshot = self.observation_snapshot(selector)
+        payload = json.loads(snapshot.evidence_json)
+        if (snapshot.generation != generation or _fingerprint(payload) != evidence_digest
+                or snapshot.conflicts or snapshot.unallocated_trades
+                or not 0 <= (datetime.now(UTC) - _utc_datetime(payload["started_at"])).total_seconds()
+                <= max_age_seconds):
+            raise ValueError("native command observation unavailable or stale")
+        budget = json.loads(payload.get("read_budget_json") or "null")
+        if type(budget) is not dict or budget["issues"]:
+            raise ValueError("complete bounded read required")
+        surfaces: dict[str, list[dict[str, Any]]] = {}
+        for surface in snapshot.surfaces:
+            if surface.surface not in {"orders", "positions", "holdings", "trades"}:
+                continue
+            coverage = surface.coverage
+            if (surface.surface in surfaces or coverage.availability != "available"
+                    or coverage.provider_account_id != payload["provider_account_id"]
+                    or coverage.page_model != "unpaged_observation" and surface.surface != "trades"
+                    or any(issue in coverage.issues for issue in (
+                        "read_deadline_exceeded", "read_budget_exceeded", "page_budget_exceeded"))
+                    or surface.value_json is None):
+                raise ValueError("complete command read surfaces required")
+            values = json.loads(surface.value_json)
+            if type(values) is not list or coverage.returned_count != len(values):
+                raise ValueError("command surface count unavailable")
+            surfaces[surface.surface] = values
+        if set(surfaces) != {"orders", "positions", "holdings", "trades"}:
+            raise ValueError("complete command read plan required")
+        attempts = [attempt for attempt in self.list_dispatch_attempts()
+                    if attempt["adapter_id"] == selector.adapter_id and attempt["account_id"] == selector.account_id
+                    and attempt["actor_id"] == actor and attempt["intent_source"] == intent_source]
+        if len(attempts) != 1 or attempts[0]["operation"] != "place_order":
+            raise ValueError("unique original invocation required")
+        attempt = attempts[0]
+        manifests = self.native_dispatch_evidence(attempt["attempt_id"])
+        prepared = [item["facts"] for item in manifests if item["kind"] == "prepared"]
+        acks = [item for item in manifests if item["kind"] == "acknowledged"]
+        if (len(prepared) != 1 or len(acks) != 1
+                or any(item["kind"] == "uncertain_acknowledgement" for item in manifests)):
+            raise ValueError("complete native acknowledgement required")
+        facts, ack = prepared[0], acks[0]
+        provenance = payload["provenance"]
+        if (facts["intent"] != intent or facts["provider_account_id"] != payload["provider_account_id"]
+                or facts["selector"] != provenance["selector"]
+                or any(facts["session_version"][key] != provenance[key] for key in (
+                    "registry_version", "credential_version", "workspace_version", "broker_workspace_version"))
+                or ack["invocation_id"] != facts["invocation_id"] or ack.get("native_scope_ack_matches") is not True):
+            raise ValueError("native writer and read owner correspondence unavailable")
+        origin = ack["native_scope_observation"]
+        scope = json.loads(payload.get("native_scope_json") or "null")
+        if type(scope) is not dict or scope["availability"] != "available":
+            raise ValueError("independent native identity-day required")
+        records = [record for record in scope["records"] if record["invocation_id"] == facts["invocation_id"]]
+        if len(records) != 1:
+            raise ValueError("complete current resource set required")
+        current = records[0]
+        if (any(current[key] != origin[key] for key in (
+                "source_id", "provenance", "label", "invocation_id", "signed_intent_hash", "order_ids"))
+                or set(ack["order_ids"]) != set(current["order_ids"])):
+            raise ValueError("native resource source or ACK set changed")
+        before = {scope_key(resource): resource for resource in validate_resources(origin["resources"])}
+        resources = validate_resources(current["resources"])
+        if set(before) != {scope_key(resource) for resource in resources} or len(resources) != len(ack["order_ids"]):
+            raise ValueError("complete exact child resource set required")
+        # Validate every child's ownership before interpreting any semantic
+        # contradiction. A foreign/missing sibling cannot qualify a prefix.
+        children: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for resource in resources:
+            if (resource["native_account"] != facts["provider_account_id"]
+                    or resource["family"] != "ordinary" or resource["segment"] != facts["native_segment"]
+                    or resource["exchange_order_id"] != before[scope_key(resource)]["exchange_order_id"]):
+                raise ValueError("native resource changed")
+            orders = [order for order in surfaces["orders"] if order["orderid"] == resource["order_id"]]
+            if len(orders) != 1:
+                raise ValueError("acknowledged child missing or repeated")
+            order = orders[0]
+            if (order["exchange_order_id"] != resource["exchange_order_id"]
+                    or order["broker_account_id"] != resource["native_account"]
+                    or order["broker_exchange_segment"] != resource["segment"]):
+                raise ValueError("observed native resource identity differs")
+            children.append((resource, order))
+        filled, quantity, terminal = 0, Fraction(0), True
+        conflicts: set[str] = set()
+        for resource, order in children:
+            if any(order[key] is None for key in ("symbol", "exchange", "product", "action", "pricetype")):
+                raise ValueError("observed signed terms unavailable")
+            q, f = Fraction(order["quantity"]), Fraction(order["filled_quantity"])
+            price, signed_price = Fraction(order["price"]), Fraction(intent["price"])
+            if resource["filled_quantity"] is None:
+                raise ValueError("independent child quantities unavailable")
+            constraints = [item for item in snapshot.order_fills if item.owner_attempt_id == attempt["attempt_id"]
+                           and item.native_order_scope == (selector.adapter_id, *scope_key(resource))]
+            if len(constraints) != 1:
+                raise ValueError("cumulative resource evidence unavailable")
+            native_fill = Fraction(resource["filled_quantity"])
+            high_water = Fraction(constraints[0].cumulative_high_water)
+            status = order["status"]
+            if status not in {
+                "TRANSIT", "OPEN", "PENDING", "PARTIAL", "TRADED", "FILLED", "COMPLETE",
+                "REJECTED", "CANCELLED", "EXPIRED",
+            }:
+                raise ValueError("native lifecycle unavailable")
+            # These are the existing comparisons, not a new raw-field policy.
+            # Their operands now belong to the complete exact original ACK set.
+            for key in ("symbol", "exchange", "product", "action", "pricetype"):
+                if order[key] != intent[key]:
+                    conflicts.add(f"signed_{key}_mismatch")
+            if price != signed_price:
+                conflicts.add("signed_price_mismatch")
+            if q.denominator != 1 or f.denominator != 1 or not 0 <= f <= q or q <= 0:
+                conflicts.add("independent_child_quantities_invalid")
+            if f != native_fill:
+                conflicts.add("independent_child_fill_mismatch")
+            if high_water != f:
+                conflicts.add("cumulative_resource_fill_mismatch")
+            if (status in {"TRADED", "FILLED", "COMPLETE"} and f != q) or (status == "REJECTED" and f):
+                conflicts.add("native_lifecycle_quantity_mismatch")
+            terminal = terminal and status in {"REJECTED", "CANCELLED", "EXPIRED", "TRADED", "FILLED", "COMPLETE"}
+            quantity += q
+            # Never truncate invalid fractional/negative observations into fills;
+            # keep the independently established integer high-water instead.
+            filled += int(max(native_fill, high_water, f if f.denominator == 1 and f >= 0 else 0))
+        if quantity != int(intent["quantity"]):
+            conflicts.add("signed_quantity_mismatch")
+        conflicting = bool(conflicts)
+        evidence = {"attempt_id": attempt["attempt_id"], "order_ids": ack["order_ids"], "resources": resources,
+                "generation": generation, "evidence_digest": evidence_digest, "filled_quantity": filled,
+                "terminal": terminal, "zero_fill_terminal": not conflicting and terminal and filled == 0
+                and not any(resource["executions"] for resource in resources)
+                and not any(surfaces[name] for name in ("positions", "holdings", "trades")),
+                "provenance": current["provenance"]}
+        if conflicting:
+            # Only this canonical owner classifies explicit comparisons. A
+            # generic exception or unavailable capture is never a conflict.
+            evidence.update(conflicting=True, conflict=min(conflicts), conflicts=sorted(conflicts),
+                            observed_quantity=int(quantity) if quantity.denominator == 1 else str(quantity),
+                            signed_quantity=int(intent["quantity"]))
+        return evidence
 
     def list_dispatch_attempts(self) -> list[dict[str, Any]]:
         """Return non-secret attempt state for diagnostics and tests."""

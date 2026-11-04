@@ -1,11 +1,13 @@
 """Real-owner exclusion, exceptional cleanup and retry for factory fixtures."""
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
 import threading
 
 from filelock import Timeout
 import pytest
 
-from tests.flask_app_lifecycle import owned_flask_apps
+from .conftest import owned_flask_apps
 from flinttrade_core import app as app_module
 from flinttrade_core.desktop import DesktopBackendShutdownIncomplete
 from flinttrade_core.system_incidents import IncidentTimeline
@@ -145,3 +147,37 @@ def test_fixture_drains_actual_held_request_before_releasing_incident_owner(tmp_
             assert not caller.is_alive() and not closer.is_alive()
             assert failures == []
             reacquired(path, incident)
+
+@pytest.mark.parametrize("body_fails", [False, True])
+def test_native_route_fixture_drains_retained_owner_before_lease_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend_lease_factory: Any,
+    owned_flask_apps: Any, body_fails: bool,
+) -> None:
+    """The real route fixture must drain on both normal and exceptional exit.
+
+    Args:
+        tmp_path: Disposable workspace directory supplied by pytest.
+        monkeypatch: Scoped replacements restored after this test.
+        backend_lease_factory: Acquire the genuine backend lease for the selected test workspace.
+        owned_flask_apps: Retained factory apps and responses drained by their existing cleanup owners.
+        body_fails: Whether the fixture body raises before normal cleanup.
+    """
+    import inspect
+    from packages.core.core.tests.test_native_account_routes import client as route_client
+
+    retained = []
+    function = route_client.__wrapped__
+    # Also exercises the original fixture preimage: owner capture alone cannot
+    # prove the client fixture performs its own bounded finalization.
+    keywords = {"owned_flask_apps": owned_flask_apps} if "owned_flask_apps" in inspect.signature(function).parameters else {}
+    path = tmp_path / "operational/incidents.sqlite"
+    try:
+        with contextmanager(function)(tmp_path, monkeypatch, backend_lease_factory, **keywords) as (_, app, _):
+            retained.append(app.config["SYSTEM_INCIDENTS"])
+            exclusive(path)
+            if body_fails:
+                raise RuntimeError("synthetic route body failure")
+    except RuntimeError as error:
+        assert body_fails and str(error) == "synthetic route body failure"
+    assert len(retained) == 1
+    reacquired(path, retained[0])

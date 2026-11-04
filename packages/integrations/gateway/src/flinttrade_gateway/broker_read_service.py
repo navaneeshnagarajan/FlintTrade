@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import inspect
 import json
 import math
 import threading
 import time
 import weakref
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Mapping
+from concurrent.futures import Future
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from flinttrade_core.account_mutation_contracts import (
     RegistrySelectorVersion,
@@ -23,9 +29,11 @@ from flinttrade_core.account_mutation_contracts import (
 )
 from flinttrade_core.broker_identity import BrokerSelector, CredentialVersion, parse_broker_selector
 from flinttrade_core.broker_read_port import (
+    AccountPostingSnapshot,
     BalanceSnapshot,
     BatchQuoteRequest,
     BrokerDataRole,
+    BrokerObservationSnapshot,
     BrokerOrderFamily,
     BrokerOrderSourceFamily,
     BrokerReadErrorCode,
@@ -44,9 +52,12 @@ from flinttrade_core.broker_read_port import (
     HoldingSnapshot,
     InstrumentLotSizeSnapshot,
     InstrumentRef,
+    LedgerRequest,
+    LedgerSnapshot,
     LotSizeRequest,
     MarginRequest,
     MarginSnapshot,
+    ObservationCoverage,
     OptionChainRequest,
     OptionChainSnapshot,
     OptionChainStrikeSnapshot,
@@ -59,6 +70,9 @@ from flinttrade_core.broker_read_port import (
     PositionSnapshot,
     QuoteRequest,
     QuoteSnapshot,
+    TradeBookSnapshot,
+    TradeHistoryRequest,
+    TradeHistorySnapshot,
     TradeSnapshot,
 )
 from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
@@ -83,12 +97,22 @@ from flinttrade_core.workspace_migrations import (
 )
 from flinttrade_engine.request_context import RequestContext
 
+from .brokers._base import BrokerAdapter
 from .json_evidence import copy_json_evidence
+from .read_frontier import ReadContinuation, read_diagnostics, read_invocation_guard
 from .registry import (
     BrokerRegistry,
     ConnectedRegistrySession,
 )
 from .session_provider import AuthenticatingSessionProvider
+
+_ObservationT = TypeVar("_ObservationT")
+_OBSERVATION_DEADLINE: ContextVar[float | None] = ContextVar("broker_observation_deadline", default=None)
+
+
+def _observation_wait_expired() -> bool:
+    deadline = _OBSERVATION_DEADLINE.get()
+    return deadline is not None and time.monotonic() >= deadline
 
 
 class _Operation(StrEnum):
@@ -105,6 +129,8 @@ class _Operation(StrEnum):
     MARGIN = "margin"
     ORDER_STATES = "order_states"
     TRADES = "trades"
+    TRADE_HISTORY = "trade_history"
+    LEDGER = "ledger"
 
 
 _ALL_OPERATIONS = frozenset(_Operation)
@@ -254,6 +280,38 @@ class _BrokerReadFacade:
         owner = _facade_owner(self)
         return BrokerReadFailure(BrokerReadErrorCode.REVOKED) if owner is None else await owner._trades(self)
 
+    async def trade_history(
+        self, request: TradeHistoryRequest
+    ) -> BrokerReadSuccess[TradeHistorySnapshot] | BrokerReadFailure:
+        """Delegate the bounded request to the exact retained read owner.
+
+        Args:
+            request: Explicit date window and collection bounds.
+
+        Returns:
+            Copied observations with coverage, or a typed ownership/read refusal.
+        """
+        owner = _facade_owner(self)
+        return (
+            BrokerReadFailure(BrokerReadErrorCode.REVOKED)
+            if owner is None
+            else await owner._trade_history(self, request)
+        )
+
+    async def ledger(
+        self, request: LedgerRequest
+    ) -> BrokerReadSuccess[LedgerSnapshot] | BrokerReadFailure:
+        """Delegate the bounded request to the exact retained read owner.
+
+        Args:
+            request: Explicit date window and collection bounds.
+
+        Returns:
+            Copied observations with coverage, or a typed ownership/read refusal.
+        """
+        owner = _facade_owner(self)
+        return BrokerReadFailure(BrokerReadErrorCode.REVOKED) if owner is None else await owner._ledger(self, request)
+
 
 def _facade_owner(facade: _BrokerReadFacade) -> BrokerReadOwner | None:
     with _FACADE_LOCK:
@@ -275,6 +333,9 @@ class BrokerReadOwner:
         "_drained",
         "_grants",
         "_active",
+        "_observation_tasks",
+        "_continuation",
+        "_native_scope_source",
         "_revoked",
         "_closed",
         "__weakref__",
@@ -289,7 +350,9 @@ class BrokerReadOwner:
         workspace_path: Path,
         rate_limiter: object | None,
         runtime_accepting_requests: Callable[[], bool],
+        native_scope_source: object | None = None,
     ) -> None:
+        self._native_scope_source = native_scope_source
         self._registry = registry
         self._provider = session_provider
         self._adapters = adapters
@@ -300,6 +363,8 @@ class BrokerReadOwner:
         self._drained = threading.Condition(self._lock)
         self._grants: weakref.WeakKeyDictionary[_BrokerReadFacade, _Grant] = weakref.WeakKeyDictionary()
         self._active = 0
+        self._observation_tasks: set[asyncio.Task] = set()
+        self._continuation: ReadContinuation | None = None
         self._revoked: weakref.WeakSet[_BrokerReadFacade] = weakref.WeakSet()
         self._closed = False
 
@@ -651,7 +716,10 @@ class BrokerReadOwner:
             with _FACADE_LOCK:
                 for facade in facades:
                     _FACADE_OWNERS.pop(facade, None)
-        return drained
+            continuation = self._continuation
+        # Never stop a worker's loop merely because its collector returned.
+        # A failed join keeps the same component for the next owner retry.
+        return drained and (continuation is None or continuation.close(deadline))
 
     def _begin(self, facade: _BrokerReadFacade, operation: _Operation, request: object, expected: type | None) -> _Grant | BrokerReadFailure:
         if expected is not None and type(request) is not expected:
@@ -671,6 +739,107 @@ class BrokerReadOwner:
             grant.active -= 1
             self._active -= 1
             self._drained.notify_all()
+
+    async def _bounded_observation(
+        self, factory: Callable[[], Awaitable[_ObservationT]], deadline: float, *, facade: _BrokerReadFacade
+    ) -> _ObservationT:
+        """Bound the collector wait while retaining actual work in this owner.
+
+        Cancellation requests do not imply completion: the SDK helper can keep
+        shielding its worker. Concrete BrokerAdapter tasks run on an owner-held
+        continuation, never a disposable caller loop. Async-only injected readers
+        keep their caller-loop affinity. Close remains incomplete until the exact
+        tasks, executor and continuation exit, through the original factory's drain.
+
+        Args:
+            factory: The admitted read operation, not a detached SDK retry.
+            deadline: The capture's original absolute monotonic deadline.
+            facade: The existing port identifying the actual installed adapter.
+
+        Returns:
+            Only an on-time result; late results are retrieved but not published.
+
+        Raises:
+            TimeoutError: The collector deadline expired or the owner retired.
+        """
+        if deadline <= time.monotonic():
+            raise TimeoutError
+        caller_loop = asyncio.get_running_loop()
+        completion: Future[_ObservationT] = Future()
+        tasks: list[asyncio.Task[_ObservationT]] = []
+
+        async def run() -> _ObservationT:
+            token = _OBSERVATION_DEADLINE.set(deadline)
+            try:
+                if _observation_wait_expired():
+                    raise TimeoutError
+                return await factory()
+            finally:
+                _OBSERVATION_DEADLINE.reset(token)
+
+        def retire(task: asyncio.Task[_ObservationT]) -> None:
+            # Completion, not concurrent-future cancellation, retires custody.
+            try:
+                if task.cancelled():
+                    completion.cancel()
+                elif (error := task.exception()) is not None:
+                    completion.set_exception(error)
+                else:
+                    completion.set_result(task.result())
+            finally:
+                with self._lock:
+                    self._observation_tasks.remove(task)
+                    self._active -= 1
+                    self._drained.notify_all()
+
+        def schedule() -> None:
+            with read_diagnostics(caller_loop):
+                task = asyncio.create_task(run())
+                with self._lock:
+                    self._observation_tasks.add(task)
+                tasks.append(task)
+                task.add_done_callback(retire)
+
+        def cancel() -> None:
+            # Queued after schedule on the same loop, even if the caller exits
+            # before the coroutine's first turn. Its done callback still owns it.
+            for task in tasks:
+                task.cancel()
+
+        with self._lock:
+            grant = self._grants.get(facade)
+            if self._closed or grant is None or grant.revoked:
+                raise TimeoutError
+            if isinstance(self._adapters.get(grant.selector.adapter_id), BrokerAdapter):
+                if self._continuation is None:
+                    self._continuation = ReadContinuation()
+                loop = self._continuation.loop
+            else:
+                loop = caller_loop
+            self._active += 1
+            try:
+                loop.call_soon_threadsafe(schedule)
+            except BaseException:
+                self._active -= 1
+                self._drained.notify_all()
+                raise
+        waiter = asyncio.wrap_future(completion)
+        # The caller may have stopped waiting when a late exception arrives.
+        waiter.add_done_callback(lambda future: None if future.cancelled() else future.exception())
+        try:
+            done, _ = await asyncio.wait({waiter}, timeout=max(0.0, deadline - time.monotonic()))
+            if waiter not in done or time.monotonic() >= deadline:
+                raise TimeoutError
+            return waiter.result()
+        except BaseException:
+            # A real SDK task deliberately ignores cancellation until its
+            # worker exits; retain its reference and drainage count meanwhile.
+            with self._lock:
+                # Completion can race a collector timeout and a successful
+                # concurrent close. A completed task needs no cancellation.
+                if not completion.done():
+                    loop.call_soon_threadsafe(cancel)
+            raise
 
     def _revalidate(self, grant: _Grant) -> ConnectedRegistrySession | BrokerReadFailure:
         with self._lock:
@@ -722,6 +891,8 @@ class BrokerReadOwner:
         *,
         depth_exchange: str | None = None,
     ) -> _ProviderCall | BrokerReadFailure:
+        if _observation_wait_expired():
+            return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         first = self._revalidate(grant)
         if type(first) is BrokerReadFailure:
             return first
@@ -760,6 +931,11 @@ class BrokerReadOwner:
                 or depth_exchange not in exchanges
             ):
                 return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+        from .canonical_read_plan import current_budget
+
+        budget = current_budget()
+        if budget is not None and not budget.take(page=selected == "trade_history"):
+            return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         if self._rate_limiter is not None:
             def revalidate_waiter() -> None:
                 result = self._revalidate(grant)
@@ -777,7 +953,17 @@ class BrokerReadOwner:
                 return refusal.failure
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
-        second = self._revalidate(grant)
+        from .brokers.dhan import DhanAdapter
+        from .brokers.kotakneo import KotakNeoAdapter
+
+        # Concrete native methods repeat this check after their final executor
+        # and transport-lock waits. Do not spend the same bounded capture on
+        # another full custody read immediately before that mandatory frontier.
+        # Async-only and substituted methods retain their pre-call revalidation.
+        native_frontier = (type(adapter) in (DhanAdapter, KotakNeoAdapter)
+                           and getattr(getattr(adapter, selected, None), "__func__", None)
+                           is getattr(type(adapter), selected, None))
+        second = first if native_frontier else self._revalidate(grant)
         if type(second) is BrokerReadFailure:
             return second
         try:
@@ -786,7 +972,33 @@ class BrokerReadOwner:
             return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         if not callable(method):
             return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
-        return _ProviderCall(second, method)
+        if _observation_wait_expired():
+            return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+
+        native_calls = 0
+
+        def verify_invocation() -> None:
+            nonlocal native_calls
+            # Runs on the actual SDK worker after every executor/transport wait.
+            # The handle's native account is independent of the public alias.
+            current = self._revalidate(grant)
+            if type(current) is BrokerReadFailure:
+                raise _ReadAdmissionRefused(current)
+            if current.version != second.version or current.account_id != second.account_id:
+                raise _ReadAdmissionRefused(BrokerReadFailure(BrokerReadErrorCode.TARGET_STALE))
+            if _observation_wait_expired():
+                raise TimeoutError
+            # The first call uses its admitted slot. Aggregate adapter methods
+            # must acquire another slot at every subsequent native invocation.
+            if budget is not None and native_calls and not budget.take():
+                raise _ReadAdmissionRefused(BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE))
+            native_calls += 1
+
+        async def guarded_method(*args: object, **kwargs: object) -> object:
+            with read_invocation_guard(verify_invocation):
+                return await cast(Callable[..., Awaitable[object]], method)(*args, **kwargs)
+
+        return _ProviderCall(second, guarded_method)
 
     @staticmethod
     def _number(value: object) -> float | None:
@@ -1021,6 +1233,8 @@ class BrokerReadOwner:
         return value
 
     def _published(self, grant: _Grant, copied: object):
+        if _observation_wait_expired():
+            return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
         current = self._revalidate(grant)
         if type(current) is BrokerReadFailure:
             return current
@@ -1310,29 +1524,161 @@ class BrokerReadOwner:
                 if type(raw) is not list:
                     raise ValueError
                 expected = set(request.symbols)
-                seen: dict[str, tuple[int, str | None]] = {}
+                seen: dict[str, InstrumentLotSizeSnapshot] = {}
                 copied_rows = []
                 for item in raw:
                     row = self._record(item)
+                    row, original_row = self._contract_projection(row, grant.selector.adapter_id)
                     symbol = self._text(row, "symbol", required=True)
                     exchange = self._text(row, "exchange", required=True)
                     lot_size = self._integer_field(row, "lot_size", required=True)
                     instrument_id = self._text(row, "instrument_id")
                     if exchange != request.exchange or (expected and symbol not in expected):
                         raise ValueError
-                    fingerprint = (lot_size, instrument_id)
+                    extras = {
+                        key: self._text(row, key)
+                        for key in (
+                            "underlying",
+                            "expiry",
+                            "option_type",
+                            "tick_unit",
+                            "raw_tick_unit",
+                            "source_revision",
+                            "source_digest",
+                            "observed_at",
+                            "valid_until",
+                        )
+                    }
+                    extras.update(
+                        {key: self._number_text(row, key) for key in ("strike_price", "tick_size", "raw_tick_size")}
+                    )
+                    observed = {
+                        key: row[key]
+                        for key in (
+                            *extras,
+                            "symbol",
+                            "exchange",
+                            "lot_size",
+                            "instrument_id",
+                            "broker_exchange_segment",
+                            "broker_symbol",
+                            "instrument_type",
+                            "price_unit",
+                            "quantity_unit",
+                        )
+                        if key in row
+                    }
+                    native = self._native_fields(
+                        row,
+                        frozenset(
+                            {
+                                "SEM_SMST_SECURITY_ID",
+                                "SECURITY_ID",
+                                "SEM_LOT_UNITS",
+                                "LOT_SIZE",
+                                "SEM_TICK_SIZE",
+                                "TICK_SIZE",
+                                "SEM_EXPIRY_DATE",
+                                "SM_EXPIRY_DATE",
+                                "SEM_STRIKE_PRICE",
+                                "STRIKE_PRICE",
+                                "SEM_OPTION_TYPE",
+                                "OPTION_TYPE",
+                                "UNDERLYING_SECURITY_ID",
+                                "UNDERLYING_SYMBOL",
+                                "pSymbol",
+                                "pTrdSymbol",
+                                "pSymbolName",
+                                "pInstType",
+                                "pOptionType",
+                                "lExpiryDate",
+                                "pExpiryDate",
+                                "dStrikePrice;",
+                                "lLotSize",
+                                "dTickSize",
+                                "lPrecision",
+                            }
+                        ),
+                    )
+                    if native is not None:
+                        observed["broker_fields"] = native
+                    for key in (
+                        "broker_id",
+                        "security_id",
+                        "exchange_segment",
+                        "instrument",
+                        "underlying_security_id",
+                        "tick_scale",
+                        "tick_source",
+                        "contract",
+                    ):
+                        if key in original_row:
+                            observed[key] = copy_json_evidence(original_row[key])
+                    for key in ("observed_at", "valid_until"):
+                        if key in original_row:
+                            observed[key] = original_row[key]
+                    extras["raw_observation_json"] = json.dumps(
+                        copy_json_evidence(observed), sort_keys=True, separators=(",", ":")
+                    )
+                    snapshot = InstrumentLotSizeSnapshot(symbol, exchange, lot_size, instrument_id, **extras)
+                    fingerprint = snapshot
                     if symbol in seen and seen[symbol] != fingerprint:
                         raise ValueError
                     if symbol in seen:
                         continue
                     seen[symbol] = fingerprint
-                    copied_rows.append(InstrumentLotSizeSnapshot(symbol, exchange, lot_size, instrument_id))
+                    copied_rows.append(snapshot)
                 if expected and set(seen) != expected:
                     raise ValueError
                 copied = tuple(copied_rows)
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             return self._published(grant, copied)
+        finally:
+            self._end(grant)
+
+    async def read_safety_source(
+        self, facade: BrokerReadPort, name: str, *args: object,
+    ) -> BrokerReadSuccess | BrokerReadFailure:
+        """Retain native observations for canonical L2/L4's existing strict parser.
+
+        Only an already bound exact-account port can borrow this read-only
+        surface. The ordinary provider admission owns budgets, transport-frontier
+        revalidation and active-worker drain. A read-only account cannot supply
+        write-admission evidence; no arbitrary adapter method is dispatched.
+
+        Args:
+            facade: Already bound exact-account read port, not a raw session or new authority.
+            name: Supported canonical safety read name mapped to an existing operation.
+            args: Arguments forwarded unchanged to that admitted native read method.
+
+        Returns:
+            The genuine native observation or a typed unsupported, unauthorised or provider failure.
+        """
+        operations = {
+            "positions": _Operation.POSITIONS, "trade_book": _Operation.TRADES,
+            "holdings": _Operation.HOLDINGS, "safety_order_book": _Operation.ORDER_STATES,
+            "order_book": _Operation.ORDER_STATES, "funds": _Operation.BALANCE,
+            "quotes": _Operation.BATCH_QUOTES, "margin_calculator": _Operation.MARGIN,
+        }
+        if type(name) is not str or name not in operations:
+            return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+        grant = self._begin(facade, operations[name], None, None)
+        if type(grant) is BrokerReadFailure:
+            return grant
+        try:
+            if grant.role is not None or grant.context.mode != "live":
+                return BrokerReadFailure(BrokerReadErrorCode.UNAUTHORISED)
+            call = await self._admit_provider(grant, name)
+            if type(call) is BrokerReadFailure:
+                return call
+            if call.handle.is_read_only:
+                return BrokerReadFailure(BrokerReadErrorCode.UNAUTHORISED)
+            try:
+                raw = await cast(Callable[..., Awaitable[object]], call.method)(call.handle, *args)
+            except Exception:
+                return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+            return self._published(grant, raw)
         finally:
             self._end(grant)
 
@@ -1539,7 +1885,14 @@ class BrokerReadOwner:
                 if "data" in raw:
                     raw = self._record(raw["data"])
                 selected = None
-                for name in ("required_margin", "total_margin_required", "total_margin", "final_margin", "order_margin", "margin"):
+                for name in (
+                    "required_margin",
+                    "total_margin_required",
+                    "total_margin",
+                    "final_margin",
+                    "order_margin",
+                    "margin",
+                ):
                     if name not in raw:
                         continue
                     value = raw[name]
@@ -1549,7 +1902,75 @@ class BrokerReadOwner:
                     break
                 if selected is None or selected < 0:
                     raise ValueError
-                copied = MarginSnapshot(selected)
+                observations = {
+                    key: raw[key]
+                    for key in (
+                        "required_margin",
+                        "provider_additional_margin",
+                        "rms_validated",
+                        "available_balance",
+                        "available_cash",
+                        "available_margin",
+                        "used_margin",
+                        "span_margin",
+                        "exposure_margin",
+                        "variable_margin",
+                        "insufficient_balance",
+                        "brokerage",
+                        "leverage",
+                        "broker_account_id",
+                    )
+                    if key in raw
+                }
+                native = self._native_fields(
+                    raw,
+                    frozenset(
+                        {
+                            "dhanClientId",
+                            "actId",
+                            "accountId",
+                            "totalMargin",
+                            "spanMargin",
+                            "exposureMargin",
+                            "availableBalance",
+                            "variableMargin",
+                            "insufficientBalance",
+                            "brokerage",
+                            "leverage",
+                            "ordMrgn",
+                            "reqdMrgn",
+                            "avlCash",
+                            "avlMrgn",
+                            "mrgnUsd",
+                            "totMrgnUsd",
+                            "insufFund",
+                            "rmsVldtd",
+                            "stat",
+                            "stCode",
+                        }
+                    ),
+                )
+                if native is not None:
+                    observations["broker_fields"] = native
+                account = self._text(raw, "broker_account_id")
+                if account is not None and account != call.handle.account_id:
+                    raise ValueError
+                for name in ("dhanClientId",) if grant.selector.adapter_id == "dhan" else ("actId", "accountId"):
+                    if (
+                        native is not None
+                        and name in native
+                        and (type(native[name]) is not str or native[name] != call.handle.account_id)
+                    ):
+                        raise ValueError
+                copied = MarginSnapshot(
+                    selected,
+                    request=request,
+                    provider_additional_margin=self._number_text(raw, "provider_additional_margin"),
+                    rms_validated=self._text(raw, "rms_validated"),
+                    raw_observation_json=json.dumps(
+                        copy_json_evidence(observations), sort_keys=True, separators=(",", ":")
+                    ),
+                )
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             return self._published(grant, copied)
@@ -1584,6 +2005,15 @@ class BrokerReadOwner:
                 if type(raw) is not list:
                     raise ValueError
                 all_rows = tuple(self._order_state(item, request.family) for item in raw)
+                for row in all_rows:
+                    if row.broker_account_id is not None and row.broker_account_id != call.handle.account_id:
+                        raise ValueError
+                    native = json.loads(row.raw_observation_json or "{}").get("broker_fields", {})
+                    account_fields = (("dhanClientId",) if grant.selector.adapter_id == "dhan" else
+                                      ("actId", "accountId") if grant.selector.adapter_id == "kotakneo" else ())
+                    if any(name in native and (type(native[name]) is not str or native[name] != call.handle.account_id)
+                           for name in account_fields):
+                        raise ValueError
                 active_rows = [
                     row
                     for row in all_rows
@@ -1646,7 +2076,15 @@ class BrokerReadOwner:
 
     def _native_order_observation_json(self, row: dict[str, object]) -> str | None:
         if not any(name in row for name in ("gtt_order_id", "resource_status", "entry_status", "rules")):
-            return None
+            native = self._native_fields(row, frozenset({
+                "dhanClientId", "orderId", "exchangeOrderId", "correlationId", "exchangeSegment", "legName",
+                "createTime", "updateTime", "exchangeTime", "afterMarketOrder", "amoTime", "quantity",
+                "filledQty", "tradedQty", "remainingQuantity", "productType", "orderType", "securityId",
+                "nOrdNo", "exOrdId", "exchOrdId", "actId", "accountId", "usrId", "brkClnt", "GuiOrdId", "exSeg",
+                "ordDtTm", "ordEntTm", "exCfmTm", "exchTmstp", "flDtTm", "flDt", "flTm", "exTm",
+                "hsUpTm", "updRecvTm", "boeSec", "uSec", "ordGenTp", "qty", "fldQty", "prod", "prcTp", "tok",
+            }))
+            return None if native is None else self._order_observation_json({"broker_fields": native})
         # Reuse the same exact-JSON validator as native Dhan leg observations.
         # Validate before inspecting aliases, so opaque hooks never run here.
         encoded = self._order_observation_json(row)
@@ -1829,6 +2267,9 @@ class BrokerReadOwner:
             average_price=self._order_number_text(row, "average_price", "averageTradedPrice"),
             leg_details_valid=self._boolean(row, "leg_details_valid"),
             raw_observation_json=self._native_order_observation_json(row),
+            broker_account_id=self._text(row, "broker_account_id"),
+            broker_exchange_segment=self._text(row, "broker_exchange_segment"),
+            correlation_id=self._text_alias(row, "correlation_id", "tag"),
         )
 
     async def _trades(self, facade: _BrokerReadFacade):
@@ -1848,21 +2289,880 @@ class BrokerReadOwner:
             try:
                 if type(raw) is not list:
                     raise ValueError
-                copied = tuple(self._trade(item) for item in raw)
+                copied = tuple(self._bound_trade(item, call.handle) for item in raw)
             except Exception:
                 return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
             return self._published(grant, copied)
         finally:
             self._end(grant)
 
+    async def _capture_trade_book(self, facade: _BrokerReadFacade):
+        from .brokers.kotakneo import KotakNeoAdapter, KotakNeoTradeBook
+
+        grant = self._begin(facade, _Operation.TRADES, None, None)
+        if type(grant) is BrokerReadFailure:
+            return grant
+        try:
+            native_observation = type(self._adapters.get(grant.selector.adapter_id)) is KotakNeoAdapter
+            call = await self._admit_provider(grant, "trade_book_observation" if native_observation else "trade_book")
+            if type(call) is BrokerReadFailure:
+                return call
+            try:
+                raw = await call.method(call.handle)
+            except BrokerReadResponseInvalid:
+                return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+            except Exception:
+                return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+            try:
+                coverage_json = None
+                if native_observation:
+                    if type(raw) is not KotakNeoTradeBook:
+                        raise ValueError
+                    rows = tuple(self._bound_trade(item, call.handle) for item in raw.rows)
+                    coverage = copy_json_evidence(raw.coverage)
+                    if coverage.get("scope") != "trading_day" or coverage.get("lifetime_complete") is not False:
+                        raise ValueError
+                    if (
+                        type(coverage.get("received_count")) is not int
+                        or type(coverage.get("returned_count")) is not int
+                    ):
+                        raise ValueError
+                    if coverage["received_count"] < len(rows) or coverage["returned_count"] != len(rows):
+                        raise ValueError
+                    coverage_json = json.dumps(coverage, sort_keys=True, separators=(",", ":"))
+                else:
+                    if type(raw) is not list:
+                        raise ValueError
+                    rows = tuple(self._bound_trade(item, call.handle) for item in raw)
+                return self._published(grant, TradeBookSnapshot(rows, coverage_json))
+            except (TypeError, ValueError, AttributeError):
+                return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+        finally:
+            self._end(grant)
+
+    @classmethod
+    def _contract_projection(cls, row: dict, broker: str) -> tuple[dict, dict]:
+        original = dict(row)
+        projected = dict(row)
+        if broker == "kotakneo" and "contract" in row:
+            contract = cls._record(row["contract"])
+            for key in ("symbol", "exchange", "instrument_id", "lot_size"):
+                if contract.get(key) != row.get(key):
+                    raise ValueError
+            allowed = {
+                "broker",
+                "symbol",
+                "exchange",
+                "instrument_id",
+                "broker_exchange_segment",
+                "underlying",
+                "option_type",
+                "instrument_type",
+                "expiry",
+                "strike",
+                "strike_unit",
+                "lot_size",
+                "quantity_unit",
+                "raw_tick_size",
+                "raw_precision",
+                "tick_size_inr",
+                "tick_scale_verified",
+                "source",
+                "source_revision",
+                "schema_revision",
+                "source_digest",
+                "record_digest",
+                "observed_at",
+                "valid_until",
+                "expiry_source",
+                "strike_source",
+            }
+            kept = {key: contract[key] for key in allowed if key in contract}
+            if "tick_source" in contract:
+                tick = cls._record(contract["tick_source"])
+                kept["tick_source"] = {
+                    key: tick[key] for key in ("kind", "url", "sha256", "reviewed_on", "master_scale") if key in tick
+                }
+            native = cls._native_fields(
+                contract,
+                frozenset(
+                    {
+                        "pSymbol",
+                        "pTrdSymbol",
+                        "pExchSeg",
+                        "pSymbolName",
+                        "pOptionType",
+                        "pInstType",
+                        "lExpiryDate",
+                        "pExpiryDate",
+                        "dStrikePrice;",
+                        "lLotSize",
+                        "dTickSize",
+                        "lPrecision",
+                    }
+                ),
+            )
+            if native is not None:
+                kept["broker_fields"] = native
+            original["contract"] = copy_json_evidence(kept)
+            for key in (
+                "underlying",
+                "expiry",
+                "option_type",
+                "raw_tick_size",
+                "source_revision",
+                "source_digest",
+                "observed_at",
+                "valid_until",
+            ):
+                if key in contract:
+                    projected[key] = contract[key]
+            if "strike" in contract:
+                projected["strike_price"] = contract["strike"]
+            if "tick_size_inr" in contract:
+                projected["tick_size"] = contract["tick_size_inr"]
+                projected["tick_unit"] = "INR"
+            if contract.get("tick_scale_verified") is False:
+                projected["raw_tick_unit"] = "unknown"
+        if broker == "dhan":
+            for key in ("observed_at", "valid_until"):
+                value = row.get(key)
+                if type(value) is int or type(value) is float:
+                    if not math.isfinite(value) or value <= 0:
+                        raise ValueError
+                    # The reviewed resolver's explicit epoch-second clock, not
+                    # any native order/fill timestamp convention.
+                    projected[key] = datetime.fromtimestamp(value, UTC).isoformat()
+            if row.get("tick_scale") == "unavailable":
+                projected["raw_tick_unit"] = "unknown"
+            if "tick_source" in row:
+                tick = cls._record(row["tick_source"])
+                original["tick_source"] = {
+                    key: tick[key]
+                    for key in (
+                        "tick_size",
+                        "source_kind",
+                        "source_revision",
+                        "source_url",
+                        "contract_source_revision",
+                        "observed_at",
+                        "valid_until",
+                    )
+                    if key in tick
+                }
+        return projected, original
+
+    @staticmethod
+    def _statement_rows(raw, handle, request, resource: str, page: int | None):
+        if type(raw) is list:
+            return raw, None
+        # Exact reviewed type only: arbitrary list subclasses/coverage hooks
+        # remain refused. A statement's False is scope, never paid evidence.
+        from .brokers.dhan_mapping import DhanStatementPage
+
+        if handle.selector.adapter_id != "dhan" or type(raw) is not DhanStatementPage:
+            raise ValueError
+        coverage = copy_json_evidence(raw.coverage)
+        if (
+            type(coverage) is not dict
+            or coverage
+            != {
+                "resource": resource,
+                "from_date": request.start_date,
+                "to_date": request.end_date,
+                "complete": False,
+                "terminal": "undocumented",
+                "broker_account_id": handle.account_id,
+                **({"page": page} if page is not None else {}),
+            }
+            or type(coverage.get("complete")) is not bool
+            or (page is not None and type(coverage.get("page")) is not int)
+        ):
+            raise ValueError
+        return list(list.__iter__(raw)), coverage
+
+    def _history_trade(self, item: object, handle: ConnectedRegistrySession) -> TradeSnapshot:
+        row = self._record(item, Trade)
+        if "tradingSymbol" in row and "symbol" not in row and handle.selector.adapter_id == "dhan":
+            # The reviewed legacy statement method returns native rows, unlike
+            # trade_book. Reuse its real mapper for semantics; retain presence
+            # before that projection. Never infer a date/zone from a timestamp.
+            from .brokers.dhan_mapping import from_dhan_trade
+
+            mapped = from_dhan_trade(row)
+            for canonical, native in (
+                ("fill_id", "exchangeTradeId"),
+                ("exchange_order_id", "exchangeOrderId"),
+                ("broker_account_id", "dhanClientId"),
+                ("broker_exchange_segment", "exchangeSegment"),
+                ("broker_product_type", "productType"),
+                ("created_at", "createTime"),
+                ("updated_at", "updateTime"),
+                ("exchange_time", "exchangeTime"),
+                ("trade_date", "tradeDate"),
+            ):
+                if native in row:
+                    mapped[canonical] = row[native]
+            mapped["broker_fields"] = row
+            row = mapped
+        return self._bound_trade(row, handle)
+
+    async def _trade_history(
+        self, facade: _BrokerReadFacade, request: TradeHistoryRequest, *, deadline: float | None = None
+    ):
+        try:
+            if type(request) is not TradeHistoryRequest:
+                raise ValueError
+            request = TradeHistoryRequest(
+                request.start_date, request.end_date, request.max_pages, request.start_page, request.max_rows
+            )
+        except (ValueError, TypeError):
+            return BrokerReadFailure(BrokerReadErrorCode.INVALID_REQUEST)
+        grant = self._begin(facade, _Operation.TRADE_HISTORY, request, TradeHistoryRequest)
+        if type(grant) is BrokerReadFailure:
+            return grant
+        try:
+            if grant.selector.adapter_id != "dhan":
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+            rows, pages, issues = [], [], []
+            provider_coverages = []
+            page_digests, identities = set(), set()
+            availability = "available"
+            observed_count = 0
+            deadline = time.monotonic() + 30.0 if deadline is None else deadline
+            for page in range(request.start_page, request.start_page + request.max_pages):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    availability = "provider_failure"
+                    issues.append("read_deadline_exceeded")
+                    break
+                try:
+                    async with asyncio.timeout(remaining):
+                        call = await self._admit_provider(grant, "trade_history")
+                except TimeoutError:
+                    availability = "provider_failure"
+                    issues.append("read_deadline_exceeded")
+                    break
+                if type(call) is BrokerReadFailure:
+                    availability = call.code.value
+                    issues.append("page_unavailable")
+                    break
+                try:
+                    raw = await self._bounded_observation(
+                        lambda call=call, page=page: call.method(
+                            call.handle, request.start_date, request.end_date, page=page
+                        ),
+                        deadline, facade=facade,
+                    )
+                except TimeoutError:
+                    availability = "provider_failure"
+                    issues.append("read_deadline_exceeded")
+                    break
+                except BrokerReadResponseInvalid:
+                    availability = "malformed_response"
+                    break
+                except Exception:
+                    availability = "provider_failure"
+                    break
+                pages.append(page)
+                try:
+                    raw, provider_coverage = self._statement_rows(raw, call.handle, request, "trade_history", page)
+                    if provider_coverage is not None:
+                        provider_coverages.append(provider_coverage)
+                    if type(raw) is not list:
+                        raise ValueError
+                    observed_count += len(raw)
+                    if observed_count > request.max_rows:
+                        issues.append("row_budget_exceeded")
+                        break
+                    copied = tuple(self._history_trade(item, call.handle) for item in raw)
+                except (ValueError, TypeError):
+                    availability = "malformed_response"
+                    break
+                digest = hashlib.sha256(
+                    json.dumps(
+                        [asdict(row) for row in copied], sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                ).hexdigest()
+                rows.extend(copied)
+                if digest in page_digests:
+                    issues.append("repeated_page")
+                    break
+                page_digests.add(digest)
+                for trade in copied:
+                    identity = (
+                        trade.trade_date,
+                        trade.broker_exchange_segment,
+                        trade.orderid,
+                        trade.fill_id,
+                        trade.fill_leg,
+                    )
+                    if trade.fill_id is not None and identity in identities:
+                        issues.append("page_overlap")
+                    identities.add(identity)
+                if not copied:
+                    issues.append("empty_page_not_terminal_evidence")
+                    break
+            else:
+                issues.append("page_budget_reached")
+            # No Dhan terminal, retention or page-size guarantee is documented.
+            coverage = ObservationCoverage(
+                resource="trades.history",
+                availability=availability,
+                query_start=request.start_date,
+                query_end=request.end_date,
+                trading_date=None,
+                timezone="Asia/Kolkata",
+                page_model="zero_based_pages_unknown_terminal",
+                pages=tuple(pages),
+                observed_count=observed_count,
+                source_digest=hashlib.sha256(
+                    json.dumps(
+                        [asdict(row) for row in rows], sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                ).hexdigest(),
+                source_revision="broker_read.observations.v1",
+                completeness="partial" if pages else "unknown",
+                missing_intervals=(request.start_date + "/" + request.end_date,),
+                issues=tuple(sorted(set(issues))),
+                provider_coverage_json=json.dumps(provider_coverages, sort_keys=True, separators=(",", ":"))
+                if provider_coverages
+                else None,
+            )
+            return self._published(grant, TradeHistorySnapshot(tuple(rows), coverage))
+        finally:
+            self._end(grant)
+
+    async def _ledger(self, facade: _BrokerReadFacade, request: LedgerRequest):
+        try:
+            if type(request) is not LedgerRequest:
+                raise ValueError
+            request = LedgerRequest(request.start_date, request.end_date, request.max_rows)
+        except (ValueError, TypeError):
+            return BrokerReadFailure(BrokerReadErrorCode.INVALID_REQUEST)
+        grant = self._begin(facade, _Operation.LEDGER, request, LedgerRequest)
+        if type(grant) is BrokerReadFailure:
+            return grant
+        try:
+            if grant.selector.adapter_id != "dhan":
+                return BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
+            call = await self._admit_provider(grant, "ledger")
+            if type(call) is BrokerReadFailure:
+                return call
+            try:
+                raw = await call.method(call.handle, request.start_date, request.end_date)
+            except BrokerReadResponseInvalid:
+                return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+            except Exception:
+                return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+            try:
+                raw, provider_coverage = self._statement_rows(raw, call.handle, request, "ledger", None)
+                if type(raw) is not list or len(raw) > request.max_rows:
+                    raise ValueError
+                postings = []
+                for item in raw:
+                    row = self._record(item)
+                    if (
+                        "dhanClientId" in row
+                        and self._text(row, "dhanClientId", required=True) != call.handle.account_id
+                    ):
+                        raise ValueError
+                    observed = {
+                        key: row[key]
+                        for key in (
+                            "dhanClientId",
+                            "narration",
+                            "voucherdate",
+                            "exchange",
+                            "voucherdesc",
+                            "vouchernumber",
+                            "debit",
+                            "credit",
+                            "runbal",
+                        )
+                        if key in row
+                    }
+                    posting = AccountPostingSnapshot(
+                        self._text(row, "vouchernumber"),
+                        self._text(row, "voucherdate"),
+                        self._number_text(row, "debit", required=True),
+                        self._number_text(row, "credit", required=True),
+                        json.dumps(copy_json_evidence(observed), sort_keys=True, separators=(",", ":")),
+                    )
+                    self._number_text(row, "runbal")
+                    postings.append(posting)
+                digest = hashlib.sha256(
+                    json.dumps([asdict(row) for row in postings], sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()
+            except (ValueError, TypeError):
+                return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+            coverage = ObservationCoverage(
+                resource="ledger.account_postings",
+                availability="available",
+                query_start=request.start_date,
+                query_end=request.end_date,
+                trading_date=None,
+                timezone="Asia/Kolkata",
+                page_model="single_request",
+                pages=(),
+                observed_count=len(postings),
+                source_digest=digest,
+                source_revision="broker_read.observations.v1",
+                completeness="partial",
+                missing_intervals=(request.start_date + "/" + request.end_date,),
+                issues=("posting_to_fill_allocation_unavailable",),
+                provider_coverage_json=json.dumps(provider_coverage, sort_keys=True, separators=(",", ":"))
+                if provider_coverage is not None
+                else None,
+            )
+            return self._published(grant, LedgerSnapshot(tuple(postings), coverage))
+        finally:
+            self._end(grant)
+
+    def observation_binding(self, facade: BrokerReadPort) -> tuple[BrokerReadProvenance, str] | BrokerReadFailure:
+        """Local current-generation check; never authenticates or fetches data.
+
+        Args:
+            facade: Exact account-bound port issued by this owner.
+
+        Returns:
+            Owner-resolved provenance and native account, or a typed refusal.
+        """
+        if type(facade) is not _BrokerReadFacade or _facade_owner(facade) is not self:
+            return BrokerReadFailure(BrokerReadErrorCode.REVOKED)
+        with self._lock:
+            grant = self._grants.get(facade)
+        if grant is None or grant.role is not None:
+            return BrokerReadFailure(BrokerReadErrorCode.UNAUTHORISED)
+        handle = self._revalidate(grant)
+        if type(handle) is BrokerReadFailure:
+            return handle
+        if type(handle.account_id) is not str or not handle.account_id:
+            return BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+        return self._provenance(grant.binding, grant.role), handle.account_id
+
+    async def capture_observations(
+        self,
+        facade: BrokerReadPort,
+        *,
+        history: TradeHistoryRequest | None = None,
+        lots: LotSizeRequest | None = None,
+        margin: MarginRequest | None = None,
+        ledger: LedgerRequest | None = None,
+        timeout_seconds: float = 30.0,
+        read_plan: object | None = None,
+        quotes: BatchQuoteRequest | None = None,
+    ) -> BrokerObservationSnapshot | BrokerReadFailure:
+        """Explicit authorised collection, not a GET/inspection side effect.
+
+        Args:
+            facade: Exact account-bound port issued by this owner.
+            history: Optional bounded historical trade request.
+            lots: Optional exact contract selection.
+            margin: Optional single-order estimate request, not standalone capital.
+            ledger: Optional bounded account-posting request.
+            timeout_seconds: Positive finite collector budget, at most sixty seconds.
+
+        Returns:
+            A bounded capture retaining uncertainty and accepted prefixes, or a
+            typed refusal. Timed-out SDK work remains owned until it actually exits.
+        """
+        if read_plan is not None:
+            from .canonical_read_plan import capture_plan
+
+            return await capture_plan(self, facade, read_plan, history=history, lots=lots, margin=margin,
+                                      ledger=ledger, quotes=quotes, timeout_seconds=timeout_seconds)
+        if quotes is not None:
+            return BrokerReadFailure(BrokerReadErrorCode.INVALID_REQUEST)
+        try:
+            if (
+                type(timeout_seconds) not in (int, float)
+                or not math.isfinite(timeout_seconds)
+                or not 0 < timeout_seconds <= 60
+            ):
+                raise ValueError
+            if history is not None:
+                if type(history) is not TradeHistoryRequest:
+                    raise ValueError
+                history = TradeHistoryRequest(
+                    history.start_date, history.end_date, history.max_pages, history.start_page, history.max_rows
+                )
+            if ledger is not None:
+                if type(ledger) is not LedgerRequest:
+                    raise ValueError
+                ledger = LedgerRequest(ledger.start_date, ledger.end_date, ledger.max_rows)
+            if lots is not None:
+                lots = self._copy_request(lots, LotSizeRequest)
+                if not 1 <= len(lots.symbols) <= 64:
+                    raise ValueError
+            if margin is not None:
+                margin = self._copy_request(margin, MarginRequest)
+        except (ValueError, TypeError):
+            return BrokerReadFailure(BrokerReadErrorCode.INVALID_REQUEST)
+        binding = self.observation_binding(facade)
+        if type(binding) is BrokerReadFailure:
+            return binding
+        started = datetime.now(UTC)
+        day = started.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        deadline = time.monotonic() + timeout_seconds
+        timed_out = False
+
+        async def collect(factory):
+            nonlocal timed_out
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+            try:
+                return await self._bounded_observation(factory, deadline, facade=facade)
+            except TimeoutError:
+                timed_out = True
+                return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+
+        result = await collect(lambda: self._capture_trade_book(facade))
+        history_result = await self._trade_history(facade, history, deadline=deadline) if history is not None else None
+        lots_result = await collect(lambda: self._lot_sizes(facade, lots)) if lots is not None else None
+        margin_result = await collect(lambda: self._margin(facade, margin)) if margin is not None else None
+        ledger_result = await collect(lambda: self._ledger(facade, ledger)) if ledger is not None else None
+        if self.observation_binding(facade) != binding:
+            return BrokerReadFailure(BrokerReadErrorCode.TARGET_STALE)
+        finished = datetime.now(UTC)
+        if finished < started:
+            return BrokerReadFailure(BrokerReadErrorCode.TARGET_STALE)
+        end_day = finished.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        rows = result.value.trades if type(result) is BrokerReadSuccess else ()
+        provider_coverage_json = result.value.provider_coverage_json if type(result) is BrokerReadSuccess else None
+        digest = (
+            hashlib.sha256(
+                json.dumps(
+                    [asdict(row) for row in rows], sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode()
+            ).hexdigest()
+            if type(result) is BrokerReadSuccess
+            else None
+        )
+        coverage = ObservationCoverage(
+            resource="trades.daily",
+            availability="available" if type(result) is BrokerReadSuccess else result.code.value,
+            query_start=day,
+            query_end=end_day,
+            trading_date=day if day == end_day else None,
+            timezone="Asia/Kolkata",
+            page_model="unpaged_documented",
+            pages=(),
+            observed_count=len(rows),
+            source_digest=digest,
+            source_revision="broker_read.observations.v1",
+            completeness=("window_only" if day == end_day else "partial")
+            if type(result) is BrokerReadSuccess else "unknown",
+            missing_intervals=("before_current_trading_day",)
+            if type(result) is BrokerReadSuccess
+            else (day + "/" + end_day,),
+            issues=(("collection_crossed_trading_day",) if day != end_day else ())
+            + (("read_deadline_exceeded",) if timed_out else ()),
+            provider_coverage_json=provider_coverage_json,
+            returned_count=len(rows) if type(result) is BrokerReadSuccess else None,
+        )
+        coverages = [coverage]
+        if type(ledger_result) is BrokerReadSuccess:
+            coverages.append(ledger_result.value.coverage)
+        elif type(ledger_result) is BrokerReadFailure:
+            coverages.append(
+                ObservationCoverage(
+                    resource="ledger.account_postings",
+                    availability=ledger_result.code.value,
+                    query_start=ledger.start_date,
+                    query_end=ledger.end_date,
+                    trading_date=None,
+                    timezone="Asia/Kolkata",
+                    page_model="single_request",
+                    pages=(),
+                    observed_count=0,
+                    source_digest=None,
+                    source_revision="broker_read.observations.v1",
+                    completeness="unknown",
+                )
+            )
+        if type(history_result) is BrokerReadSuccess:
+            rows += history_result.value.trades
+            coverages.append(history_result.value.coverage)
+        elif type(history_result) is BrokerReadFailure:
+            if history_result.code is BrokerReadErrorCode.INVALID_REQUEST:
+                return history_result
+            coverages.append(
+                ObservationCoverage(
+                    resource="trades.history",
+                    availability=history_result.code.value,
+                    query_start=history.start_date,
+                    query_end=history.end_date,
+                    trading_date=None,
+                    timezone="Asia/Kolkata",
+                    page_model="unavailable",
+                    pages=(),
+                    observed_count=0,
+                    source_digest=None,
+                    source_revision="broker_read.observations.v1",
+                    completeness="unknown",
+                    missing_intervals=(history.start_date + "/" + history.end_date,),
+                )
+            )
+        for resource, outcome in (("instruments.contracts", lots_result), ("margin.single_estimate", margin_result)):
+            if outcome is not None:
+                coverages.append(
+                    ObservationCoverage(
+                        resource=resource,
+                        availability="available" if type(outcome) is BrokerReadSuccess else outcome.code.value,
+                        query_start=None,
+                        query_end=None,
+                        trading_date=day,
+                        timezone="Asia/Kolkata",
+                        page_model="single_request",
+                        pages=(),
+                        observed_count=(len(outcome.value) if resource == "instruments.contracts" else 1)
+                        if type(outcome) is BrokerReadSuccess
+                        else 0,
+                        source_digest=None,
+                        source_revision="broker_read.observations.v1",
+                        completeness="requested_scope" if type(outcome) is BrokerReadSuccess else "unknown",
+                    )
+                )
+        captured = BrokerObservationSnapshot(
+            binding[0],
+            binding[1],
+            started.isoformat(),
+            finished.isoformat(),
+            rows,
+            tuple(coverages),
+            contracts=lots_result.value if type(lots_result) is BrokerReadSuccess else (),
+            margins=(margin_result.value,) if type(margin_result) is BrokerReadSuccess else (),
+            account_postings=ledger_result.value.postings if type(ledger_result) is BrokerReadSuccess else (),
+        )
+        return await self._capture_native_scope(facade, captured, deadline)
+
+    async def _capture_native_scope(
+        self, facade: _BrokerReadFacade, captured: BrokerObservationSnapshot, deadline: float,
+    ) -> BrokerObservationSnapshot | BrokerReadFailure:
+        """Collect optional server-owned primitives through the same read custody."""
+        source = self._native_scope_source
+        if source is None:
+            return captured
+        binding = (captured.provenance, captured.provider_account_id)
+
+        async def read() -> BrokerReadFailure | BrokerReadSuccess:
+            grant = self._begin(facade, _Operation.ORDER_STATES, None, None)
+            if type(grant) is BrokerReadFailure:
+                return grant
+            try:
+                handle = self._revalidate(grant)
+                if type(handle) is BrokerReadFailure:
+                    return handle
+                if source.adapter is not self._adapters.get(grant.selector.adapter_id):
+                    return BrokerReadFailure(BrokerReadErrorCode.TARGET_STALE)
+                from .canonical_read_plan import current_budget
+
+                budget = current_budget()
+                if budget is not None and not budget.take():
+                    return BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+                rows = await source.read(handle)
+                return self._published(grant, rows)
+            finally:
+                self._end(grant)
+        try:
+            outcome = await self._bounded_observation(read, deadline, facade=facade)
+        except (TimeoutError, ValueError, TypeError):
+            outcome = BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+        if self.observation_binding(facade) != binding:
+            return BrokerReadFailure(BrokerReadErrorCode.TARGET_STALE)
+        facts = {"availability": "available" if type(outcome) is BrokerReadSuccess else outcome.code.value,
+                 "records": outcome.value if type(outcome) is BrokerReadSuccess else None,
+                 "provenance": "synthetic", "source_id": source.source_id}
+        return replace(captured, native_scope_json=json.dumps(facts, sort_keys=True, separators=(",", ":")))
+
+    def _bound_trade(self, item: object, handle: ConnectedRegistrySession) -> TradeSnapshot:
+        trade = self._trade(item)
+        native = json.loads(trade.raw_observation_json).get("broker_fields", {})
+        account = handle.account_id
+        if type(account) is not str or not account:
+            raise ValueError
+        if trade.broker_account_id is not None and trade.broker_account_id != account:
+            raise ValueError
+        if handle.selector.adapter_id == "dhan":
+            account_names = ("dhanClientId",)
+            identities = (
+                ("exchangeTradeId", trade.fill_id),
+                ("exchangeOrderId", trade.exchange_order_id),
+                ("orderId", trade.orderid),
+                ("securityId", trade.instrument_id),
+            )
+            numeric = (("quantity", ("tradedQuantity", "quantity")), ("price", ("tradedPrice", "price")))
+        elif handle.selector.adapter_id == "kotakneo":
+            account_names = ("actId", "accountId")
+            identities = (("flId", trade.fill_id), ("exOrdId", trade.exchange_order_id), ("nOrdNo", trade.orderid))
+            # qty is NOT fldQty. avgPrc and flPrc remain independent observations.
+            numeric = (("quantity", ("fldQty",)),)
+        else:
+            account_names, identities, numeric = (), (), ()
+        for name in account_names:
+            if name in native and (type(native[name]) is not str or native[name] != account):
+                raise ValueError
+        for name, value in identities:
+            if name in native and value is not None and native[name] != value:
+                raise ValueError
+        for attribute, names in numeric:
+            expected = Decimal(getattr(trade, attribute))
+            for name in names:
+                if name in native and Decimal(self._number_text(native, name, required=True)) != expected:
+                    raise ValueError
+        return trade
+
+    @staticmethod
+    def _native_fields(row: dict[str, object], allowed: frozenset[str]) -> dict | None:
+        native = row.get("broker_fields")
+        if native is None:
+            return None
+        if type(native) is not dict or any(type(key) is not str for key in native):
+            raise ValueError
+        return copy_json_evidence({key: native[key] for key in native if key in allowed})
+
+    @staticmethod
+    def _trade_observation_json(row: dict[str, object]) -> str:
+        # An allowlist, not arbitrary adapter output, crosses this seam. Native
+        # independent quantities/times are observations, not semantic aliases.
+        native_keys = frozenset(
+            {
+                "dhanClientId",
+                "orderId",
+                "exchangeOrderId",
+                "exchangeTradeId",
+                "transactionType",
+                "exchangeSegment",
+                "productType",
+                "orderType",
+                "tradingSymbol",
+                "securityId",
+                "tradedQuantity",
+                "quantity",
+                "tradedPrice",
+                "price",
+                "createTime",
+                "updateTime",
+                "exchangeTime",
+                "drvExpiryDate",
+                "drvOptionType",
+                "drvStrikePrice",
+                "tradeDate",
+                "sebiTax",
+                "stt",
+                "brokerageCharges",
+                "serviceTax",
+                "exchangeTransactionCharges",
+                "stampDuty",
+                "flId",
+                "flLeg",
+                "nOrdNo",
+                "exOrdId",
+                "exSeg",
+                "rptTp",
+                "fldQty",
+                "qty",
+                "avgPrc",
+                "flPrc",
+                "flDt",
+                "flTm",
+                "exTm",
+                "flDtTm",
+                "hsUpTm",
+                "updRecvTm",
+                "tok",
+                "trdSym",
+                "sym",
+                "trnsTp",
+                "prod",
+                "actId",
+                "accountId",
+                "genNum",
+                "genDen",
+                "prcNum",
+                "prcDen",
+                "multiplier",
+                "precision",
+                "ordDtTm",
+                "boeSec",
+                "uSec",
+                "lotSz",
+                "brdLtQty",
+                "it",
+                "optTp",
+                "exp",
+                "expDt",
+                "stkPrc",
+                "prcTp",
+                "ordDur",
+                "ordGenTp",
+                "GuiOrdId",
+                "prc",
+            }
+        )
+        retained = {
+            key: row[key]
+            for key in (
+                "fill_id",
+                "fill_leg",
+                "exchange_order_id",
+                "broker_account_id",
+                "broker_exchange_segment",
+                "broker_product_type",
+                "trade_date",
+                "created_at",
+                "updated_at",
+                "exchange_time",
+                "fill_time",
+                "option_type",
+                "expiry",
+                "strike_price",
+                "underlying",
+            )
+            if key in row
+        }
+        if "broker_fields" in row and row["broker_fields"] is not None:
+            native = row["broker_fields"]
+            if type(native) is not dict or any(type(key) is not str for key in native):
+                raise ValueError
+            retained["broker_fields"] = {key: native[key] for key in native if key in native_keys}
+        return json.dumps(copy_json_evidence(retained), sort_keys=True, separators=(",", ":"), allow_nan=False)
+
     def _trade(self, item: object) -> TradeSnapshot:
         row = self._record(item, Trade)
         return TradeSnapshot(
-            self._text(row, "orderid"), self._text(row, "symbol", required=True), self._text(row, "instrument_id"),
-            self._text(row, "exchange", required=True), self._text(row, "action", required=True),
-            self._number_text(row, "quantity", required=True), self._number_text(row, "price", required=True),
-            self._text(row, "product", required=True), self._text(row, "timestamp", required=True),
-            self._numeric(row, "multiplier"), self._numeric(row, "fx_rate"), self._boolean(row, "cross_currency"),
+            self._text(row, "orderid"),
+            self._text(row, "symbol", required=True),
+            self._text(row, "instrument_id"),
+            self._text(row, "exchange", required=True),
+            self._text(row, "action", required=True),
+            self._number_text(row, "quantity", required=True),
+            self._number_text(row, "price", required=True),
+            self._text(row, "product", required=True),
+            self._text(row, "timestamp", required=True),
+            self._numeric(row, "multiplier"),
+            self._numeric(row, "fx_rate"),
+            self._boolean(row, "cross_currency"),
+            **{
+                key: self._text(row, key)
+                for key in (
+                    "fill_id",
+                    "fill_leg",
+                    "exchange_order_id",
+                    "broker_account_id",
+                    "broker_exchange_segment",
+                    "broker_product_type",
+                    "trade_date",
+                    "created_at",
+                    "updated_at",
+                    "exchange_time",
+                    "fill_time",
+                )
+            },
+            raw_observation_json=self._trade_observation_json(row),
         )
 
 
@@ -1874,6 +3174,7 @@ def create_broker_read_owner(
     workspace_path: Path,
     rate_limiter: object | None = None,
     runtime_accepting_requests: Callable[[], bool],
+    native_scope_source: object | None = None,
 ) -> BrokerReadOwner:
     """Create an inert owner from one already-prepared app dependency set."""
     if (
@@ -1887,6 +3188,13 @@ def create_broker_read_owner(
         or (rate_limiter is not None and not callable(getattr(rate_limiter, "acquire", None)))
     ):
         raise RegistrySessionUnavailable
+    if native_scope_source is not None:
+        from .native_scope_primitives import SyntheticNativeScopeSource
+
+        if (type(native_scope_source) is not SyntheticNativeScopeSource
+                or native_scope_source.workspace_path != workspace_path.resolve()
+                or not any(native_scope_source.adapter is adapter for adapter in adapters.values())):
+            raise RegistrySessionUnavailable
     return BrokerReadOwner(
         registry=registry,
         session_provider=session_provider,
@@ -1894,4 +3202,5 @@ def create_broker_read_owner(
         workspace_path=workspace_path,
         rate_limiter=rate_limiter,
         runtime_accepting_requests=runtime_accepting_requests,
+        native_scope_source=native_scope_source,
     )

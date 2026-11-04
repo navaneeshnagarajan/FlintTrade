@@ -77,8 +77,9 @@ describe("SymbolRow LTP / % change columns (FT-TRADE-008)", () => {
       </Provider>,
     );
 
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
-    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("+0.35%");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("2,850.00");
+    expect(screen.getByTestId("RELIANCE % change")).toHaveTextContent("+0.35%");
+    expect(screen.getByRole("button")).toHaveAccessibleName(/^RELIANCE\s*NSE\s*2,850\.00\s*\+0\.35%$/);
   });
 
   it("shows an honest em dash when the column is checked but no quote has arrived", () => {
@@ -87,15 +88,15 @@ describe("SymbolRow LTP / % change columns (FT-TRADE-008)", () => {
       visibleColumns: ["symbol", "price", "changePct"],
     });
 
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
-    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE % change")).toHaveTextContent("—");
   });
 
   it("hides LTP and % change when those columns are unchecked", () => {
     renderRow({ visibleColumns: ["symbol"] });
 
-    expect(screen.queryByLabelText("RELIANCE LTP")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("RELIANCE % change")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("RELIANCE LTP")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("RELIANCE % change")).not.toBeInTheDocument();
   });
 
   it("shows a brief loading ellipsis before the honest empty", () => {
@@ -105,8 +106,8 @@ describe("SymbolRow LTP / % change columns (FT-TRADE-008)", () => {
       visibleColumns: ["symbol", "price", "changePct"],
     });
 
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("…");
-    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("…");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("…");
+    expect(screen.getByTestId("RELIANCE % change")).toHaveTextContent("…");
   });
 });
 
@@ -127,25 +128,25 @@ describe("SymbolRow tick authority", () => {
     store.set(tickAtomFamily("NSE:RELIANCE"), tickA);
     const view = render(<Provider store={store}><SymbolRow item={ITEM} quote={null} sparkPrices={[]}
       visibleColumns={["symbol", "price", "changePct"]} formula="rangePct" onSelect={vi.fn()} onRemove={vi.fn()} /></Provider>);
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("2,850.00");
     return { store, view };
   }
 
   it("hides cached A ticker prices immediately under B and admits only B observations", () => {
     const { store } = mountAccountARow();
     act(() => useBrokerStore.getState().setActiveAccount(brokerAccountKey(b)));
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
-    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE % change")).toHaveTextContent("—");
     act(() => store.set(tickAtomFamily("NSE:RELIANCE"), { ...tickA, ltp: 4000, prevClose: 3900 }));
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("4,000.00");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("4,000.00");
     act(() => useBrokerStore.getState().setActiveAccount(brokerAccountKey(a)));
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("—");
   });
 
   it.each(["practice", "explore"] as const)("clears cached native ticker observations before the first %s row render", (mode) => {
     mountAccountARow();
     act(() => useModeStore.getState().setMode(mode));
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("—");
-    expect(screen.getByLabelText("RELIANCE % change")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("—");
+    expect(screen.getByTestId("RELIANCE % change")).toHaveTextContent("—");
   });
 });

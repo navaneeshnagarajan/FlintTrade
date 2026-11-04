@@ -7,6 +7,7 @@ import { request as ownedRequest, type Locator, type Page, type Request, type Te
 import { z } from "zod";
 import { test as guardedTest, expect, type HttpMethod, type SyntheticPhasedFixtureRegistry } from "./fixture-registry";
 import { EDGE_PROBE_URLS, PUBLIC_INTERNET_PROBE_URL } from "../src/lib/operatorProbeUrls";
+import { armIncidentProtocol, SYSTEM_INSPECTION_CASE, type IncidentScope, type ProducerRow } from "./incident-delivery-protocol";
 
 // This journey requires an owned, OS-isolated normal-factory core. It does not
 // supply application API responses or claim provider/native qualification.
@@ -80,6 +81,8 @@ const test = guardedTest.extend<{ coreLifetime: void }>({
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 interface CaptureWitness {
   startWitness(page: Page, info: TestInfo): void;
+  callWitness(client: { call(name: string, args: Record<string, unknown>): Promise<unknown> }, info: TestInfo,
+    name: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
   finishWitness(client: unknown, verdict: unknown, info: TestInfo, name: string, predicate: unknown): Promise<{ accepted: boolean }>;
 }
 async function captureWitness(): Promise<CaptureWitness> {
@@ -94,6 +97,7 @@ const diagnosticClosers = new Map<string, () => Promise<void>>();
 const relayClosers = new Map<string, () => Promise<void>>();
 interface QueryObservation { key: unknown; status: string; fetchStatus: string; failures: number; observers: number; error: string }
 interface DiscoveryObservation {
+  periodic?: { bindScope(value: string): void; classify(request: Request): Promise<boolean>; finish(): Promise<void> };
   events: { id: number; borrowersBefore: number; stopped: boolean; aborted: boolean; stack: string }[];
   locations: unknown[]; errors: string[];
   flights(): Promise<{ id: number; borrowers: number; stopped: boolean; aborted: boolean }[]>;
@@ -115,7 +119,7 @@ test.afterEach(async ({}, info) => {
   const close = diagnosticClosers.get(info.testId);
   try { await close?.(); } finally { diagnosticClosers.delete(info.testId); }
 });
-interface Row { method: string; path: string; body: unknown; status: number; response: unknown; etag: string | undefined; bodySha256: string; responseSha256: string; trial: string | undefined; experiment: string | undefined }
+interface Row { diagnostic: string | undefined; method: string; path: string; body: unknown; status: number; response: unknown; etag: string | undefined; bodySha256: string; responseSha256: string; trial: string | undefined; experiment: string | undefined }
 function safe(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(safe);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, /^(?:credential|authorization|token|password|api_key)$/i.test(key) ? "<redacted-synthetic>" : safe(child)]));
@@ -152,8 +156,9 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
   await cdp.send("Debugger.setAsyncCallStackDepth", { maxDepth: 32 });
   const probePath = process.env["FLINTTRADE_E2E_DISCOVERY_PROBE"];
   if (!probePath) throw new Error("Owned R38 read-only discovery observer required");
-  const probeModule: { installDiscoveryProbe(page: Page, cdp: unknown): Promise<DiscoveryObservation> } = await import(probePath);
-  const discovery = await probeModule.installDiscoveryProbe(page, cdp);
+  const probeModule: { installDiscoveryProbe(page: Page, cdp: unknown, info: TestInfo): Promise<DiscoveryObservation> } = await import(probePath);
+  const discovery = await probeModule.installDiscoveryProbe(page, cdp, info);
+  discovery.periodic?.bindScope(JSON.stringify(bootstrap.session));
   discoveryProbes.set(page, discovery);
   const heldDiscoveries: unknown[] = [];
   cdp.on("Network.requestWillBeSent", event => {
@@ -163,6 +168,10 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
   diagnosticClosers.set(info.testId, async () => {
     await writing;
     await Promise.all(bodyReads);
+    await fs.writeFile(info.outputPath("periodic-counts.json"), JSON.stringify(
+      ["/api/v1/ping", "/health", "/api/v1/native/accounts"].map(path => ({ path: prefix + path,
+        counts: registry.periodicReadCounts(prefix + path) })), null, 2));
+    await discovery.periodic?.finish();
     await fs.writeFile(info.outputPath("browser-completed-bodies.json"), JSON.stringify(browserBodies, null, 2));
     await fs.writeFile(info.outputPath("registry-counts.json"), JSON.stringify(registered.map(row => ({ ...row, calls: registry.callCount(row.method, row.path), ...(row.method === "GET" ? { reads: registry.readCounts(row.path) } : {}) })), null, 2));
     await fs.writeFile(info.outputPath("browser-console.json"), JSON.stringify(consoleRows, null, 2));
@@ -175,7 +184,7 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
       const module: { connectReticle(path: string): Promise<{ call(name: string, args: Record<string, unknown>): Promise<unknown>; close(): void }> } = await import(clientPath);
       const client = await module.connectReticle(info.outputPath("refusal-diagnostic-transcript.json"));
       try {
-        const events = await client.call("reticle_observe", { action: "events", since: 0, filters: ["net", "signal"], max_events: 2000 });
+        const events = await (await captureWitness()).callWitness(client, info, "reticle_observe", { action: "events", since: 0, filters: ["net", "signal"], max_events: 2000 });
         await fs.writeFile(info.outputPath("refusal-diagnostic-events.json"), JSON.stringify(events, null, 2));
       } finally { client.close(); }
     }
@@ -196,7 +205,7 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
     const text = await response.text();
     let parsed: unknown = text;
     try { parsed = JSON.parse(text); } catch { /* Retain exact non-JSON evidence. */ }
-    const row: Row = { method: request.method(), path: url.pathname + url.search, body: safe(data ? JSON.parse(data) : null), status: response.status(), response: safe(parsed), etag: response.headers()["etag"], bodySha256: sha(data), responseSha256: sha(text), trial: response.headers()["x-trial-id"], experiment: response.headers()["x-experiment-id"] };
+    const row: Row = { diagnostic: response.headers()["x-diagnostic-request-id"], method: request.method(), path: url.pathname + url.search, body: safe(data ? JSON.parse(data) : null), status: response.status(), response: safe(parsed), etag: response.headers()["etag"], bodySha256: sha(data), responseSha256: sha(text), trial: response.headers()["x-trial-id"], experiment: response.headers()["x-experiment-id"] };
     rows.push(row);
     writing = writing.then(async () => {
       await fs.writeFile(info.outputPath("core-relay-ledger.json"), JSON.stringify(rows, null, 2));
@@ -215,6 +224,15 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
   }
   for (const path of ["/v1/auth/status", "/health", "/api/v1/ping", "/api/v1/advisor/status", "/api/v1/instrument-lots", "/api/v1/system/diagnostics", "/v1/config/llm", "/v1/sandbox/funds", "/v1/sandbox/positions", "/v1/sandbox/status"]) {
     register("GET", path, { minimum: 0, maximum: 8 });
+  }
+  if (!discovery.periodic) throw new Error("Native periodic provenance observer required");
+  for (const [path, cadenceMs, attemptsPerTick, expectedStatus] of [
+    ["/api/v1/ping", 1500, 1, 200], ["/health", 30_000, 1, 200],
+    ["/api/v1/native/accounts", 10_000, 3, 503],
+  ] as const) {
+    registry.registerPeriodicRead({ name: `proven periodic ${path}`, path: prefix + path,
+      cadenceMs, activeWindowMs: info.timeout, attemptsPerTick, expectedStatus,
+      classify: request => discovery.periodic!.classify(request), handler: relay });
   }
   const nativePath = prefix + "/api/v1/native/accounts";
   let nativeBaseline = 0;
@@ -286,7 +304,99 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
     await expect.poll(() => registry.readCounts(prefix + "/api/v1/native/accounts").completed).toBe(nativeReadBudget(info.title));
     expect(rows.filter(row => row.path === prefix + "/api/v1/native/accounts").every(row => row.status === 503)).toBe(true);
   }
-  return { bootstrap, register, registerRead, rows, finish, nativePhase, retireNative };
+  async function incidentInspection() {
+    expect(info.title).toBe(SYSTEM_INSPECTION_CASE);
+    expect(await page.evaluate(() => typeof Notification === "undefined" ? "unsupported" : Notification.permission)).not.toBe("granted");
+    const startup = z.object({ case_key: z.literal(sha(info.testId)), pid: z.number().int().positive() }).parse(JSON.parse(await fs.readFile(info.outputPath("normal-core/startup.json"), "utf8")));
+    const scope: IncidentScope = { caseId: info.testId, title: info.title, server: bootstrap.baseURL, pid: startup.pid, auth: "Bearer " + bootstrap.session.token, phase: "system-inspection" };
+    async function readDiagnostics() {
+      const response = await transport.get(bootstrap.baseURL + "/api/v1/system/diagnostics", { headers: { Authorization: scope.auth }, maxRedirects: 0 });
+      expect(response.status()).toBe(200);
+      return response.text();
+    }
+    const diagnosticsWire = await readDiagnostics();
+    const producerLedger: ProducerRow[] = JSON.parse(await fs.readFile(info.outputPath("normal-core/core-http-ledger.json"), "utf8"));
+    const protocol = armIncidentProtocol({ registry, origin: "http://127.0.0.1:5173", prefix, scope, diagnosticsWire, producerLedger,
+      expectedNativeReads: registry.callCount("GET", nativePath) + registry.periodicReadCounts(nativePath).calls, relay,
+      current: async () => {
+        const current = Bootstrap.parse(JSON.parse(await fs.readFile(statePath!, "utf8")));
+        const owner = z.object({ case_key: z.literal(sha(info.testId)), pid: z.number() }).parse(JSON.parse(await fs.readFile(info.outputPath("normal-core/startup.json"), "utf8")));
+        const browser = await page.evaluate(() => JSON.parse(sessionStorage.getItem("flinttrade:auth-session")!));
+        expect(browser).toEqual(bootstrap.session);
+        expect(await page.evaluate(() => typeof Notification === "undefined" ? "unsupported" : Notification.permission)).not.toBe("granted");
+        return { ...scope, server: current.baseURL, pid: owner.pid, auth: "Bearer " + current.session.token };
+      },
+    });
+    await fs.writeFile(info.outputPath("incident-census-before-writes.json"), JSON.stringify(protocol.evidence(), null, 2));
+    const closeDiagnostics = diagnosticClosers.get(info.testId);
+    diagnosticClosers.set(info.testId, async () => {
+      try {
+        // Supplemental custody after the original body/window, including a
+        // failed body. Never use this read to admit or retry another write.
+        const readback: unknown = JSON.parse(await readDiagnostics());
+        await fs.writeFile(info.outputPath("incident-after-body-observation.json"), JSON.stringify({ ...protocol.evidence(), readback }, null, 2));
+      } finally { await closeDiagnostics?.(); }
+    });
+    return { ...protocol, async verifyDurable() {
+      const readback: unknown = JSON.parse(await readDiagnostics());
+      await fs.writeFile(info.outputPath("incident-protocol-final.json"), JSON.stringify({ ...protocol.evidence(), readback }, null, 2));
+      protocol.verifyReadback(readback); protocol.retire();
+      protocol.verifyCoreLedger(JSON.parse(await fs.readFile(info.outputPath("normal-core/core-http-ledger.json"), "utf8")));
+    } };
+  }
+  async function journalReads() {
+    // Reports owns this range summary. Practice Fills uses the sandbox book;
+    // its disabled journal observer does not add an independent read.
+    // Bind exact selectors to the browser's native IST date without changing
+    // its clock, replacing producer bytes or granting a wildcard GET.
+    const dates = await page.evaluate(() => {
+      const day = new Date(Date.now() + 330 * 60_000);
+      const end = day.toISOString().slice(0, 10);
+      day.setUTCDate(day.getUTCDate() - 6);
+      return { start: day.toISOString().slice(0, 10), end };
+    });
+    const path = `/api/v1/trades/journal?start_date=${dates.start}&end_date=${dates.end}&limit=1000`;
+    registerRead(path, 1);
+    return { async verify() {
+      await expect.poll(() => registry.readCounts(prefix + path).completed).toBe(1);
+      const reads = rows.filter(row => row.method === "GET" && row.path === prefix + path);
+      expect(reads).toHaveLength(1);
+      expect(reads[0]).toMatchObject({ body: null, status: 200 });
+      expect(reads[0].response).toEqual({ status: "success", data: { trades: [], total: 0 } });
+    } };
+  }
+  function brokerCatalogueReads() {
+    // BrokerConnect's lazy leaf owns this metadata GET. This is not an MCP
+    // tool call, account discovery, or evidence of provider readiness.
+    const path = "/api/v1/broker/mcp";
+    registered.push({ method: "GET", path: prefix + path, expected: { calls: 1, phase: "required" } });
+    registry.register({ name: "BrokerConnect catalogue", method: "GET", path: prefix + path,
+      expectedCalls: 1, readPhase: "required", handler: async request => {
+        const response = await relay(request);
+        await fs.writeFile(info.outputPath("broker-catalogue-response.json"), response.body);
+        return response;
+      } });
+    return { async verify() {
+      await expect.poll(() => registry.readCounts(prefix + path).completed).toBe(1);
+      const reads = rows.filter(row => row.method === "GET" && row.path === prefix + path);
+      expect(reads).toHaveLength(1);
+      expect(reads[0]).toMatchObject({ body: null, status: 200 });
+      const catalogue = z.object({ status: z.literal("success"), count: z.number().int().positive(),
+        brokers: z.array(z.object({ adapter_id: z.string(), display_name: z.string(),
+          mcp: z.object({ remote_url: z.string() }) })) }).parse(reads[0].response);
+      expect(catalogue.count).toBe(catalogue.brokers.length);
+      expect(catalogue.brokers.map(broker => broker.adapter_id))
+        .toEqual(["dhan", "upstox", "groww", "deltaexchange"]);
+      // A fulfilled handler alone is insufficient: require the same completed
+      // browser body as the normal factory's actual wire response.
+      await Promise.all(bodyReads);
+      expect(browserBodies.filter(value => z.object({ path: z.string() }).parse(value).path === prefix + path))
+        .toEqual([{ method: "GET", path: prefix + path, status: 200, bodySha256: sha(""),
+          completed: true, responseSha256: reads[0].responseSha256 }]);
+    } };
+  }
+  return { bootstrap, register, registerRead, rows, finish, nativePhase, retireNative, incidentInspection,
+    journalReads, brokerCatalogueReads };
 }
 async function declaredReticle(info: TestInfo, predicates: Record<string, unknown>[], name = "reticle") {
   const clientPath = process.env["FLINTTRADE_E2E_RETICLE_CLIENT"];
@@ -295,16 +405,23 @@ async function declaredReticle(info: TestInfo, predicates: Record<string, unknow
   const module: { connectReticle(path: string): Promise<Client> } = await import(clientPath);
   const client = await module.connectReticle(info.outputPath(name + "-transcript.json"));
   try {
+    const witness = await captureWitness();
     await client.call("reticle_session", { action: "list" });
-    await client.call("reticle_look", { action: "state" });
+    await witness.callWitness(client, info, "reticle_look", { action: "state" });
     // Public, unfiltered-by-outcome timeline: retain IDs, ordering and actual
     // hydration signal semantics without changing the assertion's full window.
-    const events = await client.call("reticle_observe", { action: "events", since: 0, filters: ["net", "signal"], max_events: 2000 });
+    const events = await witness.callWitness(client, info, "reticle_observe", { action: "events", since: 0, filters: ["net", "signal"], max_events: 2000 });
     await fs.writeFile(info.outputPath(name + "-events.json"), JSON.stringify(events, null, 2));
     const predicate = { kind: "allOf", predicates: [
-      { kind: "net", method: "GET", urlContains: "/api/v1/native/accounts", status: 503, count: nativeReadBudget(info.title) }, ...predicates,
+      // Initial acquisitions remain exact in the phased registry. The full
+      // native window additionally permits only the independently proven timer
+      // reads, bounded before observation by cadence, retries and case deadline.
+      { kind: "anyOf", predicates: Array.from({ length: Math.floor(info.timeout / 10_000) * 3 + 1 }, (_, periodic) => ({
+        kind: "net", method: "GET", urlContains: "/api/v1/native/accounts", status: 503,
+        count: nativeReadBudget(info.title) + periodic,
+      })) }, ...predicates,
     ] };
-    const verdict = await client.call("reticle_assert", { predicate, since: 0, timeout_ms: 2000 });
+    const verdict = await witness.callWitness(client, info, "reticle_assert", { predicate, since: 0, timeout_ms: 2000 });
     await fs.writeFile(info.outputPath(name + "-verdict.json"), JSON.stringify({ predicate, verdict }, null, 2));
     const fullWindow = await (await captureWitness()).finishWitness(client, verdict, info, name, predicate);
     expect.soft(fullWindow.accepted, JSON.stringify(fullWindow)).toBe(true);
@@ -354,24 +471,33 @@ async function checkpoint(page: Page, info: TestInfo, name: string) {
   await fs.writeFile(info.outputPath(name + ".html"), await page.content());
   await fs.writeFile(info.outputPath(name + ".ax.txt"), await page.locator("body").ariaSnapshot());
 }
+async function nativeScrollEnd(scroller: Locator) {
+  // Returning an object (not the pending promise) acknowledges installation on
+  // the exact element before input. Locator resolution must not race the wheel.
+  return scroller.evaluateHandle(element => ({
+    finished: new Promise<void>(resolve => element.addEventListener("scrollend", () => resolve(), { once: true })),
+  }));
+}
 async function scrollKeyAndSettle(page: Page, scroller: Locator, key: "ArrowDown" | "PageDown") {
   const before = await scroller.evaluate(element => element.scrollTop);
   // Native key scrolling animates. Its first moved pixel is not settlement;
   // await the browser's actual scrollend rather than queueing more key pulses.
-  await Promise.all([
-    scroller.evaluate(element => new Promise<void>(resolve => element.addEventListener("scrollend", () => resolve(), { once: true }))),
-    page.keyboard.press(key),
-  ]);
+  const waiter = await nativeScrollEnd(scroller);
+  try {
+    await page.keyboard.press(key);
+    await waiter.evaluate(value => value.finished);
+  } finally { await waiter.dispose(); }
   expect(await scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(before);
 }
 async function scrollWheelAndSettle(page: Page, scroller: Locator, delta: number) {
   const box = await scroller.boundingBox();
   if (!box) throw new Error("Missing real portfolio scroll owner");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await Promise.all([
-    scroller.evaluate(element => new Promise<void>(resolve => element.addEventListener("scrollend", () => resolve(), { once: true }))),
-    page.mouse.wheel(0, delta),
-  ]);
+  const waiter = await nativeScrollEnd(scroller);
+  try {
+    await page.mouse.wheel(0, delta);
+    await waiter.evaluate(value => value.finished);
+  } finally { await waiter.dispose(); }
 }
 async function clearReticleTextOverlap(page: Page, row: Locator, info: TestInfo, name: string) {
   if (!prefix) return;
@@ -697,6 +823,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(finalLeaseRead?.status).toBe(404);
   expect(finalLeaseRead?.response).toMatchObject({ code: "dataset_or_lease_retired" });
   const settings = page.getByRole("region", { name: "Settings app", exact: true });
+  await settings.locator("summary").filter({ hasText: "Layout actions" }).click();
   const retainedControls = await controls.elementHandle();
   expect(retainedControls).not.toBeNull();
   const draft = "unsubmitted-snapshot-draft";
@@ -844,7 +971,9 @@ test("published history leases reach mounted backtest and immutable evidence", a
 
 test("nine actual app mounts retain layout and context with honest System and local help", async ({ page, syntheticApi }, info) => {
   const core = await setup(page, syntheticApi, info);
-  for (const path of ["/v1/sandbox/holdings", "/v1/sandbox/orders", "/v1/sandbox/trades", "/api/v1/data/portfolio/evidence", "/api/v1/backtest/strategies", "/api/v1/backtest/strategies/running", "/api/v1/backtest/strategies/uploaded", "/api/v1/cron/jobs", "/api/v1/safety/config", "/api/v1/native/brokers", "/api/v1/broker-mcp/catalogue"]) core.register("GET", path, { minimum: 0, maximum: 4 });
+  const journal = await core.journalReads();
+  const catalogue = core.brokerCatalogueReads();
+  for (const path of ["/v1/sandbox/holdings", "/v1/sandbox/orders", "/v1/sandbox/trades", "/api/v1/data/portfolio/evidence", "/api/v1/backtest/strategies", "/api/v1/backtest/strategies/running", "/api/v1/backtest/strategies/uploaded", "/api/v1/cron/jobs", "/api/v1/safety/config", "/api/v1/native/brokers"]) core.register("GET", path, { minimum: 0, maximum: 4 });
   // Mount the common shell independently of the lazy chart. Each actual
   // mount/Activity return owns its completed reads and bounded abort, never
   // one cancellation allowance shared across unrelated lifetimes.
@@ -854,6 +983,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Terminal", exact: true }).click();
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal).toBeVisible();
+  await terminal.locator("summary").filter({ hasText: "Layout actions" }).click();
   await terminal.getByLabel("Layout name", { exact: true }).fill("Synthetic retained layout");
   await terminal.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(terminal.getByRole("status").filter({ hasText: "Saved Synthetic retained layout" })).toBeVisible();
@@ -869,10 +999,26 @@ test("nine actual app mounts retain layout and context with honest System and lo
   const mode = await page.evaluate(() => localStorage.getItem("flinttrade:mode"));
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
   await core.retireNative(nativeTerminalReads);
+  let incidents: Awaited<ReturnType<typeof core.incidentInspection>> | undefined;
   for (const name of ["Testing", "Portfolio", "Automation", "Reports", "Learn", "Brokers", "Settings", "System"]) {
+    if (name === "System") incidents = await core.incidentInspection();
     await apps.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp("/" + name.toLowerCase() + "$"));
     await expect(page.getByRole("region", { name: name + " app", exact: true })).toBeVisible();
+    if (name === "Brokers") {
+      const brokerMcp = page.getByLabel("Broker MCP assistants", { exact: true });
+      await expect(brokerMcp.getByRole("heading", { name: "Broker MCP assistants", exact: true })).toBeVisible();
+      await catalogue.verify();
+      for (const adapter of ["dhan", "upstox", "groww", "deltaexchange"]) {
+        await expect(brokerMcp.getByTestId("broker-mcp-" + adapter)).toBeVisible();
+      }
+    }
+    if (name === "Reports") {
+      const reports = page.getByRole("region", { name: "Reports app", exact: true });
+      await expect(reports.getByRole("heading", { name: "Trade Review", exact: true })).toBeVisible();
+      await journal.verify();
+      await expect(reports.getByText("0 trades", { exact: true })).toBeVisible();
+    }
     if (name === "System") await expect(page.getByRole("region", { name: "Resources", exact: true })).toBeVisible();
     await checkpoint(page, info, "app-" + name.toLowerCase());
   }
@@ -892,9 +1038,12 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.setViewportSize({ width: 600, height: 760 });
   await checkpoint(page, info, "terminal-return-compact");
   await core.retireNative(nativeTerminalReads);
-  expect(core.rows.filter(row => row.method !== "GET")).toEqual([]);
+  await catalogue.verify();
+  expect(incidents).toBeDefined();
+  incidents!.assertOnlyWrites(core.rows);
   await core.finish();
-  await declaredReticle(info, [{ kind: "net", method: "POST", count: 0 }, { kind: "state", store: "mode", path: "mode", equals: "practice" }, { kind: "text", scope: '[data-testid="system-status-bar"]', contains: "GPU: Unavailable", visible: true }]);
+  await declaredReticle(info, [...incidents!.predicates, { kind: "state", store: "mode", path: "mode", equals: "practice" }, { kind: "text", scope: '[data-testid="system-status-bar"]', contains: "GPU: Unavailable", visible: true }]);
+  await incidents!.verifyDurable();
 });
 
 test("learning and training actions refuse without fabricated authority", async ({ page, syntheticApi }, info) => {

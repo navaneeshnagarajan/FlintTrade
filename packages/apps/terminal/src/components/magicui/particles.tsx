@@ -30,7 +30,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { motionConfig } from "@/lib/motion";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useThemeStore } from "@/stores/themeStore";
 import type { ParticleBehavior } from "@/lib/cinematicThemes";
 
@@ -89,7 +89,7 @@ export function Particles({
   seed = 7_137,
 }: ParticlesProps) {
   // Reduced motion: OS/browser setting
-  const osReducedMotion = motionConfig.prefersReducedMotion();
+  const osReducedMotion = usePrefersReducedMotion();
   // Reduced motion: user store override
   const storeReduceMotion = useThemeStore((s) => s.reduceMotion);
 

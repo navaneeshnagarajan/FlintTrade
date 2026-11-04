@@ -11,7 +11,7 @@
 #       package: "some-transitive-dep"
 #       affected_version: "1.2.3"
 #       reason: "vuln only triggers when feature X is enabled; flinttrade never enables it"
-#       accepted_by: "navaneesh"
+#       accepted_by: "synthetic-approver"
 #       expires: "2026-08-23"
 allowlist:
   - vuln_id: "PYSEC-2026-4320"

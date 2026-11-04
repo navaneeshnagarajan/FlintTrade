@@ -1,0 +1,22 @@
+{
+  "synthetic": true,
+  "label": "local-pool-cleanup-refusal",
+  "method": "POST",
+  "path": "/api/v1/native/accounts/dhan/Synthetic/login",
+  "key": "20e76545-dc2f-4765-a30c-006f376f7c31",
+  "status": 200,
+  "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"20e76545-dc2f-4765-a30c-006f376f7c31\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"cleanup_pending\"}\n",
+  "closeAttempts": 2868,
+  "sdkRequests": [
+    [
+      "GET",
+      "https://api.dhan.co/v2/profile"
+    ],
+    [
+      "GET",
+      "https://api.dhan.co/v2/profile"
+    ]
+  ],
+  "producerCleanupAccepted": false,
+  "qualification": "Literal normal-factory body; teardown refused after release. HTTP/UI correspondence only, not factory-cleanup acceptance."
+}

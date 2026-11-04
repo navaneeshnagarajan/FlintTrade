@@ -468,6 +468,15 @@ class StrategyExecutionContract:
         if type(value) is StrategyExecutionContract and value.dispatcher is None:
             return False
         value_type = type(value)
+        if any(value_type is container for container in (dict, list, tuple, set, frozenset)):
+            # These exact builtin instances have no attached attribute state and
+            # their MRO is the builtin plus object. Inspect today's policy and
+            # both current namespaces; subclasses still take the generic path.
+            # This is only a direct-name result: the walker still visits every
+            # retained child with its existing node/depth bounds.
+            if (cls._MUTATION_METHODS.isdisjoint(cls._class_namespace(value_type))
+                    and cls._MUTATION_METHODS.isdisjoint(cls._class_namespace(object))):
+                return False
         value_module = cls._type_metadata(value_type, "__module__")
         if type(value_module) is not str:
             raise _CapabilityInspectionLimitExceeded("class module metadata is not concrete text")
@@ -498,7 +507,20 @@ class StrategyExecutionContract:
         if cls._is_class_object(value):
             return any(cls._has_callable(value, method_name) for method_name in cls._MUTATION_METHODS)
         mutation_methods = cls._MUTATION_METHODS
-        if cls._uses_canonical_strategy_dispatch(value):
+        if any(value_type is exact for exact in (
+            types.FunctionType, types.BuiltinFunctionType, types.MethodType,
+            types.MethodDescriptorType, types.WrapperDescriptorType, types.ClassMethodDescriptorType,
+            property, staticmethod, classmethod,
+        )):
+            # These exact routine/descriptor layouts inherit only from object.
+            # Some have mutable attached state: read it afresh along with both
+            # namespaces. Only absent direct names are elided; name/owner and
+            # code, globals, defaults, closures and children remain inspected.
+            names = (cls._class_namespace(value_type).keys()
+                     | cls._class_namespace(object).keys()
+                     | cls._static_instance_state(value).keys())
+            mutation_methods = mutation_methods.intersection(names)
+        elif cls._uses_canonical_strategy_dispatch(value):
             mutation_methods = mutation_methods - {"dispatch_order"}
         if any(cls._has_callable(value, method) for method in mutation_methods):
             return True

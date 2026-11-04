@@ -1,0 +1,138 @@
+{
+  "ordinary": {
+    "synthetic": true,
+    "productionDrivers": true,
+    "rows": [
+      {
+        "label": "catalogue",
+        "method": "GET",
+        "path": "/api/v1/native/brokers",
+        "key": null,
+        "status": 200,
+        "body": "{\"data\":{\"brokers\":[{\"adapter_id\":\"dhan\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Approve a DhanHQ app-consent login. Register the shown redirect URL in your DhanHQ app; Dhan redirects back with a tokenId that FlintTrade consumes for a 24h access token.\",\"fields\":[{\"help\":\"\",\"label\":\"App ID\",\"name\":\"api_key\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"App secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"oauth\",\"kind\":\"oauth\",\"label\":\"Log in with Dhan (OAuth)\"},{\"credential_defaults\":{},\"description\":\"Paste a 24h access token from web.dhan.co \\u2192 Profile \\u2192 Access DhanHQ APIs.\",\"fields\":[{\"help\":\"\",\"label\":\"Dhan client ID\",\"name\":\"client_id\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"},{\"credential_defaults\":{},\"description\":\"Mint a fresh 24h token from your PIN and authenticator code (TOTP must be enabled on the account).\",\"fields\":[{\"help\":\"\",\"label\":\"Dhan client ID\",\"name\":\"client_id\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"PIN\",\"name\":\"pin\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false}],\"id\":\"pin_totp\",\"kind\":\"direct\",\"label\":\"PIN + TOTP\"}],\"connectable\":true,\"display_name\":\"Dhan\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"CDS\",\"BCD\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Dhan's hosted MCP flow from the client.\",\"cautions\":[\"Broker MCP trade tools are outside FlintTrade's in-process safety gate; FlintTrade automation must still use gate_order or gate_broker_write through BrokerRouter.\",\"Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session or remove order-confirmation requirements.\",\"Dhan's documented skill guardrails require explicit confirmation before place/modify/cancel, use LIMIT defaults, and validate F&O lot sizes.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"url\":\"https://mcp.dhan.co/mcp\"},\"id\":\"remote_url\",\"label\":\"Claude / ChatGPT / custom connector\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[\"mcp\",\"add\",\"--transport\",\"http\",\"dhan\",\"https://mcp.dhan.co/mcp\"],\"command\":\"claude\",\"config\":{},\"id\":\"claude_code\",\"label\":\"Claude Code CLI\",\"url\":null},{\"args\":[\"mcp\",\"add\",\"dhan\",\"--url\",\"https://mcp.dhan.co/mcp\"],\"command\":\"codex\",\"config\":{},\"id\":\"codex_cli\",\"label\":\"Codex CLI\",\"url\":null},{\"args\":[],\"command\":null,\"config\":{\"mcpServers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}},\"id\":\"cursor\",\"label\":\"Cursor direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"mcp\":{\"servers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}}},\"id\":\"vscode_copilot\",\"label\":\"VS Code direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"mcpServers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}},\"id\":\"kiro\",\"label\":\"Kiro direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"name\":\"dhan\",\"oauth\":true,\"type\":\"remote\",\"url\":\"https://mcp.dhan.co/mcp\"},\"id\":\"opencode\",\"label\":\"OpenCode remote OAuth\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[\"add\",\"dhan-oss/dhanhq-skills\",\"--skill\",\"dhanhq\"],\"command\":\"skills\",\"config\":{},\"id\":\"dhanhq_skill_pack\",\"label\":\"DhanHQ agent skill pack\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://docs.dhanhq.co/mcp/\",\"login_steps\":[\"Add the Dhan remote MCP URL to a supported MCP client.\",\"Complete the Dhan browser authorisation and explicit consent flow opened by that client.\"],\"read_only\":false,\"reauth\":\"Re-authorize in the MCP client when Dhan prompts for a fresh session.\",\"remote_url\":\"https://mcp.dhan.co/mcp\",\"trading_supported\":true,\"use_cases\":[\"Portfolio and account review\",\"Order placement, modification, cancellation, and Super Orders in the external MCP client\",\"Market data, historical OHLC, option chain with Greeks, and live-feed lookup\",\"Margin, funds, instruments, alerts, ScanX, options analysis, and backtesting workflows\"]},\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/dhan\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"2.3.0rc1\",\"pin\":\"dhanhq\",\"pinned_version\":\"2.3.0rc1\",\"source_kind\":\"published-rc\",\"status\":\"ok\"},\"sdk_pin\":\"dhanhq\"},{\"adapter_id\":\"upstox\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Approve access on upstox.com. In Developer \\u2192 Apps, register the shown redirect URL and your current outbound public IP under Primary/Secondary IP before using order APIs; changing those IPs invalidates Upstox access tokens. Leave the optional Notifier Webhook Endpoint blank.\",\"fields\":[{\"help\":\"\",\"label\":\"API key (client ID)\",\"name\":\"api_key\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"oauth\",\"kind\":\"oauth\",\"label\":\"Log in with Upstox (OAuth)\"},{\"credential_defaults\":{},\"description\":\"Paste a trading-capable token you already generated, such as a prior OAuth login or sandbox app token. Use the Analytics token method below for Upstox Developer \\u2192 Apps analytics tokens.\",\"fields\":[{\"help\":\"\",\"label\":\"Client ID\",\"name\":\"client_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"},{\"credential_defaults\":{\"read_only\":\"true\",\"token_scope\":\"analytics\"},\"description\":\"Paste the one-year Analytics Access Token from Upstox Developer \\u2192 Apps. Upstox documents this token as read-only: market data/streaming, plus portfolio/account/funds reads only when static IP is configured. FlintTrade will block place/modify/cancel through this session.\",\"fields\":[{\"help\":\"\",\"label\":\"Client ID\",\"name\":\"client_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"Analytics access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"analytics_access_token\",\"kind\":\"direct\",\"label\":\"Analytics access token (read-only)\"}],\"connectable\":true,\"display_name\":\"Upstox\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"CDS\",\"BCD\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\",\"GLOBAL_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Upstox's hosted MCP flow from the client.\",\"cautions\":[\"Upstox MCP cannot place, modify, or cancel orders.\",\"Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.\",\"If the MCP client starts the wrong Node.js/npx binary, configure full node and npx paths instead of relying on PATH.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"developer_mode\":true,\"name\":\"Upstox MCP\",\"url\":\"https://mcp.upstox.com/mcp\"},\"id\":\"remote_url\",\"label\":\"ChatGPT / custom connector URL\",\"url\":\"https://mcp.upstox.com/mcp\"},{\"args\":[\"mcp-remote\",\"https://mcp.upstox.com/mcp\"],\"command\":\"npx\",\"config\":{\"mcpServers\":{\"Upstox MCP\":{\"args\":[\"mcp-remote\",\"https://mcp.upstox.com/mcp\"],\"command\":\"npx\"}}},\"id\":\"claude_cursor_mcp_remote\",\"label\":\"Claude Desktop / Cursor mcp-remote\",\"url\":null},{\"args\":[],\"command\":null,\"config\":{\"mcp\":{\"inputs\":[],\"servers\":{\"Upstox MCP\":{\"url\":\"https://mcp.upstox.com/mcp\"}}}},\"id\":\"vscode_copilot\",\"label\":\"VS Code GitHub Copilot\",\"url\":\"https://mcp.upstox.com/mcp\"}],\"daily_reauthorization\":true,\"docs_url\":\"https://upstox.com/developer/api-documentation/mcp-integration/\",\"login_steps\":[\"Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.\",\"Use an active, non-dormant Upstox account; dormant accounts cannot complete MCP authorisation.\",\"Complete the OAuth authorisation opened by that client.\",\"Repeat authorisation daily before relying on account context.\"],\"read_only\":true,\"reauth\":\"Daily re-authorisation is required.\",\"remote_url\":\"https://mcp.upstox.com/mcp\",\"trading_supported\":false,\"use_cases\":[\"Read-only holdings, orders, positions, mutual funds, funds, and profile lookup\",\"Account-scoped portfolio composition, performance, risk, and buying-power analysis\",\"Individual stock research in the context of current holdings\",\"Technical indicator, chart, trend, market-quote, and market-context analysis\",\"Activity summaries, margins, historical trading information, and P&L overviews\",\"Portfolio beta and correlation studies against NIFTY over multi-year windows\",\"Professional investment-model reviews over the operator's current portfolio\",\"Board-meeting, AGM/EGM, corporate-governance, and hold-or-sell context checks\"]},\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/upstox\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"2.30.0\",\"pin\":\"upstox-python-sdk\",\"pinned_version\":\"2.30.0\",\"source_kind\":\"git\",\"status\":\"ok\"},\"sdk_pin\":\"upstox-python-sdk\"},{\"adapter_id\":\"kotakneo\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Kotak Neo two-step 2FA. Paste the Trade API access token from NEO \\u2192 Invest \\u2192 Trade API (the Python SDK calls this consumer key), then enter TOTP and MPIN.\",\"fields\":[{\"help\":\"Kotak's docs call this the Trade API access token; FlintTrade maps it to the SDK's consumer_key field internally.\",\"label\":\"Trade API access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"Mobile number (with country code)\",\"name\":\"mobile_number\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"UCC (client code)\",\"name\":\"ucc\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"MPIN\",\"name\":\"mpin\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"Neo fin key\",\"name\":\"neo_fin_key\",\"required\":false,\"secret\":false}],\"id\":\"totp_mpin\",\"kind\":\"direct\",\"label\":\"TOTP + MPIN\"}],\"connectable\":true,\"display_name\":\"Kotak Neo\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":null,\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/kotakneo\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"3.0.9\",\"pin\":\"kotakneoapi\",\"pinned_version\":\"3.0.9\",\"source_kind\":\"git\",\"status\":\"ok\"},\"sdk_pin\":\"kotakneoapi\"},{\"adapter_id\":\"groww\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Enter the Groww Trade API key and the current TOTP code from your authenticator. FlintTrade mints the daily access token locally before creating the broker session.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false}],\"id\":\"api_key_totp\",\"kind\":\"direct\",\"label\":\"API key + TOTP\"},{\"credential_defaults\":{},\"description\":\"Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the daily access token locally before creating the broker session. Live account reads have passed with an approved key; live order placement still requires static outbound IP setup.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"If Groww says session approval is required, approve the API-key session in Groww Cloud/API Keys and retry.\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"api_key_secret\",\"kind\":\"direct\",\"label\":\"API key + secret\"},{\"credential_defaults\":{},\"description\":\"Paste an already minted Groww Trade API access token from Groww Cloud/API Keys. Groww tokens expire at 06:00 IST and live order placement still requires static outbound IP setup.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"Generate a fresh Groww Trade API token after the 06:00 IST expiry window.\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"}],\"connectable\":false,\"display_name\":\"Groww\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Groww's hosted MCP flow from the client with explicit account permission.\",\"cautions\":[\"Sell orders through Groww MCP require DDPI authorisation.\",\"Groww describes MCP as early-stage and not investment advice; verify outputs before trading.\",\"Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.\",\"Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.\",\"Groww native account reads and margin checks have passed with an approved key, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"name\":\"GrowwMCP\",\"url\":\"https://mcp.groww.in/mcp\"},\"id\":\"remote_url\",\"label\":\"Claude Pro custom connector\",\"url\":\"https://mcp.groww.in/mcp\"},{\"args\":[\"mcp-remote@0.1.18\",\"https://mcp.groww.in/mcp\",\"52155\"],\"command\":\"npx\",\"config\":{\"mcpServers\":{\"growwmcp\":{\"args\":[\"mcp-remote@0.1.18\",\"https://mcp.groww.in/mcp\",\"52155\"],\"command\":\"npx\"}}},\"id\":\"mcp_remote_cursor_vscode\",\"label\":\"Cursor / VS Code / Windsurf mcp-remote\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://groww.in/updates/groww-mcp\",\"login_steps\":[\"For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.\",\"For Cursor, VS Code, or Windsurf, add the mcp-remote configuration and install Node.js if needed.\",\"Confirm DDPI status before sell-order workflows.\"],\"read_only\":false,\"reauth\":\"Grant access when the MCP client asks; Groww documents explicit permission rather than background sync.\",\"remote_url\":\"https://mcp.groww.in/mcp\",\"trading_supported\":true,\"use_cases\":[\"Portfolio performance, exposure, benchmark, and market-fall analysis\",\"F&O position, candle, expiry, and P&L analysis\",\"Smart order management in the external MCP client\",\"Market context and holdings near 52-week highs\",\"Stocks and F&O today; mutual funds, IPOs, bonds, and fundamental analysis are future broker scope\"]},\"native_connect_blockers\":[\"Broker-side market-data/API permission\",\"Live order-safety proof\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/groww\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"1.5.0\",\"pin\":\"growwapi\",\"pinned_version\":\"1.5.0\",\"source_kind\":\"published-release\",\"status\":\"ok\"},\"sdk_pin\":\"growwapi\"},{\"adapter_id\":\"indmoney\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Generate an access token on the INDstocks API dashboard and paste it here. Save your static outbound IP before live algo orders; INDstocks resets tokens daily at 06:00 IST and allows up to five active tokens.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"Generate a fresh INDstocks token after the daily 06:00 IST reset.\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"}],\"connectable\":false,\"display_name\":\"INDmoney\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":null,\"native_connect_blockers\":[\"Authoritative smart-parent cancellation discriminator\",\"Broker-native atomic reduce-only close primitive\",\"Live order-safety proof\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/indmoney\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":null,\"pin\":null,\"pinned_version\":null,\"status\":\"not_required\"},\"sdk_pin\":null},{\"adapter_id\":\"deltaexchange\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Paste a Delta Exchange API key and secret for one venue. India and Global keys are not interchangeable, and the environment has no default.\",\"fields\":[{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true},{\"help\":\"One of india_prod, india_testnet, global_prod, global_testnet. A key from another venue is rejected.\",\"label\":\"Venue\",\"name\":\"environment\",\"required\":true,\"secret\":false},{\"help\":\"Required only for close-all.\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false}],\"id\":\"api_key\",\"kind\":\"direct\",\"label\":\"API key + secret\"}],\"connectable\":false,\"display_name\":\"Delta Exchange\",\"exchanges\":[\"CRYPTO\"],\"mcp\":{\"auth_mode\":\"Local stdio server. FlintTrade does not proxy Delta MCP orders.\",\"cautions\":[\"India and Global keys are not interchangeable.\",\"DELTA_MCP_MODE=trade must not drive FlintTrade orders. Writes stay behind the router.\",\"Native connect stays disabled until live order-safety proof and a deadman runtime proof exist.\"],\"client_configs\":[{\"args\":[\"delta-exchange-mcp\"],\"command\":\"uvx\",\"config\":{\"mcpServers\":{\"delta-exchange\":{\"args\":[\"delta-exchange-mcp\"],\"command\":\"uvx\"}}},\"id\":\"stdio_uvx\",\"label\":\"Local stdio via uvx\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://mcp.delta.exchange/docs\",\"login_steps\":[\"Install the official server with uvx delta-exchange-mcp.\",\"Set DELTA_API_KEY, DELTA_API_SECRET, and DELTA_MCP_ENV to one venue.\",\"Leave DELTA_MCP_MODE unset. Do not enable trade mode for FlintTrade orders.\"],\"read_only\":true,\"reauth\":\"Rotate the API key in the MCP client. FlintTrade orders still go through the router.\",\"remote_url\":\"https://mcp.delta.exchange\",\"trading_supported\":false,\"use_cases\":[\"Read products, tickers, positions, and wallet state from an external MCP client\"]},\"native_connect_blockers\":[\"Live order-safety proof\",\"Deadman heartbeat runtime proof for unattended flatten\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/deltaexchange\",\"requires_static_ip\":false,\"sdk_attestation\":{\"installed_version\":null,\"pin\":null,\"pinned_version\":null,\"status\":\"not_required\"},\"sdk_pin\":null}]},\"status\":\"success\"}\n",
+        "cacheControl": null
+      },
+      {
+        "label": "connect",
+        "method": "POST",
+        "path": "/api/v1/native/accounts",
+        "key": "723fa099-b4d2-40c7-9c3b-0f186e34cb63",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":1,\"kind\":\"connect\",\"operationId\":\"723fa099-b4d2-40c7-9c3b-0f186e34cb63\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_present\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "connect-replay",
+        "method": "POST",
+        "path": "/api/v1/native/accounts",
+        "key": "723fa099-b4d2-40c7-9c3b-0f186e34cb63",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":1,\"kind\":\"connect\",\"operationId\":\"723fa099-b4d2-40c7-9c3b-0f186e34cb63\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_present\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "accounts",
+        "method": "GET",
+        "path": "/api/v1/native/accounts",
+        "key": null,
+        "status": 200,
+        "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Synthetic\",\"adapter_id\":\"dhan\",\"expires_at\":1793415960.0,\"has_session\":true,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n",
+        "cacheControl": null
+      },
+      {
+        "label": "reconnect",
+        "method": "POST",
+        "path": "/api/v1/native/accounts/dhan/Synthetic/login",
+        "key": "9bfd7c61-edbc-43e6-86c1-1560887b0841",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"9bfd7c61-edbc-43e6-86c1-1560887b0841\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_present\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "reconnect-replay",
+        "method": "POST",
+        "path": "/api/v1/native/accounts/dhan/Synthetic/login",
+        "key": "9bfd7c61-edbc-43e6-86c1-1560887b0841",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"9bfd7c61-edbc-43e6-86c1-1560887b0841\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_present\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "reconnect-accounts",
+        "method": "GET",
+        "path": "/api/v1/native/accounts",
+        "key": null,
+        "status": 200,
+        "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Synthetic\",\"adapter_id\":\"dhan\",\"expires_at\":1793415960.0,\"has_session\":true,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n",
+        "cacheControl": null
+      },
+      {
+        "label": "reconnect-expired",
+        "method": "POST",
+        "path": "/api/v1/native/accounts/dhan/Synthetic/login",
+        "key": "9bfd7c61-edbc-43e6-86c1-1560887b0841",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"9bfd7c61-edbc-43e6-86c1-1560887b0841\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_unavailable\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "expired-accounts",
+        "method": "GET",
+        "path": "/api/v1/native/accounts",
+        "key": null,
+        "status": 200,
+        "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Synthetic\",\"adapter_id\":\"dhan\",\"expires_at\":null,\"has_session\":false,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n",
+        "cacheControl": null
+      }
+    ],
+    "sdkRequests": [
+      [
+        "GET",
+        "https://api.dhan.co/v2/profile"
+      ],
+      [
+        "GET",
+        "https://api.dhan.co/v2/profile"
+      ]
+    ]
+  },
+  "unknown": {
+    "synthetic": true,
+    "productionDrivers": true,
+    "rows": [
+      {
+        "label": "connect",
+        "method": "POST",
+        "path": "/api/v1/native/accounts",
+        "key": "723fa099-b4d2-40c7-9c3b-0f186e34cb63",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":null,\"kind\":\"connect\",\"operationId\":\"723fa099-b4d2-40c7-9c3b-0f186e34cb63\",\"reason\":\"authentication_outcome_unknown\",\"state\":\"authentication_unknown\"},\"runtimeStatus\":\"blocked\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "connect-replay",
+        "method": "POST",
+        "path": "/api/v1/native/accounts",
+        "key": "723fa099-b4d2-40c7-9c3b-0f186e34cb63",
+        "status": 200,
+        "body": "{\"receipt\":{\"credentialGeneration\":null,\"kind\":\"connect\",\"operationId\":\"723fa099-b4d2-40c7-9c3b-0f186e34cb63\",\"reason\":\"authentication_outcome_unknown\",\"state\":\"authentication_unknown\"},\"runtimeStatus\":\"blocked\"}\n",
+        "cacheControl": "no-store"
+      },
+      {
+        "label": "accounts",
+        "method": "GET",
+        "path": "/api/v1/native/accounts",
+        "key": null,
+        "status": 200,
+        "body": "{\"data\":{\"accounts\":[]},\"status\":\"success\"}\n",
+        "cacheControl": null
+      }
+    ],
+    "sdkRequests": [
+      [
+        "GET",
+        "https://api.dhan.co/v2/profile"
+      ]
+    ]
+  }
+}

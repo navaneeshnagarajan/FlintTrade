@@ -132,6 +132,10 @@ jobs:
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
       - run: uv sync --frozen
+      - name: Synthetic acceptance report and registration contracts
+        run: uv run --offline --no-sync python -B -I -S tools/acceptance/ci_python_contracts.py --state-root "$RUNNER_TEMP/acceptance-python"
+      - name: Check native-v2 generated contracts and canonical fixture projection
+        run: uv run --offline --no-sync python scripts/generate-native-autonomy-v2-contracts.py --check
       - name: Verify pre-restructure baseline artefacts
         run: |
           uv run python - <<'PY'
@@ -313,7 +317,7 @@ jobs:
       - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
         run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/generated/ src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check (strict TypeScript check already passed)

@@ -24,8 +24,26 @@ _Avoid_: Persona, feature tier
 A scoped period of Live or paper trading, associated with a specific account or simulation ledger. Concurrent sessions do not share trading authority merely because they share an app.
 
 **Trading permission**:
-The user's time-limited authorisation for specified automated actions on specified accounts, within stated risk limits. Permission to open trades is distinct from a pre-authorised duty to close existing exposure.
+The user's time-limited authorisation for specified automated actions on specified accounts, within stated risk limits. Responsibility for existing exposure does not by itself authorise further automated writes.
 _Avoid_: Always allow, unrestricted access
+
+**Entry retirement**:
+The end of a run's entry-execution permission. It does not mean pending broker orders have been cancelled or positions have been closed.
+
+**Duty**:
+Retained responsibility for known exposure or still-possible broker writes until evidenced resolution or accepted transfer. A duty is not trading permission.
+
+**Custody acceptance**:
+An operator's explicit acceptance of responsibility for an identified duty within an agreed scope. Acceptance does not establish trading permission or account flatness.
+
+**Capital commitment cap**:
+A ceiling on cumulative capital committed to entries, including their fee allowance. Under a non-replenishing cap, closing positions or receiving proceeds does not restore the allocation.
+
+**Exposure cap**:
+A ceiling used to assess current and still-possible run exposure, including outstanding fills and closing costs. It is not a guarantee against later market-price movements.
+
+**Loss-action threshold**:
+The run-loss level that calls for entry retirement and custody handling. It is neither an automatic-liquidation instruction nor a guaranteed realised-loss ceiling.
 
 **Skill**:
 A reusable procedure supplied to the AI, adapted from an existing procedure, or learned from checked experience. A skill is not a human experience level, a model weight update, or trading permission.

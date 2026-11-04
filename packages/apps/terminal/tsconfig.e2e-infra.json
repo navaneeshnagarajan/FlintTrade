@@ -24,6 +24,9 @@
     ]
   },
   "include": [
+    "e2e/incident-delivery-protocol.ts",
+    "e2e/incident-delivery-protocol.control.ts",
+    "playwright.incident-protocol.config.ts",
     "playwright.incidents.config.ts",
     "playwright.policy.config.ts",
     "e2e/incidents/SystemIncidents.spec.ts",
@@ -74,6 +77,7 @@
     "e2e/structural-accessibility.spec.ts",
     "e2e/structural-accessibility.ts",
     "e2e/workspace-interactions.ts",
-    "e2e/observed-registry.ts"
+    "e2e/observed-registry.ts",
+    "e2e/designer-desk-measure.spec.ts"
   ]
 }

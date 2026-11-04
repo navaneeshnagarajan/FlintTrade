@@ -288,8 +288,14 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
         headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}
     for method, path in MUTATIONS:
         response = client.open(path, method=method, headers=headers, json={})
-        assert response.status_code == 503, (method, path, response.json)
-        assert response.json == {"error": "broker_account_cutover_unavailable"}
+        # Normal owned CONNECT now has strict ingress. An empty body without
+        # an action key is still refused before auth/credential publication;
+        # unsupported brokers and all unreplaced legacy verbs stay frozen.
+        expected = (
+            (400, {"error": "account_setup_invalid"}) if path == "/api/v1/native/accounts"
+            else (503, {"error": "broker_account_cutover_unavailable"})
+        )
+        assert (response.status_code, response.json) == expected, (method, path, response.json)
         assert response.headers["Cache-Control"] == "no-store"
         assert client.open(path, method="OPTIONS", data="synthetic", content_type="text/plain").status_code == 200
     for path in ("/api/v1/native/oauth/callback",):

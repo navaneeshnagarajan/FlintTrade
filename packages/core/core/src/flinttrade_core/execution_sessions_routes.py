@@ -128,6 +128,230 @@ def status(run_id: str) -> Any:
     return jsonify(status="success", data=owner.status(owner.scope(run_id, g.execution_actor)))
 
 
+@execution_sessions_bp.post("/native")
+def native_create() -> Any:
+    """Configure, never implicitly qualify or authorise native autonomy."""
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.create(_session_token_from_request(), _body())), 201
+
+
+@execution_sessions_bp.post("/native-v2")
+def native_v2_configure() -> Any:
+    """Configure a nominal v2 run without qualifying, granting or starting it.
+
+    Returns:
+        The validated cash/options view and HTTP 201; owner refusals use 409.
+    """
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.configure(_session_token_from_request(), _body())), 201
+
+
+@execution_sessions_bp.get("/<run_id>/autonomy-v2")
+def native_v2_status(run_id: str) -> Any:
+    """Read local v2 custody without broker, model or qualification side effects.
+
+    Args:
+        run_id: Exact durable run selected by the authenticated operator.
+
+    Returns:
+        The nominal cash/options view; scope and version conflicts use 409.
+    """
+    from .auth_routes import _session_token_from_request
+
+    registry = get_execution_sessions(current_app._get_current_object())
+    native = registry._native_child()
+    if native is None:
+        raise ValueError("native custody has not been configured")
+    return jsonify(status="success", data=native.v2.status(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/inspect")
+def native_v2_inspect(run_id: str) -> Any:
+    """Run one explicit bounded canonical read plan, never entry qualification.
+
+    Args:
+        run_id: Exact configured run bound by the shared InspectRequestV2.
+
+    Returns:
+        A cash/options view with the stored report; invalid plans use HTTP 409.
+    """
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.inspect(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/qualify")
+def native_v2_qualify(run_id: str) -> Any:
+    """Evaluate server-owned evidence only; the request body must be empty.
+
+    Args:
+        run_id: Exact existing cash/options run.
+
+    Returns:
+        A nominal view with its current report, including honest blocked states.
+    """
+    from .auth_routes import _session_token_from_request
+
+    if _body():
+        raise ValueError("qualification accepts no caller evidence")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.qualify(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/transfer-preview")
+def native_v2_transfer_preview(run_id: str) -> Any:
+    """Select finite custody without granting permission or starting work."""
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.custody.preview(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/transfer-accept")
+def native_v2_transfer_accept(run_id: str) -> Any:
+    """Record actual receiving acceptance against one exact current preview."""
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.custody.accept(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/grant")
+def native_v2_grant(run_id: str) -> Any:
+    """Keep explicit grant refusal distinct from configuration and acceptance."""
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.grant(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy-v2/start")
+def native_v2_start(run_id: str) -> Any:
+    """Never report running without an actual acquired bounded producer."""
+    from .auth_routes import _session_token_from_request
+
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy.v2
+    return jsonify(status="success", data=owner.start(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.get("/<run_id>/autonomy")
+def native_status(run_id: str) -> Any:
+    """Inspect retained native authority and obligations for the authenticated operator.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope containing the owner's current native status.
+    """
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.status(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/qualify")
+def native_qualify(run_id: str) -> Any:
+    """Ask the existing owner to qualify a run using backend-held evidence only.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope containing the owner's qualification result.
+
+    Raises:
+        ValueError: The caller supplies evidence or the owner rejects the run binding.
+    """
+    from .auth_routes import _session_token_from_request
+    if _body():
+        raise ValueError("qualification accepts no caller evidence")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.qualify(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/grant")
+def native_grant(run_id: str) -> Any:
+    """Submit the operator's explicit bounded grant to the existing authority owner.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope containing the retained grant disposition.
+
+    Raises:
+        ValueError: The grant, run scope or current authority is invalid.
+    """
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.grant(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/revoke")
+def native_revoke(run_id: str) -> Any:
+    """Revoke the exact named grant without claiming its obligations are settled.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope containing retained status after revocation.
+
+    Raises:
+        ValueError: The body is not an exact grant selector or the owner refuses it.
+    """
+    from .auth_routes import _session_token_from_request
+    body = _body()
+    if set(body) != {"grant_id"}:
+        raise ValueError("exact grant required")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.revoke(_session_token_from_request(), run_id, body["grant_id"]))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/commands")
+def native_command(run_id: str) -> Any:
+    """Submit a bounded command through the existing native authority owner.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope containing the command's actual retained disposition, not proof of a fill.
+
+    Raises:
+        ValueError: The mode contradicts native binding or command admission is refused.
+    """
+    from .auth_routes import _session_token_from_request
+    if request.headers.get("X-FlintTrade-Mode") not in {None, "live"}:
+        raise ValueError("command mode contradicts immutable native binding")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.submit(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/reconcile")
+def native_reconcile(run_id: str) -> Any:
+    """Reconcile retained obligations from owner-acquired broker observations.
+
+    Args:
+        run_id: Exact run identifier resolved by the existing execution owner.
+
+    Returns:
+        Success envelope with the owner's reconciliation result; missing evidence remains unresolved.
+
+    Raises:
+        ValueError: The caller supplies receipts or the owner rejects reconciliation.
+    """
+    from .auth_routes import _session_token_from_request
+    if _body():
+        raise ValueError("reconciliation never accepts caller receipts")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.reconcile(_session_token_from_request(), run_id))
+
+
 @execution_sessions_bp.post("/<run_id>/<operation>")
 def control(run_id: str, operation: str) -> Any:
     from .auth_routes import _session_token_from_request
