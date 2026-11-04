@@ -215,8 +215,8 @@ def test_build_requirements_lock_is_exact_wheel_only_and_hash_closed() -> None:
         "# Build backend for the immutable Kotak Neo Git source. Install only hashed universal wheels.",
         "packaging==26.3 \\",
         "    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
-        "setuptools==84.0.0 \\",
-        "    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+        "setuptools==84.1.0 \\",
+        "    --hash=sha256:5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9",
         "wheel==0.48.0 \\",
         "    --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
     ]
@@ -230,7 +230,7 @@ def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
     project = tomllib.loads((sdk_environment.REPO / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["tool"]["uv"]["build-constraint-dependencies"] == [
         "packaging==26.3",
-        "setuptools==84.0.0",
+        "setuptools==84.1.0",
         "wheel==0.48.0",
     ]
     assert project["tool"]["uv"]["no-build-isolation-package"] == ["kotakneoapi", "upstox-python-sdk"]
@@ -238,7 +238,7 @@ def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
     gateway = tomllib.loads(
         (sdk_environment.REPO / "packages/integrations/gateway/pyproject.toml").read_text(encoding="utf-8")
     )
-    assert {"packaging==26.3", "setuptools==84.0.0", "wheel==0.48.0"} <= set(gateway["project"]["dependencies"])
+    assert {"packaging==26.3", "setuptools==84.1.0", "wheel==0.48.0"} <= set(gateway["project"]["dependencies"])
 
     lock = tomllib.loads((sdk_environment.REPO / "uv.lock").read_text(encoding="utf-8"))
     packages = {entry["name"]: entry for entry in lock["package"]}
