@@ -257,15 +257,34 @@ def test_muhurat_2026_fo_window_is_open_without_a_broker_calendar() -> None:
         time(14, 20),
         time(15, 40),
     )
+    assert scheduler.get_market_session("NSE", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
+    assert scheduler.get_market_session("CDS", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
+    assert scheduler.get_market_session("MCX", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
     assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 20, tzinfo=IST))
     assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 30, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE_INDEX", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert not scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
     assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 19, tzinfo=IST))
     assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
     assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 41, tzinfo=IST))
     assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 18, 30, tzinfo=IST))
-    assert not scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
 
 
 def test_missing_muhurat_record_fails_closed(monkeypatch) -> None:

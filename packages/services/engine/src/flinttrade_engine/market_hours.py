@@ -93,9 +93,12 @@ _EQUITY_EXCHANGES = ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "NSE_INDEX", "BSE
 # ---------------------------------------------------------------------------
 #
 # Muhurat Trading is a Diwali special session. 2025 keeps the published
-# evening window. 2026 F&O is the published afternoon window: pre-open
-# 14:05–14:20 and normal market 14:20–15:40 IST. 2027 stays a projection
-# and does not open a weekend on its own.
+# evening window. 2026 uses the same close split as a normal day:
+# equity NSE/BSE end at 15:30 (the non-CAS cash close in STANDARD_HOURS),
+# F&O ends at 15:40, and currency/commodity end at 15:30. CAS names trade
+# 14:20–15:15 and the closing auction is 15:20–15:35; that phase clock is
+# separate from the single equity close, as on a normal day. 2027 stays a
+# projection and does not open a weekend on its own.
 
 SPECIAL_SESSIONS: list[SpecialTradingSession] = [
     # 2025 -- Diwali: 20 Oct 2025
@@ -106,14 +109,34 @@ SPECIAL_SESSIONS: list[SpecialTradingSession] = [
         close_time=time(19, 15),
         exchanges=_EQUITY_EXCHANGES,
     ),
-    # 2026 -- Sunday 8 Nov. F&O normal market 14:20–15:40 IST.
+    # 2026 F&O. Only this segment runs to 15:40.
     SpecialTradingSession(
         session_date=date(2026, 11, 8),
         name="Muhurat Trading 2026",
         open_time=time(14, 20),
         close_time=time(15, 40),
-        exchanges=("NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"),
+        exchanges=("NFO", "BFO"),
         pre_open_time=time(14, 5),
+    ),
+    # Equity and indexes. Same single close as STANDARD_HOURS NSE/BSE (15:30),
+    # which is the non-CAS normal market. CAS continuous ends 15:15; the
+    # closing auction is 15:20–15:35 and is not this close.
+    SpecialTradingSession(
+        session_date=date(2026, 11, 8),
+        name="Muhurat Trading 2026",
+        open_time=time(14, 20),
+        close_time=time(15, 30),
+        exchanges=("NSE", "BSE", "NSE_INDEX", "BSE_INDEX"),
+        pre_open_time=time(14, 5),
+    ),
+    # Currency and commodity. Both segments are already on the normal clock.
+    SpecialTradingSession(
+        session_date=date(2026, 11, 8),
+        name="Muhurat Trading 2026",
+        open_time=time(14, 20),
+        close_time=time(15, 30),
+        exchanges=("CDS", "MCX"),
+        pre_open_time=time(14, 20),
     ),
     # 2027 -- Diwali: 29 Oct 2027 (projected)
     SpecialTradingSession(
@@ -164,6 +187,23 @@ def is_special_session(
             return session
 
     return None
+
+
+def muhurat_equity_phase(minutes_from_midnight: int) -> str:
+    """Cash phase during the 8 Nov 2026 Muhurat session.
+
+    Continuous on CAS names is 14:20–15:15. The closing auction is
+    15:20–15:35. Between those, and until 15:30, non-CAS cash is still
+    open. That 15:30 close is the single NSE/BSE session close. F&O is
+    not this phase.
+    """
+    if 14 * 60 + 20 <= minutes_from_midnight < 15 * 60 + 15:
+        return "continuous"
+    if 15 * 60 + 20 <= minutes_from_midnight <= 15 * 60 + 35:
+        return "cas"
+    if 15 * 60 + 15 <= minutes_from_midnight <= 15 * 60 + 30:
+        return "non-cas"
+    return "closed"
 
 
 def nse_cash_phase(minutes_from_midnight: int) -> str:

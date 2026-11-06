@@ -26,6 +26,7 @@ from flinttrade_engine.market_hours import (
     is_special_session,
     list_upcoming_sessions,
     muhurat_amo_note,
+    muhurat_equity_phase,
     muhurat_funds_note,
     nse_cash_phase,
 )
@@ -152,8 +153,17 @@ class TestIsSpecialSession:
         assert session.close_time == time(15, 40)
         assert session.pre_open_time == time(14, 5)
         assert "NFO" in session.exchanges
+        assert "NSE" not in session.exchanges
         assert "CDS" not in session.exchanges
         assert "MCX" not in session.exchanges
+        equity = is_special_session(date(2026, 11, 8), exchange="NSE")
+        assert equity is not None
+        assert equity.close_time == time(15, 30)
+        assert "NSE_INDEX" in equity.exchanges
+        currency = is_special_session(date(2026, 11, 8), exchange="CDS")
+        commodity = is_special_session(date(2026, 11, 8), exchange="MCX")
+        assert currency is not None and currency.close_time == time(15, 30)
+        assert commodity is not None and commodity.close_time == time(15, 30)
 
     def test_muhurat_2027_detected(self) -> None:
         session = is_special_session(date(2027, 10, 29))
@@ -211,6 +221,18 @@ class TestGetMarketHours:
         open_t, close_t = get_market_hours("NFO", date(2026, 11, 8))
         assert open_t == time(14, 20)
         assert close_t == time(15, 40)
+
+    def test_equity_muhurat_2026_uses_the_non_cas_close(self) -> None:
+        for exchange in ("NSE", "BSE", "NSE_INDEX", "BSE_INDEX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
+
+    def test_currency_and_commodity_muhurat_2026(self) -> None:
+        for exchange in ("CDS", "MCX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +298,22 @@ class TestMuhurat2026Window:
         assert fo_session_state(_at(14, 20), SPECIAL_SESSIONS, "NFO") == "open"
         assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NFO") == "open"
         assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 30), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NSE") == "closed"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "CDS") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "MCX") == "open"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "CDS") == "closed"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "MCX") == "closed"
+
+    def test_equity_phase_follows_the_bulletin(self) -> None:
+        assert muhurat_equity_phase(14 * 60 + 20) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 14) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 16) == "non-cas"
+        assert muhurat_equity_phase(15 * 60 + 20) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 35) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 36) == "closed"
+        assert muhurat_equity_phase(15 * 60 + 40) == "closed"
 
     def test_closed_outside_the_fo_window_on_that_sunday(self) -> None:
         assert date(2026, 11, 8).weekday() == 6

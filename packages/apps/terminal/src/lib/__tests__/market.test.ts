@@ -213,13 +213,20 @@ describe("returns false on weekends regardless of the time", () => {
     vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
     expect(isMarketHours("NFO")).toBe(true);
     expect(isMarketHours("NSE")).toBe(true);
+    expect(isMarketHours("CDS")).toBe(true);
+    expect(isMarketHours("MCX")).toBe(true);
     vi.setSystemTime(istToUtc(2026, 11, 8, 14, 19));
     expect(isMarketHours("NFO")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 40));
+    expect(isMarketHours("NFO")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(false);
+    expect(isMarketHours("NSE_INDEX")).toBe(false);
+    expect(isMarketHours("CDS")).toBe(false);
+    expect(isMarketHours("MCX")).toBe(false);
     vi.setSystemTime(istToUtc(2026, 11, 8, 15, 41));
     expect(isMarketHours("NFO")).toBe(false);
     vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
     expect(isMarketHoursWithHolidays("NFO", [])).toBe(false);
-    expect(isMarketHours("MCX")).toBe(false);
   });
 
   it("keeps DELTA open on Saturday because crypto trades 24/7", () => {
@@ -612,10 +619,25 @@ describe("getNseCashSessionStatus IST session window", () => {
     vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
     const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
     expect(session.status).toBe("continuous");
-    expect(session.label).toBe("Open");
+    expect(session.label).toBe("Continuous");
     expect(session.isGreenOpen).toBe(true);
-    expect(session.title).toBe("Open · F&O 14:20–15:40 IST");
-    expect(session.foSecondary).toBeNull();
+    expect(session.title).toBe("Continuous · 14:20–15:15");
+    expect(session.foSecondary).toBe("F&O open · till 15:40");
+  });
+
+  it("keeps equity off the F&O close and shows the closing auction", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 22));
+    const auction = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(auction.status).toBe("cas");
+    expect(auction.title).toBe("CAS · 15:20–15:35");
+    expect(auction.isGreenOpen).toBe(false);
+    expect(auction.foSecondary).toBe("F&O open · till 15:40");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 40));
+    const foOnly = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(foOnly.label).toBe("Open");
+    expect(foOnly.title).toBe("Open · F&O 14:20–15:40 IST");
+    expect(foOnly.isGreenOpen).toBe(true);
   });
 
   it("is Closed on Muhurat Sunday outside the F&O window", () => {

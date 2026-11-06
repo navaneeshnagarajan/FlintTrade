@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   MUHURAT_FUNDS_NOTE,
+  equitySessionWindow,
   foSessionState,
+  foSessionWindow,
   muhuratAmoNote,
+  muhuratEquityPhase,
   muhuratFundsNote,
   shippedMuhuratHolidays,
 } from "../muhuratSession";
@@ -15,10 +18,16 @@ function ist(hour: number, minute: number): Date {
 const shipped = shippedMuhuratHolidays();
 
 describe("F&O Muhurat session on 8 Nov 2026", () => {
-  it("is open during 14:20–15:40 IST", () => {
+  it("is open during 14:20–15:40 IST for F&O and closes equity at 15:30", () => {
     expect(foSessionState(ist(14, 20), shipped)).toBe("open");
     expect(foSessionState(ist(15, 0))).toBe("open");
     expect(foSessionState(ist(15, 40), shipped)).toBe("open");
+    expect(foSessionWindow(ist(15, 0), shipped)?.closeMin).toBe(15 * 60 + 40);
+    expect(equitySessionWindow(ist(15, 0), shipped)?.closeMin).toBe(15 * 60 + 30);
+    expect(muhuratEquityPhase(ist(15, 0), shipped)).toBe("continuous");
+    expect(muhuratEquityPhase(ist(15, 16), shipped)).toBe("non-cas");
+    expect(muhuratEquityPhase(ist(15, 22), shipped)).toBe("cas");
+    expect(muhuratEquityPhase(ist(15, 40), shipped)).toBe("closed");
   });
 
   it("is closed outside that window on the same Sunday", () => {

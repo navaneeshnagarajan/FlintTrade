@@ -356,9 +356,10 @@ describe("TopBarV2", () => {
     renderTopBarV2();
 
     const chip = screen.getByTestId("market-session-status");
-    expect(chip).toHaveTextContent("Open");
-    expect(chip).toHaveAttribute("title", "Open · F&O 14:20–15:40 IST");
+    expect(chip).toHaveTextContent("Continuous");
+    expect(chip).toHaveAttribute("title", "Continuous · 14:20–15:15");
     expect(chip).not.toHaveTextContent("Market closed");
+    expect(screen.getByTestId("fo-session-status")).toHaveTextContent("F&O open · till 15:40");
   });
 
   it("stays Closed on Muhurat Sunday outside the F&O window", () => {

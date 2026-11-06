@@ -35,9 +35,8 @@ import {
   type NseCashSessionPhase,
 } from "@/lib/nseSession";
 import {
-  foSessionState,
-  foSessionTimeline,
-  foSessionWindow,
+  muhuratCashSession,
+  muhuratEquityPhase,
 } from "@/lib/muhuratSession";
 import type { Holiday } from "@/types/api";
 import { cn } from "@/lib/utils";
@@ -196,19 +195,30 @@ export function computeNseMarketState(
   const nowMin = istMinutes(now);
   const nowMs = now.getTime();
   const weekend = istParts(now).weekday === 0 || istParts(now).weekday === 6;
-  const foWindow = foSessionState(now, holidays) === "open" ? foSessionWindow(now, holidays) : null;
-
-  if (foWindow) {
-    const openMin = foWindow.openMin;
-    const closeMin = foWindow.closeMin;
+  const cash = muhuratCashSession(now, holidays);
+  const equityPhase = muhuratEquityPhase(now, holidays);
+  if (cash && equityPhase !== "absent" && equityPhase !== "closed") {
+    const openMin = 14 * 60 + 20;
+    const closeMin = equityPhase === "cas" ? 15 * 60 + 35 : 15 * 60 + 30;
     const sessionLen = Math.max(1, closeMin - openMin);
     return {
       def: { ...def, openMin, closeMin },
-      status: "open",
+      status: equityPhase === "cas" ? "cas" : "open",
       progress: Math.min(1, Math.max(0, (Math.floor(nowMin) - openMin) / sessionLen)),
       remainingMs: Math.max(0, (closeMin - nowMin) * 60_000),
-      phaseLabel: "Open",
-      timelineNote: foSessionTimeline(foWindow),
+      phaseLabel: cash.label,
+      timelineNote:
+        "CAS 14:20–15:15, closing auction 15:20–15:35. Non-CAS till 15:30. F&O till 15:40. Pre-open 14:05–14:20.",
+    };
+  }
+  if (cash && equityPhase === "closed") {
+    return {
+      def,
+      status: "closed",
+      progress: 0,
+      remainingMs: 0,
+      phaseLabel: "Closed",
+      timelineNote: "Equity closed. F&O till 15:40.",
     };
   }
 

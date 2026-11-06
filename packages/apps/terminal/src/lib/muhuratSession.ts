@@ -1,13 +1,16 @@
 /**
  * NSE F&O Muhurat session for Sunday 8 Nov 2026.
  *
- * Pre-open 14:05–14:20 IST. F&O normal market 14:20–15:40 IST.
- * An empty special-session list stays closed. This module does not
- * invent an open window when that record is absent.
+ * Pre-open 14:05–14:20 IST. F&O runs 14:20–15:40. Equity uses the same
+ * split as a normal day: non-CAS cash closes 15:30, CAS names trade
+ * 14:20–15:15, and the closing auction is 15:20–15:35. Currency and
+ * commodity, where those segments exist, run 14:20–15:30.
+ * An empty special-session list stays closed.
  */
 
 import type { Holiday } from "@/types/api";
 import { istMinutes, istParts, toIstIsoDate } from "@/lib/ist";
+import type { MarketSessionInfo } from "@/lib/market";
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 const PRE_OPEN_LEAD_MINUTES = 15;
@@ -19,12 +22,29 @@ export const MUHURAT_2026_DATE = "2026-11-08";
 export const MUHURAT_2026_PRE_OPEN_MIN = 14 * 60 + 5;
 export const MUHURAT_2026_FO_OPEN_MIN = 14 * 60 + 20;
 export const MUHURAT_2026_FO_CLOSE_MIN = 15 * 60 + 40;
+/** Non-CAS cash close. Same single equity close as a normal NSE/BSE day. */
+export const MUHURAT_2026_EQUITY_CLOSE_MIN = 15 * 60 + 30;
+export const MUHURAT_2026_CAS_CONTINUOUS_END_MIN = 15 * 60 + 15;
+export const MUHURAT_2026_AUCTION_START_MIN = 15 * 60 + 20;
+export const MUHURAT_2026_AUCTION_END_MIN = 15 * 60 + 35;
 
 export const MUHURAT_FUNDS_NOTE =
   "F&O credits and intraday equity profits from 6 November 2026 are not included in available funds during this Muhurat session. The settlement holiday keeps those credits on the ledger.";
 
 function istEpochMs(hour: number, minute: number, second = 0, ms = 0): number {
   return Date.UTC(2026, 10, 8, hour, minute, second, ms) - IST_OFFSET_MS;
+}
+
+function sessionRow(
+  exchange: string,
+  closeHour: number,
+  closeMinute: number,
+): Holiday["open_exchanges"][number] {
+  return {
+    exchange,
+    start_time: istEpochMs(14, 20),
+    end_time: istEpochMs(closeHour, closeMinute, 59, 999),
+  };
 }
 
 function fmtMin(minutes: number): string {
@@ -42,26 +62,14 @@ export function shippedMuhuratHolidays(): Holiday[] {
       holiday_type: "SPECIAL_SESSION",
       closed_exchanges: [],
       open_exchanges: [
-        {
-          exchange: "NFO",
-          start_time: istEpochMs(14, 20),
-          end_time: istEpochMs(15, 40, 59, 999),
-        },
-        {
-          exchange: "BFO",
-          start_time: istEpochMs(14, 20),
-          end_time: istEpochMs(15, 40, 59, 999),
-        },
-        {
-          exchange: "NSE",
-          start_time: istEpochMs(14, 20),
-          end_time: istEpochMs(15, 40, 59, 999),
-        },
-        {
-          exchange: "BSE",
-          start_time: istEpochMs(14, 20),
-          end_time: istEpochMs(15, 40, 59, 999),
-        },
+        sessionRow("NFO", 15, 40),
+        sessionRow("BFO", 15, 40),
+        sessionRow("NSE", 15, 30),
+        sessionRow("BSE", 15, 30),
+        sessionRow("NSE_INDEX", 15, 30),
+        sessionRow("BSE_INDEX", 15, 30),
+        sessionRow("CDS", 15, 30),
+        sessionRow("MCX", 15, 30),
       ],
     },
   ];
@@ -97,14 +105,120 @@ export function foSessionWindow(
     if (String(row.holiday_type).toUpperCase() !== "SPECIAL_SESSION") continue;
     for (const session of row.open_exchanges) {
       const exchange = session.exchange.trim().toUpperCase();
-      if (exchange !== "NFO" && exchange !== "NSE" && exchange !== "BFO" && exchange !== "BSE") {
-        continue;
-      }
+      if (exchange !== "NFO" && exchange !== "BFO") continue;
       const openMin = epochToIstMinutes(session.start_time);
       const closeMin = epochToIstMinutes(session.end_time);
       if (openMin === null || closeMin === null || closeMin < openMin) continue;
       return { date: row.date, openMin, closeMin };
     }
+  }
+  return null;
+}
+
+const EQUITY_EXCHANGES = new Set(["NSE", "BSE", "NSE_INDEX", "BSE_INDEX"]);
+
+function exchangeWindow(
+  now: Date,
+  holidays: readonly Holiday[] | undefined,
+  matches: (exchange: string) => boolean,
+): FoSessionWindow | null {
+  const calendar = holidays === undefined ? shippedMuhuratHolidays() : holidays;
+  const dateKey = toIstIsoDate(now);
+  for (const row of calendar) {
+    if (row.date !== dateKey) continue;
+    if (String(row.holiday_type).toUpperCase() !== "SPECIAL_SESSION") continue;
+    for (const session of row.open_exchanges) {
+      const exchange = session.exchange.trim().toUpperCase();
+      if (!matches(exchange)) continue;
+      const openMin = epochToIstMinutes(session.start_time);
+      const closeMin = epochToIstMinutes(session.end_time);
+      if (openMin === null || closeMin === null || closeMin < openMin) continue;
+      return { date: row.date, openMin, closeMin };
+    }
+  }
+  return null;
+}
+
+/** Equity/index window. Absent when that record is missing. */
+export function equitySessionWindow(
+  now: Date,
+  holidays?: readonly Holiday[],
+): FoSessionWindow | null {
+  return exchangeWindow(now, holidays, (exchange) => EQUITY_EXCHANGES.has(exchange));
+}
+
+export type MuhuratEquityPhase = "continuous" | "non-cas" | "cas" | "closed" | "absent";
+
+/** Same boundaries as `muhurat_equity_phase` in market hours. */
+export function muhuratEquityPhase(
+  now: Date,
+  holidays?: readonly Holiday[],
+): MuhuratEquityPhase {
+  if (!equitySessionWindow(now, holidays)) return "absent";
+  const minutes = Math.floor(istMinutes(now));
+  if (minutes >= MUHURAT_2026_FO_OPEN_MIN && minutes < MUHURAT_2026_CAS_CONTINUOUS_END_MIN) {
+    return "continuous";
+  }
+  if (minutes >= MUHURAT_2026_AUCTION_START_MIN && minutes <= MUHURAT_2026_AUCTION_END_MIN) {
+    return "cas";
+  }
+  if (minutes >= MUHURAT_2026_CAS_CONTINUOUS_END_MIN && minutes <= MUHURAT_2026_EQUITY_CLOSE_MIN) {
+    return "non-cas";
+  }
+  return "closed";
+}
+
+/**
+ * Cash-chip view for Muhurat Sunday.
+ * Null when this is not that session, so a normal Sunday stays closed.
+ * After equity ends, a still-open F&O window is reported on its own.
+ */
+export function muhuratCashSession(
+  now: Date,
+  holidays?: readonly Holiday[],
+): MarketSessionInfo | null {
+  const equity = equitySessionWindow(now, holidays);
+  const fo = foSessionWindow(now, holidays);
+  if (!equity && !fo) return null;
+  const minutes = Math.floor(istMinutes(now));
+  const foOpen = Boolean(fo && minutes >= fo.openMin && minutes <= fo.closeMin);
+  const foNote = foOpen && fo ? `F&O open · till ${fmtMin(fo.closeMin)}` : null;
+  const phase = muhuratEquityPhase(now, holidays);
+  if (phase === "continuous") {
+    return {
+      status: "continuous",
+      label: "Continuous",
+      title: "Continuous · 14:20–15:15",
+      foSecondary: foNote,
+      isGreenOpen: true,
+    };
+  }
+  if (phase === "cas") {
+    return {
+      status: "cas",
+      label: "CAS",
+      title: "CAS · 15:20–15:35",
+      foSecondary: foNote,
+      isGreenOpen: false,
+    };
+  }
+  if (phase === "non-cas") {
+    return {
+      status: "continuous",
+      label: "Open",
+      title: "Non-CAS · 14:20–15:30",
+      foSecondary: foNote,
+      isGreenOpen: false,
+    };
+  }
+  if (foOpen && fo) {
+    return {
+      status: "continuous",
+      label: "Open",
+      title: foSessionTitle(fo),
+      foSecondary: null,
+      isGreenOpen: true,
+    };
   }
   return null;
 }

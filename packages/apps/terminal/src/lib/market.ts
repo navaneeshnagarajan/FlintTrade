@@ -12,9 +12,7 @@ import {
   resolveNseCashSession,
 } from "@/lib/nseSession";
 import {
-  foSessionState,
-  foSessionTitle,
-  foSessionWindow,
+  muhuratCashSession,
   shippedMuhuratHolidays,
 } from "@/lib/muhuratSession";
 
@@ -291,18 +289,8 @@ export function getNseCashSessionStatus(
 ): MarketSessionInfo {
   if (!timings) return MARKET_UNAVAILABLE;
 
-  if (foSessionState(now, holidays) === "open") {
-    const window = foSessionWindow(now, holidays);
-    if (window) {
-      return {
-        status: "continuous",
-        label: "Open",
-        title: foSessionTitle(window),
-        foSecondary: null,
-        isGreenOpen: true,
-      };
-    }
-  }
+  const muhurat = muhuratCashSession(now, holidays);
+  if (muhurat) return muhurat;
 
   const { day } = istWeekdayAndMinutes(now);
   if (day === 0 || day === 6) return cashSessionToInfo(resolveNseCashSession(now));
