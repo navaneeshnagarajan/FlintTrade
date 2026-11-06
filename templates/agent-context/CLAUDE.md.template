@@ -74,7 +74,7 @@ app's compiler version from another app.
 | Terminal | React, TypeScript, Vite, Tailwind, FlexLayout, TanStack Table, React Router (`react-router`) | `packages/apps/terminal/package.json` |
 | Shared UI | React components, tokens and chart primitives | `packages/core/design-system/package.json` |
 | Backend | Python, Flask, DuckDB, NumPy, broker SDKs and optional ML packages | Package `pyproject.toml` files and `uv.lock` |
-| Desktop | Electron 44 source-bootstrap shell (exact pin in manifest) | `packages/apps/desktop/package.json` |
+| Desktop | Electron 45 source-bootstrap shell (exact pin in manifest) | `packages/apps/desktop/package.json` |
 | Public site | Next.js, React and Fumadocs | `packages/apps/site/package.json` |
 | Tick engine | Rust and PyO3 | `packages/core/ticks/Cargo.toml` |
 

@@ -49,13 +49,13 @@ disagrees with that table.
 | | Floor | Target |
 |---|---|---|
 | Python | `>=3.14` | 3.14 |
-| Node | `>=22.22.2` | 24 |
+| Node | `>=22.23.4` | 24 |
 | Linux | Ubuntu 26.04 LTS | 26.04 |
 | macOS | macOS 13+ | universal `.dmg` |
 | Windows | Windows 10/11 x64 | `.exe` and PowerShell installers |
 
-Python's floor and target are the same 3.14 series. Node's floor comes from
-jsdom 30, and its target stays ahead at 24.
+Python's floor and target are the same 3.14 series. Node's floor is 22.23.4,
+and its target stays ahead at 24. Electron 45.2.3 bundles Node 24.22.2.
 
 Ubuntu 26.04 LTS is the Linux floor because that release ships Python 3.14.
 The Ubuntu floor applies only to Linux source installs. macOS 13+ ships as a
@@ -226,7 +226,7 @@ update, install and uninstall contracts.
 
 Use this when you are developing FlintTrade itself. Unlike the one-line
 installer it expects you to supply the toolchain: git, Python 3.14+, Node
-22.22.2+, `uv` and `pnpm`.
+22.23.4+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git

@@ -87,7 +87,7 @@ On Windows, run the checkout copy with
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. It expects you to supply
-the toolchain yourself: git, Python 3.14+, Node 22.22.2+, `uv` and `pnpm`.
+the toolchain yourself: git, Python 3.14+, Node 22.23.4+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -167,7 +167,7 @@ distribution-signing and notarisation secrets.
 ### Terminal dev server (contributors)
 
 When you are changing terminal code, run the Vite dev server alongside the
-backend instead of the built UI. It requires Python 3.14+, Node.js 22.22.2+, Git,
+backend instead of the built UI. It requires Python 3.14+, Node.js 22.23.4+, Git,
 and optionally Rust for `core/ticks`.
 
 ```bash
