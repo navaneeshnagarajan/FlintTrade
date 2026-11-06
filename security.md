@@ -7,7 +7,7 @@ Thank you for helping keep FlintTrade and its users safe.
 FlintTrade is pre-release (`v0.0.1`). Only the latest release receives security fixes.
 
 Runtime support is the `flint.toml` `[requirements]` table: Python `>=3.14`
-(target 3.14), Node `>=22.22.2` (target 24), and Ubuntu 26.04 LTS (target 26.04).
+(target 3.14), Node `>=22.23.4` (target 24), and Ubuntu 26.04 LTS (target 26.04).
 
 | Version | Supported |
 |---------|-----------|

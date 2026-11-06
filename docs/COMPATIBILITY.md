@@ -14,14 +14,14 @@ disagrees. Per-push CI runs the **floor**; nightly
 | Component | Floor (must work) | What actually runs | Notes |
 |---|---|---|---|
 | Python | `>=3.14` | 3.14 on every lane | The one-line installer provisions its own Python 3.14. Optional sklearn / LightGBM extras can still skip when a platform wheel is missing; that does not lower the floor. |
-| Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
+| Node | `>=22.23.4` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is the supported Node 22 release. Electron 45.2.3 bundles Node 24.22.2. Required for the terminal, site, desktop, and Playwright. |
 | Operating system | Ubuntu 26.04 LTS | Per-push and release Linux legs: `ubuntu-26.04` (and `ubuntu-26.04-arm` for the arm64 installer). Nightly: macOS and Windows as well. Target 26.04. | The OS floor is the release that ships Python 3.14. The one-line installer provisions its own interpreter under `~/.flinttrade/tools`. |
 
-The Electron 44 desktop shell additionally requires **macOS 13 (Ventura) or
-later** on Apple Silicon and Intel. Electron 44 dropped macOS 12 support; this
+The Electron 45 desktop shell additionally requires **macOS 13 (Ventura) or
+later** on Apple Silicon and Intel. macOS 12 (Monterey) is not supported; this
 desktop requirement is separate from the Python/Node requirements for the
 source-built web app. See [Desktop App](DESKTOP.md) and the
-[Electron 44 release notes](https://www.electronjs.org/blog/electron-44-0).
+[Electron 45 release notes](https://www.electronjs.org/blog/electron-45-0).
 
 For library purposes and exact resolved versions, see
 [Technology Stack and Dependencies](TECH_STACK.md).
