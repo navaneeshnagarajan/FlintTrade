@@ -6,6 +6,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Electron 45.2.3 desktop shell.** The shell bundles Node 24.22.2. The supported Node floor is `>=22.23.4`; the development target remains Node 24.
+
 ### Added
 
 - **Mode honesty bar.** One line under the TopBar for Example, and for
