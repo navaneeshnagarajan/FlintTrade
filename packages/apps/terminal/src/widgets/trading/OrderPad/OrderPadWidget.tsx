@@ -81,6 +81,7 @@ import {
   missingLotRefusal,
 } from "@/lib/instrumentLots";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
+import { muhuratAmoNote } from "@/lib/muhuratSession";
 import {
   SESSION_OPEN_LABEL,
   optionPremiumHint,
@@ -1419,6 +1420,7 @@ function OrderPadWidget(props: WidgetProps) {
     showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);
   }
 
+  const amoNote = muhuratAmoNote();
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const btnColor = isBuy
@@ -1442,6 +1444,14 @@ function OrderPadWidget(props: WidgetProps) {
           </span>
         )}
       </div>
+      {amoNote ? (
+        <p
+          className="px-3 py-2 text-xxs text-text-muted border-b border-border-default"
+          data-testid="muhurat-amo-note"
+        >
+          {amoNote}
+        </p>
+      ) : null}
 
       {/* Form body */}
       {/* noValidate: validation is owned by zod + the custom F&O lot check in

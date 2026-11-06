@@ -209,6 +209,19 @@ describe("returns false on weekends regardless of the time", () => {
     expect(isMarketHours()).toBe(false);
   });
 
+  it("is open for NFO during the Muhurat window and closed outside it", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    expect(isMarketHours("NFO")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(true);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 14, 19));
+    expect(isMarketHours("NFO")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 41));
+    expect(isMarketHours("NFO")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    expect(isMarketHoursWithHolidays("NFO", [])).toBe(false);
+    expect(isMarketHours("MCX")).toBe(false);
+  });
+
   it("keeps DELTA open on Saturday because crypto trades 24/7", () => {
     vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 11, 0));
     expect(isMarketHours("DELTA")).toBe(true);
@@ -593,6 +606,40 @@ describe("getNseCashSessionStatus IST session window", () => {
 
     vi.setSystemTime(istToUtc(2026, 9, 10, 16, 0));
     expect(getNseCashSessionStatus(timings).status).toBe("closed");
+  });
+
+  it("is Open during the F&O Muhurat window on Sunday 8 Nov 2026", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("continuous");
+    expect(session.label).toBe("Open");
+    expect(session.isGreenOpen).toBe(true);
+    expect(session.title).toBe("Open · F&O 14:20–15:40 IST");
+    expect(session.foSecondary).toBeNull();
+  });
+
+  it("is Closed on Muhurat Sunday outside the F&O window", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 10, 0));
+    const morning = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(morning.status).toBe("closed");
+    expect(morning.isGreenOpen).toBe(false);
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 14, 19));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 41));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 18, 30));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).label).toBe("Closed");
+  });
+
+  it("fails closed during the F&O window when special-session data is absent", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS, new Date(), []);
+    expect(session.status).toBe("closed");
+    expect(session.isGreenOpen).toBe(false);
+    expect(session.title).not.toMatch(/14:20/);
   });
 
   it("is unavailable when timings are missing", () => {

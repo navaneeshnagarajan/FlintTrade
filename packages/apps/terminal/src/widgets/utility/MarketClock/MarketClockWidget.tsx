@@ -34,6 +34,12 @@ import {
   resolveNseCashSession,
   type NseCashSessionPhase,
 } from "@/lib/nseSession";
+import {
+  foSessionState,
+  foSessionTimeline,
+  foSessionWindow,
+} from "@/lib/muhuratSession";
+import type { Holiday } from "@/types/api";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -181,11 +187,30 @@ const PHASE_TO_STATUS: Record<NseCashSessionPhase, MarketStatus> = {
  * Continuous is the only green "open". CAS / Matching / Post-close are live
  * phases, not Closed.
  */
-export function computeNseMarketState(def: MarketDef, now: Date): MarketState {
+export function computeNseMarketState(
+  def: MarketDef,
+  now: Date,
+  holidays?: readonly Holiday[],
+): MarketState {
   const session = resolveNseCashSession(now);
   const nowMin = istMinutes(now);
   const nowMs = now.getTime();
   const weekend = istParts(now).weekday === 0 || istParts(now).weekday === 6;
+  const foWindow = foSessionState(now, holidays) === "open" ? foSessionWindow(now, holidays) : null;
+
+  if (foWindow) {
+    const openMin = foWindow.openMin;
+    const closeMin = foWindow.closeMin;
+    const sessionLen = Math.max(1, closeMin - openMin);
+    return {
+      def: { ...def, openMin, closeMin },
+      status: "open",
+      progress: Math.min(1, Math.max(0, (Math.floor(nowMin) - openMin) / sessionLen)),
+      remainingMs: Math.max(0, (closeMin - nowMin) * 60_000),
+      phaseLabel: "Open",
+      timelineNote: foSessionTimeline(foWindow),
+    };
+  }
 
   if (weekend) {
     const minsUntilMonday = def.openMin - nowMin + (nowMin >= def.openMin ? 2 * 1440 : 1440);

@@ -11,6 +11,12 @@ import {
   type NseCashSessionInfo,
   resolveNseCashSession,
 } from "@/lib/nseSession";
+import {
+  foSessionState,
+  foSessionTitle,
+  foSessionWindow,
+  shippedMuhuratHolidays,
+} from "@/lib/muhuratSession";
 
 // ---------------------------------------------------------------------------
 // Per-exchange trading hours (minutes since midnight, IST)
@@ -168,7 +174,7 @@ function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date:
  */
 export function isMarketHours(
   target?: MarketHoursTarget,
-  holidays: readonly Holiday[] = [],
+  holidays: readonly Holiday[] = shippedMuhuratHolidays(),
 ): boolean {
   const { exchange, hours } = resolveMarketHours(target);
   if (exchange === "DELTA") return true;
@@ -270,17 +276,33 @@ function sessionBoundToEpochMs(value: number): number | null {
  * Trustworthy timings confirm the calendar is usable. Phase and windows come
  * from the CAS clock, not a flat 15:30 close. Timing bounds may be epoch
  * milliseconds (native brokers), epoch seconds, or HHMM integers used by
- * broker and the Explore stub (`915` / `1530`). Weekends are Closed.
- * Missing or unusable timings are unavailable rather than a false Closed.
+ * broker and the Explore stub (`915` / `1530`). Weekends are Closed unless a
+ * special-session row covers the instant. Missing or unusable timings are
+ * unavailable rather than a false Closed. An empty holiday list does not
+ * invent an open session.
  *
  * A short epoch window outside the regular cash day (Muhurat) is honoured as
- * Continuous while it is live.
+ * Open while it is live.
  */
 export function getNseCashSessionStatus(
   timings: readonly MarketTiming[] | undefined,
   now: Date = new Date(),
+  holidays?: readonly Holiday[],
 ): MarketSessionInfo {
   if (!timings) return MARKET_UNAVAILABLE;
+
+  if (foSessionState(now, holidays) === "open") {
+    const window = foSessionWindow(now, holidays);
+    if (window) {
+      return {
+        status: "continuous",
+        label: "Open",
+        title: foSessionTitle(window),
+        foSecondary: null,
+        isGreenOpen: true,
+      };
+    }
+  }
 
   const { day } = istWeekdayAndMinutes(now);
   if (day === 0 || day === 6) return cashSessionToInfo(resolveNseCashSession(now));

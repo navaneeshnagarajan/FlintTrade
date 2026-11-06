@@ -199,16 +199,19 @@ def get_timings() -> tuple[Any, int]:
 
     # Upcoming special sessions for this exchange
     upcoming = list_upcoming_sessions(limit=5)
-    special: list[dict[str, Any]] = [
-        {
+    special: list[dict[str, Any]] = []
+    for s in upcoming:
+        if s.exchanges and exchange not in s.exchanges:
+            continue
+        row: dict[str, Any] = {
             "date": s.session_date.isoformat(),
             "name": s.name,
             "open": f"{s.open_time.hour:02d}:{s.open_time.minute:02d}",
             "close": f"{s.close_time.hour:02d}:{s.close_time.minute:02d}",
         }
-        for s in upcoming
-        if not s.exchanges or exchange in s.exchanges
-    ]
+        if s.pre_open_time is not None:
+            row["pre_open"] = f"{s.pre_open_time.hour:02d}:{s.pre_open_time.minute:02d}"
+        special.append(row)
 
     return (
         jsonify(

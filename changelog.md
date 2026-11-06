@@ -33,6 +33,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **NSE F&O Muhurat session.** Sunday 8 Nov 2026 is open for the F&O window 14:20–15:40 IST, with pre-open 14:05–14:20. Explore status, the Market Clock, the trade-desk after-market-order note, and the funds note follow that window. A missing special-session record stays closed.
+
 - **Broker sessions are not available in the terminal.** Broker-account
   mutations — `/v1` account and auth writes, native connect / login /
   set-primary / delete, OAuth start and callback, and the other guarded

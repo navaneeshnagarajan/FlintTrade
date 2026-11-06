@@ -387,7 +387,14 @@ class TimeScheduler:
             return None
 
         if session_date.weekday() >= 5:
-            return None
+            # A published pre-open is the verified special-session record.
+            # Anything else, including a missing record, stays closed.
+            from .market_hours import is_special_session  # noqa: PLC0415
+
+            special = is_special_session(session_date, exchange=calendar_key)
+            if special is None or special.pre_open_time is None:
+                return None
+            return special.open_time, special.close_time
         market_close = time(19, 30) if exchange_key == "CDS" and _is_cds_cross_currency(symbol) else sched.market_close
         return sched.market_open, market_close
 
