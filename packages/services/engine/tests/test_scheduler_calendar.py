@@ -248,6 +248,93 @@ def test_implausible_near_daylong_cross_midnight_session_fails_closed() -> None:
     )
 
 
+def test_muhurat_2026_fo_window_is_open_without_a_broker_calendar() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    assert date(2026, 11, 8).weekday() == 6
+    assert scheduler.get_market_session("NFO", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 40),
+    )
+    assert scheduler.get_market_session("NSE", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
+    assert scheduler.get_market_session("CDS", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
+    assert scheduler.get_market_session("MCX", on=date(2026, 11, 8)) == (
+        time(14, 20),
+        time(15, 30),
+    )
+    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 20, tzinfo=IST))
+    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 30, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE_INDEX", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert not scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 19, tzinfo=IST))
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 41, tzinfo=IST))
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 18, 30, tzinfo=IST))
+
+
+def test_missing_muhurat_record_fails_closed(monkeypatch) -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    monkeypatch.setattr(
+        "flinttrade_engine.market_hours.is_special_session",
+        lambda *_args, **_kwargs: None,
+    )
+    scheduler = TimeScheduler()
+    assert scheduler.get_market_session("NFO", on=date(2026, 11, 8)) is None
+    assert not scheduler.is_market_open(
+        "NFO",
+        at=datetime(2026, 11, 8, 15, 0, tzinfo=IST),
+    )
+
+
+def test_loaded_calendar_window_replaces_the_shipped_muhurat_session() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    scheduler.set_holidays(
+        {
+            "data": [
+                {
+                    "date": "2026-11-08",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": ["NFO"],
+                    "open_exchanges": [
+                        {
+                            "exchange": "NFO",
+                            "start_time": "18:00",
+                            "end_time": "19:00",
+                        }
+                    ],
+                }
+            ]
+        },
+        year="2026",
+    )
+    assert not scheduler.is_market_open(
+        "NFO",
+        at=datetime(2026, 11, 8, 15, 0, tzinfo=IST),
+    )
+    assert scheduler.is_market_open(
+        "NFO",
+        at=datetime(2026, 11, 8, 18, 30, tzinfo=IST),
+    )
+
+
 def test_malformed_declared_special_session_fails_closed() -> None:
     from flinttrade_engine.scheduler import TimeScheduler
 

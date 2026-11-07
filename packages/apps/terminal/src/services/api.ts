@@ -36,6 +36,7 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { layaOrderRefused } from "@/lib/layaStatus";
+import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
@@ -2114,8 +2115,11 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     case "holdings":
       return { holdings: mockHoldings() } as T;
     case "holidays":
-    case "market/holidays":
+    case "market/holidays": {
+      const year = Number(params.year);
+      if (year === 2026) return shippedMuhuratHolidays() as T;
       return [] as T;
+    }
     case "intervals":
       return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
     case "timings":

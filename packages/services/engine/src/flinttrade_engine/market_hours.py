@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, datetime, time, timedelta, timezone
 
 logger = logging.getLogger("flinttrade.engine.market_hours")
 
@@ -48,6 +48,8 @@ class SpecialTradingSession:
         close_time: Session closing time (IST).
         exchanges: Exchanges this session applies to. An empty list
             means it applies to all equity exchanges (NSE, BSE, NFO, BFO, CDS, BCD).
+        pre_open_time: Published pre-open, when the exchange circular gives one.
+            A weekend session without it stays closed until a calendar row is loaded.
     """
 
     session_date: date
@@ -55,6 +57,7 @@ class SpecialTradingSession:
     open_time: time
     close_time: time
     exchanges: tuple[str, ...] = field(default_factory=lambda: ())
+    pre_open_time: time | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -89,14 +92,13 @@ _EQUITY_EXCHANGES = ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "NSE_INDEX", "BSE
 # Known special sessions -- Muhurat Trading dates for 2025-2027
 # ---------------------------------------------------------------------------
 #
-# Muhurat Trading is held on Diwali evening, typically 6:15 PM - 7:15 PM IST.
-# Dates are based on the Hindu calendar (Kartik Amavasya) and confirmed
-# annually by NSE/BSE. These are best-effort predictions; the engine should
-# be updated when exchanges publish official circulars.
-#
-# Sources:
-# - NSE circulars (confirmed for 2025)
-# - Hindu calendar Diwali dates for 2026-2027 (projected)
+# Muhurat Trading is a Diwali special session. 2025 keeps the published
+# evening window. 2026 uses the same close split as a normal day:
+# equity NSE/BSE end at 15:30 (the non-CAS cash close in STANDARD_HOURS),
+# F&O ends at 15:40, and currency/commodity end at 15:30. CAS names trade
+# 14:20–15:15 and the closing auction is 15:20–15:35; that phase clock is
+# separate from the single equity close, as on a normal day. 2027 stays a
+# projection and does not open a weekend on its own.
 
 SPECIAL_SESSIONS: list[SpecialTradingSession] = [
     # 2025 -- Diwali: 20 Oct 2025
@@ -107,13 +109,34 @@ SPECIAL_SESSIONS: list[SpecialTradingSession] = [
         close_time=time(19, 15),
         exchanges=_EQUITY_EXCHANGES,
     ),
-    # 2026 -- Diwali: 8 Nov 2026 (projected)
+    # 2026 F&O. Only this segment runs to 15:40.
     SpecialTradingSession(
         session_date=date(2026, 11, 8),
         name="Muhurat Trading 2026",
-        open_time=time(18, 15),
-        close_time=time(19, 15),
-        exchanges=_EQUITY_EXCHANGES,
+        open_time=time(14, 20),
+        close_time=time(15, 40),
+        exchanges=("NFO", "BFO"),
+        pre_open_time=time(14, 5),
+    ),
+    # Equity and indexes. Same single close as STANDARD_HOURS NSE/BSE (15:30),
+    # which is the non-CAS normal market. CAS continuous ends 15:15; the
+    # closing auction is 15:20–15:35 and is not this close.
+    SpecialTradingSession(
+        session_date=date(2026, 11, 8),
+        name="Muhurat Trading 2026",
+        open_time=time(14, 20),
+        close_time=time(15, 30),
+        exchanges=("NSE", "BSE", "NSE_INDEX", "BSE_INDEX"),
+        pre_open_time=time(14, 5),
+    ),
+    # Currency and commodity. Both segments are already on the normal clock.
+    SpecialTradingSession(
+        session_date=date(2026, 11, 8),
+        name="Muhurat Trading 2026",
+        open_time=time(14, 20),
+        close_time=time(15, 30),
+        exchanges=("CDS", "MCX"),
+        pre_open_time=time(14, 20),
     ),
     # 2027 -- Diwali: 29 Oct 2027 (projected)
     SpecialTradingSession(
@@ -164,6 +187,23 @@ def is_special_session(
             return session
 
     return None
+
+
+def muhurat_equity_phase(minutes_from_midnight: int) -> str:
+    """Cash phase during the 8 Nov 2026 Muhurat session.
+
+    Continuous on CAS names is 14:20–15:15. The closing auction is
+    15:20–15:35. Between those, and until 15:30, non-CAS cash is still
+    open. That 15:30 close is the single NSE/BSE session close. F&O is
+    not this phase.
+    """
+    if 14 * 60 + 20 <= minutes_from_midnight < 15 * 60 + 15:
+        return "continuous"
+    if 15 * 60 + 20 <= minutes_from_midnight <= 15 * 60 + 35:
+        return "cas"
+    if 15 * 60 + 15 <= minutes_from_midnight <= 15 * 60 + 30:
+        return "non-cas"
+    return "closed"
 
 
 def nse_cash_phase(minutes_from_midnight: int) -> str:
@@ -279,3 +319,138 @@ def list_upcoming_sessions(
     upcoming = [s for s in SPECIAL_SESSIONS if s.session_date >= from_date]
     upcoming.sort(key=lambda s: s.session_date)
     return upcoming[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Muhurat operator notes
+# ---------------------------------------------------------------------------
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+_PRE_OPEN_LEAD_MINUTES = 15
+_EQUITY_AMO_BEFORE_PRE_OPEN_MINUTES = 2
+_FO_AMO_BEFORE_PRE_OPEN_MINUTES = 3
+_FO_AMO_BEFORE_NORMAL_OPEN_MINUTES = 4
+_MUHURAT_2026 = date(2026, 11, 8)
+
+_FUNDS_NOTE = (
+    "F&O credits and intraday equity profits from 6 November 2026 are not "
+    "included in available funds during this Muhurat session. The settlement "
+    "holiday keeps those credits on the ledger."
+)
+
+
+def _as_ist(at: datetime) -> datetime:
+    if at.tzinfo is None or at.utcoffset() is None:
+        return at.replace(tzinfo=_IST)
+    return at.astimezone(_IST)
+
+
+def _minutes(value: time) -> int:
+    return value.hour * 60 + value.minute
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _session_on(
+    at: datetime,
+    sessions: list[SpecialTradingSession] | None,
+    exchange: str = "NFO",
+) -> SpecialTradingSession | None:
+    """Return the supplied session for this instant, or nothing when data is absent."""
+    if not sessions:
+        return None
+    current = _as_ist(at)
+    venue = exchange.strip().upper()
+    for session in sessions:
+        if session.session_date != current.date():
+            continue
+        if session.exchanges and venue not in session.exchanges:
+            continue
+        return session
+    return None
+
+
+def fo_session_state(
+    at: datetime,
+    sessions: list[SpecialTradingSession] | None,
+    exchange: str = "NFO",
+) -> str:
+    """Return ``open``, ``closed``, or ``absent``.
+
+    ``absent`` means the caller did not supply a special session for this
+    date. Callers stay closed in that case.
+    """
+    session = _session_on(at, sessions, exchange)
+    if session is None:
+        return "absent"
+    minutes = _minutes(_as_ist(at).time())
+    if _minutes(session.open_time) <= minutes <= _minutes(session.close_time):
+        return "open"
+    return "closed"
+
+
+def muhurat_amo_note(
+    at: datetime,
+    sessions: list[SpecialTradingSession] | None,
+    exchange: str = "NFO",
+) -> str | None:
+    """After-market-order note for a supplied Muhurat session, before it opens."""
+    session = _session_on(at, sessions, exchange)
+    if session is None:
+        return None
+    current = _as_ist(at)
+    minutes = _minutes(current.time())
+    open_min = _minutes(session.open_time)
+    close_min = _minutes(session.close_time)
+    if minutes > close_min or open_min <= minutes <= close_min:
+        return None
+    if session.pre_open_time is not None:
+        pre_open = _minutes(session.pre_open_time)
+    else:
+        pre_open = open_min - _PRE_OPEN_LEAD_MINUTES
+    equity_cutoff = pre_open - _EQUITY_AMO_BEFORE_PRE_OPEN_MINUTES
+    fo_pre_cutoff = pre_open - _FO_AMO_BEFORE_PRE_OPEN_MINUTES
+    fo_normal_cutoff = open_min - _FO_AMO_BEFORE_NORMAL_OPEN_MINUTES
+    open_label = _hhmm(open_min)
+    pre_label = _hhmm(pre_open)
+    equity_label = _hhmm(equity_cutoff)
+    fo_pre_label = _hhmm(fo_pre_cutoff)
+    fo_normal_label = _hhmm(fo_normal_cutoff)
+    if minutes <= fo_pre_cutoff:
+        return (
+            "F&O after-market orders for the Muhurat session are collected until "
+            f"{fo_pre_label} IST, 3 minutes before pre-open, and until {fo_normal_label} IST, "
+            f"4 minutes before the {open_label} normal open. Equity after-market orders are "
+            f"collected until {equity_label} IST, 2 minutes before the {pre_label} equity pre-open."
+        )
+    if minutes <= equity_cutoff:
+        return (
+            "F&O after-market orders for Muhurat pre-open have closed. Orders for the "
+            f"{open_label} normal open are collected until {fo_normal_label} IST. Equity "
+            f"after-market orders are collected until {equity_label} IST."
+        )
+    if minutes <= fo_normal_cutoff:
+        return (
+            "Equity after-market orders for the Muhurat session have closed. F&O after-market "
+            f"orders for the {open_label} normal open are collected until {fo_normal_label} IST."
+        )
+    return (
+        "After-market orders for the Muhurat session have closed. "
+        f"F&O opens at {open_label} IST."
+    )
+
+
+def muhurat_funds_note(
+    at: datetime,
+    sessions: list[SpecialTradingSession] | None,
+    exchange: str = "NFO",
+) -> str | None:
+    """Funds note while the 8 Nov 2026 Muhurat session is open."""
+    session = _session_on(at, sessions, exchange)
+    if session is None or session.session_date != _MUHURAT_2026:
+        return None
+    if fo_session_state(at, sessions, exchange) != "open":
+        return None
+    return _FUNDS_NOTE

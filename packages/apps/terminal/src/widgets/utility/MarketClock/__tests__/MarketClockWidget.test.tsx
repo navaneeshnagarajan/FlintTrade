@@ -239,6 +239,24 @@ describe("computeNseMarketState — CAS honesty", () => {
     expect(computeNseMarketState(nse, istWeekday(15, 55)).phaseLabel).toBe("Post-close");
   });
 
+  it("is Open during the F&O Muhurat window and Closed outside it", () => {
+    const inside = new Date("2026-11-08T09:30:00.000Z"); // 15:00 IST Sunday
+    const outside = new Date("2026-11-08T04:30:00.000Z"); // 10:00 IST Sunday
+    const open = computeNseMarketState(nse, inside);
+    expect(open.status).toBe("open");
+    expect(open.phaseLabel).toBe("Continuous");
+    expect(open.timelineNote).toContain("CAS 14:20–15:15");
+    expect(open.timelineNote).toContain("closing auction 15:20–15:35");
+    expect(open.timelineNote).toContain("Non-CAS till 15:30");
+    expect(open.timelineNote).toContain("F&O till 15:40");
+    expect(open.timelineNote).toContain("Pre-open 14:05–14:20");
+    const afterEquity = new Date("2026-11-08T10:10:00.000Z"); // 15:40 IST
+    expect(computeNseMarketState(nse, afterEquity).status).toBe("closed");
+    expect(computeNseMarketState(nse, outside).status).toBe("closed");
+    expect(computeNseMarketState(nse, inside, []).status).toBe("closed");
+    expect(computeNseMarketState(nse, inside, []).phaseLabel).toBe("Closed");
+  });
+
   it("is Closed at 16:00, not still Open until 15:30-only", () => {
     const state = computeNseMarketState(nse, istWeekday(16, 0));
     expect(state.status).toBe("closed");

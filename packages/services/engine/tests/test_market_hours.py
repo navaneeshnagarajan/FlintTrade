@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
@@ -20,12 +20,18 @@ from flinttrade_engine.market_hours import (
     STANDARD_HOURS,
     SpecialTradingSession,
     add_special_session,
+    fo_session_state,
     get_market_hours,
     get_standard_hours,
     is_special_session,
     list_upcoming_sessions,
+    muhurat_amo_note,
+    muhurat_equity_phase,
+    muhurat_funds_note,
     nse_cash_phase,
 )
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +149,21 @@ class TestIsSpecialSession:
         session = is_special_session(date(2026, 11, 8))
         assert session is not None
         assert "2026" in session.name
+        assert session.open_time == time(14, 20)
+        assert session.close_time == time(15, 40)
+        assert session.pre_open_time == time(14, 5)
+        assert "NFO" in session.exchanges
+        assert "NSE" not in session.exchanges
+        assert "CDS" not in session.exchanges
+        assert "MCX" not in session.exchanges
+        equity = is_special_session(date(2026, 11, 8), exchange="NSE")
+        assert equity is not None
+        assert equity.close_time == time(15, 30)
+        assert "NSE_INDEX" in equity.exchanges
+        currency = is_special_session(date(2026, 11, 8), exchange="CDS")
+        commodity = is_special_session(date(2026, 11, 8), exchange="MCX")
+        assert currency is not None and currency.close_time == time(15, 30)
+        assert commodity is not None and commodity.close_time == time(15, 30)
 
     def test_muhurat_2027_detected(self) -> None:
         session = is_special_session(date(2027, 10, 29))
@@ -195,6 +216,23 @@ class TestGetMarketHours:
     def test_nfo_on_muhurat(self) -> None:
         open_t, close_t = get_market_hours("NFO", date(2025, 10, 20))
         assert open_t == time(18, 15)
+
+    def test_nfo_muhurat_2026_uses_the_afternoon_window(self) -> None:
+        open_t, close_t = get_market_hours("NFO", date(2026, 11, 8))
+        assert open_t == time(14, 20)
+        assert close_t == time(15, 40)
+
+    def test_equity_muhurat_2026_uses_the_non_cas_close(self) -> None:
+        for exchange in ("NSE", "BSE", "NSE_INDEX", "BSE_INDEX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
+
+    def test_currency_and_commodity_muhurat_2026(self) -> None:
+        for exchange in ("CDS", "MCX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +287,79 @@ class TestListUpcomingSessions:
     def test_from_far_future_returns_empty(self) -> None:
         sessions = list_upcoming_sessions(from_date=date(2050, 1, 1))
         assert sessions == []
+
+
+def _at(hour: int, minute: int) -> datetime:
+    return datetime(2026, 11, 8, hour, minute, tzinfo=_IST)
+
+
+class TestMuhurat2026Window:
+    def test_open_during_the_fo_window(self) -> None:
+        assert fo_session_state(_at(14, 20), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 30), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NSE") == "closed"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "CDS") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "MCX") == "open"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "CDS") == "closed"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "MCX") == "closed"
+
+    def test_equity_phase_follows_the_bulletin(self) -> None:
+        assert muhurat_equity_phase(14 * 60 + 20) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 14) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 16) == "non-cas"
+        assert muhurat_equity_phase(15 * 60 + 20) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 35) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 36) == "closed"
+        assert muhurat_equity_phase(15 * 60 + 40) == "closed"
+
+    def test_closed_outside_the_fo_window_on_that_sunday(self) -> None:
+        assert date(2026, 11, 8).weekday() == 6
+        assert fo_session_state(_at(10, 0), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(14, 10), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(14, 19), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(15, 41), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(18, 30), SPECIAL_SESSIONS, "NFO") == "closed"
+
+    def test_missing_special_session_data_fails_closed(self) -> None:
+        assert fo_session_state(_at(15, 0), None, "NFO") == "absent"
+        assert fo_session_state(_at(15, 0), [], "NFO") == "absent"
+        assert muhurat_amo_note(_at(14, 0), []) is None
+        assert muhurat_funds_note(_at(15, 0), []) is None
+
+    def test_amo_and_funds_notes_follow_the_window(self) -> None:
+        early = muhurat_amo_note(_at(14, 0), SPECIAL_SESSIONS)
+        assert early is not None
+        assert "14:02 IST, 3 minutes before pre-open" in early
+        assert "14:16 IST, 4 minutes before the 14:20 normal open" in early
+        assert "14:03 IST, 2 minutes before the 14:05 equity pre-open" in early
+
+        at_pre_cutoff = muhurat_amo_note(_at(14, 2), SPECIAL_SESSIONS)
+        assert at_pre_cutoff is not None
+        assert "3 minutes before pre-open" in at_pre_cutoff
+
+        after_pre_cutoff = muhurat_amo_note(_at(14, 3), SPECIAL_SESSIONS)
+        assert after_pre_cutoff is not None
+        assert "pre-open have closed" in after_pre_cutoff
+        assert "until 14:16 IST" in after_pre_cutoff
+
+        normal_only = muhurat_amo_note(_at(14, 10), SPECIAL_SESSIONS)
+        assert normal_only is not None
+        assert "Equity after-market orders for the Muhurat session have closed" in normal_only
+        assert "until 14:16 IST" in normal_only
+
+        closed_collection = muhurat_amo_note(_at(14, 17), SPECIAL_SESSIONS)
+        assert closed_collection == "After-market orders for the Muhurat session have closed. F&O opens at 14:20 IST."
+
+        assert muhurat_amo_note(_at(15, 0), SPECIAL_SESSIONS) is None
+        assert muhurat_amo_note(_at(16, 0), SPECIAL_SESSIONS) is None
+
+        funds = muhurat_funds_note(_at(15, 0), SPECIAL_SESSIONS)
+        assert funds is not None
+        assert "6 November 2026" in funds
+        assert "not included in available funds" in funds
+        assert "settlement holiday" in funds
+        assert muhurat_funds_note(_at(14, 0), SPECIAL_SESSIONS) is None
+        assert muhurat_funds_note(_at(15, 41), SPECIAL_SESSIONS) is None

@@ -1701,4 +1701,17 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
   });
+
+  it("shows the Muhurat after-market-order note before the F&O open", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-08T08:30:00.000Z")); // 14:00 IST
+    render(<OrderPadWidget {...defaultProps} />);
+    expect(screen.getByTestId("muhurat-amo-note")).toHaveTextContent(
+      "14:02 IST, 3 minutes before pre-open",
+    );
+    expect(screen.getByTestId("muhurat-amo-note")).toHaveTextContent(
+      "4 minutes before the 14:20 normal open",
+    );
+    vi.useRealTimers();
+  });
 });

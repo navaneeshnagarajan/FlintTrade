@@ -37,6 +37,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **NSE F&O Muhurat session.** Sunday 8 Nov 2026 opens for F&O 14:20–15:40 IST. Equity and indexes use the normal-day close: non-CAS cash to 15:30, CAS names 14:20–15:15, closing auction 15:20–15:35. Currency and commodity run 14:20–15:30. Equity after-market orders are collected until 14:03 IST. A missing special-session record stays closed.
+
 - **Broker sessions are not available in the terminal.** Broker-account
   mutations — `/v1` account and auth writes, native connect / login /
   set-primary / delete, OAuth start and callback, and the other guarded
