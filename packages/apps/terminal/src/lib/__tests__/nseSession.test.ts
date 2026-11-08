@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAS_SCHEDULE_NOTE,
   NSE_CASH_TIMELINE_NOTE,
+  INDEX_UNDERLYINGS,
   derivativeContractCloseMin,
   formatNseCashSessionTitle,
   nseCashSchedule,
@@ -202,6 +203,19 @@ describe("NFO contract close from 7 Dec 2026", () => {
     expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", ["2026-12-17"])).toBeNull();
     expect(derivativeContractCloseMin(expiryDay, "NIFTY", calendar)).toBeNull();
     expect(derivativeContractCloseMin(expiryDay, "NOT A CONTRACT", calendar)).toBeNull();
+  });
+
+  it("closes every listed index at 15:30 on its own expiry and rejects the following day", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    const nextDay = onDate(2026, 12, 11, 11 * 60);
+    const previousDay = onDate(2026, 12, 9, 11 * 60);
+    for (const name of INDEX_UNDERLYINGS) {
+      const symbol = `${name}10DEC26FUT`;
+      expect(derivativeContractCloseMin(expiryDay, symbol, undefined, "NFO")).toBe(15 * 60 + 30);
+      expect(derivativeContractCloseMin(expiryDay, symbol, undefined, "BFO")).toBe(15 * 60 + 30);
+      expect(derivativeContractCloseMin(previousDay, symbol, undefined, "NFO")).toBe(15 * 60 + 45);
+      expect(derivativeContractCloseMin(nextDay, symbol, undefined, "NFO")).toBeNull();
+    }
   });
 
   it("closes an expiring BSE index contract at 15:30 and keeps a stock contract until 15:45", () => {

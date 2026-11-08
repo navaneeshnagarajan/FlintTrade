@@ -2049,6 +2049,19 @@ SUPPORTED_EXCHANGES = {
 }
 
 
+def _market_calendar(explicit: Any = None) -> Any:
+    """Holiday calendar shared with the scheduler, when one is already loaded."""
+    if explicit is not None:
+        return explicit
+    try:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+    except ImportError:
+        return None
+    if not has_app_context():
+        return None
+    return current_app.config.get("TIME_SCHEDULER")
+
+
 def is_market_open(
     exchange: str,
     at: datetime | None = None,
@@ -2056,6 +2069,7 @@ def is_market_open(
     symbol: str | None = None,
     expiry_calendar: Sequence[date | str] | None = None,
     risk_increasing: bool = True,
+    market_calendar: Any = None,
 ) -> bool:
     """Check if the given exchange is currently open for trading.
 
@@ -2082,6 +2096,27 @@ def is_market_open(
     else:
         now = now.astimezone(IST)
     current_time = now.time().replace(tzinfo=None)
+
+    # Weekends and exchange holidays use the scheduler's calendar. A closed
+    # day stays closed for a new order and for a reduce-only exit. Muhurat
+    # remains open only inside its published window, which the scheduler
+    # already records as a session.
+    from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+    calendar = _market_calendar(market_calendar)
+    if calendar is None:
+        calendar = TimeScheduler()
+    if (
+        calendar.get_market_session(
+            exchange,
+            on=now.date(),
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=False,
+        )
+        is None
+    ):
+        return False
 
     from flinttrade_engine.market_hours import is_special_session  # noqa: PLC0415
 
@@ -2232,6 +2267,7 @@ class OrderValidation:
         *,
         expiry_calendar: Sequence[date | str] | None = None,
         risk_increasing: bool = True,
+        market_calendar: Any = None,
     ) -> SafetyResult:
         exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)
 
@@ -2246,6 +2282,7 @@ class OrderValidation:
             symbol=order.symbol,
             expiry_calendar=expiry_calendar,
             risk_increasing=risk_increasing,
+            market_calendar=market_calendar,
         ):
             now = at or datetime.now(IST)
             current_time = now.time().replace(tzinfo=None).strftime("%H:%M")
@@ -3999,6 +4036,7 @@ class SafetySystem:
         starting_capital: float = 0.0,
         at: datetime | None = None,
         expiry_calendar: Sequence[date | str] | None = None,
+        market_calendar: Any = None,
     ) -> list[SafetyResult]:
         """Run order through all 5 layers and return results.
 
@@ -4018,6 +4056,7 @@ class SafetySystem:
                 starting_capital=starting_capital,
                 at=at,
                 expiry_calendar=expiry_calendar,
+                market_calendar=market_calendar,
             )
 
     def _check_order_locked(
@@ -4035,6 +4074,7 @@ class SafetySystem:
         starting_capital: float = 0.0,
         at: datetime | None = None,
         expiry_calendar: Sequence[date | str] | None = None,
+        market_calendar: Any = None,
     ) -> list[SafetyResult]:
         results: list[SafetyResult] = []
 
@@ -4061,6 +4101,7 @@ class SafetySystem:
             at=at,
             expiry_calendar=expiry_calendar,
             risk_increasing=not reducing,
+            market_calendar=market_calendar,
         )
         results.append(r1)
         if not r1.passed:

@@ -391,7 +391,7 @@ def test_option_session_uses_the_runtime_scheduler_holiday() -> None:
             },
             year="2026",
         )
-        option = "NIFTY24APR25500CE"
+        option = "NIFTY24APR2625500CE"
         assert fresh.is_market_open("NFO", symbol=option) is True
         assert runtime.is_market_open("NFO", symbol=option) is False
         app = Flask(__name__)

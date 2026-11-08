@@ -180,43 +180,148 @@ export function resolveNseCashSession(now: Date = new Date()): NseCashSessionInf
   };
 }
 
-/** Index underlyings that share the symbol catalogue used to read contract names. */
-const INDEX_UNDERLYINGS = new Set([
-  "NIFTY",
+/**
+ * Compact NSE and BSE index underlyings.
+ * Keep this set equal to `INDEX_UNDERLYINGS` in flinttrade_core.symbol_utils.
+ */
+export const INDEX_UNDERLYINGS = new Set([
+  "BANKEX",
   "BANKNIFTY",
+  "BSE100",
+  "BSE150MIDCAPINDEX",
+  "BSE200",
+  "BSE250LARGEMIDCAPINDEX",
+  "BSE400MIDSMALLCAPINDEX",
+  "BSE500",
+  "BSEAUTO",
+  "BSECAPITALGOODS",
+  "BSECARBONEX",
+  "BSECONSUMERDURABLES",
+  "BSECPSE",
+  "BSEDOLLEX100",
+  "BSEDOLLEX200",
+  "BSEDOLLEX30",
+  "BSEENERGY",
+  "BSEFASTMOVINGCONSUMERGOODS",
+  "BSEFINANCIALSERVICES",
+  "BSEGREENEX",
+  "BSEHEALTHCARE",
+  "BSEINDIAINFRASTRUCTUREINDEX",
+  "BSEINDUSTRIALS",
+  "BSEINFORMATIONTECHNOLOGY",
+  "BSEIPO",
+  "BSELARGECAP",
+  "BSEMETAL",
+  "BSEMIDCAP",
+  "BSEMIDCAPSELECTINDEX",
+  "BSEOIL&GAS",
+  "BSEPOWER",
+  "BSEPSU",
+  "BSEREALTY",
+  "BSESENSEXNEXT50",
+  "BSESMALLCAP",
+  "BSESMALLCAPSELECTINDEX",
+  "BSESMEIPO",
+  "BSETECK",
+  "BSETELECOM",
   "FINNIFTY",
-  "MIDCPNIFTY",
-  "SENSEX",
-  "NIFTYIT",
-  "NIFTYMETAL",
-  "NIFTYPHARMA",
-  "NIFTYAUTO",
-  "NIFTYENERGY",
-  "NIFTYREALTY",
-  "NIFTYFMCG",
-  "NIFTYINFRA",
+  "HANGSENGBEESNAV",
   "INDIAVIX",
+  "MIDCPNIFTY",
+  "NIFTY",
+  "NIFTY100",
+  "NIFTY100EQLWGT",
+  "NIFTY100LIQ15",
+  "NIFTY100LOWVOL30",
+  "NIFTY100QUALTY30",
+  "NIFTY200",
+  "NIFTY200QUALTY30",
+  "NIFTY500",
+  "NIFTY50DIVPOINT",
+  "NIFTY50EQLWGT",
+  "NIFTY50PR1XINV",
+  "NIFTY50PR2XLEV",
+  "NIFTY50TR1XINV",
+  "NIFTY50TR2XLEV",
+  "NIFTY50VALUE20",
+  "NIFTYALPHA50",
+  "NIFTYAUTO",
+  "NIFTYCOMMODITIES",
+  "NIFTYCONSUMPTION",
+  "NIFTYCPSE",
+  "NIFTYDIVOPPS50",
+  "NIFTYENERGY",
+  "NIFTYFMCG",
+  "NIFTYFPI",
+  "NIFTYGROWSECT15",
+  "NIFTYGS10YR",
+  "NIFTYGS10YRCLN",
+  "NIFTYGS1115YR",
+  "NIFTYGS15YRPLUS",
+  "NIFTYGS48YR",
+  "NIFTYGS813YR",
+  "NIFTYGSCOMPSITE",
+  "NIFTYINFRA",
+  "NIFTYIT",
+  "NIFTYMEDIA",
+  "NIFTYMETAL",
+  "NIFTYMIDCAP100",
+  "NIFTYMIDCAP150",
+  "NIFTYMIDCAP50",
+  "NIFTYMIDLIQ15",
+  "NIFTYMIDSML400",
+  "NIFTYMNC",
+  "NIFTYNXT50",
+  "NIFTYPHARMA",
+  "NIFTYPSE",
+  "NIFTYPSUBANK",
+  "NIFTYPVTBANK",
+  "NIFTYREALTY",
+  "NIFTYSERVSECTOR",
+  "NIFTYSMLCAP100",
+  "NIFTYSMLCAP250",
+  "NIFTYSMLCAP50",
+  "SENSEX",
+  "SENSEX50",
 ]);
 
 const EXPIRY_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+function namedIndexDay(prefix: string): { name: string; day: string } | null {
+  let matched = "";
+  for (const name of INDEX_UNDERLYINGS) {
+    if (prefix.startsWith(name) && name.length > matched.length) matched = name;
+  }
+  if (!matched) return null;
+  const day = prefix.slice(matched.length);
+  if (day.length > 2 || (day.length > 0 && !/^\d+$/.test(day))) return null;
+  return { name: matched, day };
+}
+
 function splitContractMonth(value: string): { underlying: string; expiry: string; rest: string } | null {
+  let generic: { underlying: string; expiry: string; rest: string } | null = null;
   for (let offset = 1; offset < value.length - 2; offset += 1) {
     const month = value.slice(offset, offset + 3);
     if (!EXPIRY_MONTHS.includes(month)) continue;
     const prefix = value.slice(0, offset);
+    const named = namedIndexDay(prefix);
+    if (named) {
+      return {
+        underlying: named.name,
+        expiry: named.day + month,
+        rest: value.slice(offset + 3),
+      };
+    }
+    if (generic) continue;
     let nameEnd = prefix.length;
     while (nameEnd > 0 && /\d/.test(prefix[nameEnd - 1] ?? "")) nameEnd -= 1;
-    const name = prefix.slice(0, nameEnd);
+    let name = prefix.slice(0, nameEnd);
     const day = prefix.slice(nameEnd);
     if (!name || !/^[A-Z&]+$/.test(name) || day.length > 2) continue;
-    return {
-      underlying: name === "NIFTY50" ? "NIFTY" : name,
-      expiry: day + month,
-      rest: value.slice(offset + 3),
-    };
+    if (name === "NIFTY50") name = "NIFTY";
+    generic = { underlying: name, expiry: day + month, rest: value.slice(offset + 3) };
   }
-  return null;
+  return generic;
 }
 
 function parseDerivativeContract(symbol: string): { underlying: string; expiry: string } | null {
@@ -287,6 +392,8 @@ export function derivativeContractCloseMin(
   if (!symbol || !symbol.trim()) return schedule.foClose;
   const parsed = parseDerivativeContract(symbol);
   if (!parsed) return null;
+  const contractExpiry = expiryTokenToIso(parsed.expiry);
+  if (contractExpiry && contractExpiry < toIstIsoDate(on)) return null;
   if (!INDEX_UNDERLYINGS.has(parsed.underlying)) {
     return /^[A-Z&]+$/.test(parsed.underlying) ? schedule.foClose : null;
   }

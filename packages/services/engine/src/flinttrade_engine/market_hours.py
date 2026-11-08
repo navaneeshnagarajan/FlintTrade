@@ -384,6 +384,12 @@ def derivative_contract_close(
     from flinttrade_core.symbol_utils import detect_instrument_type
 
     venue = exchange.strip().upper()
+    # A contract is finished the day after the expiry written on its symbol.
+    # A new risk-increasing order stays closed. An exit is not blocked here.
+    if risk_increasing and symbol:
+        symbol_expiry = _symbol_expiry(symbol)
+        if symbol_expiry is not None and target_date > symbol_expiry:
+            return None
     special = is_special_session(target_date, exchange=venue)
     if special is not None:
         return special.close_time

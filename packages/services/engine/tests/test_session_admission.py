@@ -238,3 +238,114 @@ def test_safety_uses_muhurat_hours_and_stays_closed_outside_them() -> None:
         total_balance=100000,
         starting_capital=100000,
     ))
+
+
+def test_check_order_stays_closed_on_an_ordinary_weekend_and_holiday() -> None:
+    from flinttrade_core.models import Position
+    from flinttrade_engine.safety import is_market_open
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    sunday = datetime(2026, 11, 15, 11, 0, tzinfo=IST)
+    monday = datetime(2026, 11, 16, 11, 0, tzinfo=IST)
+    safety = _system()
+    scheduler = TimeScheduler()
+    for exchange, symbol in (
+        ("NSE", "RELIANCE"),
+        ("NFO", "RELIANCE26NOV26FUT"),
+        ("BFO", "RELIANCE26NOV26FUT"),
+    ):
+        assert not scheduler.is_market_open(exchange, at=sunday, symbol=symbol)
+        assert not is_market_open(exchange, at=sunday, symbol=symbol)
+        fresh = _order(symbol, exchange)
+        increased = _order(symbol, exchange)
+        increased.quantity = "2"
+        held = Position(symbol=symbol, exchange=exchange, product="MIS", quantity="1")
+        assert not _passed(safety.check_order(
+            fresh,
+            selector="dhan:primary",
+            at=sunday,
+            total_balance=100000,
+            starting_capital=100000,
+        ))
+        assert not _passed(safety.check_order(
+            increased,
+            selector="dhan:primary",
+            positions=[held],
+            at=sunday,
+            total_balance=100000,
+            starting_capital=100000,
+        ))
+        exit_order = _order(symbol, exchange)
+        exit_order.action = "SELL"
+        assert not _passed(safety.check_order(
+            exit_order,
+            selector="dhan:primary",
+            positions=[held],
+            at=sunday,
+            total_balance=100000,
+            starting_capital=100000,
+        ))
+        assert _passed(safety.check_order(
+            fresh,
+            selector="dhan:primary",
+            at=monday,
+            total_balance=100000,
+            starting_capital=100000,
+        ))
+
+    holiday = TimeScheduler()
+    holiday.set_holidays(
+        {
+            "data": [
+                {
+                    "date": "2026-11-16",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": ["NSE", "NFO", "BFO"],
+                }
+            ]
+        },
+        year="2026",
+    )
+    for exchange, symbol in (
+        ("NSE", "RELIANCE"),
+        ("NFO", "RELIANCE26NOV26FUT"),
+        ("BFO", "RELIANCE26NOV26FUT"),
+    ):
+        assert not holiday.is_market_open(exchange, at=monday, symbol=symbol)
+        assert not is_market_open(exchange, at=monday, symbol=symbol, market_calendar=holiday)
+        assert not _passed(safety.check_order(
+            _order(symbol, exchange),
+            selector="dhan:primary",
+            at=monday,
+            total_balance=100000,
+            starting_capital=100000,
+            market_calendar=holiday,
+        ))
+
+
+def test_check_order_rejects_a_risk_increasing_order_after_expiry() -> None:
+    safety = _system()
+    expired = _order("NIFTY10DEC2624000CE", "NFO")
+    for hour, minute in ((11, 0), (15, 44)):
+        assert not _passed(safety.check_order(
+            expired,
+            selector="dhan:primary",
+            at=_at(11, hour, minute),
+            total_balance=100000,
+            starting_capital=100000,
+        ))
+    assert _passed(safety.check_order(
+        expired,
+        selector="dhan:primary",
+        at=_at(10, 11, 0),
+        total_balance=100000,
+        starting_capital=100000,
+    ))
+    stock = _order("RELIANCE10DEC26FUT", "NFO")
+    assert not _passed(safety.check_order(
+        stock,
+        selector="dhan:primary",
+        at=_at(11, 11, 0),
+        total_balance=100000,
+        starting_capital=100000,
+    ))

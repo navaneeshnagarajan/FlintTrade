@@ -459,6 +459,35 @@ class TestCasRevisionBoundary:
             is None
         )
         assert derivative_contract_close("NFO", session, symbol="NOT A CONTRACT") is None
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+            )
+            is None
+        )
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+                risk_increasing=False,
+            )
+            == time(15, 45)
+        )
+
+    def test_every_listed_index_closes_at_1530_on_its_expiry_day(self) -> None:
+        from flinttrade_core.symbol_utils import INDEX_UNDERLYINGS, detect_instrument_type
+
+        session = date(2026, 12, 10)
+        earlier = date(2026, 12, 9)
+        for name in sorted(INDEX_UNDERLYINGS):
+            assert detect_instrument_type(name) == "index"
+            symbol = f"{name}10DEC26FUT"
+            assert derivative_contract_close("NFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("BFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("NFO", earlier, symbol=symbol) == time(15, 45), name
 
     def test_bfo_uses_the_same_expiry_close_as_nse(self) -> None:
         assert derivative_contract_close(
