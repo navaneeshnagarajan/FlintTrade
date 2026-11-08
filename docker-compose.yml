@@ -30,7 +30,7 @@
 # A .env file is optional: the app services start without one.
 #
 # Multi-arch builds:
-#   All base images (python:3.12-slim, node:22-alpine, nginx:alpine, etc.) support
+#   All base images (python:3.14-slim-trixie, node:22-alpine, nginx:alpine, etc.) support
 #   linux/amd64 and linux/arm64. To build the FlintTrade image for multiple platforms:
 #     docker buildx build --platform linux/amd64,linux/arm64 -t flinttrade:latest .
 # =============================================================================

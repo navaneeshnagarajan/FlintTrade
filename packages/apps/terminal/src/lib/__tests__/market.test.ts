@@ -209,6 +209,26 @@ describe("returns false on weekends regardless of the time", () => {
     expect(isMarketHours()).toBe(false);
   });
 
+  it("is open for NFO during the Muhurat window and closed outside it", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    expect(isMarketHours("NFO")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(true);
+    expect(isMarketHours("CDS")).toBe(true);
+    expect(isMarketHours("MCX")).toBe(true);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 14, 19));
+    expect(isMarketHours("NFO")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 40));
+    expect(isMarketHours("NFO")).toBe(true);
+    expect(isMarketHours("NSE")).toBe(false);
+    expect(isMarketHours("NSE_INDEX")).toBe(false);
+    expect(isMarketHours("CDS")).toBe(false);
+    expect(isMarketHours("MCX")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 41));
+    expect(isMarketHours("NFO")).toBe(false);
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    expect(isMarketHoursWithHolidays("NFO", [])).toBe(false);
+  });
+
   it("keeps DELTA open on Saturday because crypto trades 24/7", () => {
     vi.setSystemTime(istToUtc(SAT.y, SAT.m, SAT.d, 11, 0));
     expect(isMarketHours("DELTA")).toBe(true);
@@ -522,7 +542,7 @@ const EXPLORE_NSE_TIMINGS = [
 ];
 
 describe("getNseCashSessionStatus IST session window", () => {
-  it("is Continuous at Thursday mid-session with Explore HHMM timings (FT-TRADE-004)", () => {
+  it("is Continuous at Thursday mid-session with Explore HHMM timings", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
     const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
     expect(session.status).toBe("continuous");
@@ -593,6 +613,55 @@ describe("getNseCashSessionStatus IST session window", () => {
 
     vi.setSystemTime(istToUtc(2026, 9, 10, 16, 0));
     expect(getNseCashSessionStatus(timings).status).toBe("closed");
+  });
+
+  it("is Open during the F&O Muhurat window on Sunday 8 Nov 2026", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("continuous");
+    expect(session.label).toBe("Continuous");
+    expect(session.isGreenOpen).toBe(true);
+    expect(session.title).toBe("Continuous · 14:20–15:15");
+    expect(session.foSecondary).toBe("F&O open · till 15:40");
+  });
+
+  it("keeps equity off the F&O close and shows the closing auction", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 22));
+    const auction = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(auction.status).toBe("cas");
+    expect(auction.title).toBe("CAS · 15:20–15:35");
+    expect(auction.isGreenOpen).toBe(false);
+    expect(auction.foSecondary).toBe("F&O open · till 15:40");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 40));
+    const foOnly = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(foOnly.label).toBe("Open");
+    expect(foOnly.title).toBe("Open · F&O 14:20–15:40 IST");
+    expect(foOnly.isGreenOpen).toBe(true);
+  });
+
+  it("is Closed on Muhurat Sunday outside the F&O window", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 10, 0));
+    const morning = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(morning.status).toBe("closed");
+    expect(morning.isGreenOpen).toBe(false);
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 14, 19));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 41));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
+
+    vi.setSystemTime(istToUtc(2026, 11, 8, 18, 30));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).label).toBe("Closed");
+  });
+
+  it("fails closed during the F&O window when special-session data is absent", () => {
+    vi.setSystemTime(istToUtc(2026, 11, 8, 15, 0));
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS, new Date(), []);
+    expect(session.status).toBe("closed");
+    expect(session.isGreenOpen).toBe(false);
+    expect(session.title).not.toMatch(/14:20/);
   });
 
   it("is unavailable when timings are missing", () => {

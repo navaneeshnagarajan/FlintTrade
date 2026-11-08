@@ -54,6 +54,8 @@ def test_requirements_table_is_present_and_complete() -> None:
         "node_target",
         "os_requires",
         "os_target",
+        "os_macos",
+        "os_windows",
     }
     missing = expected - declared.keys()
     assert not missing, f"flint.toml [requirements] is missing: {sorted(missing)}"
@@ -116,6 +118,34 @@ def test_the_readme_documents_the_declared_floors() -> None:
     readme = (_REPO_ROOT / "readme.md").read_text(encoding="utf-8")
     for value in (declared["python_requires"], declared["node_requires"]):
         assert value in readme, f"readme.md does not document the declared floor {value!r}"
+
+
+@pytest.mark.unit
+def test_the_readme_supported_versions_table_lists_every_shipped_platform() -> None:
+    """The supported-versions table must name each platform declared in flint.toml.
+
+    Ubuntu 26.04 is the Linux source-install floor. macOS and Windows are
+    separate shipped platforms, confirmed by the nightly cross-platform matrix
+    and the desktop release installers.
+    """
+    declared = _requirements()
+    readme = (_REPO_ROOT / "readme.md").read_text(encoding="utf-8")
+    start = readme.index("## Supported versions")
+    section = readme[start:readme.index("\n## ", start + 1)]
+    for key in ("os_requires", "os_macos", "os_windows"):
+        value = declared[key]
+        assert value in section, f"readme supported versions omit {key} {value!r}"
+    assert "Linux source installs" in section
+
+    nightly = (_REPO_ROOT / ".github/workflows/nightly-cross-platform.yml").read_text(encoding="utf-8")
+    desktop = (_REPO_ROOT / ".github/workflows/desktop-release.yml").read_text(encoding="utf-8")
+    for runner in ("macos-latest", "windows-latest", "ubuntu-26.04"):
+        assert runner in nightly, f"nightly cross-platform does not run {runner}"
+    assert "macos-universal" in desktop
+    assert "--mac dmg --universal" in desktop
+    assert "windows-x64" in desktop
+    assert "--win nsis --x64" in desktop
+    assert "ubuntu-26.04" in desktop
 
 
 @pytest.mark.unit

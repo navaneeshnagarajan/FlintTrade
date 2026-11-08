@@ -8,29 +8,12 @@
 #     - advisory: "GHSA-xxxx-xxxx-xxxx"
 #       package: "some-node-dep"
 #       reason: "dev-only tooling; not shipped to the browser bundle"
-#       accepted_by: "navaneesh"
+#       accepted_by: "maintainers"
 #       expires: "2026-08-23"
-allowlist:
-  # ---------------------------------------------------------------------------
-  # The brace-expansion entry that used to live here is gone. GHSA-mh99-v99m-4gvg
-  # was republished on 2026-07-31 with per-line ranges, and GHSA-6j4f-fj2g-mc7p
-  # plus GHSA-qhr7-859c-m2p7 have patched 2.1.7 / 3.0.9 / 5.0.12 releases. The
-  # overrides in pnpm-workspace.yaml pin those. Do not allowlist them.
-  # Everything else that had a real patched version was fixed the same way
-  # (js-yaml 4.3.2, postcss 8.5.23, fast-uri 4.1.4, sharp 0.35.4,
-  # maplibre-gl 6.8.0, @xmldom/xmldom 0.8.15, qs 6.16.0, fflate 0.6.11,
-  # undici 7.30.0) plus direct bumps of next (16.3.4) and react-router (8.3.0).
-  # ---------------------------------------------------------------------------
-
-  - advisory: "GHSA-qwww-vcr4-c8h2"
-    package: "react-router"
-    reason: >-
-      Patched only in react-router >=8.3.0, which does not exist on npm yet
-      (latest is 7.18.1, already pinned). It arrives transitively through
-      fumadocs-core, the static docs framework used by the marketing site, so
-      it cannot be upgraded ahead of fumadocs. The advisory explicitly affects
-      only applications using the unstable RSC APIs; the site does not use
-      them, and the terminal does not depend on fumadocs at all. Revisit when
-      fumadocs ships a react-router 8 compatible release.
-    accepted_by: "navaneesh"
-    expires: "2026-10-26"
+#
+# No live entries. GHSA-qwww-vcr4-c8h2 (react-router) expired on 2026-10-26.
+# The terminal already depends on react-router 8.4.0, which is outside the
+# affected range (>=8.0.0, <8.3.0 and >=7.12.0, <7.18.2), and pnpm audit no
+# longer reports it. Do not renew that waiver. Earlier patched packages stay
+# on the overrides in pnpm-workspace.yaml.
+allowlist: []

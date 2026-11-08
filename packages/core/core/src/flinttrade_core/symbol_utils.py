@@ -14,24 +14,112 @@ from typing import Literal
 
 ExpiryFormat = Literal["DDMMMYY", "YYMMDD", "ISO"]
 _MONTH_NUMBER = {calendar.month_abbr[number].upper(): number for number in range(1, 13)}
-_INDEX_NAMES = frozenset(
-    (
-        "NIFTY",
+# Compact NSE and BSE index underlyings. Derivative admission uses this one
+# list to tell an index contract from a stock contract. Quote boards and
+# lot tables in the terminal use the same names.
+INDEX_UNDERLYINGS = frozenset(
+    {
+        "BANKEX",
         "BANKNIFTY",
+        "BSE100",
+        "BSE150MIDCAPINDEX",
+        "BSE200",
+        "BSE250LARGEMIDCAPINDEX",
+        "BSE400MIDSMALLCAPINDEX",
+        "BSE500",
+        "BSEAUTO",
+        "BSECAPITALGOODS",
+        "BSECARBONEX",
+        "BSECONSUMERDURABLES",
+        "BSECPSE",
+        "BSEDOLLEX100",
+        "BSEDOLLEX200",
+        "BSEDOLLEX30",
+        "BSEENERGY",
+        "BSEFASTMOVINGCONSUMERGOODS",
+        "BSEFINANCIALSERVICES",
+        "BSEGREENEX",
+        "BSEHEALTHCARE",
+        "BSEINDIAINFRASTRUCTUREINDEX",
+        "BSEINDUSTRIALS",
+        "BSEINFORMATIONTECHNOLOGY",
+        "BSEIPO",
+        "BSELARGECAP",
+        "BSEMETAL",
+        "BSEMIDCAP",
+        "BSEMIDCAPSELECTINDEX",
+        "BSEOIL&GAS",
+        "BSEPOWER",
+        "BSEPSU",
+        "BSEREALTY",
+        "BSESENSEXNEXT50",
+        "BSESMALLCAP",
+        "BSESMALLCAPSELECTINDEX",
+        "BSESMEIPO",
+        "BSETECK",
+        "BSETELECOM",
         "FINNIFTY",
-        "MIDCPNIFTY",
-        "SENSEX",
-        "NIFTYIT",
-        "NIFTYMETAL",
-        "NIFTYPHARMA",
-        "NIFTYAUTO",
-        "NIFTYENERGY",
-        "NIFTYREALTY",
-        "NIFTYFMCG",
-        "NIFTYINFRA",
+        "HANGSENGBEESNAV",
         "INDIAVIX",
-    )
+        "MIDCPNIFTY",
+        "NIFTY",
+        "NIFTY100",
+        "NIFTY100EQLWGT",
+        "NIFTY100LIQ15",
+        "NIFTY100LOWVOL30",
+        "NIFTY100QUALTY30",
+        "NIFTY200",
+        "NIFTY200QUALTY30",
+        "NIFTY500",
+        "NIFTY50DIVPOINT",
+        "NIFTY50EQLWGT",
+        "NIFTY50PR1XINV",
+        "NIFTY50PR2XLEV",
+        "NIFTY50TR1XINV",
+        "NIFTY50TR2XLEV",
+        "NIFTY50VALUE20",
+        "NIFTYALPHA50",
+        "NIFTYAUTO",
+        "NIFTYCOMMODITIES",
+        "NIFTYCONSUMPTION",
+        "NIFTYCPSE",
+        "NIFTYDIVOPPS50",
+        "NIFTYENERGY",
+        "NIFTYFMCG",
+        "NIFTYFPI",
+        "NIFTYGROWSECT15",
+        "NIFTYGS10YR",
+        "NIFTYGS10YRCLN",
+        "NIFTYGS1115YR",
+        "NIFTYGS15YRPLUS",
+        "NIFTYGS48YR",
+        "NIFTYGS813YR",
+        "NIFTYGSCOMPSITE",
+        "NIFTYINFRA",
+        "NIFTYIT",
+        "NIFTYMEDIA",
+        "NIFTYMETAL",
+        "NIFTYMIDCAP100",
+        "NIFTYMIDCAP150",
+        "NIFTYMIDCAP50",
+        "NIFTYMIDLIQ15",
+        "NIFTYMIDSML400",
+        "NIFTYMNC",
+        "NIFTYNXT50",
+        "NIFTYPHARMA",
+        "NIFTYPSE",
+        "NIFTYPSUBANK",
+        "NIFTYPVTBANK",
+        "NIFTYREALTY",
+        "NIFTYSERVSECTOR",
+        "NIFTYSMLCAP100",
+        "NIFTYSMLCAP250",
+        "NIFTYSMLCAP50",
+        "SENSEX",
+        "SENSEX50",
+    }
 )
+_INDEX_NAMES = INDEX_UNDERLYINGS
 _CURRENCY_NAMES = frozenset(("USDINR", "EURINR", "GBPINR", "JPYINR", "USDCHF", "EURUSD"))
 _COMMODITY_NAMES = frozenset(
     (
@@ -73,13 +161,38 @@ def normalize_symbol(symbol: str, exchange: str = "") -> str:
     return index_spelling if index_spelling in _INDEX_NAMES else value
 
 
+def _named_index_day(prefix: str) -> tuple[str, str] | None:
+    """Split a known index name from a following day, longest name first."""
+    matched = ""
+    for name in INDEX_UNDERLYINGS:
+        if prefix.startswith(name) and len(name) > len(matched):
+            matched = name
+    if not matched:
+        return None
+    day = prefix[len(matched) :]
+    if len(day) > 2 or (day and not day.isdigit()):
+        return None
+    return matched, day
+
+
 def _split_month(value: str) -> tuple[str, str, str] | None:
-    """Separate a derivative into underlying, day/month, and trailing fields."""
+    """Separate a derivative into underlying, day/month, and trailing fields.
+
+    A month abbreviation inside an index name, such as SEP in BSEPOWER, is
+    kept with that name. The known index match wins over an earlier generic one.
+    """
+    generic: tuple[str, str, str] | None = None
     for offset in range(1, len(value) - 2):
         month = value[offset : offset + 3]
         if month not in _MONTH_NUMBER:
             continue
         prefix = value[:offset]
+        named = _named_index_day(prefix)
+        if named is not None:
+            name, day = named
+            return name, day + month, value[offset + 3 :]
+        if generic is not None:
+            continue
         name_end = len(prefix)
         while name_end and prefix[name_end - 1].isdigit():
             name_end -= 1
@@ -88,8 +201,8 @@ def _split_month(value: str) -> tuple[str, str, str] | None:
             continue
         if len(day) > 2:
             continue
-        return normalize_symbol(name), day + month, value[offset + 3 :]
-    return None
+        generic = (normalize_symbol(name), day + month, value[offset + 3 :])
+    return generic
 
 
 def parse_option_symbol(symbol: str) -> OptionParts | None:

@@ -40,7 +40,7 @@
     }
   },
   "compliance": {
-    "_comment": "Legacy workspace section for personal-use safety defaults. personal_use_mode true keeps FlintTrade in the single-user posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records \u2014 leave empty.",
+    "_comment": "Single-operator safety defaults. personal_use_mode true keeps the single-operator posture. ai_disclosure_banner shows the 'AI output is not investment advice' notice. static_ip is an optional, non-secret label for your own records — leave empty.",
     "ai_disclosure_banner": true,
     "personal_use_mode": true,
     "static_ip": ""
@@ -77,7 +77,7 @@
     "telegram_enabled": false
   },
   "sebi": {
-    "_comment": "Local safety limits (personal use). max_ops_per_second throttles order operations; audit_retention_years keeps the local audit log; kill_switch_enabled arms the engine kill switch.",
+    "_comment": "Local safety limits. max_ops_per_second throttles order operations; audit_retention_years keeps the local audit log; kill_switch_enabled arms the engine kill switch.",
     "audit_retention_years": 5,
     "kill_switch_enabled": true,
     "max_ops_per_second": 10

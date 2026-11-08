@@ -112,19 +112,14 @@ class Waiver:
 
 # Waivers are deliberately dated. An undated suppression is indistinguishable
 # from a bug, so every entry expires and the finding turns fatal again on its own.
-_WAIVERS: tuple[Waiver, ...] = (
-    Waiver(
-        subject="pnpm (release line)",
-        reason=(
-            "pnpm 9 -> 11 is a lockfile-format and lifecycle-script migration, not a version bump: "
-            "pnpm 10 stopped running dependency build scripts unless allowlisted and pnpm 11 turns an "
-            "un-allowlisted build into a hard failure. pnpm-workspace.yaml already carries the allowBuilds "
-            "block for it, but the block is inert below pnpm 10.26.0, so the move has to be made and "
-            "verified deliberately rather than as a drive-by"
-        ),
-        review_by="2026-10-31",
-    ),
-)
+#
+# Empty on purpose. The previous entry covered the pnpm 9 to 11 migration and
+# expired on 2026-10-31. That migration has landed: the pin is pnpm 12, the
+# current release line, so the out-of-band finding no longer applies. A patch
+# behind ``latest-12`` stays a warning. Add a Waiver only for a pin that is
+# knowingly outside the N-1 band, with a future ``review_by`` and a reason
+# that says why an upgrade cannot land yet.
+_WAIVERS: tuple[Waiver, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)

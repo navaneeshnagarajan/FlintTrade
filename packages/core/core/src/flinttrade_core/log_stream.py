@@ -362,7 +362,7 @@ def stream_logs() -> Response:
     if not isinstance(shutdown_event, threading.Event):
         raise TypeError("LOG_STREAM_SHUTDOWN_EVENT must be a threading.Event")
 
-    def generate() -> Generator[str, None, None]:
+    def generate() -> Generator[str]:
         wake = buf.subscribe()
         try:
             # Snapshot/cursor are atomic, including close during the first burst.

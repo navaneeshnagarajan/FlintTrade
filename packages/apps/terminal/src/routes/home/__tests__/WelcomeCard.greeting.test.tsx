@@ -1,7 +1,7 @@
 /**
  * WelcomeCard.greeting.test.tsx — Explore `/home` greeting uses IST buckets.
  *
- * FT-HOME-001: at ~12:01 IST the card must say Good afternoon even when the
+ * at ~12:01 IST the card must say Good afternoon even when the
  * host clock is evening (or morning) in the browser's own zone.
  */
 

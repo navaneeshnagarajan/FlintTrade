@@ -1,10 +1,7 @@
 # FlintTrade Developer Guide
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 
 This guide is for contributors and integrators. It assumes you have read
@@ -27,7 +24,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 |---|---|---|---|
 | `site` | TypeScript / Next.js | Public website, generated documentation, contribution pages, and read-only docs MCP | `packages/apps/site/src/**/*.test.ts` |
 | `terminal` | TypeScript / React | User-facing single-page application; FlexLayout workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
-| `desktop` | TypeScript / Electron 44 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
+| `desktop` | TypeScript / Electron 45 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, native broker reads, config, workspace, models, exceptions, service-provider catalogue, inert service connections, and the `BrokerReadPort` contract | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
@@ -151,7 +148,7 @@ while `VISUAL_AXE_GATE` is `"0"`. Change that one value to `"1"` to make
 the job fail on a regression. It is not a required check, and it should
 stay advisory until it has run quiet on a few pull requests.
 
-Screenshot baselines are generated only by that workflow on `ubuntu-latest`
+Screenshot baselines are generated only by that workflow on `ubuntu-26.04`
 (the same hosted image as the terminal Playwright job). Dispatch **Visual
 and accessibility** with **Regenerate screenshot baselines** enabled, on
 the branch that should receive the files. The job commits the
@@ -246,7 +243,7 @@ release CI can use complete Apple distribution-signing and notarisation secret
 sets.
 
 First launch uses system Git or the official HTTPS archive fallback, verifies
-pinned tool distributions, provisions Python 3.12 with `uv`, installs from the
+pinned tool distributions, provisions Python 3.14 with `uv`, installs from the
 frozen Python and pnpm locks, builds the terminal, and starts the source guardian
 only after candidate promotion succeeds. Rust is not a desktop build
 prerequisite; it remains optional for `core/ticks`.
@@ -390,8 +387,8 @@ without presenting them as ready to connect.
   `python scripts/ft.py lint` (POSIX alias: `make lint`) before committing —
   that target lints the terminal as well, see [TypeScript](#typescript) below.
 - **Type hints** on every public function. We write to the `python_requires`
-  floor in `flint.toml` — currently 3.12 — so `list[int]` not `List[int]`,
-  `X | None` not `Optional[X]`. CI runs `python_target` (3.14).
+  floor in `flint.toml` — currently 3.14 — so `list[int]` not `List[int]`,
+  `X | None` not `Optional[X]`. CI runs that same 3.14 series.
 - **Google-style docstrings** for every public function and class.
 - **Absolute imports** for anything cross-package or top-level
   (`flinttrade_<pkg>....`). Intra-package relative imports
@@ -909,22 +906,26 @@ uses the workspace disk cache `instrument_lot_cache.json` when that file
 has rows, and otherwise the shipped excerpt
 `packages/core/core/src/flinttrade_core/data/instrument_lot_fixture.json`.
 `instrument_lot_master.build_excerpt` builds that excerpt from the public
-Dhan scrip master and the Kotak Neo F&O master (near month and next month
-of NIFTY, BANKNIFTY, and SENSEX futures). The document carries `source`
-and `fetched_at`. `refresh_master_cache_if_due` downloads again when the
-cache is missing or from an earlier IST day; `start_instrument_master_refresh`
-runs that at startup and again at each IST midnight. A failed download
-leaves a previous non-empty cache in place. Contracts whose expiry is
-before today (IST) are dropped. `contracts_from_rows` raises only when
-the same contract (underlying, expiry month, and kind) has two sizes
-across Dhan and Neo. A later expiry with a different size is kept.
+Dhan scrip master and the Kotak Neo F&O master (near, next and far month
+of NIFTY, BANKNIFTY, and SENSEX futures, the three-month cycle NSE lists).
+The document carries `source` and `fetched_at`. `refresh_master_cache_if_due`
+downloads again when the cache is missing or from an earlier IST day;
+`start_instrument_master_refresh` runs that at startup and again at each
+IST midnight. A failed download leaves a previous non-empty cache in place.
+Contracts whose expiry is before today (IST) are dropped from a per-contract
+lookup. `contracts_from_rows` raises only when the same contract (underlying,
+expiry month, and kind) has two sizes across Dhan and Neo. A later expiry
+with a different size is kept.
 
-`scalper_lot_label` returns `size · expiry` (`<size> · <month> expiry`
+`scalper_lot_label` returns `size · expiry` (for example `65 · Nov expiry`
 per the broker instrument master). When the next month’s size differs,
-both months are named. `index_lot_line` names each listed underlying with
-its lot and the expiry month, and uses `—` for an underlying the master
-does not list. The figures come from the loaded master, not from a
-constant in this guide.
+both months are named. `index_lot_line` is the risk line, for example
+`NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Nov expiry)` on the shipped
+excerpt, with `—` for an underlying the master does not list. When every
+retained contract for an underlying has expired and they share one lot,
+the line names that size as last listed instead of dropping the name.
+Disagreeing old sizes stay `—`, and an expired security id still cannot
+be ordered.
 `missing_lot_refusal` is the order text:
 `Not placed. The lot size for <name> isn't verified.`
 `<name>` is the contract's display name. The Order Pad shows that
@@ -1008,7 +1009,5 @@ screen-reader list, `Positions without a heat map tile`.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
 
-Active design specs for in-flight work live under
-[docs/superpowers/specs/](superpowers/specs/). If you are about to start
-non-trivial work, check the specs folder first — there may already be
-an approved design.
+The public roadmap is [ROADMAP.md](../ROADMAP.md). Shipped behaviour
+belongs in the changelog.

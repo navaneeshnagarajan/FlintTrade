@@ -69,3 +69,44 @@ class TestMarketTimingsRoute:
         assert response.status_code == 400
         data = response.get_json()
         assert "supported" in data
+
+    def test_derivative_close_and_expiry_exception_switch_on_dec_7(self, client) -> None:  # type: ignore[no-untyped-def]
+        before = client.get("/api/v1/market/timings?exchange=NFO&on=2026-12-04")
+        after = client.get("/api/v1/market/timings?exchange=BFO&on=2026-12-07")
+        assert before.status_code == 200
+        assert before.get_json()["close"] == "15:40"
+        assert before.get_json()["expiring_index_close"] is None
+        body = after.get_json()
+        assert body["close"] == "15:45"
+        assert body["expiring_index_close"] == "15:30"
+        assert body["order_entry"] == "open"
+
+    def test_timings_reads_the_symbol_expiry_and_fails_closed_when_unconfirmed(self, client) -> None:  # type: ignore[no-untyped-def]
+        listed = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10"
+            "&symbol=NIFTY10DEC2624000CE&expiries=2026-12-10,2026-12-17"
+        )
+        from_symbol = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10&symbol=NIFTY10DEC2624000CE"
+        )
+        unconfirmed = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10"
+            "&symbol=NIFTY10DEC2624000CE&expiries=2026-12-17"
+        )
+        ambiguous = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10&symbol=NIFTY"
+        )
+        later = client.get(
+            "/api/v1/market/timings?exchange=BFO&on=2026-12-10"
+            "&symbol=SENSEX17DEC2680000CE&expiries=2026-12-10,2026-12-17"
+        )
+        assert listed.get_json()["close"] == "15:30"
+        assert listed.get_json()["order_entry"] == "open"
+        assert from_symbol.get_json()["close"] == "15:30"
+        assert from_symbol.get_json()["order_entry"] == "open"
+        assert from_symbol.get_json()["expiring_index_close"] == "15:30"
+        assert unconfirmed.get_json()["close"] is None
+        assert unconfirmed.get_json()["order_entry"] == "closed"
+        assert ambiguous.get_json()["close"] is None
+        assert ambiguous.get_json()["order_entry"] == "closed"
+        assert later.get_json()["close"] == "15:45"

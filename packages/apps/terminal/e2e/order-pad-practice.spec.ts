@@ -510,7 +510,7 @@ test.describe("quantity-check refusal clears when quantity changes", () => {
     await expect.poll(() => [...discoveryOutcomes].sort()).toEqual([
       "completed", "completed", "net::ERR_ABORTED", "net::ERR_ABORTED",
     ]);
-    await expect(page.getByText("Lot: 65", { exact: true })).toBeVisible();
+    await expect(page.getByText("Lot 65 · Max 1,755 per order", { exact: true })).toBeVisible();
 
     const refusal = "Quantity must be a multiple of the lot size (65).";
     const quantity = page.getByRole("spinbutton", { name: "Quantity" });

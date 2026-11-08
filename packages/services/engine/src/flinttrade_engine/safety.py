@@ -26,7 +26,7 @@ import sqlite3
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time as dt_time, timedelta, timezone
@@ -2049,12 +2049,35 @@ SUPPORTED_EXCHANGES = {
 }
 
 
-def is_market_open(exchange: str, at: datetime | None = None) -> bool:
+def _market_calendar(explicit: Any = None) -> Any:
+    """Holiday calendar shared with the scheduler, when one is already loaded."""
+    if explicit is not None:
+        return explicit
+    try:
+        from flask import current_app, has_app_context  # noqa: PLC0415
+    except ImportError:
+        return None
+    if not has_app_context():
+        return None
+    return current_app.config.get("TIME_SCHEDULER")
+
+
+def is_market_open(
+    exchange: str,
+    at: datetime | None = None,
+    *,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+    market_calendar: Any = None,
+) -> bool:
     """Check if the given exchange is currently open for trading.
 
     - NSE_INDEX / BSE_INDEX: always False (quote-only, no orders)
     - DELTA: always True (24/7 crypto via ccxt, not broker)
     - Unknown exchanges: False
+    - NFO and BFO use the date-switched contract close
+    - NSE and BSE cash auction entry stops from 15:38 from 7 Dec 2026
     - Known exchanges: True only if current IST time is within market hours
     """
     if exchange in _QUOTE_ONLY_EXCHANGES:
@@ -2068,7 +2091,60 @@ def is_market_open(exchange: str, at: datetime | None = None) -> bool:
         return False
 
     now = at or datetime.now(IST)
+    if now.tzinfo is None or now.utcoffset() is None:
+        now = now.replace(tzinfo=IST)
+    else:
+        now = now.astimezone(IST)
     current_time = now.time().replace(tzinfo=None)
+
+    # Weekends and exchange holidays use the scheduler's calendar. A closed
+    # day stays closed for a new order and for a reduce-only exit. Muhurat
+    # remains open only inside its published window, which the scheduler
+    # already records as a session.
+    from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+    calendar = _market_calendar(market_calendar)
+    if calendar is None:
+        calendar = TimeScheduler()
+    if (
+        calendar.get_market_session(
+            exchange,
+            on=now.date(),
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=False,
+        )
+        is None
+    ):
+        return False
+
+    from flinttrade_engine.market_hours import is_special_session  # noqa: PLC0415
+
+    special = is_special_session(now.date(), exchange=exchange)
+    if special is not None:
+        return special.open_time <= current_time <= special.close_time
+
+    if exchange in {"NSE", "BSE"}:
+        from flinttrade_engine.market_hours import cash_auction_order_entry  # noqa: PLC0415
+
+        auction = cash_auction_order_entry(now)
+        if auction is not None:
+            return auction
+
+    if exchange in {"NFO", "BFO"}:
+        from flinttrade_engine.market_hours import derivative_contract_close  # noqa: PLC0415
+
+        close_time = derivative_contract_close(
+            exchange,
+            now.date(),
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+        )
+        if close_time is None:
+            return False
+        return dt_time(9, 15) <= current_time < close_time
+
     open_time, close_time = MARKET_HOURS[exchange]
     return open_time <= current_time < close_time
 
@@ -2090,8 +2166,35 @@ def get_expiry_time(exchange: str) -> dt_time:
     return expiry_times.get(exchange, dt_time(15, 30))
 
 
-def _format_market_hours(exchange: str) -> str:
-    """Format market hours for error messages."""
+def _format_market_hours(
+    exchange: str,
+    at: datetime | None = None,
+    *,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+) -> str:
+    """Format the effective market hours for an error message."""
+    now = at or datetime.now(IST)
+    if now.tzinfo is None or now.utcoffset() is None:
+        now = now.replace(tzinfo=IST)
+    else:
+        now = now.astimezone(IST)
+    if exchange in {"NFO", "BFO"}:
+        from flinttrade_engine.market_hours import derivative_contract_close  # noqa: PLC0415
+
+        close_time = derivative_contract_close(
+            exchange,
+            now.date(),
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+        )
+        if close_time is None:
+            return "closed until the expiry is confirmed"
+        return f"09:15–{close_time.strftime('%H:%M')} IST"
+    if exchange in {"NSE", "BSE"} and now.date() >= date(2026, 12, 7):
+        return "09:15–15:30 IST, auction order entry 15:31–15:38 IST"
     if exchange in MARKET_HOURS:
         o, c = MARKET_HOURS[exchange]
         return f"{o.strftime('%H:%M')}–{c.strftime('%H:%M')} IST"
@@ -2156,7 +2259,16 @@ class OrderValidation:
         self.qty_limits = qty_limits or dict(_DEFAULT_QTY_LIMITS)
         self.check_market_hours = check_market_hours
 
-    def validate(self, order: Order, ltp: float | None = None, at: datetime | None = None) -> SafetyResult:
+    def validate(
+        self,
+        order: Order,
+        ltp: float | None = None,
+        at: datetime | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
+        market_calendar: Any = None,
+    ) -> SafetyResult:
         exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)
 
         # Exchange check
@@ -2164,10 +2276,23 @@ class OrderValidation:
             return SafetyResult(SafetyVerdict.FAIL, "L1_ORDER", f"Exchange {exchange} is not tradeable")
 
         # Market hours check
-        if self.check_market_hours and not is_market_open(exchange, at=at):
+        if self.check_market_hours and not is_market_open(
+            exchange,
+            at=at,
+            symbol=order.symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+            market_calendar=market_calendar,
+        ):
             now = at or datetime.now(IST)
             current_time = now.time().replace(tzinfo=None).strftime("%H:%M")
-            hours = _format_market_hours(exchange)
+            hours = _format_market_hours(
+                exchange,
+                at=now,
+                symbol=order.symbol,
+                expiry_calendar=expiry_calendar,
+                risk_increasing=risk_increasing,
+            )
             return SafetyResult(
                 SafetyVerdict.FAIL,
                 "L1_ORDER",
@@ -3910,6 +4035,8 @@ class SafetySystem:
         daily_pnl: float = 0.0,
         starting_capital: float = 0.0,
         at: datetime | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
+        market_calendar: Any = None,
     ) -> list[SafetyResult]:
         """Run order through all 5 layers and return results.
 
@@ -3928,6 +4055,8 @@ class SafetySystem:
                 daily_pnl=daily_pnl,
                 starting_capital=starting_capital,
                 at=at,
+                expiry_calendar=expiry_calendar,
+                market_calendar=market_calendar,
             )
 
     def _check_order_locked(
@@ -3944,6 +4073,8 @@ class SafetySystem:
         daily_pnl: float = 0.0,
         starting_capital: float = 0.0,
         at: datetime | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
+        market_calendar: Any = None,
     ) -> list[SafetyResult]:
         results: list[SafetyResult] = []
 
@@ -3959,8 +4090,19 @@ class SafetySystem:
         if not r4.passed:
             return results
 
-        # L1 — order validation (exchange, market hours, symbol, qty, price)
-        r1 = self.l1_order.validate(order, ltp, at=at)
+        # L1 — order validation (exchange, market hours, symbol, qty, price).
+        # The symbol carries the contract expiry. A supplied calendar confirms
+        # it. A reduce-only exit is not blocked when that calendar is missing
+        # on a day the symbol does not show as its expiry.
+        reducing = PositionLimits._is_strict_reduction(order, positions or [])
+        r1 = self.l1_order.validate(
+            order,
+            ltp,
+            at=at,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=not reducing,
+            market_calendar=market_calendar,
+        )
         results.append(r1)
         if not r1.passed:
             return results

@@ -1,7 +1,7 @@
 /**
  * ConnectionStep — optional broker step in the setup wizard.
  *
- * Monday primary path (FT-MONDAY-001): continue without a broker. Practice
+ * Continue without a broker. Practice
  * fills use FlintTrade's native SandboxEngine. Native brokers
  * stay Settings/fallback only — never the primary connect CTA.
  *
@@ -19,7 +19,7 @@ import type { ConnectionFormValues } from "./connectionForm";
 import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
-  isMondayReadBroker,
+  isConnectedReadBroker,
 } from "@/lib/connectedReadChrome";
 
 type ConnectionMode = "direct";
@@ -52,11 +52,11 @@ function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
   return account.source === "native" && account.status === "connected" && account.read_only !== true;
 }
 
-function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
+function isConnectedReadAccount(account: BrokerAccount): boolean {
   return (
     account.source === "native"
     && account.status === "connected"
-    && isMondayReadBroker(account.broker)
+    && isConnectedReadBroker(account.broker)
     && account.read_smoke_ok === true
   );
 }
@@ -73,19 +73,19 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   const hasWriteCapableBroker = useBrokerStore((state) =>
     state.accounts.some(isWriteCapableBrokerAccount),
   );
-  const hasMondayReadBroker = useBrokerStore((state) =>
-    state.accounts.some(isMondayReadConnectedAccount),
+  const hasConnectedReadBroker = useBrokerStore((state) =>
+    state.accounts.some(isConnectedReadAccount),
   );
   const hasReadOnlyConnectedBroker = useBrokerStore((state) =>
     state.accounts.some(isReadOnlyConnectedBrokerAccount),
   );
-  const canContinue = hasMondayReadBroker || hasWriteCapableBroker;
+  const canContinue = hasConnectedReadBroker || hasWriteCapableBroker;
 
   return (
     <div className="space-y-4">
       <BrokerConnect />
 
-      {hasMondayReadBroker && (
+      {hasConnectedReadBroker && (
         <div
           role="note"
           className="flex items-start gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400"
@@ -98,7 +98,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         </div>
       )}
 
-      {!hasWriteCapableBroker && !hasMondayReadBroker && hasReadOnlyConnectedBroker && (
+      {!hasWriteCapableBroker && !hasConnectedReadBroker && hasReadOnlyConnectedBroker && (
         <div
           role="note"
           className="flex items-start gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400"

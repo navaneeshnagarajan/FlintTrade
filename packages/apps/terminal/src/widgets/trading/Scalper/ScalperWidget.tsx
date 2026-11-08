@@ -100,7 +100,7 @@ function ScalperWidget(props: WidgetProps) {
   const isPinned = typeof pinnedSymbol === "string" && pinnedSymbol in INDEX_CONFIG;
   const [symbol, setSymbol] = useState(isPinned ? pinnedSymbol : DEFAULT_SYMBOL);
 
-  // FT-TRADE-011: unpinned Scalper follows the same FDC3 user channel
+  // unpinned Scalper follows the same FDC3 user channel
   // Watchlist broadcasts on (red = selectedSymbolAtom). A null bus —
   // empty watchlist, no click yet — must not silently retarget.
   const liveChannel = useChannelMembership(props.api?.id ?? "scalper-detached", props.params);

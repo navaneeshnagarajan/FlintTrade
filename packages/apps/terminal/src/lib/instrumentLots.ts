@@ -263,9 +263,42 @@ export function lotCountLabel(lots: number): string {
   return count === 1 ? "1 lot" : `${count} lots`;
 }
 
+function datedSeries(underlying: string, rows: ScripRow[]): ContractLot[] {
+  const key = underlying.trim().toUpperCase().replace(/\s+/g, "");
+  const mine = contractsFromRows(rows).filter((contract) => contract.underlying === key && contract.expiry);
+  const futures = mine.filter((contract) => contract.kind === "FUT");
+  const chosen = (futures.length > 0 ? futures : mine).slice();
+  chosen.sort((left, right) => (left.expiry ?? "").localeCompare(right.expiry ?? ""));
+  return chosen;
+}
+
 /**
- * Near-month lot size, or null when the master has no row.
+ * Last listed lot when the current month is absent and the retained lots agree.
+ * A disagreement, or an underlying with no row, stays unverified.
+ */
+function lastListedLot(
+  underlying: string,
+  rows: ScripRow[],
+  asOf?: string,
+): { lotSize: number; month: string } | null {
+  const today = todayIst(asOf);
+  const expired = datedSeries(underlying, rows).filter(
+    (contract) => contract.expiry !== null && (contract.expiry as string) < today,
+  );
+  if (expired.length === 0) return null;
+  const sizes = new Set(expired.map((contract) => contract.lotSize));
+  if (sizes.size !== 1) return null;
+  const last = expired[expired.length - 1];
+  const month = monthLabel(last.expiry as string);
+  if (!month) return null;
+  return { lotSize: last.lotSize, month };
+}
+
+/**
+ * Near-month lot size, or null when the master has no unexpired row.
  * A later expiry can differ; use {@link lotSizeForContract} for one contract.
+ * An expired contract is not a current size. {@link indexLotLine} may still
+ * name the last listed size when every retained contract agrees.
  */
 export function lotSizeFromMaster(
   underlying: string,
@@ -307,8 +340,10 @@ const MISSING_LOT = "\u2014";
  * Near-month index lots in the Scalper's form.
  *
  * `NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)`. A missing
- * underlying is `—`. When the Scalper names a second month, that
- * underlying keeps the Scalper's wording.
+ * underlying is `—`. A month the master does not list, when every retained
+ * contract agrees, is `65 (last listed Oct)`. Disagreeing old sizes stay
+ * `—`. When the Scalper names a second month, that underlying keeps the
+ * Scalper's wording.
  */
 export function indexLotLine(
   rows: ScripRow[] = instrumentLotRows(),
@@ -321,7 +356,12 @@ export function indexLotLine(
   for (const underlying of underlyings) {
     const label = scalperLotLabel(underlying, rows, asOf);
     if (label == null) {
-      parts.push(`${underlying} ${MISSING_LOT}`);
+      const agreed = lastListedLot(underlying, rows, asOf);
+      parts.push(
+        agreed === null
+          ? `${underlying} ${MISSING_LOT}`
+          : `${underlying} ${agreed.lotSize} (last listed ${agreed.month})`,
+      );
       continue;
     }
     const segments = label.split(",").map((segment) => segment.trim()).filter(Boolean);

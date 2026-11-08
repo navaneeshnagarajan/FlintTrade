@@ -622,7 +622,7 @@ export function AITutorPill() {
     /*
      * Fixed, z-50. Opened from the TopBar it drops down under the bar;
      * elsewhere the closed pill sits bottom-right.
-     * Hidden below the TopBar Ask AI band (480px, FT-MOBILE-002).
+     * Hidden below the TopBar Ask AI band (480px).
      */
     <div
       className={cn(

@@ -2,7 +2,7 @@
 
 FlintTrade is a self-hosted web app first. The backend serves the terminal and
 API from one origin, and a normal browser remains the primary supported way to
-run it. The desktop package is a small Electron 44 shell around that same local
+run it. The desktop package is a small Electron 45 shell around that same local
 application.
 
 > **Installer availability:** the current source baseline is `v0.0.1`. Previous
@@ -27,8 +27,8 @@ file:
 | Linux ARM64 | `FlintTrade-<version>-linux-arm64.AppImage` |
 | All platforms | `SHA256SUMS.txt` |
 
-Electron 44 requires macOS 13 (Ventura) or later; macOS 12 (Monterey) is no
-longer supported by the desktop shell. See the [Electron 44 release notes](https://www.electronjs.org/blog/electron-44-0).
+Electron 45 requires macOS 13 (Ventura) or later; macOS 12 (Monterey) is no
+longer supported by the desktop shell. The shell bundles Node 24.22.2. See the [Electron 45 release notes](https://www.electronjs.org/blog/electron-45-0).
 
 The macOS, Windows, Linux and tray assets are generated from the same canonical
 FlintTrade angular `F` and green flint-spark mark used by the terminal and
@@ -80,7 +80,7 @@ launch it:
    archive fallback when Git is unavailable;
 4. provisions checksum-verified pinned `uv` and Node 22 distributions into the
    managed tools directory regardless of system Node availability; `uv` then
-   provisions Python 3.12 and Corepack activates the repository-pinned pnpm
+   provisions Python 3.14 and Corepack activates the repository-pinned pnpm
    10.34.5;
 5. runs the frozen Python and JavaScript installs, then builds the terminal;
 6. promotes the completed candidate only after all build steps pass;
@@ -353,7 +353,7 @@ site serves — see [`scripts/install/`](../scripts/install/).
 
 ## Build and verify locally
 
-Shell development requires Git and Node 22.22.2 or newer. Use the repository's
+Shell development requires Git and Node 22.23.4 or newer. Use the repository's
 pinned pnpm 10.34.5; Rust is needed only for the optional `core/ticks` package,
 not for Electron packaging.
 

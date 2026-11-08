@@ -6,10 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows } from "@/test-utils/futureIndexLotRows";
 import { UNDERLYINGS } from "../types";
 import { formatINR } from "../utils";
 
-const niftyLot = UNDERLYINGS[0].lotSize ?? 0;
+let niftyLot = 0;
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -56,6 +58,9 @@ describe("StrategyBuilderTool", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionStorage.clear();
+    setInstrumentLotRows(futureIndexLotRows());
+    niftyLot = UNDERLYINGS[0].lotSize ?? 0;
+    expect(niftyLot).toBeGreaterThan(0);
   });
 
   it("renders without crashing", () => {
@@ -143,7 +148,7 @@ describe("StrategyBuilderTool", () => {
   });
 
   it("seeds a labelled sample premium on Explore Long Call so payoff is not zero-risk", async () => {
-    // Tester FT-LAB-003: Explore → /lab → Options Builder → Long Call → Payoff
+    // Tester: Explore → /lab → Options Builder → Long Call → Payoff
     // must not read as Premium ₹0 / max loss ₹0. Sample-chain ATM CE LTP
     // (NIFTY 22500, gap 50) is 45 → max loss 45 × the instrument-master lot.
     render(<StrategyBuilderTool />);
@@ -163,7 +168,7 @@ describe("StrategyBuilderTool", () => {
     expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
   });
 
-  it("shows header and legs chips on the same position basis as Payoff (FT-LAB-005)", async () => {
+  it("shows header and legs chips on the same position basis as Payoff", async () => {
     render(<StrategyBuilderTool />);
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
 

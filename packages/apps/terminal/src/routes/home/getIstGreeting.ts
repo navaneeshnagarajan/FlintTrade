@@ -3,7 +3,7 @@
  *
  * Buckets are Asia/Kolkata wall-clock hours via {@link istParts}, not the
  * browser's local ``getHours()``. A host in US Pacific at 12:01 IST is still
- * the previous evening locally — that is FT-HOME-001.
+ * the previous evening locally — that is.
  *
  *   00:00–11:59 IST → Good morning
  *   12:00–16:59 IST → Good afternoon

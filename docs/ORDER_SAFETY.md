@@ -1,6 +1,6 @@
 # Order Safety Notes
 
-FlintTrade is personal-use, self-hosted software. It is not a broker, an
+FlintTrade is single-operator, self-hosted software. It is not a broker, an
 investment adviser, a managed strategy product, a compliance product, or a
 service that accepts funds or account access from other people. Nothing in this
 repository is financial, investment, tax, legal, or regulatory advice.

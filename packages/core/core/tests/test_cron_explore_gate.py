@@ -1,4 +1,4 @@
-"""Explore schedule pause/resume fail-closed (FT-AUTO-004)."""
+"""Explore schedule pause/resume fail-closed."""
 
 from __future__ import annotations
 

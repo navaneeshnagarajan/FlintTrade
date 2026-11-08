@@ -62,7 +62,8 @@ const fallbackScreenshotFiles = [
 const rootDocs = [
   ['docs/README.md', 'index', 'Docs', 'Project documentation index'],
   ['docs/INVENTORY.md', 'inventory', 'Docs', 'Build-status inventory: built & working, built but untested, referenced but not built'],
-  ['disclaimer.md', 'disclaimer', 'Safety', 'Beta-stage, no-advice, trading-risk, and user-responsibility notice'],
+  ['ROADMAP.md', 'roadmap', 'Docs', 'What works today, what is in progress, and what comes next'],
+  ['disclaimer.md', 'disclaimer', 'Safety', 'Pre-release, no-advice, trading-risk, and user-responsibility notice'],
   ['docs/DESKTOP.md', 'desktop', 'Setup', 'End-user desktop app install, uninstall, configuration, and local build guide'],
   ['docs/USER_GUIDE.md', 'user-guide', 'Docs', 'User guide for local setup and FlintTrade workspaces'],
   ['docs/DEVELOPER_GUIDE.md', 'developer-guide', 'Contributing', 'Contributor setup and extension guide'],
@@ -84,7 +85,6 @@ const setupDocs = [
   ['docs/setup/static-ip-setup.md', 'setup/static-ip-setup', 'Setup', 'Static IP setup notes for broker API access'],
   ['docs/setup/email.md', 'setup/email', 'Setup', 'SMTP and SES setup for recovery email'],
   ['docs/setup/backup.md', 'setup/backup', 'Setup', 'Local backup and restore guide'],
-  ['docs/setup/multi-user.md', 'setup/multi-user', 'Setup', 'Why multi-user mode was removed as overscope'],
 ];
 
 const releaseDocs = [
@@ -133,8 +133,8 @@ const repositoryFileUrls = new Map([
   ['docs/releases/', githubFallbackUrl('tree', 'docs/releases')],
   ['docs/screenshots/', githubFallbackUrl('tree', 'docs/screenshots')],
   ['docs/setup/', githubFallbackUrl('tree', 'docs/setup')],
-  ['docs/superpowers/specs/', githubFallbackUrl('tree', 'docs/superpowers/specs')],
   ['docs/DESKTOP.md', githubFallbackUrl('blob', 'docs/DESKTOP.md')],
+  ['ROADMAP.md', githubFallbackUrl('blob', 'ROADMAP.md')],
   ['disclaimer.md', githubFallbackUrl('blob', 'disclaimer.md')],
   ['flint.toml', githubFallbackUrl('blob', 'flint.toml')],
   ['LICENSE', githubFallbackUrl('blob', 'LICENSE')],
@@ -623,7 +623,6 @@ async function main() {
         'static-ip-setup',
         'email',
         'backup',
-        'multi-user',
       ],
     }, null, 2),
   );

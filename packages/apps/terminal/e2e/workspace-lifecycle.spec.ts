@@ -7,7 +7,7 @@ const LAYOUT_KEY = "flinttrade:app-layouts:v1:terminal";
 
 test("creates, clones, switches, and restores two canonical workspaces", async ({ page, syntheticApi }) => {
   await seedExploreDemoSession(page);
-  // Explore probes advisor status (FT-AI-001) and the Mode menu reads
+  // Explore probes advisor status and the Mode menu reads
   // Live-arm status. `useAdvisorLlmStatus` refetches on every mount
   // (staleTime 0). Template create, clone, the Options Desk switch, the
   // switch back, and the reload each remount that probe. This journey

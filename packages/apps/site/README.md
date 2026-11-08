@@ -9,6 +9,7 @@
 ## Public surface
 
 - `src/app/page.tsx — public landing page`
+- `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`
 - `scripts/generate-content.mjs — docs/package/release content generator`
 - `src/lib/mcp/capabilities.ts — docs MCP tools and prompts`
 
@@ -48,7 +49,7 @@ hosting cannot serve it. Use a VPS (or any generic Node host) that can run
 
 Requirements:
 
-- Node.js >= 22.22.2 (the monorepo engine floor)
+- Node.js >= 22.23.4 (the monorepo engine floor)
 - A clone of this repository (the site build reads generated docs and, on
   `prebuild`, the terminal demo under `packages/apps/terminal`)
 - `pnpm` at the version pinned in the root `packageManager` field

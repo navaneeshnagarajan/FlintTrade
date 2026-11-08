@@ -340,7 +340,9 @@ def test_legacy_granted_loop_survives_logout_without_blanket_liquidation(protect
     assert grant(desk).status_code == 201
     budget = desk.run.model_budget.snapshot()
     desk.revoked.add('practice-session')
-    _wait_for(lambda: len(desk.read_calls) >= 3 or not desk.run.thread.is_alive())
+    # Protection quotes block on the broker-read thread. The default five-second
+    # poll can expire during one read on a loaded shard, so wait longer.
+    _wait_for(lambda: len(desk.read_calls) >= 3 or not desk.run.thread.is_alive(), timeout=15)
     assert desk.run.thread.is_alive(), 'logout must retain independently granted fixed supervision'
     assert len(desk.read_calls) >= 3, 'observe repeated monitor cycles, not an in-flight forced close'
     assert len(desk.sandbox.get_trades()) == 1, 'logout itself is not a risk exit'
@@ -348,8 +350,8 @@ def test_legacy_granted_loop_survives_logout_without_blanket_liquidation(protect
         desk.read_calls.append(('RELIANCE', 'NSE'))
         return [{'symbol': 'RELIANCE', 'exchange': 'NSE', 'ltp': 100.0, 'available': True}]
     monkeypatch.setattr(desk.app.config['ACTIVE_BROKER_ADAPTERS']['dhan'], 'quotes', loss_quote)
-    _wait_for(lambda: len(desk.sandbox.get_trades()) == 2)
-    _wait_for(lambda: not desk.run.thread.is_alive())
+    _wait_for(lambda: len(desk.sandbox.get_trades()) == 2, timeout=15)
+    _wait_for(lambda: not desk.run.thread.is_alive(), timeout=15)
     assert desk.run.model_budget.snapshot() == budget
     assert desk.sandbox.get_positions() == []
 

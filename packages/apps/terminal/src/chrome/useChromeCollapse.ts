@@ -1,5 +1,5 @@
 /**
- * Viewport gates for defensive skinny-window TopBar chrome (FT-MOBILE-002).
+ * Viewport gates for defensive skinny-window TopBar chrome.
  *
  * Desk-first: normal and widescreen stay unchanged. These queries only collapse
  * browser chrome when the window is already too narrow to keep every control

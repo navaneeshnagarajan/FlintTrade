@@ -3,7 +3,7 @@
  *
  * Token is held in memory and mirrored to tab-scoped sessionStorage so a
  * same-tab address-bar load, refresh, or bookmark of `/home` can restore the
- * session (FT-HOME-003). Never localStorage. Session expires at 08:00 IST
+ * session. Never localStorage. Session expires at 08:00 IST
  * daily (enforced via startExpiryTimer).
  */
 import { create } from "zustand";

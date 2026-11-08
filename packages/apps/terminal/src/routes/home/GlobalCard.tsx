@@ -24,8 +24,8 @@ const GLOBAL_INDICES: GlobalIndex[] = [
 
 export function GlobalCard() {
   return (
-    <BentoCard size="default" label="Global Indices (placeholder data)" data-testid="global-card">
-      <DemoBadge testId="global-demo-badge" title="Placeholder world-index quotes — not live" />
+    <BentoCard size="default" label="Global Indices (sample data)" data-testid="global-card">
+      <DemoBadge testId="global-demo-badge" title="Sample world-index quotes — not live" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Globe size={13} className="text-text-muted" aria-hidden="true" />

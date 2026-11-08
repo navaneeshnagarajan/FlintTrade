@@ -2,12 +2,16 @@
 no-build-package = ["growwapi"]
 
 constraint-dependencies = ["plotly==6.9.0"]
+# certifi stays on the newest release growwapi 1.5.0 accepts (certifi<2026).
+# A uv override to the patched 2026 bundle does not apply to
+# `pip install --require-hashes -r requirements.lock`. The resulting advisory
+# is time-limited in supply-chain/pip-audit-allowlist.yml.
 
 # Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
 # retained as separate release-compatibility evidence in brokers.lock.
 build-constraint-dependencies = [
     "packaging==26.3",
-    "setuptools==84.0.0",
+    "setuptools==84.1.0",
     "wheel==0.48.0",
 ]
 no-build-isolation-package = ["kotakneoapi", "upstox-python-sdk"]
@@ -107,11 +111,9 @@ filterwarnings = [
 [tool.ruff]
 # `target-version` is the OLDEST interpreter the code must still run on, not the
 # one we develop against. flint.toml [requirements] sets python_requires
-# ">=3.12" (python_target "3.14"), so py312 is CORRECT and deliberate: raising
-# it to the target would licence ruff to rewrite code into 3.13/3.14-only syntax
-# that a supported 3.12 runtime cannot even parse. Bump this only when the
-# flint.toml FLOOR moves.
-target-version = "py312"
+# ">=3.14" (python_target "3.14"), so py314 matches the floor. Bump this only
+# when the flint.toml floor moves.
+target-version = "py314"
 line-length = 120
 
 [tool.ruff.lint]

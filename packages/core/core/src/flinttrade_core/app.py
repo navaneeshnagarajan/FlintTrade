@@ -1724,6 +1724,20 @@ def _cleanup_stale_duckdb_wals() -> None:
         # A read-only probe can replay the WAL in memory without checkpointing
         # it, after which deleting the file loses the recovered transaction.
         # Let DuckDB own recovery and WAL retirement through a read-write open.
+        # A live Action Centre queue already owns this file. Close that writer
+        # first: a second connection's checkpoint closes the shared descriptor
+        # and the write fails with "Bad file descriptor", which invalidates
+        # the database for the rest of the process.
+        try:
+            from flinttrade_engine.action_center import release_live_queue  # noqa: PLC0415
+
+            release_live_queue(db_file)
+        except Exception as exc:
+            logger.warning(
+                "Could not release the live Action Centre queue before WAL recovery for %s: %s",
+                db_file.name,
+                exc,
+            )
         try:
             with duckdb.connect(str(db_file)) as conn:
                 conn.execute("CHECKPOINT")
@@ -2089,7 +2103,7 @@ def _prepare_broker_dependencies(
     # Native-adapter activation (dormant -> live bridge). Only runs when the
     # caller supplies both prerequisite checks; otherwise natives stay dormant.
     if native_attest_ok is not None and native_has_credentials is not None:
-        from flinttrade_gateway.monday_read_smoke import monday_read_connectable  # noqa: PLC0415
+        from flinttrade_gateway.connected_read_smoke import connected_read_connectable  # noqa: PLC0415
 
         native_ids: list[str] = []
         for selector in config.registered:
@@ -2099,7 +2113,7 @@ def _prepare_broker_dependencies(
                 continue
             info = BROKER_CATALOG.get(adapter_id)
             catalog_connectable = bool(info.connectable) if info is not None else False
-            if info is not None and info.native and not monday_read_connectable(adapter_id, catalog_connectable):
+            if info is not None and info.native and not connected_read_connectable(adapter_id, catalog_connectable):
                 logger.info("Native adapter %s dormant: coming-soon-activation-blocked", adapter_id)
                 continue
             native_ids.append(adapter_id)

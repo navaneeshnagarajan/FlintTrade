@@ -66,7 +66,7 @@ jobs:
   # select everything; protected-branch pushes and weekly/manual runs are full.
   changed-surfaces:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -112,7 +112,7 @@ jobs:
   python-invariants:
     # Repository and documentation contracts run even on docs-only PRs.
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Runaway guard. The whole suite finishes well inside this; the cap stops
     # a hung job from idling up to the 6-hour runner default (the over-usage
     # signal that tripped Actions in the first place).
@@ -126,8 +126,8 @@ jobs:
       NUMEXPR_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '3.14' }
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
@@ -217,7 +217,7 @@ jobs:
   python-shards:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       OMP_NUM_THREADS: '1'
@@ -231,8 +231,8 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.12' }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '3.14' }
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: uv sync --frozen --extra ml
       - name: Run Python package shard
@@ -250,7 +250,7 @@ jobs:
   python-tests:
     needs: [changed-surfaces, python-invariants, python-shards]
     if: always() && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require every selected Python check
@@ -291,7 +291,7 @@ jobs:
   node-core-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -322,7 +322,7 @@ jobs:
   node-widget-tests-1:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -342,7 +342,7 @@ jobs:
   node-widget-tests-2a:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -362,7 +362,7 @@ jobs:
   node-widget-tests-2b:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -402,7 +402,7 @@ jobs:
   node-widget-tests-3:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,7 +420,7 @@ jobs:
 
   secrets-check:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Scan only tracked/unignored sources and never print matched values.
     timeout-minutes: 10
     steps:
@@ -435,7 +435,7 @@ jobs:
   rust-ticks-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -443,7 +443,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: packages/core/ticks
-      - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+      # PyO3 links these tests to libpython3.14. The shared-library package
+      # ships only the versioned soname; python3.14-dev adds the linker name
+      # in the interpreter library directory.
+      - name: Install the Python 3.14 linker library
+        run: sudo apt-get install -y --no-install-recommends python3.14-dev
+      - name: Test the ticks crate
+        run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+        env:
+          PYO3_PYTHON: python3.14
 
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
@@ -452,22 +460,11 @@ jobs:
   electron-desktop-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.desktop == 'true'
-    # ubuntu-24.04, not 22.04. The 22.04 pin was inherited from the retired Tauri
-    # lane, where it was a stated choice: that job compiled the same crate the
-    # release matrix built, on the 22.04 glibc/webkit support floor. The Electron
-    # cutover kept the runner and lost the reason.
-    #
-    # The reason no longer applies here. This job packages `--dir` and verifies
-    # the security contract; it publishes nothing, so the glibc its native addon
-    # links against never reaches a user. flint.toml declares
-    # os_requires = "Ubuntu 24.04 LTS or any platform providing Python >= 3.12",
-    # so per-push CI running on 22.04 was testing below the project's own floor.
-    #
-    # desktop-release.yml's Linux build legs DO stay on ubuntu-22.04/-arm, and
-    # deliberately: they compile flinttrade-fs-promoter.node with /usr/bin/cc and
-    # ship it inside the AppImage, so the build host's glibc becomes the
-    # installer's real floor. That is a distribution decision, not a test one.
-    runs-on: ubuntu-24.04
+    # ubuntu-26.04 matches flint.toml os_requires. This job packages a directory
+    # and verifies the security contract. The Linux release legs use the same
+    # image because they compile the native addon that ships in the AppImage,
+    # so Ubuntu 26.04's glibc is the installer's floor.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -498,7 +495,7 @@ jobs:
   terminal-e2e-infra-self-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

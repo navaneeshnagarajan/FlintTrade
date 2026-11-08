@@ -1,8 +1,8 @@
-"""FT-MONDAY-002 native Dhan + Kotak Neo read-smoke (non-funded).
+"""In-process Dhan and Kotak Neo read smoke (non-funded).
 
-In-process login + ticks / depth / latency (+ hist / chain where the SDK
-allows). Never places, modifies, or cancels an order. Successful smoke is
-``Connected (read)`` / ``API smoke`` — never placeable Live orders.
+Login plus ticks, depth, and latency (history and chain where the SDK
+allows). Never places, modifies, or cancels an order. A successful smoke is
+``Connected (read)`` / ``API smoke``, not a placeable Live order.
 
 Neo has no sandbox. Operator copy is ``Live read only until funded unlock.``
 """
@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable
 CHROME_CONNECTED_READ = "Connected (read)"
 CHROME_API_SMOKE = "API smoke"
 NEO_OPERATOR_COPY = "Live read only until funded unlock."
-MONDAY_READ_BROKERS = frozenset({"dhan", "kotakneo"})
+CONNECTED_READ_BROKERS = frozenset({"dhan", "kotakneo"})
 READ_SMOKE_EXTRA_KEY = "read_smoke_ok"
 WRITE_VERBS = frozenset({
     "place_order",
@@ -68,18 +68,18 @@ class ReadSmokeResult:
         }
 
 
-def monday_read_connectable(broker_id: str, catalog_connectable: bool = False) -> bool:
+def connected_read_connectable(broker_id: str, catalog_connectable: bool = False) -> bool:
     """Dhan + Neo stay selectable for Connected (read) / API smoke.
 
     A stale catalogue ``connectable=False`` or coming-soon activation block
     must not hide Neo from Setup. Live place stays fail-closed elsewhere.
     """
-    if broker_id in MONDAY_READ_BROKERS:
+    if broker_id in CONNECTED_READ_BROKERS:
         return True
     return bool(catalog_connectable)
 
 
-def stamp_monday_read_smoke(session: Any, ok: bool) -> None:
+def stamp_connected_read_smoke(session: Any, ok: bool) -> None:
     """Persist smoke evidence on the session. Chrome must read this flag."""
     extra = getattr(session, "extra", None)
     if extra is None:
@@ -91,12 +91,12 @@ def stamp_monday_read_smoke(session: Any, ok: bool) -> None:
     extra[READ_SMOKE_EXTRA_KEY] = bool(ok)
 
 
-def monday_read_smoke_ok(session: Any) -> bool:
+def connected_read_smoke_ok(session: Any) -> bool:
     extra = getattr(session, "extra", None) or {}
     return extra.get(READ_SMOKE_EXTRA_KEY) is True
 
 
-async def probe_monday_session_reads(
+async def probe_connected_session_reads(
     adapter: Any,
     session: Any,
     *,
@@ -110,19 +110,19 @@ async def probe_monday_session_reads(
         if callable(depth):
             await depth(session, symbols)
     except Exception:  # noqa: BLE001 — failed smoke never paints Connected
-        stamp_monday_read_smoke(session, False)
+        stamp_connected_read_smoke(session, False)
         return False
-    stamp_monday_read_smoke(session, True)
+    stamp_connected_read_smoke(session, True)
     return True
 
 
-def monday_read_chrome(broker_id: str, *, connected: bool, reads_ok: bool) -> str | None:
-    """Honest chrome for the Monday Dhan + Neo path.
+def connected_read_chrome(broker_id: str, *, connected: bool, reads_ok: bool) -> str | None:
+    """Honest chrome for the Dhan and Kotak Neo Connected (read) path.
 
     A failed read never paints Connected. Success is Connected (read) / API
     smoke — never a live-order claim.
     """
-    if broker_id not in MONDAY_READ_BROKERS:
+    if broker_id not in CONNECTED_READ_BROKERS:
         return None
     if not connected or not reads_ok:
         return None
@@ -149,7 +149,7 @@ async def _timed(name: str, call: Callable[[], Awaitable[Any]]) -> ReadSmokeStep
     return ReadSmokeStep(name, True, latency_ms)
 
 
-def list_monday_ai_read_handles(registry: Any) -> list[tuple[str, str, Any]]:
+def list_connected_ai_read_handles(registry: Any) -> list[tuple[str, str, Any]]:
     """Connected Dhan/Neo sessions stamped ``read_smoke_ok`` for AI analysis.
 
     Never grants write authority. Neo is Live-read only — not Practice.
@@ -164,15 +164,15 @@ def list_monday_ai_read_handles(registry: Any) -> list[tuple[str, str, Any]]:
     for selector, session in sessions:
         broker_id = getattr(selector, "adapter_id", "")
         account_id = getattr(selector, "account_id", "")
-        if broker_id not in MONDAY_READ_BROKERS:
+        if broker_id not in CONNECTED_READ_BROKERS:
             continue
-        if not monday_read_smoke_ok(session):
+        if not connected_read_smoke_ok(session):
             continue
         handles.append((str(broker_id), str(account_id), session))
     return handles
 
 
-async def collect_monday_ai_read_snapshot(
+async def collect_connected_ai_read_snapshot(
     broker_id: str,
     account_id: str,
     adapter: Any,
@@ -185,9 +185,9 @@ async def collect_monday_ai_read_snapshot(
     Requires stamped Connected (read) evidence. A failed or unstamped
     session returns ``ok=False`` and no fabricated quotes.
     """
-    if broker_id not in MONDAY_READ_BROKERS:
+    if broker_id not in CONNECTED_READ_BROKERS:
         raise ValueError(f"Connected (read) / API smoke reads are Dhan + Neo only, not {broker_id}")
-    if not monday_read_smoke_ok(session):
+    if not connected_read_smoke_ok(session):
         return {
             "broker_id": broker_id,
             "account_id": account_id,
@@ -231,7 +231,7 @@ async def collect_monday_ai_read_snapshot(
     }
 
 
-def format_monday_ai_read_context(rows: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> str:
+def format_connected_ai_read_context(rows: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> str:
     """Flatten successful Connected (read) snapshots for the advisor prompt."""
     usable = [row for row in rows if row.get("ok")]
     if not usable:
@@ -250,7 +250,7 @@ def format_monday_ai_read_context(rows: list[dict[str, Any]] | tuple[dict[str, A
     return "\n".join(lines)
 
 
-async def run_monday_read_smoke(
+async def run_connected_read_smoke(
     broker_id: str,
     adapter: Any,
     credentials: dict[str, Any],
@@ -260,7 +260,7 @@ async def run_monday_read_smoke(
     option_chain_req: dict[str, Any] | None = None,
 ) -> ReadSmokeResult:
     """Login + non-funded read smoke. Never a write. Honest on failure."""
-    if broker_id not in MONDAY_READ_BROKERS:
+    if broker_id not in CONNECTED_READ_BROKERS:
         raise ValueError(f"Connected (read) / API smoke is Dhan + Neo only, not {broker_id}")
     symbols = list(symbols or ["NSE:RELIANCE"])
     steps: list[ReadSmokeStep] = []
@@ -312,7 +312,7 @@ async def run_monday_read_smoke(
                     current.uncancel()
         steps.append(logout_step)
         # A logged-out handle must never remain discoverable as connected.
-        stamp_monday_read_smoke(session, False)
+        stamp_connected_read_smoke(session, False)
         if cancellation is not None:
             raise cancellation
 

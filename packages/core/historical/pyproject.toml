@@ -2,7 +2,7 @@
 name = "flinttrade-historical"
 version = "0.0.1"
 description = "OHLCV downloader, free data sources (OpenChart/yfinance/jugaad), DuckDB pipeline, expiry manager"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "flinttrade-core",
     "duckdb==1.5.6",

@@ -41,7 +41,7 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
-It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
+It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
 launcher — `~/.local/bin/flinttrade-web` on macOS and Linux,
@@ -87,7 +87,7 @@ On Windows, run the checkout copy with
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. It expects you to supply
-the toolchain yourself: git, Python 3.12+, Node 22.22.2+, `uv` and `pnpm`.
+the toolchain yourself: git, Python 3.14+, Node 22.23.4+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -167,7 +167,7 @@ distribution-signing and notarisation secrets.
 ### Terminal dev server (contributors)
 
 When you are changing terminal code, run the Vite dev server alongside the
-backend instead of the built UI. It requires Python 3.12+, Node.js 22.22.2+, Git,
+backend instead of the built UI. It requires Python 3.14+, Node.js 22.23.4+, Git,
 and optionally Rust for `core/ticks`.
 
 ```bash
@@ -199,17 +199,13 @@ Native broker access is **not usable on this unreleased line**: native broker UX
 Do not treat catalogue metadata as a working operator path.
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
-**Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
+**Broker HTTP.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
-callback) return `503` with `broker_account_cutover_unavailable` until Task 9D
-migrates the handlers. Native HTTP account and market-data reads return `409`
-with zero provider calls until the Task 7C.2 / 8B cutover onto the in-process
-`BrokerReadPort`. Exact broker reads that already exist are that in-process
+callback) return `503` with `broker_account_cutover_unavailable`. Native HTTP
+account and market-data reads return `409` with zero provider calls. Exact
+reads use the in-process `BrokerReadPort`. Exact broker reads that already exist are that in-process
 port, not a working terminal Brokers screen. Service connections are an inert
 control plane only.
 
@@ -229,10 +225,8 @@ Exchange stays disabled until Live order safety and unattended deadman
 flattening are proven. Its configured authentication method uses an API key and secret for one venue
 (India or Global, production or testnet): `india_prod`, `india_testnet`,
 `global_prod`, or `global_testnet`. India and Global keys are not
-interchangeable, and the venue has no default. Native HTTP
-remains frozen until Task 9D / Task 7C.2 — Setup → Brokers still fails on the
-frozen routes; MSI static-IP host native read smoke uses the in-process
-native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+interchangeable, and the venue has no default. Setup → Brokers still fails on those routes. Read smoke on a static-IP host
+uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 ### Why two layers?
@@ -252,7 +246,8 @@ The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
 **Connected (read)**, and **Live**. Practice and Live are the session Modes.
 **Connected (read)** is a broker status on a Practice session, not a separate
 Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
-**Demo (example data)**.
+**Demo (example data)**. The public site paths `/demo` and `/explore` permanently
+redirect (HTTP 308) to `/demo-app/welcome`.
 
 | Label | What it means |
 |---|---|
@@ -336,9 +331,16 @@ after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
-continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
-last 30 min" closing-price copy. The September 2026 consultation stays out
-of the UI.
+continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
+and NSE/FAOP/77356: continuous until 15:30, auction 15:30–15:40, matching
+15:40–15:45, post-close 15:50–16:00, and `F&O open · till 15:45`. An index
+contract stops at 15:30 on the expiry written on its symbol. A supplied
+expiry calendar confirms that date. A new order stays closed when the expiry
+cannot be read, or when a supplied calendar does not list it. Stock derivatives stay
+open until 15:45. BSE equity derivatives use the same close. Dates before
+7 December 2026, and the Muhurat session, keep the earlier clock. There is no
+flat "Market open until 15:30" or "VWAP last 30 min" closing-price copy. The
+September 2026 consultation stays out of the UI.
 
 **Mode honesty.** One line under the TopBar, always, owned by the active
 label. Example data reads `Example data. No broker is connected and no orders are sent.`
@@ -787,7 +789,7 @@ indices / advanced tools start collapsed behind **Watchlist & tools** /
 remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
-**Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
+**Desk chrome.** The desk uses one TopBar and one scrolling
 ticker strip. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
 **Tools → Quick Settings** opens density, theme, and similar controls
@@ -801,10 +803,10 @@ then the operator status strip when one is showing, then the Mode
 honesty line, then the ticker strip, then the route body. Trade uses
 that shell first; the same shell then rolls to Invest, Automate, Learn,
 and Ditto. This is not a silent widen of Compact-only-on-Trade
-(FT-UX-001). Mode and status stay reachable (desk-first; skinny-browser
+. Mode and status stay reachable (desk-first; skinny-browser
 defensive collapse is fine).
 
-**Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
+**Ticker venue badges.** Pinned badges match the
 venues that feed the marquee: NSE, BSE, and MCX on the default tape,
 and NFO when an F&O symbol feeds. A venue with no feeding symbol is
 omitted. Symbols that do not resolve to a venue show **Unavailable**.
@@ -885,13 +887,13 @@ With example data, Terminal Watchlist checked LTP and % change columns
 paint their headers and cells. Those values use the same sample
 quotes as the ticker tape. A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
-column hides it (FT-TRADE-008).
+column hides it.
 
 Selecting a symbol in Terminal Watchlist retargets Chart,
 Option Chain, and Scalper to that symbol — no retype.
 Retarget on example data is allowed.
 An empty watchlist never silently retargets
-(FT-TRADE-011).
+.
 
 With example data, Terminal → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
 stay disarmed — the same honesty class as Settings → Telegram
@@ -900,7 +902,7 @@ Helper: `Orders are blocked for Example. Switch to Practice or Live with a broke
 stays OFF and disabled; its title is `One-click is unavailable for Example`. Sample quote preview is allowed; there is no Confirm
 BUY / Confirm SELL chrome. Practice and Live open Confirm only
 when the Mode allows it and a gateway is configured. The
-backend refuses an example-data order if the UI slips (FT-TRADE-009).
+backend refuses an example-data order if the UI slips.
 
 ### Learn → Practice Trading
 
@@ -929,7 +931,7 @@ yet.` plus a primary **Retry** (one automatic retry is allowed). The
 red `Couldn’t load this document from the local backend.` line plus
 **Retry** is reserved for a hard fail after retry is exhausted. Order
 Safety Notes already loading in the same session does not treat User
-Guide as permanently broken (FT-LEARN-003).
+Guide as permanently broken.
 
 ---
 
@@ -1045,7 +1047,7 @@ the query string, the hash, and any navigation state.
 | Route | Purpose |
 |---|---|
 | `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. A signed-in visit leaves Welcome for `/trade`, which opens Terminal. |
-| `/explore` | Depends on the build and the session. The public site redirects `/explore` to the Demo at `/demo-app/welcome`. The public demo bundle replaces `/explore` with Terminal (`/terminal`). An installed build replaces `/explore` with `/welcome`. If that Welcome screen already has a signed-in session, it continues to `/trade`, and the shell then opens Terminal. A signed-out installed visit stays on `/welcome`. **Try with example data** opens `/home`, which the shell replaces with Terminal. |
+| `/explore` | Depends on the build and the session. The public site permanently redirects `/explore` (HTTP 308) to the Demo at `/demo-app/welcome`. The public demo bundle replaces `/explore` with Terminal (`/terminal`). An installed build replaces `/explore` with `/welcome`. If that Welcome screen already has a signed-in session, it continues to `/trade`, and the shell then opens Terminal. A signed-out installed visit stays on `/welcome`. **Try with example data** opens `/home`, which the shell replaces with Terminal. |
 | `/terminal` | Markets, the account overview, and manual trading. FlexLayout canvas, widgets, and presets. Alt+H and Alt+T both finish here. |
 | `/testing` | Strategy research, Practice forward tests, and local datasets. A bookmark of `/lab` opens this app. |
 | `/portfolio` | Investments, holdings, allocation, and goals. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. A bookmark of `/invest`, including `/invest#networth`, opens Portfolio and keeps the hash. |
@@ -1422,9 +1424,10 @@ same open pad.
 
 Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
-09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
+09:15–15:30 "open" window. When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
-15:40`. Non-CAS cash still continuous to 15:30.
+15:40` through 6 December 2026, and `F&O open · till 15:45` from 7 December
+2026. Non-CAS cash still continuous to 15:30.
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or
@@ -1440,19 +1443,19 @@ Live, so silent-stale is a fail.
 With example data, Terminal Watchlist checked LTP and % change columns
 use the same sample quotes as the ticker tape.
 A missing quote shows `—` after a brief `…`, never a silent blank
-(FT-TRADE-008). Selecting a watchlist symbol retargets Chart,
+. Selecting a watchlist symbol retargets Chart,
 Option Chain, and Scalper to that symbol. An empty watchlist never silently retargets
-(FT-TRADE-011).
+.
 
 With example data, Terminal Scalper (including the Scalper Zone preset),
 **Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
 `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` There is no Confirm Order
-path from example data (FT-TRADE-009).
+path from example data.
 
 With example data, Terminal Option Chain, the strip shows OI profile
 + PCR for the selected expiry/symbol. Example data does not invent live OI.
 An empty expiry is an honest
-empty, not zeros-as-data (FT-TRADE-012).
+empty, not zeros-as-data.
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
@@ -1496,7 +1499,7 @@ Streaming option-chain widget rendered with
 Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
-selected expiry and symbol (FT-TRADE-012). Example data does not
+selected expiry and symbol. Example data does not
 invent live OI. The Mode honesty line is the disclosure —
 there is no second Example chip on the chain strip. An empty expiry
 is an honest empty — not zeros-as-data.
@@ -1635,7 +1638,7 @@ the view — seeded jobs do not carry a second chip
 once Pause is gated. Seeded example jobs show a muted sample status,
 not a production-looking Active badge. **Pause** on
 those jobs is disabled, with title helper `Example schedule — control unavailable`. Practice and Live keep
-Pause/Resume for real jobs (FT-AUTO-004).
+Pause/Resume for real jobs.
 
 ### Monitors
 
@@ -1657,7 +1660,7 @@ the helper is "Configure Telegram first".
 With example data, Automation → Execution Logs, a healthy sample session shows
 the muted empty state `No execution logs for Example. Switch to Practice or Live to see real run history.` It never shows `Failed to
 load logs. Backend may be offline.` while the app is live and example data
-is showing (FT-AUTO-003). In Practice or Live, a successful
+is showing. In Practice or Live, a successful
 load with no rows for the selected date shows `No execution logs for this
 date.` — not an outage. The red `Failed to load logs. Backend may be
 offline.` line (or Retry) is reserved for a real request failure. While
@@ -1723,11 +1726,11 @@ Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
 When Settings → AI shows Managed Ollama **Not installed**, AI Centre
-Chat does not show a green **Connected (suggest only)** badge (FT-AI-004). The badge
+Chat does not show a green **Connected (suggest only)** badge. The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
 Composer input and Send stay disabled until the runtime is installed
-and configured — the same bar as FT-AI-002. A provider string of
+and configured — the same bar as Settings. A provider string of
 ollama is not Connected while the managed runtime is absent.
 
 When unconfigured or not installed, the warning badge is **Not configured**
@@ -1802,7 +1805,7 @@ card.
 
 Rule-based and ML-derived software outputs. Includes an executor that runs
 multiple generators in parallel and aggregates diagnostics. These outputs are
-educational and are not financial advice.
+and are not financial advice.
 
 ### Sentiment
 
@@ -1869,7 +1872,7 @@ least 1). The Settings reminder has **Show** and **Hide**. It has no
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), a local OpenAI-compatible host, and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives in Settings → Telegram (**Test Send**); example data keeps that control disarmed. |
 | **Risk & Safety** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
@@ -1934,7 +1937,7 @@ Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
 shows **Not installed** — that is not a Connected advisor. AI Centre
-`/ai` Chat follows that install state (FT-AI-004) and does not paint
+`/ai` Chat follows that install state and does not paint
 green **Connected (suggest only)** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
@@ -1950,7 +1953,7 @@ tab never leaves a highlighted tab over a blank content pane.
 Settings → **Monitoring** (`/settings#monitoring`) reads this install. It
 does not write `workspace.json`. It stays its own Settings section. The
 TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
-(FT-SET-MONITOR-001).
+.
 
 **System Health** keeps service rows and machine rows apart. Signed-out
 checks use `GET /healthz` and `GET /readyz`, which return status only.
@@ -2178,7 +2181,7 @@ header still offers **Retry** and **Open Settings → AI**.
 The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
-When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
+When Settings → AI shows Managed Ollama **Not installed**,
 AI Centre does not show a green **Connected (suggest only)** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed

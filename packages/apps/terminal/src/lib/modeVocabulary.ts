@@ -1,5 +1,5 @@
 /**
- * FT-UX-001 — execution-mode vocabulary.
+ * execution-mode vocabulary.
  *
  * Explore / Practice / Live chips mean execution mode only. Example data is
  * labelled Example; Practice wording stays on the Practice sandbox path; Live

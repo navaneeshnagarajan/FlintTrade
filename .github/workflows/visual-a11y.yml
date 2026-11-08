@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       update_baselines:
-        description: Regenerate screenshot baselines on ubuntu-latest and commit them to this branch
+        description: Regenerate screenshot baselines on ubuntu-26.04 and commit them to this branch
         type: boolean
         default: false
   pull_request:
@@ -47,7 +47,7 @@ permissions:
 jobs:
   terminal-visual-a11y:
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       # Flip this one value to "1" to make visual diffs and new axe violations fail the job.

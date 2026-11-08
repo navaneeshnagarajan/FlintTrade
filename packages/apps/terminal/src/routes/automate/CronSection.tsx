@@ -2,7 +2,7 @@
  * CronSection — Schedules tab.
  * Lists all registered cron jobs with pause/resume controls.
  *
- * Explore (FT-AUTO-004): the global sample banner owns disclosure. Seeded or
+ * Explore: the global sample banner owns disclosure. Seeded or
  * leaked jobs show Sample/Demo (muted) — never a production-Active badge —
  * and Pause is disabled. Practice / Live keep Pause / Resume.
  */

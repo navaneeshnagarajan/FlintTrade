@@ -13,15 +13,15 @@ disagrees. Per-push CI runs the **floor**; nightly
 
 | Component | Floor (must work) | What actually runs | Notes |
 |---|---|---|---|
-| Python | `>=3.12` | 3.12 on every per-push lane; 3.14 on the nightly target leg | The one-line installer provisions its own 3.12. sklearn / LightGBM extras can still fail to import on Windows 3.14 — those tests skip rather than define the floor. |
-| Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
-| Operating system | Any platform that can provide Python `>=3.12` (Ubuntu 24.04 LTS is the Linux system-interpreter floor) | Per-push: Ubuntu (`ubuntu-latest` plus Electron on `ubuntu-24.04`). Nightly: macOS, Windows, and a fail-soft `ubuntu-26.04` preview. Desktop-release Linux build legs still use `ubuntu-22.04` images with a managed toolchain. | Ubuntu 22.04's *system* Python is 3.10 and cannot meet the source-install floor. The one-line installer sidesteps this by provisioning `~/.flinttrade/tools`. |
+| Python | `>=3.14` | 3.14 on every lane | The one-line installer provisions its own Python 3.14. Optional sklearn / LightGBM extras can still skip when a platform wheel is missing; that does not lower the floor. |
+| Node | `>=22.23.4` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is the supported Node 22 release. Electron 45.2.3 bundles Node 24.22.2. Required for the terminal, site, desktop, and Playwright. |
+| Operating system | Ubuntu 26.04 LTS | Per-push and release Linux legs: `ubuntu-26.04` (and `ubuntu-26.04-arm` for the arm64 installer). Nightly: macOS and Windows as well. Target 26.04. | The OS floor is the release that ships Python 3.14. The one-line installer provisions its own interpreter under `~/.flinttrade/tools`. |
 
-The Electron 44 desktop shell additionally requires **macOS 13 (Ventura) or
-later** on Apple Silicon and Intel. Electron 44 dropped macOS 12 support; this
+The Electron 45 desktop shell additionally requires **macOS 13 (Ventura) or
+later** on Apple Silicon and Intel. macOS 12 (Monterey) is not supported; this
 desktop requirement is separate from the Python/Node requirements for the
 source-built web app. See [Desktop App](DESKTOP.md) and the
-[Electron 44 release notes](https://www.electronjs.org/blog/electron-44-0).
+[Electron 45 release notes](https://www.electronjs.org/blog/electron-45-0).
 
 For library purposes and exact resolved versions, see
 [Technology Stack and Dependencies](TECH_STACK.md).
@@ -29,10 +29,7 @@ For library purposes and exact resolved versions, see
 ## Brokers
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 INDmoney tokens reset at the daily 06:00 IST dashboard cycle. INDmoney and
 Groww remain disabled until their existing activation blockers are cleared.

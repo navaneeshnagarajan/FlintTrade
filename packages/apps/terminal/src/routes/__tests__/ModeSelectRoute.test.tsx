@@ -43,7 +43,7 @@ describe("ModeSelectRoute", () => {
     expect(connectedRead).toBeDisabled();
     expect(connectedRead).toHaveTextContent("Connect a broker first");
 
-    // Live stays fail-closed until funded unlock — never a Monday place CTA.
+    // Live stays fail-closed until funded unlock — never a Live place call to action.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
     expect(liveButton).toHaveTextContent(/broker required/i);
     expect(liveButton).toHaveTextContent(/fail-closed/i);

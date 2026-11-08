@@ -1,5 +1,5 @@
 /**
- * OI profile + PCR strip model for the Option Chain (FT-TRADE-012).
+ * OI profile + PCR strip model for the Option Chain.
  *
  * The strip describes the selected expiry/symbol only. Missing OI stays
  * missing — it is never coerced to zero. An empty expiry is an honest

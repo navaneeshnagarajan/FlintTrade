@@ -1,4 +1,4 @@
-"""FT-MONDAY-002 — native Dhan + Neo Connected (read) smoke + fail-closed Live.
+"""— native Dhan + Neo Connected (read) smoke + fail-closed Live.
 
 Acceptance lock (2026-09-20):
 
@@ -20,17 +20,17 @@ from flinttrade_core.auth_routes import _create_token
 from flinttrade_core.order_routes import orders_bp
 from flinttrade_core.rate_limiter import RateLimiter
 from flinttrade_data.sandbox_engine import SandboxEngine
-from flinttrade_gateway.monday_read_smoke import (
+from flinttrade_gateway.connected_read_smoke import (
     CHROME_CONNECTED_READ,
-    MONDAY_READ_BROKERS,
+    CONNECTED_READ_BROKERS,
     NEO_OPERATOR_COPY,
     WRITE_VERBS,
-    monday_read_chrome,
-    monday_read_connectable,
-    monday_read_smoke_ok,
-    probe_monday_session_reads,
-    run_monday_read_smoke,
-    stamp_monday_read_smoke,
+    connected_read_chrome,
+    connected_read_connectable,
+    connected_read_smoke_ok,
+    probe_connected_session_reads,
+    run_connected_read_smoke,
+    stamp_connected_read_smoke,
 )
 
 
@@ -87,7 +87,7 @@ class _SmokeAdapter:
 
     async def place_order(self, *_a: object, **_k: object) -> None:
         self.calls.append("place_order")
-        raise AssertionError("Monday read-smoke must not place")
+        raise AssertionError("Connected-read smoke must not place")
 
     async def logout(self, _session: object) -> None:
         self.calls.append("logout")
@@ -107,7 +107,7 @@ class _LivePathSentinel:
 
 
 def _live_token(*, unlocked: bool = False) -> str:
-    return _create_token("ft-monday-002", mode="live", live_mode_unlocked=unlocked)
+    return _create_token("connected-read", mode="live", live_mode_unlocked=unlocked)
 
 
 def _live_headers(*, unlocked: bool = False) -> dict[str, str]:
@@ -117,7 +117,7 @@ def _live_headers(*, unlocked: bool = False) -> dict[str, str]:
     }
 
 
-def _monday_app(db_path: Path) -> Flask:
+def _practice_app(db_path: Path) -> Flask:
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["DATA_SANDBOX_ENGINE"] = SandboxEngine(
@@ -134,11 +134,11 @@ def _monday_app(db_path: Path) -> Flask:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("broker_id", sorted(MONDAY_READ_BROKERS))
+@pytest.mark.parametrize("broker_id", sorted(CONNECTED_READ_BROKERS))
 @pytest.mark.asyncio
-async def test_monday_read_smoke_connects_without_writes(broker_id: str) -> None:
+async def test_connected_read_smoke_connects_without_writes(broker_id: str) -> None:
     adapter = _SmokeAdapter()
-    result = await run_monday_read_smoke(
+    result = await run_connected_read_smoke(
         broker_id,
         adapter,
         {"token": "non-funded"},
@@ -152,7 +152,7 @@ async def test_monday_read_smoke_connects_without_writes(broker_id: str) -> None
     assert not any(verb in adapter.calls for verb in WRITE_VERBS)
     assert adapter.calls.count("logout") == 1
     assert adapter.last_session is not None
-    assert monday_read_smoke_ok(adapter.last_session) is False
+    assert connected_read_smoke_ok(adapter.last_session) is False
     if broker_id == "kotakneo":
         assert result.operator_copy == NEO_OPERATOR_COPY
         assert "history" in adapter.calls
@@ -165,10 +165,10 @@ async def test_monday_read_smoke_connects_without_writes(broker_id: str) -> None
 @pytest.mark.asyncio
 async def test_failed_read_never_paints_connected() -> None:
     adapter = _SmokeAdapter(fail_quotes=True)
-    result = await run_monday_read_smoke("dhan", adapter, {"token": "non-funded"})
+    result = await run_connected_read_smoke("dhan", adapter, {"token": "non-funded"})
     assert result.ok is False
     assert result.chrome == ""
-    assert monday_read_chrome("dhan", connected=True, reads_ok=False) is None
+    assert connected_read_chrome("dhan", connected=True, reads_ok=False) is None
     assert "place_order" not in adapter.calls
     assert adapter.calls.count("logout") == 1
 
@@ -178,7 +178,7 @@ async def test_failed_read_never_paints_connected() -> None:
 async def test_cleanup_failure_is_recorded_and_never_reports_connected() -> None:
     adapter = _SmokeAdapter(fail_logout=True)
 
-    result = await run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"})
+    result = await run_connected_read_smoke("kotakneo", adapter, {"token": "non-funded"})
 
     assert result.ok is False
     assert result.chrome == ""
@@ -191,13 +191,13 @@ async def test_cleanup_failure_is_recorded_and_never_reports_connected() -> None
 @pytest.mark.asyncio
 async def test_unsupported_logout_is_mandatory_and_login_failure_never_logs_out() -> None:
     unsupported = _SmokeAdapter(unsupported_logout=True)
-    result = await run_monday_read_smoke("kotakneo", unsupported, {"token": "non-funded"})
+    result = await run_connected_read_smoke("kotakneo", unsupported, {"token": "non-funded"})
     assert result.ok is False
     assert result.chrome == ""
     assert unsupported.calls.count("logout") == 1
 
     failed_login = _SmokeAdapter(fail_login=True)
-    failed = await run_monday_read_smoke("kotakneo", failed_login, {"token": "non-funded"})
+    failed = await run_connected_read_smoke("kotakneo", failed_login, {"token": "non-funded"})
     assert failed.ok is False
     assert failed_login.calls == ["login"]
 
@@ -206,7 +206,7 @@ async def test_unsupported_logout_is_mandatory_and_login_failure_never_logs_out(
 @pytest.mark.asyncio
 async def test_unsupported_mandatory_quotes_never_paint_connected() -> None:
     adapter = _SmokeAdapter(unsupported_quotes=True)
-    result = await run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"})
+    result = await run_connected_read_smoke("kotakneo", adapter, {"token": "non-funded"})
     assert result.ok is False
     assert result.chrome == ""
     assert adapter.calls.count("logout") == 1
@@ -217,7 +217,7 @@ async def test_unsupported_mandatory_quotes_never_paint_connected() -> None:
 async def test_cancelled_smoke_logs_out_once_and_does_not_leave_session_stamped_connected() -> None:
     adapter = _SmokeAdapter()
     adapter.read_release = asyncio.Event()
-    running = asyncio.create_task(run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"}))
+    running = asyncio.create_task(run_connected_read_smoke("kotakneo", adapter, {"token": "non-funded"}))
     await adapter.read_started.wait()
     running.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -227,7 +227,7 @@ async def test_cancelled_smoke_logs_out_once_and_does_not_leave_session_stamped_
 
 @pytest.mark.unit
 def test_live_place_stays_fail_closed_without_funded_unlock(tmp_path: Path) -> None:
-    app = _monday_app(tmp_path / "monday-002.sqlite3")
+    app = _practice_app(tmp_path / "connected-read.sqlite3")
     client = app.test_client()
     body = {
         "symbol": "RELIANCE",
@@ -249,11 +249,11 @@ def test_live_place_stays_fail_closed_without_funded_unlock(tmp_path: Path) -> N
 @pytest.mark.unit
 def test_neo_has_no_practice_sandbox_copy() -> None:
     assert "Practice" not in NEO_OPERATOR_COPY
-    assert monday_read_chrome("kotakneo", connected=True, reads_ok=True) == CHROME_CONNECTED_READ
-    assert monday_read_chrome("upstox", connected=True, reads_ok=True) is None
-    assert monday_read_connectable("kotakneo", False) is True
-    assert monday_read_connectable("dhan", False) is True
-    assert monday_read_connectable("groww", False) is False
+    assert connected_read_chrome("kotakneo", connected=True, reads_ok=True) == CHROME_CONNECTED_READ
+    assert connected_read_chrome("upstox", connected=True, reads_ok=True) is None
+    assert connected_read_connectable("kotakneo", False) is True
+    assert connected_read_connectable("dhan", False) is True
+    assert connected_read_connectable("groww", False) is False
 
 
 @pytest.mark.unit
@@ -265,10 +265,10 @@ async def test_chrome_requires_stamped_read_smoke() -> None:
 
     adapter = _SmokeAdapter()
     session = _Session()
-    assert monday_read_smoke_ok(session) is False
-    assert monday_read_chrome("kotakneo", connected=True, reads_ok=False) is None
-    ok = await probe_monday_session_reads(adapter, session)
+    assert connected_read_smoke_ok(session) is False
+    assert connected_read_chrome("kotakneo", connected=True, reads_ok=False) is None
+    ok = await probe_connected_session_reads(adapter, session)
     assert ok is True
-    assert monday_read_smoke_ok(session) is True
-    stamp_monday_read_smoke(session, False)
-    assert monday_read_smoke_ok(session) is False
+    assert connected_read_smoke_ok(session) is True
+    stamp_connected_read_smoke(session, False)
+    assert connected_read_smoke_ok(session) is False

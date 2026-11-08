@@ -32,11 +32,10 @@ in the repository notice and source headers.
 | [CI.md](CI.md) | Contributor | How the GitHub Actions pipeline runs, what each job covers, and how to read CI failures. |
 | [REFERENCES.md](REFERENCES.md) | Everyone | Public attribution and project influence notes. |
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |
-| [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, backup, and multi-user notes. |
-| [product-modes.mdx](product-modes.mdx) | User / Contributor | Practice and Live are Modes. Connected (read) is a broker status. Example is sample data, versus Sample / Unavailable / Live / Stale provenance. Home and Trade open Terminal. |
-| [acceptance/](acceptance/) | Maintainer | Tracking PASS bars. [FT-MONDAY-002](acceptance/FT-MONDAY-002.md) locks native Dhan + Neo MSI Connected (read) / API smoke. [FT-MONDAY-003](acceptance/FT-MONDAY-003.md) ships AI Chat Practice + native live-read context (Suggest stays illustrative; Live place fail-closed). [FT-SETUP-COPY-001](acceptance/FT-SETUP-COPY-001.md) tracks Setup, Mode Select, and Broker Connect copy honesty (Mode chrome is Practice, Connected (read), and Live; API smoke stays in broker-connect helper copy for a non-funded read). [FT-SETUP-FLOW-001](acceptance/FT-SETUP-FLOW-001.md) locks first-run Setup to the Practice desk: Step 1 of 2 - Create operator then Step 2 of 2 - Practice desk when the vault is already secured, and Step 1 of 3 - Create operator, Step 2 of 3 - Vault, then Step 3 of 3 - Practice desk when it is not. The Practice desk is Step 2 or 3. [FT-CORE-TICKER-001](acceptance/FT-CORE-TICKER-001.md) locks ticker venue badges derived from the marquee and a labelled reduced-motion freeze. [FT-UX-QUICK-SETTINGS-001](acceptance/FT-UX-QUICK-SETTINGS-001.md) restores Tools Quick Settings for desk controls. |
+| [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, and backup notes. |
+| [GLOSSARY.md](GLOSSARY.md) | Everyone | Shared product vocabulary. |
+| [product-modes.mdx](product-modes.mdx) | User / Contributor | Practice and Live are Modes. Connected (read) is a broker status. Example is sample data, versus Sample / Unavailable / Live / Stale provenance, and Home versus Trade ownership. |
 | [screenshots/](screenshots/) | Documentation | UI screenshots referenced from user-facing docs. |
-| [superpowers/specs/](superpowers/specs/) | Contributor | Historical design specs (brainstorming gate output). Treat as in-flight only when a current PR still implements them. |
 
 ## Two-column quick links
 
@@ -57,9 +56,10 @@ in the repository notice and source headers.
 - **[Technology stack](TECH_STACK.md)** — what each major dependency does, where its version is recorded, and how dependency updates are reviewed.
 - **[CI and quality contract](CI.md)** — how the per-push pipeline is shaped, how to interpret failure logs, how the nightly cross-platform matrix works.
 - **[Setup guides](setup/)** — pick the file that matches your operating system, follow it end-to-end, you should have a green test run inside an hour.
-- **[Static IP](setup/static-ip-setup.md)**, **[Email](setup/email.md)**, **[Backup](setup/backup.md)**, and **[Multi-user](setup/multi-user.md)** — operator notes for broker access, recovery email, ordinary bhavcopy archives, and trust boundaries.
+- **[Static IP](setup/static-ip-setup.md)**, **[Email](setup/email.md)**, and **[Backup](setup/backup.md)** — operator notes for broker access, recovery email, and ordinary bhavcopy archives.
+- **[Glossary](GLOSSARY.md)** — shared product vocabulary.
 - **[References](REFERENCES.md)** — public credit and attribution notes.
-- **[Specs](superpowers/specs/)** — design documents for in-flight work. If you are about to start a feature, check whether a spec already covers it.
+- **[Roadmap](../ROADMAP.md)** — what works today, what is in progress, and what comes next.
 
 ## Conventions used in this folder
 
@@ -70,7 +70,6 @@ in the repository notice and source headers.
   so syntax highlighting renders correctly on GitHub and on most editors.
 - **No personal information** — no hostnames, IPs, hardware specs, broker
   account numbers, fund amounts, or order IDs appear in committed docs.
-  Anything that smells personal lives in `.local/` (gitignored).
 
 ## Where the source code lives
 

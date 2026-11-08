@@ -2374,7 +2374,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
   });
 
   it("serves sample symbols from the Explore catalogue instead of erroring", async () => {
-    // Regression FT-CMD-001: search had no Explore fallback, so Ctrl+K
+    // Regression: search had no Explore fallback, so Ctrl+K
     // Symbols errored with "native broker API key is not configured" instead of
     // returning sample instruments such as NIFTY.
     mockConnectionState.apiKey = "";
@@ -2431,8 +2431,8 @@ describe("Native FlintTrade API client (api.ts)", () => {
       exchange: "NFO",
       instrumenttype: "FUTIDX",
       lotsize: 65,
-      freezeQty: 3510,
-      freeze_qty: 3510,
+      freezeQty: 1800,
+      freeze_qty: 1800,
     }));
 
     mockModeState.mode = "practice";
@@ -2444,8 +2444,8 @@ describe("Native FlintTrade API client (api.ts)", () => {
       exchange: "NFO",
       instrumenttype: "OPTIDX",
       lotsize: 30,
-      freezeQty: 1440,
-      freeze_qty: 1440,
+      freezeQty: 900,
+      freeze_qty: 900,
     }));
     const searched = await searchSymbol("BANKNIFTY", "NFO");
     expect(searched).toEqual(expect.arrayContaining([

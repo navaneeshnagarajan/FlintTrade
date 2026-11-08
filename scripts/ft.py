@@ -284,7 +284,7 @@ def resolve_python() -> str:
             return found
 
     fail("No usable Python interpreter found.")
-    fail("Install Python 3.12+ from https://python.org (tick 'Add python.exe to PATH' on Windows),")
+    fail("Install Python 3.14+ from https://python.org (tick 'Add python.exe to PATH' on Windows),")
     fail("or create the repo virtualenv with: uv sync --frozen --all-packages")
     raise SystemExit(1)
 
@@ -686,7 +686,7 @@ def require_pnpm() -> list[str]:
     argv = pnpm_argv()
     if argv is None:
         fail("No Node toolchain found (corepack, pnpm or npx).")
-        fail("Install Node 22.22.2+ from https://nodejs.org/ and re-run.")
+        fail("Install Node 22.23.4+ from https://nodejs.org/ and re-run.")
         raise SystemExit(1)
     return argv
 
@@ -859,8 +859,9 @@ def _wait_dev_backend_exit(
 ) -> None:
     """Observe POSIX exit without reaping the group leader and releasing its PID.
 
-    Python 3.12 on macOS lacks ``waitid``; kqueue provides the same non-reaping
-    notification. Polling lets recorded signals request cleanup without raising
+    Python 3.14 is the supported floor, and it exposes ``waitid`` on macOS.
+    kqueue provides the same non-reaping notification when ``waitid`` is
+    absent. Polling lets recorded signals request cleanup without raising
     asynchronously inside Popen, before we have recorded ownership of a child.
     Windows retains Popen's wait and taskkill tree handling.
     """
@@ -1164,7 +1165,7 @@ def cmd_setup(_args: list[str]) -> int:
     pnpm = pnpm_argv()
     if pnpm is None:
         warn("No Node toolchain found; the terminal, site and desktop packages were skipped.")
-        warn("Install Node 22.22.2+ from https://nodejs.org/ and re-run setup.")
+        warn("Install Node 22.23.4+ from https://nodejs.org/ and re-run setup.")
     else:
         info("Installing the pnpm workspace...")
         run([*pnpm, "install", "--frozen-lockfile"], env=ci_env())
