@@ -388,8 +388,8 @@ class TestCasRevisionBoundary:
         assert nse_cash_phase(15 * 60 + 39, on=on) == "cas"
         assert nse_cash_phase(15 * 60 + 40, on=on) == "matching"
         assert nse_cash_phase(15 * 60 + 44, on=on) == "matching"
-        assert nse_cash_phase(15 * 60 + 45, on=on) == "matching"
-        assert nse_cash_phase(15 * 60 + 49, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 45, on=on) == "transition"
+        assert nse_cash_phase(15 * 60 + 49, on=on) == "transition"
         assert nse_cash_phase(15 * 60 + 50, on=on) == "post-close"
         assert nse_cash_phase(16 * 60, on=on) == "closed"
 
@@ -397,7 +397,7 @@ class TestCasRevisionBoundary:
         assert get_market_hours("NFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
         assert get_market_hours("NFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
         assert get_market_hours("BFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
-        assert get_market_hours("BFO", date(2026, 12, 7)) == (time(9, 15), time(15, 40))
+        assert get_market_hours("BFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
 
     def test_expiring_index_contract_closes_at_1530(self) -> None:
         calendar = [date(2026, 12, 10), date(2026, 12, 17)]
@@ -454,12 +454,24 @@ class TestCasRevisionBoundary:
         )
         assert derivative_contract_close("NFO", session, symbol="NOT A CONTRACT") is None
 
-    def test_bfo_keeps_todays_close_without_a_bse_session_notice(self) -> None:
+    def test_bfo_uses_the_same_expiry_close_as_nse(self) -> None:
         assert derivative_contract_close(
             "BFO",
             date(2026, 12, 10),
             symbol="SENSEX10DEC2680000CE",
             expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 30)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 10),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 45)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 4),
+            symbol="SENSEX04DEC2680000CE",
+            expiry_calendar=[date(2026, 12, 4)],
         ) == time(15, 40)
 
     def test_muhurat_still_overrides(self) -> None:

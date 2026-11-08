@@ -360,3 +360,59 @@ def test_malformed_declared_special_session_fails_closed() -> None:
     )
 
     assert not scheduler.is_trading_day("MCX", on=date(2026, 3, 3))
+
+
+def test_scheduler_uses_the_revised_derivative_close_on_both_sides_of_dec_7() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    before = datetime(2026, 12, 4, 15, 42, tzinfo=IST)
+    after = datetime(2026, 12, 7, 15, 42, tzinfo=IST)
+    assert not scheduler.is_market_open("NFO", at=before, symbol="RELIANCE10DEC26FUT")
+    assert scheduler.is_market_open("NFO", at=after, symbol="RELIANCE10DEC26FUT")
+    assert scheduler.is_market_open("BFO", at=after, symbol="RELIANCE10DEC26FUT")
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 12, 7, 15, 45, tzinfo=IST), symbol="RELIANCE10DEC26FUT")
+
+
+def test_scheduler_rejects_an_expiring_index_contract_and_an_unknown_expiry() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    expiry_day = datetime(2026, 12, 10, 15, 31, tzinfo=IST)
+    calendar = ["2026-12-10", "2026-12-17"]
+    assert not scheduler.is_market_open(
+        "NFO",
+        at=expiry_day,
+        symbol="NIFTY10DEC2624000CE",
+        expiry_calendar=calendar,
+    )
+    assert scheduler.is_market_open(
+        "NFO",
+        at=expiry_day,
+        symbol="NIFTY17DEC2624000CE",
+        expiry_calendar=calendar,
+    )
+    assert not scheduler.is_market_open(
+        "BFO",
+        at=expiry_day,
+        symbol="SENSEX10DEC2680000CE",
+        expiry_calendar=calendar,
+    )
+    assert not scheduler.is_market_open("NFO", at=datetime(2026, 12, 10, 11, 0, tzinfo=IST), symbol="NIFTY")
+    assert scheduler.is_market_open(
+        "NFO",
+        at=datetime(2026, 12, 4, 15, 31, tzinfo=IST),
+        symbol="NIFTY04DEC2624000CE",
+        expiry_calendar=["2026-12-04"],
+    )
+
+
+def test_scheduler_closes_cash_auction_entry_from_1538_and_leaves_derivatives_open() -> None:
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+    assert scheduler.is_market_open("NSE", at=datetime(2026, 12, 7, 15, 37, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 7, 15, 38, tzinfo=IST))
+    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 4, 15, 37, tzinfo=IST))
+    assert scheduler.is_market_open("NFO", at=datetime(2026, 12, 7, 15, 38, tzinfo=IST), symbol="RELIANCE10DEC26FUT")
+    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 6, 15, 37, tzinfo=IST))

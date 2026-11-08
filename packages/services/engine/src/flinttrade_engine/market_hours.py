@@ -73,12 +73,17 @@ _NFO_OPEN = time(9, 15)
 _NFO_CLOSE_BEFORE_REVISION = time(15, 40)
 _NFO_CLOSE_REVISED = time(15, 45)
 _NFO_EXPIRING_INDEX_CLOSE = time(15, 30)
+_DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO"})
+_CASH_EXCHANGES = frozenset({"NSE", "BSE"})
+# Auction order entry starts at 15:31. It can stop at random from 15:38.
+_AUCTION_ORDER_ENTRY_START = time(15, 31)
+_AUCTION_RANDOM_CLOSE = time(15, 38)
 
 #: Standard market hours per exchange segment. Tuple of (open_time, close_time).
-#: NFO 15:40 is the close before 7 Dec 2026. ``get_market_hours`` applies the
-#: later NFO close from that date. BFO stays at 15:40: BSE notice 20261016-14
-#: only circulates the SEBI circular and does not replace the 15:40
-#: equity-derivatives timetable in notice 20260612-9.
+#: NFO and BFO 15:40 are the closes before 7 Dec 2026. ``get_market_hours``
+#: applies the later close from that date to both segments. SEBI circular
+#: HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 sections 4.2.4 and 4.2.5 bind
+#: every recognised exchange.
 STANDARD_HOURS: dict[str, tuple[time, time]] = {
     "NSE": (time(9, 15), time(15, 30)),
     "BSE": (time(9, 15), time(15, 30)),
@@ -233,27 +238,47 @@ def nse_cash_phase(minutes_from_midnight: int, on: date | None = None) -> str:
     15:15; CAS is not Closed.
 
     From 7 Dec 2026 (NSE/CMTR/77355): Continuous until 15:30, CAS
-    15:30–15:40, order matching 15:40–15:45, then the transition to
-    post-close through 15:50. The Matching phase covers that transition
-    so the session is not Closed before post-close at 15:50. A missing
-    date keeps the earlier clock. The September 2026 consultation is
-    not product UI.
+    15:30–15:40, order matching 15:40–15:45, transition 15:45–15:50,
+    post-close 15:50–16:00. Matching ends at 15:45 so the phase matches
+    that window. A missing date keeps the earlier clock. The September
+    2026 consultation is not product UI.
     """
     if _revised_cas(on):
         continuous_end = 15 * 60 + 30
         cas_end = 15 * 60 + 40
+        matching_end = 15 * 60 + 45
     else:
         continuous_end = 15 * 60 + 15
         cas_end = 15 * 60 + 35
+        matching_end = 15 * 60 + 50
     if 9 * 60 + 15 <= minutes_from_midnight < continuous_end:
         return "continuous"
     if continuous_end <= minutes_from_midnight < cas_end:
         return "cas"
-    if cas_end <= minutes_from_midnight < 15 * 60 + 50:
+    if cas_end <= minutes_from_midnight < matching_end:
         return "matching"
+    if _revised_cas(on) and matching_end <= minutes_from_midnight < 15 * 60 + 50:
+        return "transition"
     if 15 * 60 + 50 <= minutes_from_midnight < 16 * 60:
         return "post-close"
     return "closed"
+
+
+def cash_auction_order_entry(at: datetime) -> bool | None:
+    """Whether a cash order may still enter the closing auction.
+
+    ``None`` means the instant is still in continuous trading, so the
+    ordinary cash close applies. ``True`` is auction order entry,
+    15:31–15:38. ``False`` is closed: the 15:30 reference minute, and
+    from 15:38 because order entry can already have stopped at random
+    (NSE/CMTR/77355). Equity derivatives are not in this auction.
+    """
+    current = at.time().replace(tzinfo=None)
+    if at.date() < _CAS_REVISION or current < time(15, 30):
+        return None
+    if _AUCTION_ORDER_ENTRY_START <= current < _AUCTION_RANDOM_CLOSE:
+        return True
+    return False
 
 
 def _nfo_segment_close(target_date: date) -> time:
@@ -319,12 +344,11 @@ def derivative_contract_close(
     """Close for one derivatives contract, or None when that must stay shut.
 
     A special session, including Muhurat, wins over the ordinary close.
-    From 7 Dec 2026, NSE/FAOP/77356 keeps stock derivatives open until
-    15:45 every day, including expiry day. An index contract stops at
-    15:30 only on its own expiry day, and only when that expiry is on the
-    supplied calendar. An index contract whose expiry is missing or not
-    listed returns None. BFO keeps the 15:40 close: no BSE operational
-    notice replaces it.
+    From 7 Dec 2026, SEBI sections 4.2.4 and 4.2.5 keep stock derivatives
+    on NSE and BSE open until 15:45 every day, including expiry day. An
+    index contract stops at 15:30 only on its own expiry day, and only
+    when that expiry is on the supplied calendar. An index contract whose
+    expiry is missing or not listed returns None.
     """
     from flinttrade_core.symbol_utils import detect_instrument_type
 
@@ -332,9 +356,7 @@ def derivative_contract_close(
     special = is_special_session(target_date, exchange=venue)
     if special is not None:
         return special.close_time
-    if venue == "BFO":
-        return get_standard_hours("BFO")[1]
-    if venue != "NFO":
+    if venue not in _DERIVATIVE_EXCHANGES:
         try:
             return get_standard_hours(venue)[1]
         except ValueError:
@@ -345,6 +367,11 @@ def derivative_contract_close(
         return _NFO_CLOSE_REVISED
     parsed = _contract_parts(symbol)
     if parsed is None:
+        token = symbol.strip().upper()
+        if " " in token or not token.replace("&", "").isalpha():
+            return None
+        if detect_instrument_type(token) == "equity":
+            return _NFO_CLOSE_REVISED
         return None
     underlying_kind = detect_instrument_type(parsed[0])
     if underlying_kind == "equity":
@@ -412,7 +439,7 @@ def get_market_hours(
         )
         return (special.open_time, special.close_time)
 
-    if exchange == "NFO":
+    if exchange in _DERIVATIVE_EXCHANGES:
         return (_NFO_OPEN, _nfo_segment_close(target_date))
 
     return get_standard_hours(exchange)

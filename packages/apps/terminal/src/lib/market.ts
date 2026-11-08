@@ -99,7 +99,7 @@ function resolveMarketHours(target: MarketHoursTarget | undefined, now: Date): {
   if (exchange === "CDS" && symbol && isCrossCurrencyCdsSymbol(symbol)) {
     return { exchange, hours: CDS_CROSS_CURRENCY_HOURS };
   }
-  if (exchange === "NFO") {
+  if (exchange === "NFO" || exchange === "BFO") {
     const segmentClose = nseCashSchedule(now).foClose;
     if (!symbol) return { exchange, hours: { open: 9 * 60 + 15, close: segmentClose } };
     const contractClose = derivativeContractCloseMin(now, symbol, expiryCalendar, exchange);

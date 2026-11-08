@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 // Types
 // ---------------------------------------------------------------------------
 
-type MarketStatus = "open" | "pre" | "closed" | "cas" | "matching" | "post-close";
+type MarketStatus = "open" | "pre" | "closed" | "cas" | "matching" | "transition" | "post-close";
 
 export interface MarketDef {
   name: string;
@@ -177,6 +177,7 @@ const PHASE_TO_STATUS: Record<NseCashSessionPhase, MarketStatus> = {
   continuous: "open",
   cas: "cas",
   matching: "matching",
+  transition: "transition",
   "post-close": "post-close",
   closed: "closed",
 };
@@ -277,6 +278,7 @@ const STATUS_LABEL: Record<MarketStatus, string> = {
   closed: "Closed",
   cas: "CAS",
   matching: "Matching",
+  transition: "Transition",
   "post-close": "Post-close",
 };
 
@@ -286,6 +288,7 @@ const STATUS_CLASS: Record<MarketStatus, string> = {
   closed: "text-text-muted bg-surface-hover border-border-default",
   cas: "text-warning bg-warning/10 border-warning/30",
   matching: "text-warning bg-warning/10 border-warning/30",
+  transition: "text-warning bg-warning/10 border-warning/30",
   "post-close": "text-warning bg-warning/10 border-warning/30",
 };
 
@@ -295,6 +298,7 @@ const BAR_CLASS: Record<MarketStatus, string> = {
   closed: "bg-surface-hover",
   cas: "bg-warning",
   matching: "bg-warning",
+  transition: "bg-warning",
   "post-close": "bg-warning",
 };
 

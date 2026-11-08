@@ -49,7 +49,11 @@ secondary `F&O open · till 15:40` chip after cash continuous ends.
 NSE/CMTR/77355 and NSE/FAOP/77356, following SEBI circular
 HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 October 2026). Dates before
 7 December 2026 keep the tables above. The Muhurat session still overrides
-this clock. BSE equity derivatives stay on the 15:40 close.
+this clock. BSE equity derivatives use the same closes. SEBI sections
+4.2.4 and 4.2.5 apply to every recognised exchange. Cash auction order
+entry stops from 15:38 because it can close at random; equity derivatives
+are not in that auction. Matching is 15:40–15:45 and 15:45–15:50 is the
+transition.
 
 | Session | Time (IST) | Notes |
 |---|---|---|

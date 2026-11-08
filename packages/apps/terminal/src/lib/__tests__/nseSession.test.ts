@@ -167,7 +167,8 @@ describe("schedule boundary — 6 Dec 2026 keeps today's clock, 7 Dec 2026 uses 
     expect(matching.foSecondary).toBe("F&O open · till 15:45");
 
     const transition = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 47));
-    expect(transition.phase).toBe("matching");
+    expect(transition.phase).toBe("transition");
+    expect(transition.title).toBe("Transition · 15:45–15:50 (from 7 Dec 2026)");
     expect(transition.foSecondary).toBeNull();
 
     const postClose = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 50));
@@ -202,10 +203,11 @@ describe("NFO contract close from 7 Dec 2026", () => {
     expect(derivativeContractCloseMin(expiryDay, "NOT A CONTRACT", calendar)).toBeNull();
   });
 
-  it("does not apply the NSE expiry close to BFO", () => {
-    expect(
-      derivativeContractCloseMin(onDate(2026, 12, 10, 12 * 60), "SENSEX10DEC2680000CE", calendar, "BFO"),
-    ).toBe(15 * 60 + 40);
+  it("closes an expiring BSE index contract at 15:30 and keeps a stock contract until 15:45", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    expect(derivativeContractCloseMin(expiryDay, "SENSEX10DEC2680000CE", calendar, "BFO")).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "RELIANCE10DEC26FUT", calendar, "BFO")).toBe(15 * 60 + 45);
+    expect(derivativeContractCloseMin(expiryDay, "SENSEX", calendar, "BFO")).toBeNull();
   });
 
   it("lets the Muhurat session override an index expiry close", () => {

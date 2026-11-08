@@ -15,7 +15,7 @@ import logging
 import math
 import threading
 import time as _time
-from collections.abc import Awaitable as AwaitableABC, Coroutine as CoroutineABC
+from collections.abc import Awaitable as AwaitableABC, Coroutine as CoroutineABC, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -333,6 +333,8 @@ class TimeScheduler:
         exchange: str,
         at: datetime | None = None,
         symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> bool:
         """Check whether the exchange is open on the trading calendar and clock."""
         exchange = exchange.strip().upper()
@@ -344,11 +346,20 @@ class TimeScheduler:
             return True
 
         current = _as_ist(at) if at is not None else self.now_ist()
+        if exchange in {"NSE", "BSE"}:
+            from .market_hours import cash_auction_order_entry  # noqa: PLC0415
+
+            auction = cash_auction_order_entry(current)
+            if auction is not None:
+                if self.get_market_session(exchange, on=current.date(), symbol=symbol) is None:
+                    return False
+                return auction
         return (
             self._active_market_window(
                 exchange,
                 at=current,
                 symbol=symbol,
+                expiry_calendar=expiry_calendar,
             )
             is not None
         )
@@ -359,6 +370,7 @@ class TimeScheduler:
         *,
         on: date | None = None,
         symbol: str | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> tuple[time, time] | None:
         """Return effective IST hours after exchange and special-session rules."""
         exchange_key = exchange.strip().upper()
@@ -396,6 +408,18 @@ class TimeScheduler:
                 return None
             return special.open_time, special.close_time
         market_close = time(19, 30) if exchange_key == "CDS" and _is_cds_cross_currency(symbol) else sched.market_close
+        if exchange_key in {"NFO", "BFO"}:
+            from .market_hours import derivative_contract_close  # noqa: PLC0415
+
+            contract_close = derivative_contract_close(
+                exchange_key,
+                session_date,
+                symbol=symbol,
+                expiry_calendar=expiry_calendar,
+            )
+            if contract_close is None:
+                return None
+            market_close = contract_close
         return sched.market_open, market_close
 
     def is_trading_day(
@@ -413,11 +437,17 @@ class TimeScheduler:
         *,
         at: datetime,
         symbol: str | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> tuple[datetime, datetime] | None:
         """Return the effective session datetimes when ``at`` is inside them."""
         for day_offset in (0, -1):
             session_date = at.date() + timedelta(days=day_offset)
-            session = self.get_market_session(exchange, on=session_date, symbol=symbol)
+            session = self.get_market_session(
+                exchange,
+                on=session_date,
+                symbol=symbol,
+                expiry_calendar=expiry_calendar,
+            )
             if session is None:
                 continue
             market_open, market_close = session
@@ -437,7 +467,11 @@ class TimeScheduler:
             )
             if market_close < market_open:
                 closes_at += timedelta(days=1)
-            if opens_at <= at <= closes_at:
+            # From 7 Dec 2026 the published derivatives close is the last
+            # instant new orders are not accepted. Earlier sessions keep the
+            # inclusive close used by the existing calendar.
+            revised_derivatives = exchange.strip().upper() in {"NFO", "BFO"} and session_date >= date(2026, 12, 7)
+            if opens_at <= at and (at < closes_at if revised_derivatives else at <= closes_at):
                 return opens_at, closes_at
         return None
 

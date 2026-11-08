@@ -443,7 +443,7 @@ pub fn nse_cash_phase(minutes_from_midnight: u32) -> &'static str {
 /// Dates before 7 Dec 2026 keep the August 2026 windows. From 7 Dec 2026
 /// (NSE/CMTR/77355) continuous trading runs until 15:30, the closing
 /// auction is 15:30–15:40, and order matching is 15:40–15:45. The
-/// Matching phase stays up through the 15:45–15:50 transition.
+/// 15:45–15:50 interval is the transition, not matching.
 pub fn nse_cash_phase_on(
     minutes_from_midnight: u32,
     year: i32,
@@ -453,12 +453,15 @@ pub fn nse_cash_phase_on(
     let revised = year > 2026 || (year == 2026 && (month > 12 || (month == 12 && day >= 7)));
     let continuous_end = if revised { 15 * 60 + 30 } else { 15 * 60 + 15 };
     let cas_end = if revised { 15 * 60 + 40 } else { 15 * 60 + 35 };
+    let matching_end = if revised { 15 * 60 + 45 } else { 15 * 60 + 50 };
     if (9 * 60 + 15..continuous_end).contains(&minutes_from_midnight) {
         "continuous"
     } else if (continuous_end..cas_end).contains(&minutes_from_midnight) {
         "cas"
-    } else if (cas_end..15 * 60 + 50).contains(&minutes_from_midnight) {
+    } else if (cas_end..matching_end).contains(&minutes_from_midnight) {
         "matching"
+    } else if revised && (matching_end..15 * 60 + 50).contains(&minutes_from_midnight) {
+        "transition"
     } else if (15 * 60 + 50..16 * 60).contains(&minutes_from_midnight) {
         "post-close"
     } else {
@@ -605,6 +608,8 @@ mod tests {
         assert_eq!(nse_cash_phase_on(15 * 60 + 20, 2026, 12, 7), "continuous");
         assert_eq!(nse_cash_phase_on(15 * 60 + 30, 2026, 12, 7), "cas");
         assert_eq!(nse_cash_phase_on(15 * 60 + 40, 2026, 12, 7), "matching");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 44, 2026, 12, 7), "matching");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 45, 2026, 12, 7), "transition");
         assert_eq!(nse_cash_phase_on(15 * 60 + 50, 2026, 12, 7), "post-close");
     }
 }

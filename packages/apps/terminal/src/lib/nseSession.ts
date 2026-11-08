@@ -20,6 +20,7 @@ export type NseCashSessionPhase =
   | "continuous"
   | "cas"
   | "matching"
+  | "transition"
   | "post-close"
   | "closed";
 
@@ -50,6 +51,7 @@ export const NSE_CASH_PHASE_LABEL: Record<NseCashSessionPhase, string> = {
   continuous: "Continuous",
   cas: "CAS",
   matching: "Matching",
+  transition: "Transition",
   "post-close": "Post-close",
   closed: "Closed",
 };
@@ -58,6 +60,7 @@ const PHASE_WINDOW: Record<NseCashSessionPhase, string> = {
   continuous: "09:15–15:15",
   cas: "15:15–15:35",
   matching: "15:35–15:50",
+  transition: "15:35–15:50",
   "post-close": "15:50–16:00",
   closed: "until 09:15 / after 16:00",
 };
@@ -68,12 +71,13 @@ export const NSE_CASH_TIMELINE_NOTE =
   "Continuous (~09:15–15:15) → CAS 15:15–15:35 → Match → Post-close 15:50–16:00. Non-CAS cash still CTS to 15:30.";
 
 const REVISED_TIMELINE_NOTE =
-  "Continuous (~09:15–15:30) → CAS 15:30–15:40 → Match 15:40–15:45 → Post-close 15:50–16:00. Non-CAS cash still CTS to 15:30.";
+  "Continuous (~09:15–15:30) → CAS 15:30–15:40 → Match 15:40–15:45 → Transition 15:45–15:50 → Post-close 15:50–16:00. Non-CAS cash still CTS to 15:30.";
 
 const REVISED_PHASE_WINDOW: Record<NseCashSessionPhase, string> = {
   continuous: "09:15–15:30",
   cas: "15:30–15:40",
   matching: "15:40–15:45",
+  transition: "15:45–15:50",
   "post-close": "15:50–16:00",
   closed: "until 09:15 / after 16:00",
 };
@@ -82,6 +86,8 @@ export interface NseCashSchedule {
   casStart: number;
   casEnd: number;
   matchingEnd: number;
+  /** When set, this is the start of the transition and the end of matching. */
+  transitionStart: number | null;
   foClose: number;
   foSecondaryLabel: string;
   scheduleNote: string;
@@ -94,6 +100,7 @@ function preRevisionSchedule(): NseCashSchedule {
     casStart: NSE_CAS_START_MIN,
     casEnd: NSE_CAS_END_MIN,
     matchingEnd: NSE_MATCHING_END_MIN,
+    transitionStart: null,
     foClose: NSE_FO_CLOSE_MIN,
     foSecondaryLabel: NSE_FO_SECONDARY_LABEL,
     scheduleNote: CAS_SCHEDULE_NOTE,
@@ -108,7 +115,8 @@ export function nseCashSchedule(on: Date): NseCashSchedule {
   return {
     casStart: HM(15, 30),
     casEnd: HM(15, 40),
-    matchingEnd: NSE_MATCHING_END_MIN,
+    matchingEnd: HM(15, 45),
+    transitionStart: HM(15, 45),
     foClose: HM(15, 45),
     foSecondaryLabel: "F&O open · till 15:45",
     scheduleNote: "from 7 Dec 2026",
@@ -131,10 +139,18 @@ export function nseCashPhaseAtMinutes(minutes: number, on?: Date): NseCashSessio
   if (minutes >= schedule.casStart && minutes < schedule.casEnd) {
     return "cas";
   }
-  if (minutes >= schedule.casEnd && minutes < schedule.matchingEnd) {
+  const matchingUntil = schedule.transitionStart ?? schedule.matchingEnd;
+  if (minutes >= schedule.casEnd && minutes < matchingUntil) {
     return "matching";
   }
-  if (minutes >= schedule.matchingEnd && minutes < NSE_POST_CLOSE_END_MIN) {
+  if (
+    schedule.transitionStart !== null
+    && minutes >= schedule.transitionStart
+    && minutes < NSE_MATCHING_END_MIN
+  ) {
+    return "transition";
+  }
+  if (minutes >= NSE_MATCHING_END_MIN && minutes < NSE_POST_CLOSE_END_MIN) {
     return "post-close";
   }
   return "closed";
@@ -251,7 +267,8 @@ function listedContractExpiry(symbol: string, expiryCalendar: readonly string[] 
  * is not a readable contract. Muhurat wins over the ordinary close. From
  * 7 Dec 2026 an NSE index contract stops at 15:30 on its own expiry day
  * when that date is on the calendar; stock derivatives stay open until
- * 15:45. BFO keeps 15:40.
+ * 15:45. The same close applies to BSE equity derivatives. SEBI sections
+ * 4.2.4 and 4.2.5 bind every recognised exchange.
  */
 export function derivativeContractCloseMin(
   on: Date,
@@ -264,8 +281,7 @@ export function derivativeContractCloseMin(
     const special = foSessionWindow(on);
     if (special) return special.closeMin;
   }
-  if (venue === "BFO") return NSE_FO_CLOSE_MIN;
-  if (venue !== "NFO") return null;
+  if (venue !== "NFO" && venue !== "BFO") return null;
   const schedule = nseCashSchedule(on);
   if (toIstIsoDate(on) < NSE_CAS_REVISION) return schedule.foClose;
   if (!symbol || !symbol.trim()) return schedule.foClose;
