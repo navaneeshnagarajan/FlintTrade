@@ -9,6 +9,8 @@ import type { Holiday, MarketTiming } from "@/types/api";
 import {
   NSE_FO_CLOSE_MIN,
   type NseCashSessionInfo,
+  derivativeContractCloseMin,
+  nseCashSchedule,
   resolveNseCashSession,
 } from "@/lib/nseSession";
 import {
@@ -32,6 +34,11 @@ export interface MarketHoursInstrument {
   exchange: string;
   /** Exchange symbol or dated contract symbol. */
   symbol: string;
+  /**
+   * Listed expiries for this underlying. From 7 Dec 2026 an NSE index
+   * contract needs this list; without it the contract stays closed.
+   */
+  expiryCalendar?: readonly string[];
 }
 
 export type MarketHoursTarget = string | MarketHoursInstrument;
@@ -78,7 +85,7 @@ export function isCrossCurrencyCdsSymbol(symbol: string): boolean {
   ));
 }
 
-function resolveMarketHours(target?: MarketHoursTarget): {
+function resolveMarketHours(target: MarketHoursTarget | undefined, now: Date): {
   exchange: string;
   hours: ExchangeHours | undefined;
 } {
@@ -87,9 +94,17 @@ function resolveMarketHours(target?: MarketHoursTarget): {
     : target?.exchange ?? "NSE";
   const exchange = rawExchange.trim().toUpperCase();
   const symbol = typeof target === "object" ? target.symbol : undefined;
+  const expiryCalendar = typeof target === "object" ? target.expiryCalendar : undefined;
 
   if (exchange === "CDS" && symbol && isCrossCurrencyCdsSymbol(symbol)) {
     return { exchange, hours: CDS_CROSS_CURRENCY_HOURS };
+  }
+  if (exchange === "NFO" || exchange === "BFO") {
+    const segmentClose = nseCashSchedule(now).foClose;
+    if (!symbol) return { exchange, hours: { open: 9 * 60 + 15, close: segmentClose } };
+    const contractClose = derivativeContractCloseMin(now, symbol, expiryCalendar, exchange);
+    if (contractClose === null) return { exchange, hours: undefined };
+    return { exchange, hours: { open: 9 * 60 + 15, close: contractClose } };
   }
   return { exchange, hours: EXCHANGE_HOURS[exchange] };
 }
@@ -174,10 +189,9 @@ export function isMarketHours(
   target?: MarketHoursTarget,
   holidays: readonly Holiday[] = shippedMuhuratHolidays(),
 ): boolean {
-  const { exchange, hours } = resolveMarketHours(target);
-  if (exchange === "DELTA") return true;
-
   const now = new Date();
+  const { exchange, hours } = resolveMarketHours(target, now);
+  if (exchange === "DELTA") return true;
   const ist = new Date(
     now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
@@ -365,13 +379,14 @@ export function getMCXStatus(): MCXMarketStatusInfo {
  * Returns pre-market / open / closed / weekend.
  */
 export function getExchangeStatus(target: MarketHoursTarget): MCXMarketStatusInfo {
-  const { exchange, hours } = resolveMarketHours(target);
+  const now = new Date();
+  const { exchange, hours } = resolveMarketHours(target, now);
   if (exchange === "DELTA") {
     return { status: "open", label: "DELTA Open (24/7)" };
   }
 
   const ist = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
   const day = ist.getDay();
   if (day === 0 || day === 6) {

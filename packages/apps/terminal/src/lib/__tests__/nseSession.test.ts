@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import {
   CAS_SCHEDULE_NOTE,
   NSE_CASH_TIMELINE_NOTE,
+  INDEX_UNDERLYINGS,
+  derivativeContractCloseMin,
   formatNseCashSessionTitle,
+  nseCashSchedule,
   resolveNseCashSession,
 } from "../nseSession";
 
@@ -125,6 +128,107 @@ describe("F&O secondary chip", () => {
     const session = resolveNseCashSession(weekday(15 * 60 + 20));
     expect(session.label).not.toMatch(/continuous/i);
     expect(session.foSecondary).toBe("F&O open · till 15:40");
+  });
+});
+
+function onDate(year: number, month: number, day: number, minutes: number): Date {
+  const utcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0) - (5 * 60 + 30) * 60_000;
+  return new Date(utcMs + minutes * 60_000);
+}
+
+describe("schedule boundary — 6 Dec 2026 keeps today's clock, 7 Dec 2026 uses the revision", () => {
+  it("keeps the August 2026 auction and the till 15:40 label on 6 Dec", () => {
+    const now = onDate(2026, 12, 6, 15 * 60 + 20);
+    const schedule = nseCashSchedule(now);
+    expect(schedule.casStart).toBe(15 * 60 + 15);
+    expect(schedule.casEnd).toBe(15 * 60 + 35);
+    expect(schedule.foClose).toBe(15 * 60 + 40);
+    expect(schedule.foSecondaryLabel).toBe("F&O open · till 15:40");
+    expect(schedule.timelineNote).toContain("CAS 15:15–15:35");
+  });
+
+  it("moves cash continuous to 15:30, the auction to 15:30–15:40, and F&O to 15:45 on 7 Dec", () => {
+    const duringAuction = onDate(2026, 12, 7, 15 * 60 + 32);
+    const session = resolveNseCashSession(duringAuction);
+    expect(session.phase).toBe("cas");
+    expect(session.label).toBe("CAS");
+    expect(session.title).toBe("CAS · 15:30–15:40 (from 7 Dec 2026)");
+    expect(session.isGreenOpen).toBe(false);
+    expect(session.foSecondary).toBe("F&O open · till 15:45");
+
+    const stillContinuous = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 20));
+    expect(stillContinuous.phase).toBe("continuous");
+    expect(stillContinuous.isGreenOpen).toBe(true);
+    expect(stillContinuous.foSecondary).toBeNull();
+
+    const matching = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 42));
+    expect(matching.phase).toBe("matching");
+    expect(matching.title).toBe("Matching · 15:40–15:45 (from 7 Dec 2026)");
+    expect(nseCashSchedule(duringAuction).timelineNote).toContain("Match 15:40–15:45");
+    expect(matching.foSecondary).toBe("F&O open · till 15:45");
+
+    const transition = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 47));
+    expect(transition.phase).toBe("transition");
+    expect(transition.title).toBe("Transition · 15:45–15:50 (from 7 Dec 2026)");
+    expect(transition.foSecondary).toBeNull();
+
+    const postClose = resolveNseCashSession(onDate(2026, 12, 7, 15 * 60 + 50));
+    expect(postClose.phase).toBe("post-close");
+    expect(postClose.foSecondary).toBeNull();
+  });
+});
+
+describe("NFO contract close from 7 Dec 2026", () => {
+  const calendar = ["2026-12-10", "2026-12-17"];
+
+  it("closes an expiring index contract at 15:30 and leaves the next index contract until 15:45", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", calendar)).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY17DEC2624000CE", calendar)).toBe(15 * 60 + 45);
+  });
+
+  it("keeps stock derivatives open until 15:45, including on their expiry day", () => {
+    const expiryDay = onDate(2026, 12, 10, 15 * 60 + 40);
+    expect(derivativeContractCloseMin(expiryDay, "RELIANCE10DEC26FUT", calendar)).toBe(15 * 60 + 45);
+    expect(derivativeContractCloseMin(onDate(2026, 12, 8, 12 * 60), "RELIANCE10DEC26FUT", calendar)).toBe(
+      15 * 60 + 45,
+    );
+  });
+
+  it("reads the expiry on the symbol and fails closed when a calendar does not confirm it", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", undefined)).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY17DEC2624000CE", undefined)).toBe(15 * 60 + 45);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", [])).toBeNull();
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", ["2026-12-17"])).toBeNull();
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY", calendar)).toBeNull();
+    expect(derivativeContractCloseMin(expiryDay, "NOT A CONTRACT", calendar)).toBeNull();
+  });
+
+  it("closes every listed index at 15:30 on its own expiry and rejects the following day", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    const nextDay = onDate(2026, 12, 11, 11 * 60);
+    const previousDay = onDate(2026, 12, 9, 11 * 60);
+    for (const name of INDEX_UNDERLYINGS) {
+      const symbol = `${name}10DEC26FUT`;
+      expect(derivativeContractCloseMin(expiryDay, symbol, undefined, "NFO")).toBe(15 * 60 + 30);
+      expect(derivativeContractCloseMin(expiryDay, symbol, undefined, "BFO")).toBe(15 * 60 + 30);
+      expect(derivativeContractCloseMin(previousDay, symbol, undefined, "NFO")).toBe(15 * 60 + 45);
+      expect(derivativeContractCloseMin(nextDay, symbol, undefined, "NFO")).toBeNull();
+    }
+  });
+
+  it("closes an expiring BSE index contract at 15:30 and keeps a stock contract until 15:45", () => {
+    const expiryDay = onDate(2026, 12, 10, 12 * 60);
+    expect(derivativeContractCloseMin(expiryDay, "SENSEX10DEC2680000CE", calendar, "BFO")).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "RELIANCE10DEC26FUT", calendar, "BFO")).toBe(15 * 60 + 45);
+    expect(derivativeContractCloseMin(expiryDay, "SENSEX", calendar, "BFO")).toBeNull();
+  });
+
+  it("lets the Muhurat session override an index expiry close", () => {
+    expect(
+      derivativeContractCloseMin(onDate(2026, 11, 8, 15 * 60), "NIFTY08NOV2624000CE", ["2026-11-08"], "NFO"),
+    ).toBe(15 * 60 + 40);
   });
 });
 

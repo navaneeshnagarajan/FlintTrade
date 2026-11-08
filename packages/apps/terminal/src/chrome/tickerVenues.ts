@@ -1,3 +1,5 @@
+import { nseCashSchedule } from "@/lib/nseSession";
+
 /**
  * Venue badges for the dedicated ticker strip.
  *
@@ -98,11 +100,18 @@ export function venueForTickerSymbol(symbol: TickerFeedSymbol): TickerVenue | nu
  * No symbols → omit the strip. Symbols with no resolvable venue → Unavailable.
  * Never fill the gap with a venue that is not on the tape.
  */
+function clockLabel(minutes: number): string {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 export function deriveTickerVenueStrip(
   symbols: readonly TickerFeedSymbol[],
   isOpen: (exchange: string) => boolean,
   /** Shared closed-session sentence. Open badges keep their own venue label. */
   closedLabel?: string,
+  now: Date = new Date(),
 ): TickerVenueStrip {
   if (symbols.length === 0) return { kind: "empty" };
 
@@ -121,6 +130,9 @@ export function deriveTickerVenueStrip(
     kind: "badges",
     badges: order.map((venue) => {
       const session = SESSION_COPY[venue];
+      const hours = venue === "NFO"
+        ? `09:15–${clockLabel(nseCashSchedule(now).foClose)} IST`
+        : session.hours;
       const open = isOpen(session.exchange);
       const closedText = closedLabel ?? `${venue} closed`;
       return {
@@ -128,7 +140,7 @@ export function deriveTickerVenueStrip(
         open,
         label: open ? `${venue} open` : (closedLabel ? `${venue}: ${closedLabel}` : `${venue} closed`),
         title: open
-          ? `${venue} session is open (${session.hours})`
+          ? `${venue} session is open (${hours})`
           : closedText,
       };
     }),

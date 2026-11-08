@@ -38,7 +38,7 @@ def _descriptor_above_select_ceiling(descriptor: int) -> int:
 
 
 @pytest.fixture
-def high_descriptor_owner():
+def high_descriptor_owner(monkeypatch):
     """Fill only unused FD slots with duplicates of our unrelated pipe."""
     import fcntl
     import resource
@@ -58,6 +58,24 @@ def high_descriptor_owner():
             descriptors.append(descriptor)
             if descriptor >= floor:
                 break
+        # A later close can free a number below the select ceiling. The next
+        # pipe or open would reuse it. Move those new descriptors up, the
+        # same way the live handoff test does, and keep the >= 1024 check.
+        real_open = os.open
+        real_pipe = os.pipe
+
+        def open_above(*args, **kwargs):
+            return _descriptor_above_select_ceiling(real_open(*args, **kwargs))
+
+        def pipe_above():
+            created_read, created_write = real_pipe()
+            return (
+                _descriptor_above_select_ceiling(created_read),
+                _descriptor_above_select_ceiling(created_write),
+            )
+
+        monkeypatch.setattr(os, "open", open_above)
+        monkeypatch.setattr(os, "pipe", pipe_above)
         identity = os.fstat(read_fd).st_dev, os.fstat(read_fd).st_ino
         yield descriptors
         # Guardian cleanup must not close another resource owner's descriptors.

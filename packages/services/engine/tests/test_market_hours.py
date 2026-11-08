@@ -20,6 +20,7 @@ from flinttrade_engine.market_hours import (
     STANDARD_HOURS,
     SpecialTradingSession,
     add_special_session,
+    derivative_contract_close,
     fo_session_state,
     get_market_hours,
     get_standard_hours,
@@ -363,3 +364,167 @@ class TestMuhurat2026Window:
         assert "settlement holiday" in funds
         assert muhurat_funds_note(_at(14, 0), SPECIAL_SESSIONS) is None
         assert muhurat_funds_note(_at(15, 41), SPECIAL_SESSIONS) is None
+
+
+# ---------------------------------------------------------------------------
+# Schedule from 7 Dec 2026 (NSE/CMTR/77355, NSE/FAOP/77356)
+# ---------------------------------------------------------------------------
+
+
+class TestCasRevisionBoundary:
+    def test_dec_6_keeps_the_current_cash_phases(self) -> None:
+        on = date(2026, 12, 6)
+        assert nse_cash_phase(15 * 60 + 14, on=on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 15, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 34, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 35, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 49, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 50, on=on) == "post-close"
+
+    def test_dec_7_uses_the_revised_cash_phases(self) -> None:
+        on = date(2026, 12, 7)
+        assert nse_cash_phase(15 * 60 + 29, on=on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 30, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 39, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 40, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 44, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 45, on=on) == "transition"
+        assert nse_cash_phase(15 * 60 + 49, on=on) == "transition"
+        assert nse_cash_phase(15 * 60 + 50, on=on) == "post-close"
+        assert nse_cash_phase(16 * 60, on=on) == "closed"
+
+    def test_nfo_close_moves_on_dec_7_and_bfo_does_not(self) -> None:
+        assert get_market_hours("NFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
+        assert get_market_hours("NFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
+        assert get_market_hours("BFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
+        assert get_market_hours("BFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
+
+    def test_expiring_index_contract_closes_at_1530(self) -> None:
+        calendar = [date(2026, 12, 10), date(2026, 12, 17)]
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="NIFTY10DEC2624000CE",
+            expiry_calendar=calendar,
+        ) == time(15, 30)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="NIFTY17DEC2624000CE",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+
+    def test_stock_derivatives_run_until_1545_including_expiry_day(self) -> None:
+        calendar = [date(2026, 12, 10)]
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 8),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+
+    def test_unknown_index_expiry_fails_closed(self) -> None:
+        session = date(2026, 12, 10)
+        symbol = "NIFTY10DEC2624000CE"
+        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=None) == time(15, 30)
+        assert derivative_contract_close(
+            "NFO",
+            session,
+            symbol="NIFTY17DEC2624000CE",
+            expiry_calendar=None,
+        ) == time(15, 45)
+        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=[]) is None
+        assert (
+            derivative_contract_close(
+                "NFO",
+                session,
+                symbol=symbol,
+                expiry_calendar=[date(2026, 12, 17)],
+            )
+            is None
+        )
+        assert (
+            derivative_contract_close(
+                "NFO",
+                session,
+                symbol="NIFTY",
+                expiry_calendar=[date(2026, 12, 10)],
+            )
+            is None
+        )
+        assert derivative_contract_close("NFO", session, symbol="NOT A CONTRACT") is None
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+            )
+            is None
+        )
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+                risk_increasing=False,
+            )
+            == time(15, 45)
+        )
+
+    def test_every_listed_index_closes_at_1530_on_its_expiry_day(self) -> None:
+        from flinttrade_core.symbol_utils import INDEX_UNDERLYINGS, detect_instrument_type
+
+        session = date(2026, 12, 10)
+        earlier = date(2026, 12, 9)
+        for name in sorted(INDEX_UNDERLYINGS):
+            assert detect_instrument_type(name) == "index"
+            symbol = f"{name}10DEC26FUT"
+            assert derivative_contract_close("NFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("BFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("NFO", earlier, symbol=symbol) == time(15, 45), name
+
+    def test_bfo_uses_the_same_expiry_close_as_nse(self) -> None:
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 10),
+            symbol="SENSEX10DEC2680000CE",
+            expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 30)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 10),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 45)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 4),
+            symbol="SENSEX04DEC2680000CE",
+            expiry_calendar=[date(2026, 12, 4)],
+        ) == time(15, 40)
+
+    def test_muhurat_still_overrides(self) -> None:
+        open_t, close_t = get_market_hours("NFO", date(2026, 11, 8))
+        assert open_t == time(14, 20)
+        assert close_t == time(15, 40)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 11, 8),
+            symbol="NIFTY08NOV2624000CE",
+            expiry_calendar=[date(2026, 11, 8)],
+        ) == time(15, 40)
+        assert nse_cash_phase(15 * 60 + 20, on=date(2026, 11, 8)) == "cas"
+
+    def test_index_expiry_before_the_revision_does_not_close_early(self) -> None:
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 4),
+            symbol="NIFTY04DEC2624000CE",
+            expiry_calendar=[date(2026, 12, 4)],
+        ) == time(15, 40)

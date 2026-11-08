@@ -1026,6 +1026,21 @@ def _safety_state_unavailable_response() -> tuple[Any, int]:
     ), 503
 
 
+def _market_calendar() -> Any:
+    """The scheduler calendar already loaded for this process, when one exists."""
+    try:
+        return current_app.config.get("TIME_SCHEDULER")
+    except RuntimeError:
+        return None
+
+
+def _expiry_context(order: Any) -> tuple[str, ...] | None:
+    """Expiry dates for admission: the date written on the contract symbol."""
+    from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
+    return symbol_expiry_context(getattr(order, "symbol", None))
+
+
 def _check_order_with_state(
     safety: Any,
     order: Any,
@@ -1049,6 +1064,8 @@ def _check_order_with_state(
         ltp=portfolio_state.ltp_for(order),
         net_delta=admission.net_delta,
         net_vega=admission.net_vega,
+        expiry_calendar=_expiry_context(order),
+        market_calendar=_market_calendar(),
     )
     blocked = next((result for result in results if not result.passed), None)
     if blocked is None:
@@ -1496,6 +1513,8 @@ def _admit_and_route_live_order(
                 ltp=portfolio_state.ltp_for(typed_order),
                 net_delta=admission.net_delta,
                 net_vega=admission.net_vega,
+                expiry_calendar=_expiry_context(typed_order),
+                market_calendar=_market_calendar(),
             )
         except (ValueError, ValidationError) as exc:
             logger.warning(
@@ -3833,6 +3852,8 @@ def _check_legs_through_safety(
             ltp=portfolio_state.ltp_for(leg),
             net_delta=admission.net_delta,
             net_vega=admission.net_vega,
+            expiry_calendar=_expiry_context(leg),
+            market_calendar=_market_calendar(),
         )
         blocked = next((r for r in results if not r.passed), None)
         if blocked is not None:
