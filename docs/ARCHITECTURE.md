@@ -176,10 +176,15 @@ duplicated:
 
 TopBar market status and the Market Clock widget are CAS-aware. Phases are Continuous, CAS, Matching, Post-close, and Closed
 — one TopBar chip active; tooltip/title is the window (for example
-`CAS · 15:15–15:35`). Cash is never green "open" after
+`CAS · 15:15–15:35`). Through 6 December 2026, cash is never green "open" after
 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears.
-Non-CAS cash still trades continuous to 15:30. The clock helpers
+From 7 December 2026 (NSE/CMTR/77355 and NSE/FAOP/77356) cash continuous
+runs until 15:30, the auction is 15:30–15:40, and the secondary chip reads
+`F&O open · till 15:45`. An NSE index contract stops at 15:30 on its own
+expiry day when the expiry calendar confirms it. Non-CAS cash still trades
+continuous to 15:30. BSE equity derivatives stay on the 15:40 close. The Muhurat
+session still overrides the ordinary clock. The clock helpers
 (`packages/apps/terminal/src/lib/market.ts` and
 `packages/core/ticks/src/session.rs`) must not treat a flat NSE
 09:15–15:30 window as "open until 15:30". Closing-price copy is not

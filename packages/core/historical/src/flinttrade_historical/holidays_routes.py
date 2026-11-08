@@ -160,7 +160,9 @@ def get_timings() -> tuple[Any, int]:
     try:
         from flinttrade_engine.market_hours import (  # noqa: PLC0415
             STANDARD_HOURS,
+            get_market_hours,
             get_standard_hours,
+            is_special_session,
             list_upcoming_sessions,
         )
     except ImportError as exc:
@@ -181,7 +183,14 @@ def get_timings() -> tuple[Any, int]:
         )
 
     try:
-        open_t, close_t = get_standard_hours(exchange)
+        # A special session stays on the ordinary row here; the special_sessions
+        # list below carries that window. NFO uses the date-effective close,
+        # which moves to 15:45 from 7 Dec 2026. BFO stays on the standard row.
+        session_date = date.today()
+        if exchange == "NFO" and is_special_session(session_date, exchange=exchange) is None:
+            open_t, close_t = get_market_hours(exchange, session_date)
+        else:
+            open_t, close_t = get_standard_hours(exchange)
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 

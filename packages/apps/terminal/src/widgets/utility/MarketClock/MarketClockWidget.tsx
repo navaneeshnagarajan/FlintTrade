@@ -2,9 +2,10 @@
  * MarketClockWidget — Live status of major trading sessions in IST.
  *
  * Markets tracked:
- *   - NSE (Equities, CAS-aware as of Aug 2026)
- *       Continuous (~09:15–15:15) → CAS 15:15–15:35 → Match → Post-close 15:50–16:00
- *       Non-CAS cash still CTS to 15:30. Never green "open" after 15:15.
+ *   - NSE (Equities, CAS-aware)
+ *       Through 6 Dec 2026: Continuous (~09:15–15:15) → CAS 15:15–15:35 → Match → Post-close 15:50–16:00
+ *       From 7 Dec 2026: Continuous until 15:30 → CAS 15:30–15:40 → Match 15:40–15:45 → Post-close 15:50–16:00
+ *       Non-CAS cash still CTS to 15:30.
  *   - MCX (Commodities)     09:00–23:55 IST
  *   - GIFT Nifty            06:30–23:30 IST
  *   - US (NYSE/NASDAQ)      19:00–01:30 IST (next day)
@@ -27,10 +28,9 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { fmtDuration, fmtIstClock, istMinutes, istParts } from "@/lib/ist";
 import {
   NSE_CASH_PHASE_LABEL,
-  NSE_CASH_TIMELINE_NOTE,
-  NSE_CAS_START_MIN,
   NSE_POST_CLOSE_END_MIN,
   nseCashPhaseAtMinutes,
+  nseCashSchedule,
   resolveNseCashSession,
   type NseCashSessionPhase,
 } from "@/lib/nseSession";
@@ -192,6 +192,7 @@ export function computeNseMarketState(
   holidays?: readonly Holiday[],
 ): MarketState {
   const session = resolveNseCashSession(now);
+  const schedule = nseCashSchedule(now);
   const nowMin = istMinutes(now);
   const nowMs = now.getTime();
   const weekend = istParts(now).weekday === 0 || istParts(now).weekday === 6;
@@ -230,29 +231,29 @@ export function computeNseMarketState(
       progress: 0,
       remainingMs: Math.max(0, minsUntilMonday) * 60_000,
       phaseLabel: session.label,
-      timelineNote: NSE_CASH_TIMELINE_NOTE,
+      timelineNote: schedule.timelineNote,
     };
   }
 
   if (session.phase === "continuous") {
-    const continuousDef = { ...def, closeMin: NSE_CAS_START_MIN };
+    const continuousDef = { ...def, closeMin: schedule.casStart };
     const base = computeMarketState(continuousDef, nowMin, nowMs);
-    return { ...base, def, phaseLabel: session.label, timelineNote: NSE_CASH_TIMELINE_NOTE };
+    return { ...base, def, phaseLabel: session.label, timelineNote: schedule.timelineNote };
   }
 
   if (session.phase === "closed") {
     const base = computeMarketState(def, nowMin, nowMs);
-    return { ...base, status: "closed", phaseLabel: session.label, timelineNote: NSE_CASH_TIMELINE_NOTE };
+    return { ...base, status: "closed", phaseLabel: session.label, timelineNote: schedule.timelineNote };
   }
 
-  const phase = nseCashPhaseAtMinutes(Math.floor(nowMin));
+  const phase = nseCashPhaseAtMinutes(Math.floor(nowMin), now);
   return {
     def,
     status: PHASE_TO_STATUS[phase],
     progress: Math.min(1, Math.max(0, (nowMin - def.openMin) / (def.closeMin - def.openMin))),
     remainingMs: Math.max(0, (def.closeMin - nowMin) * 60_000 - (nowMs % 1000)),
     phaseLabel: NSE_CASH_PHASE_LABEL[phase],
-    timelineNote: NSE_CASH_TIMELINE_NOTE,
+    timelineNote: schedule.timelineNote,
   };
 }
 

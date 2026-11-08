@@ -429,16 +429,35 @@ impl SessionTracker {
     }
 }
 
-/// NSE cash session phase (as of Aug 2026).
+/// NSE cash session phase for the schedule in force before 7 Dec 2026.
 ///
 /// Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
 /// Post-close 15:50–16:00. Never treat 15:20 as Closed or as green Continuous.
+/// Callers that know the session date use [`nse_cash_phase_on`].
 pub fn nse_cash_phase(minutes_from_midnight: u32) -> &'static str {
-    if (9 * 60 + 15..15 * 60 + 15).contains(&minutes_from_midnight) {
+    nse_cash_phase_on(minutes_from_midnight, 2026, 8, 3)
+}
+
+/// NSE cash phase for a calendar date.
+///
+/// Dates before 7 Dec 2026 keep the August 2026 windows. From 7 Dec 2026
+/// (NSE/CMTR/77355) continuous trading runs until 15:30, the closing
+/// auction is 15:30–15:40, and order matching is 15:40–15:45. The
+/// Matching phase stays up through the 15:45–15:50 transition.
+pub fn nse_cash_phase_on(
+    minutes_from_midnight: u32,
+    year: i32,
+    month: u32,
+    day: u32,
+) -> &'static str {
+    let revised = year > 2026 || (year == 2026 && (month > 12 || (month == 12 && day >= 7)));
+    let continuous_end = if revised { 15 * 60 + 30 } else { 15 * 60 + 15 };
+    let cas_end = if revised { 15 * 60 + 40 } else { 15 * 60 + 35 };
+    if (9 * 60 + 15..continuous_end).contains(&minutes_from_midnight) {
         "continuous"
-    } else if (15 * 60 + 15..15 * 60 + 35).contains(&minutes_from_midnight) {
+    } else if (continuous_end..cas_end).contains(&minutes_from_midnight) {
         "cas"
-    } else if (15 * 60 + 35..15 * 60 + 50).contains(&minutes_from_midnight) {
+    } else if (cas_end..15 * 60 + 50).contains(&minutes_from_midnight) {
         "matching"
     } else if (15 * 60 + 50..16 * 60).contains(&minutes_from_midnight) {
         "post-close"
@@ -578,5 +597,14 @@ mod tests {
         assert_eq!(nse_cash_phase(16 * 60), "closed");
         assert_ne!(nse_cash_phase(15 * 60 + 20), "closed");
         assert_ne!(nse_cash_phase(15 * 60 + 20), "continuous");
+    }
+
+    #[test]
+    fn test_nse_cash_phase_revision_boundary() {
+        assert_eq!(nse_cash_phase_on(15 * 60 + 20, 2026, 12, 6), "cas");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 20, 2026, 12, 7), "continuous");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 30, 2026, 12, 7), "cas");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 40, 2026, 12, 7), "matching");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 50, 2026, 12, 7), "post-close");
     }
 }

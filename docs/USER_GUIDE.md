@@ -331,9 +331,15 @@ after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
-continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
-last 30 min" closing-price copy. The September 2026 consultation stays out
-of the UI.
+continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
+and NSE/FAOP/77356: continuous until 15:30, auction 15:30–15:40, matching
+15:40–15:45, post-close 15:50–16:00, and `F&O open · till 15:45`. An NSE index
+contract stops at 15:30 on its own expiry day when that expiry is on the
+calendar; a missing expiry keeps that contract closed. Stock derivatives stay
+open until 15:45. BSE equity derivatives stay on the 15:40 close. Dates before
+7 December 2026, and the Muhurat session, keep the earlier clock. There is no
+flat "Market open until 15:30" or "VWAP last 30 min" closing-price copy. The
+September 2026 consultation stays out of the UI.
 
 **Mode honesty.** One line under the TopBar, always, owned by the active
 label. Example data reads `Example data. No broker is connected and no orders are sent.`
@@ -1421,7 +1427,8 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
 09:15–15:30 "open" window. When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
-15:40`. Non-CAS cash still continuous to 15:30.
+15:40` through 6 December 2026, and `F&O open · till 15:45` from 7 December
+2026. Non-CAS cash still continuous to 15:30.
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or

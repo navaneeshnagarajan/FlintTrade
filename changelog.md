@@ -8,6 +8,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **NSE session clock from 7 December 2026.** Cash continuous trading runs until 15:30. The closing auction is 15:30–15:40, order matching is 15:40–15:45, and the post-close session stays 15:50–16:00. Equity derivatives on NSE run until 15:45. An index contract stops at 15:30 on its own expiry day when that expiry is on the calendar; if the expiry cannot be confirmed, that contract stays closed. Stock derivatives stay open until 15:45, including on expiry day. Dates before 7 December 2026 keep the current clock, and the Muhurat session still overrides it. BSE equity derivatives stay on the 15:40 close. Follows SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 October 2026) and NSE circulars NSE/CMTR/77355 and NSE/FAOP/77356 (6 November 2026).
+
 - **Electron 45.2.3 desktop shell.** The shell bundles Node 24.22.2. The supported Node floor is `>=22.23.4`; the development target remains Node 24.
 
 ### Added
