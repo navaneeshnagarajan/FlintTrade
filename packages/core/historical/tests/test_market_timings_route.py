@@ -81,13 +81,20 @@ class TestMarketTimingsRoute:
         assert body["expiring_index_close"] == "15:30"
         assert body["order_entry"] == "open"
 
-    def test_timings_fail_closed_for_an_unconfirmed_index_expiry(self, client) -> None:  # type: ignore[no-untyped-def]
+    def test_timings_reads_the_symbol_expiry_and_fails_closed_when_unconfirmed(self, client) -> None:  # type: ignore[no-untyped-def]
         listed = client.get(
             "/api/v1/market/timings?exchange=NFO&on=2026-12-10"
             "&symbol=NIFTY10DEC2624000CE&expiries=2026-12-10,2026-12-17"
         )
-        missing = client.get(
+        from_symbol = client.get(
             "/api/v1/market/timings?exchange=NFO&on=2026-12-10&symbol=NIFTY10DEC2624000CE"
+        )
+        unconfirmed = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10"
+            "&symbol=NIFTY10DEC2624000CE&expiries=2026-12-17"
+        )
+        ambiguous = client.get(
+            "/api/v1/market/timings?exchange=NFO&on=2026-12-10&symbol=NIFTY"
         )
         later = client.get(
             "/api/v1/market/timings?exchange=BFO&on=2026-12-10"
@@ -95,7 +102,11 @@ class TestMarketTimingsRoute:
         )
         assert listed.get_json()["close"] == "15:30"
         assert listed.get_json()["order_entry"] == "open"
-        assert missing.get_json()["close"] is None
-        assert missing.get_json()["order_entry"] == "closed"
-        assert missing.get_json()["expiring_index_close"] == "15:30"
+        assert from_symbol.get_json()["close"] == "15:30"
+        assert from_symbol.get_json()["order_entry"] == "open"
+        assert from_symbol.get_json()["expiring_index_close"] == "15:30"
+        assert unconfirmed.get_json()["close"] is None
+        assert unconfirmed.get_json()["order_entry"] == "closed"
+        assert ambiguous.get_json()["close"] is None
+        assert ambiguous.get_json()["order_entry"] == "closed"
         assert later.get_json()["close"] == "15:45"

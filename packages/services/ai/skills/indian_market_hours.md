@@ -62,10 +62,12 @@ transition.
 | Matching | 15:40–15:45 | Order matching. Transition to post-close runs to 15:50 |
 | Post-close | 15:50–16:00 | Unchanged |
 | NSE equity derivatives | 09:15–15:45 | Stock derivatives, every day including expiry |
-| Expiring NSE index contract | until 15:30 | Only that contract, and only when its expiry is on the calendar |
+| Expiring index contract | until 15:30 | The expiry written on that contract's symbol |
 
-An index contract whose expiry is missing or not on the calendar stays
-closed. The secondary chip reads `F&O open · till 15:45`. Expiry settlement
+An index contract stops at 15:30 on the expiry written on its symbol. A
+supplied expiry calendar confirms that date. A new order stays closed when
+the expiry cannot be read, or when a supplied calendar does not list it.
+The secondary chip reads `F&O open · till 15:45`. Expiry settlement
 for expiring contracts is the underlying VWAP from 15:00–15:30; this clock
 does not compute that price.
 

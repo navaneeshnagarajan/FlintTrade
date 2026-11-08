@@ -246,11 +246,11 @@ function expiryTokenToIso(token: string): string | null {
 }
 
 function listedContractExpiry(symbol: string, expiryCalendar: readonly string[] | undefined): string | null {
-  if (!expiryCalendar || expiryCalendar.length === 0) return null;
   const parsed = parseDerivativeContract(symbol);
   if (!parsed) return null;
   const contractExpiry = expiryTokenToIso(parsed.expiry);
   if (!contractExpiry) return null;
+  if (expiryCalendar === undefined) return contractExpiry;
   const listed = new Set(
     expiryCalendar.flatMap((item) => {
       const iso = expiryTokenToIso(item);

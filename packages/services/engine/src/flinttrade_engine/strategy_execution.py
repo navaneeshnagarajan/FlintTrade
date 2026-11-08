@@ -103,6 +103,8 @@ class GatedStrategyDispatcher:
             portfolio_state = await self._portfolio_state_provider(order, lease.reservations)
             lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
             admission = portfolio_state.admission_for(0)
+            from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
             results = self._safety.check_order(
                 order,
                 selector=selector,
@@ -114,6 +116,7 @@ class GatedStrategyDispatcher:
                 ltp=portfolio_state.ltp_for(order),
                 net_delta=admission.net_delta,
                 net_vega=admission.net_vega,
+                expiry_calendar=symbol_expiry_context(order.symbol),
             )
             blocked = next((result for result in results if not result.passed), None)
             if blocked is not None:

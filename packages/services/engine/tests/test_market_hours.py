@@ -432,7 +432,13 @@ class TestCasRevisionBoundary:
     def test_unknown_index_expiry_fails_closed(self) -> None:
         session = date(2026, 12, 10)
         symbol = "NIFTY10DEC2624000CE"
-        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=None) is None
+        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=None) == time(15, 30)
+        assert derivative_contract_close(
+            "NFO",
+            session,
+            symbol="NIFTY17DEC2624000CE",
+            expiry_calendar=None,
+        ) == time(15, 45)
         assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=[]) is None
         assert (
             derivative_contract_close(

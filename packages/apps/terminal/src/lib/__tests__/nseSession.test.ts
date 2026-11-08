@@ -194,9 +194,10 @@ describe("NFO contract close from 7 Dec 2026", () => {
     );
   });
 
-  it("fails closed when an index contract's expiry is missing or not on the calendar", () => {
+  it("reads the expiry on the symbol and fails closed when a calendar does not confirm it", () => {
     const expiryDay = onDate(2026, 12, 10, 12 * 60);
-    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", undefined)).toBeNull();
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", undefined)).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY17DEC2624000CE", undefined)).toBe(15 * 60 + 45);
     expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", [])).toBeNull();
     expect(derivativeContractCloseMin(expiryDay, "NIFTY10DEC2624000CE", ["2026-12-17"])).toBeNull();
     expect(derivativeContractCloseMin(expiryDay, "NIFTY", calendar)).toBeNull();

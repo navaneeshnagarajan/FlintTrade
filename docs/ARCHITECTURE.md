@@ -181,8 +181,10 @@ TopBar market status and the Market Clock widget are CAS-aware. Phases are Conti
 continuous ends, a secondary `F&O open · till 15:40` chip appears.
 From 7 December 2026 (NSE/CMTR/77355 and NSE/FAOP/77356) cash continuous
 runs until 15:30, the auction is 15:30–15:40, and the secondary chip reads
-`F&O open · till 15:45`. An NSE index contract stops at 15:30 on its own
-expiry day when the expiry calendar confirms it. The same derivative close
+`F&O open · till 15:45`. An index contract stops at 15:30 on the expiry
+written on its symbol. A supplied expiry calendar confirms that date. A new
+order stays closed when the expiry cannot be read, or when a supplied
+calendar does not list it. The same derivative close
 applies to BSE. Matching ends at 15:45 and 15:45–15:50 is the transition.
 Non-CAS cash still trades continuous to 15:30. Cash auction order entry
 stops from 15:38, when that entry can already have closed at random.

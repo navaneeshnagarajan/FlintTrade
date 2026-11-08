@@ -333,9 +333,10 @@ widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
 and NSE/FAOP/77356: continuous until 15:30, auction 15:30–15:40, matching
-15:40–15:45, post-close 15:50–16:00, and `F&O open · till 15:45`. An NSE index
-contract stops at 15:30 on its own expiry day when that expiry is on the
-calendar; a missing expiry keeps that contract closed. Stock derivatives stay
+15:40–15:45, post-close 15:50–16:00, and `F&O open · till 15:45`. An index
+contract stops at 15:30 on the expiry written on its symbol. A supplied
+expiry calendar confirms that date. A new order stays closed when the expiry
+cannot be read, or when a supplied calendar does not list it. Stock derivatives stay
 open until 15:45. BSE equity derivatives use the same close. Dates before
 7 December 2026, and the Muhurat session, keep the earlier clock. There is no
 flat "Market open until 15:30" or "VWAP last 30 min" closing-price copy. The

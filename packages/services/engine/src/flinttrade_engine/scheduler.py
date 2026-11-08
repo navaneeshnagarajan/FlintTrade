@@ -335,6 +335,7 @@ class TimeScheduler:
         symbol: str | None = None,
         *,
         expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
     ) -> bool:
         """Check whether the exchange is open on the trading calendar and clock."""
         exchange = exchange.strip().upper()
@@ -360,6 +361,7 @@ class TimeScheduler:
                 at=current,
                 symbol=symbol,
                 expiry_calendar=expiry_calendar,
+                risk_increasing=risk_increasing,
             )
             is not None
         )
@@ -371,6 +373,7 @@ class TimeScheduler:
         on: date | None = None,
         symbol: str | None = None,
         expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
     ) -> tuple[time, time] | None:
         """Return effective IST hours after exchange and special-session rules."""
         exchange_key = exchange.strip().upper()
@@ -416,6 +419,7 @@ class TimeScheduler:
                 session_date,
                 symbol=symbol,
                 expiry_calendar=expiry_calendar,
+                risk_increasing=risk_increasing,
             )
             if contract_close is None:
                 return None
@@ -438,6 +442,7 @@ class TimeScheduler:
         at: datetime,
         symbol: str | None = None,
         expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
     ) -> tuple[datetime, datetime] | None:
         """Return the effective session datetimes when ``at`` is inside them."""
         for day_offset in (0, -1):
@@ -447,6 +452,7 @@ class TimeScheduler:
                 on=session_date,
                 symbol=symbol,
                 expiry_calendar=expiry_calendar,
+                risk_increasing=risk_increasing,
             )
             if session is None:
                 continue
@@ -496,7 +502,12 @@ class TimeScheduler:
             return None
 
         now = _as_ist(at) if at is not None else self.now_ist()
-        active_window = self._active_market_window(exchange, at=now, symbol=symbol)
+        active_window = self._active_market_window(
+            exchange,
+            at=now,
+            symbol=symbol,
+            risk_increasing=False,
+        )
         if active_window is None:
             return None
         _, closes_at = active_window
@@ -511,14 +522,26 @@ class TimeScheduler:
         exchange: str,
         at: datetime | None = None,
         symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> bool:
-        """True if current time is at or past the square-off time."""
+        """True if current time is at or past the square-off time.
+
+        Square-off reads the expiry on the contract symbol. A missing
+        calendar does not stop it on a day that symbol is not expiring.
+        """
         sched = EXCHANGE_SCHEDULES.get(exchange.strip().upper())
         if sched is None or sched.is_24x7:
             return False
 
         now = _as_ist(at) if at is not None else self.now_ist()
-        active_window = self._active_market_window(exchange, at=now, symbol=symbol)
+        active_window = self._active_market_window(
+            exchange,
+            at=now,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=False,
+        )
         if active_window is None:
             return False
         _, closes_at = active_window
@@ -1249,7 +1272,7 @@ class StrategyRunner:
         """Single tick iteration."""
         exchange = self.strategy.exchange
 
-        # Skip if market is closed
+        # Skip if market is closed. The symbol carries the contract expiry.
         if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
             return
 

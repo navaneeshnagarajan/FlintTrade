@@ -2055,6 +2055,7 @@ def is_market_open(
     *,
     symbol: str | None = None,
     expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
 ) -> bool:
     """Check if the given exchange is currently open for trading.
 
@@ -2082,6 +2083,12 @@ def is_market_open(
         now = now.astimezone(IST)
     current_time = now.time().replace(tzinfo=None)
 
+    from flinttrade_engine.market_hours import is_special_session  # noqa: PLC0415
+
+    special = is_special_session(now.date(), exchange=exchange)
+    if special is not None:
+        return special.open_time <= current_time <= special.close_time
+
     if exchange in {"NSE", "BSE"}:
         from flinttrade_engine.market_hours import cash_auction_order_entry  # noqa: PLC0415
 
@@ -2097,6 +2104,7 @@ def is_market_open(
             now.date(),
             symbol=symbol,
             expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
         )
         if close_time is None:
             return False
@@ -2129,6 +2137,7 @@ def _format_market_hours(
     *,
     symbol: str | None = None,
     expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
 ) -> str:
     """Format the effective market hours for an error message."""
     now = at or datetime.now(IST)
@@ -2144,6 +2153,7 @@ def _format_market_hours(
             now.date(),
             symbol=symbol,
             expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
         )
         if close_time is None:
             return "closed until the expiry is confirmed"
@@ -2221,6 +2231,7 @@ class OrderValidation:
         at: datetime | None = None,
         *,
         expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
     ) -> SafetyResult:
         exchange = order.exchange.value if hasattr(order.exchange, "value") else str(order.exchange)
 
@@ -2234,6 +2245,7 @@ class OrderValidation:
             at=at,
             symbol=order.symbol,
             expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
         ):
             now = at or datetime.now(IST)
             current_time = now.time().replace(tzinfo=None).strftime("%H:%M")
@@ -2242,6 +2254,7 @@ class OrderValidation:
                 at=now,
                 symbol=order.symbol,
                 expiry_calendar=expiry_calendar,
+                risk_increasing=risk_increasing,
             )
             return SafetyResult(
                 SafetyVerdict.FAIL,
@@ -3985,6 +3998,7 @@ class SafetySystem:
         daily_pnl: float = 0.0,
         starting_capital: float = 0.0,
         at: datetime | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> list[SafetyResult]:
         """Run order through all 5 layers and return results.
 
@@ -4003,6 +4017,7 @@ class SafetySystem:
                 daily_pnl=daily_pnl,
                 starting_capital=starting_capital,
                 at=at,
+                expiry_calendar=expiry_calendar,
             )
 
     def _check_order_locked(
@@ -4019,6 +4034,7 @@ class SafetySystem:
         daily_pnl: float = 0.0,
         starting_capital: float = 0.0,
         at: datetime | None = None,
+        expiry_calendar: Sequence[date | str] | None = None,
     ) -> list[SafetyResult]:
         results: list[SafetyResult] = []
 
@@ -4034,8 +4050,18 @@ class SafetySystem:
         if not r4.passed:
             return results
 
-        # L1 — order validation (exchange, market hours, symbol, qty, price)
-        r1 = self.l1_order.validate(order, ltp, at=at)
+        # L1 — order validation (exchange, market hours, symbol, qty, price).
+        # The symbol carries the contract expiry. A supplied calendar confirms
+        # it. A reduce-only exit is not blocked when that calendar is missing
+        # on a day the symbol does not show as its expiry.
+        reducing = PositionLimits._is_strict_reduction(order, positions or [])
+        r1 = self.l1_order.validate(
+            order,
+            ltp,
+            at=at,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=not reducing,
+        )
         results.append(r1)
         if not r1.passed:
             return results

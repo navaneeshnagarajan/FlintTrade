@@ -297,26 +297,22 @@ def _contract_parts(symbol: str) -> tuple[str, str] | None:
     return parts.underlying, parts.expiry
 
 
-def _listed_contract_expiry(
-    symbol: str,
-    expiry_calendar: Sequence[date | str] | None,
-) -> date | None:
-    """Expiry date when the contract is on the supplied calendar.
-
-    Missing, unparsable, or unlisted expiries are unknown. Callers stay
-    closed rather than assume the later F&O close.
-    """
-    if not expiry_calendar:
-        return None
+def _symbol_expiry(symbol: str) -> date | None:
+    """Expiry written on a compact contract symbol, when it can be read."""
     parsed = _contract_parts(symbol)
     if parsed is None:
         return None
     from flinttrade_core.symbol_utils import parse_expiry
 
     try:
-        contract_expiry = parse_expiry(parsed[1])
+        return parse_expiry(parsed[1])
     except ValueError:
         return None
+
+
+def _calendar_dates(expiry_calendar: Sequence[date | str]) -> set[date]:
+    from flinttrade_core.symbol_utils import parse_expiry
+
     listed: set[date] = set()
     for item in expiry_calendar:
         if isinstance(item, datetime):
@@ -329,9 +325,41 @@ def _listed_contract_expiry(
             listed.add(parse_expiry(str(item)))
         except ValueError:
             continue
-    if contract_expiry not in listed:
+    return listed
+
+
+def authoritative_expiry(
+    symbol: str | None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    *,
+    risk_increasing: bool = True,
+) -> date | None:
+    """Expiry used to decide an index contract's close.
+
+    The date on the symbol is the contract's own expiry. A supplied
+    calendar confirms that date. A new risk-increasing order stays closed
+    when the symbol has no expiry, or when a supplied calendar does not
+    list it. An exit may still use the symbol date when the calendar is
+    missing or does not list a non-expiry day.
+    """
+    symbol_expiry = _symbol_expiry(symbol or "")
+    if expiry_calendar is None:
+        return symbol_expiry
+    if symbol_expiry is None:
         return None
-    return contract_expiry
+    if symbol_expiry in _calendar_dates(expiry_calendar):
+        return symbol_expiry
+    if risk_increasing:
+        return None
+    return symbol_expiry
+
+
+def symbol_expiry_context(symbol: str | None) -> tuple[str, ...] | None:
+    """Expiry calendar read from a contract symbol, when the date can be read."""
+    expiry = authoritative_expiry(symbol, None)
+    if expiry is None:
+        return None
+    return (expiry.isoformat(),)
 
 
 def derivative_contract_close(
@@ -340,15 +368,18 @@ def derivative_contract_close(
     *,
     symbol: str | None = None,
     expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
 ) -> time | None:
     """Close for one derivatives contract, or None when that must stay shut.
 
     A special session, including Muhurat, wins over the ordinary close.
     From 7 Dec 2026, SEBI sections 4.2.4 and 4.2.5 keep stock derivatives
     on NSE and BSE open until 15:45 every day, including expiry day. An
-    index contract stops at 15:30 only on its own expiry day, and only
-    when that expiry is on the supplied calendar. An index contract whose
-    expiry is missing or not listed returns None.
+    index contract stops at 15:30 on the expiry read from its symbol.
+    A supplied calendar confirms that date. A new risk-increasing order
+    stays closed when the expiry is unreadable or a supplied calendar
+    does not confirm it. An exit is not blocked by a missing calendar
+    on a day the symbol does not show as its expiry.
     """
     from flinttrade_core.symbol_utils import detect_instrument_type
 
@@ -378,9 +409,15 @@ def derivative_contract_close(
         return _NFO_CLOSE_REVISED
     if underlying_kind != "index":
         return None
-    expiry = _listed_contract_expiry(symbol, expiry_calendar)
+    expiry = authoritative_expiry(
+        symbol,
+        expiry_calendar,
+        risk_increasing=risk_increasing,
+    )
     if expiry is None:
-        return None
+        if risk_increasing:
+            return None
+        return _NFO_CLOSE_REVISED
     if expiry == target_date:
         return _NFO_EXPIRING_INDEX_CLOSE
     return _NFO_CLOSE_REVISED
