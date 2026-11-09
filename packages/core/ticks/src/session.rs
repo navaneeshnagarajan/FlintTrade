@@ -38,7 +38,7 @@ pub struct SessionConfig {
     /// Market open in minutes from midnight (IST). NSE = 9*60+15 = 555.
     pub market_open_minutes: u32,
     /// Market close in minutes from midnight (IST). NSE cash book / non-CAS
-    /// CTS = 15:30; green "open" UI must use [`nse_cash_phase`], not this flat close.
+    /// CTS = 15:30; green "open" UI must use [`nse_cash_phase_on`], not this flat close.
     pub market_close_minutes: u32,
     /// Pre-market start in minutes from midnight. NSE = 9*60 = 540.
     pub pre_market_start_minutes: u32,
@@ -429,11 +429,13 @@ impl SessionTracker {
     }
 }
 
-/// NSE cash session phase for the schedule in force before 7 Dec 2026.
+/// FROZEN NSE cash phase for 3 Aug 2026, before the 7 Dec 2026 revision.
 ///
+/// This is not the live session clock. It always answers as 3 Aug 2026:
 /// Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
 /// Post-close 15:50–16:00. Never treat 15:20 as Closed or as green Continuous.
-/// Callers that know the session date use [`nse_cash_phase_on`].
+/// Production code must call [`nse_cash_phase_on`] with the session date.
+/// No production path imports this function.
 pub fn nse_cash_phase(minutes_from_midnight: u32) -> &'static str {
     nse_cash_phase_on(minutes_from_midnight, 2026, 8, 3)
 }

@@ -24,6 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   isMarketHours,
+  orderPadSessionBadge,
   getMCXStatus,
   getExchangeStatus,
   getNseCashSessionStatus,
@@ -33,6 +34,7 @@ import {
 } from "../market";
 import type { MarketHoursTarget } from "../market";
 import type { Holiday } from "@/types/api";
+import { resolveNseCashSession } from "../nseSession";
 
 const isMarketHoursWithHolidays = isMarketHours as (
   target?: MarketHoursTarget,
@@ -675,5 +677,43 @@ describe("getNseCashSessionStatus IST session window", () => {
     });
     expect(operatorMarketLabel(session)).toBe("Market unavailable");
     expect(operatorMarketLabel(session)).not.toBe(MARKET_CLOSED_LABEL);
+  });
+});
+
+describe("Order Pad badge versus resolveNseCashSession", () => {
+  it("does not claim the green continuous session at 15:20 IST on 6 Dec 2026", () => {
+    const at = istToUtc(2026, 12, 6, 15, 20);
+    const session = resolveNseCashSession(at);
+    const badge = orderPadSessionBadge(at, "NSE");
+    expect(session.isGreenOpen).toBe(false);
+    expect(badge.greenContinuous).toBe(session.isGreenOpen);
+    expect(badge.greenContinuous).toBe(false);
+  });
+
+  it("follows the dated cash phase on a pre-revision weekday, not the flat 15:30 window", () => {
+    const at = istToUtc(2026, 12, 4, 15, 20);
+    const session = resolveNseCashSession(at);
+    const badge = orderPadSessionBadge(at, "NSE");
+    expect(session.phase).toBe("cas");
+    expect(session.isGreenOpen).toBe(false);
+    expect(badge.greenContinuous).toBe(false);
+    expect(badge.label).toBe(session.label);
+  });
+
+  it("claims the green continuous session at 15:20 IST on 7 Dec 2026", () => {
+    const at = istToUtc(2026, 12, 7, 15, 20);
+    const session = resolveNseCashSession(at);
+    const badge = orderPadSessionBadge(at, "NSE");
+    expect(session.phase).toBe("continuous");
+    expect(badge.greenContinuous).toBe(true);
+    expect(badge.greenContinuous).toBe(session.isGreenOpen);
+  });
+
+  it("uses the selected exchange instead of the NSE cash window", () => {
+    const evening = istToUtc(2026, 12, 7, 20, 0);
+    expect(resolveNseCashSession(evening).isGreenOpen).toBe(false);
+    expect(orderPadSessionBadge(evening, "NSE").greenContinuous).toBe(false);
+    expect(orderPadSessionBadge(evening, "MCX").greenContinuous).toBe(true);
+    expect(orderPadSessionBadge(istToUtc(2026, 12, 7, 23, 40), "MCX").greenContinuous).toBe(false);
   });
 });

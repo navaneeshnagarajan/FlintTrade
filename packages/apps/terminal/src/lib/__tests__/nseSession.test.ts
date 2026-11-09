@@ -13,6 +13,7 @@ import {
   INDEX_UNDERLYINGS,
   derivativeContractCloseMin,
   formatNseCashSessionTitle,
+  nseCashPhaseAtMinutes,
   nseCashSchedule,
   resolveNseCashSession,
 } from "../nseSession";
@@ -82,7 +83,7 @@ describe("cash honesty — never green open after 15:15; CAS is not Closed", () 
 
 describe("tooltip / title windows (as of Aug 2026)", () => {
   it("uses the locked CAS tooltip", () => {
-    expect(formatNseCashSessionTitle("cas")).toBe(
+    expect(formatNseCashSessionTitle("cas", weekday(15 * 60 + 20))).toBe(
       "CAS · 15:15–15:35 (as of Aug 2026)",
     );
     expect(resolveNseCashSession(weekday(15 * 60 + 20)).title).toBe(
@@ -91,16 +92,17 @@ describe("tooltip / title windows (as of Aug 2026)", () => {
   });
 
   it("titles every chip with its window", () => {
-    expect(formatNseCashSessionTitle("continuous")).toBe(
+    const on = weekday(12 * 60);
+    expect(formatNseCashSessionTitle("continuous", on)).toBe(
       "Continuous · 09:15–15:15 (as of Aug 2026)",
     );
-    expect(formatNseCashSessionTitle("matching")).toBe(
+    expect(formatNseCashSessionTitle("matching", on)).toBe(
       "Matching · 15:35–15:50 (as of Aug 2026)",
     );
-    expect(formatNseCashSessionTitle("post-close")).toBe(
+    expect(formatNseCashSessionTitle("post-close", on)).toBe(
       "Post-close · 15:50–16:00 (as of Aug 2026)",
     );
-    expect(formatNseCashSessionTitle("closed")).toMatch(/as of Aug 2026/);
+    expect(formatNseCashSessionTitle("closed", on)).toMatch(/as of Aug 2026/);
     expect(CAS_SCHEDULE_NOTE).toBe("as of Aug 2026");
   });
 });
@@ -135,6 +137,21 @@ function onDate(year: number, month: number, day: number, minutes: number): Date
   const utcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0) - (5 * 60 + 30) * 60_000;
   return new Date(utcMs + minutes * 60_000);
 }
+
+describe("dated cash phase", () => {
+  it("requires the session date instead of the pre-revision clock", () => {
+    expect(() => nseCashPhaseAtMinutes(15 * 60 + 20, undefined as unknown as Date)).toThrow(
+      /session date/,
+    );
+  });
+
+  it("keeps 15:20 on 6 Dec 2026 in CAS, not green continuous", () => {
+    const at = onDate(2026, 12, 6, 15 * 60 + 20);
+    expect(nseCashPhaseAtMinutes(15 * 60 + 20, at)).toBe("cas");
+    expect(nseCashPhaseAtMinutes(15 * 60 + 20, at)).not.toBe("continuous");
+    expect(resolveNseCashSession(at).isGreenOpen).toBe(false);
+  });
+});
 
 describe("schedule boundary — 6 Dec 2026 keeps today's clock, 7 Dec 2026 uses the revision", () => {
   it("keeps the August 2026 auction and the till 15:40 label on 6 Dec", () => {
