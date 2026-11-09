@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import {
   useCancelForeverOrder,
@@ -60,6 +61,7 @@ import {
   orderStatusIsCancelPending,
   orderStatusIsOpen,
 } from "@/widgets/trading/Positions/positionReconcile";
+import { readForeverPendingCancels, writeForeverPendingCancels } from "./foreverPendingCancel";
 
 const SUPPORTED_GTT_BROKERS = ["dhan", "upstox"] as const;
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
@@ -89,6 +91,8 @@ interface CancelAcknowledgement {
   receivedAt: number;
   listUpdatedAt: number;
   reconciled: boolean;
+  /** Set only when a later row status itself says cancelled. */
+  confirmedCancelled: boolean;
 }
 
 const CONFIRMED_CANCELLED = new Set(["CANCELLED", "CANCELED"]);
@@ -163,6 +167,8 @@ function ForeverOrdersErrorNotice({ error }: { error: unknown }) {
 
 export default function ForeverOrdersWidget() {
   const appMode = useModeStore((s) => s.mode);
+  const authStatus = useAuthStore((s) => s.status);
+  const sessionUsername = useAuthStore((s) => s.username);
   const isLive = appMode === "live";
 
   const [target, setTarget] = useSupportedNativeBrokerOrderTarget(SUPPORTED_GTT_BROKERS);
@@ -230,8 +236,12 @@ export default function ForeverOrdersWidget() {
   const placeMutation = usePlaceForeverOrder();
   const modifyMutation = useModifyForeverOrder();
   const cancelMutation = useCancelForeverOrder();
-  // In-session presentation only, not a durable intent ledger or write authority.
-  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>([]);
+  const ignoredCancelSubmissions = useRef(new Set<number>());
+  // Tab-session presentation for this operator, mode and account. Not a
+  // dispatch ledger, and not authority for another broker write.
+  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>(
+    () => readForeverPendingCancels(presentationScope).map((pending) => ({ ...pending, reconciled: false, confirmedCancelled: false })),
+  );
 
   // Mutation variables identify the response's target; a response from another
   // account must never be shown as the selected account's result.
@@ -302,17 +312,59 @@ export default function ForeverOrdersWidget() {
     // so a later trigger read can confirm or retire it.
     const pendingCancel = (cancelMutation.isSuccess && !cancelConfirmed) || cancelLost;
     if (!cancelResultMatches || !pendingCancel || orderId === undefined) return;
+    if (cancelMutation.submittedAt !== undefined && ignoredCancelSubmissions.current.has(cancelMutation.submittedAt)) return;
     setCancelAcknowledgements((previous) => {
       const existing = previous.find((ack) => ack.scope === presentationScope && ack.orderId === orderId);
       if (existing && existing.submittedAt === cancelMutation.submittedAt) return previous;
       const acknowledgement = {
         scope: presentationScope, orderId, submittedAt: cancelMutation.submittedAt,
         receivedAt: Date.now(), listUpdatedAt: listQuery.dataUpdatedAt ?? 0, reconciled: false,
+        confirmedCancelled: false,
       };
       return [...previous.filter((ack) => ack !== existing), acknowledgement];
     });
   }, [cancelConfirmed, cancelLost, cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
     cancelMutation.submittedAt, presentationScope, listQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    const stored = readForeverPendingCancels(presentationScope);
+    if (stored.length === 0) return;
+    setCancelAcknowledgements((previous) => {
+      let changed = false;
+      const next = [...previous];
+      for (const pending of stored) {
+        if (next.some((existing) => existing.scope === pending.scope && existing.orderId === pending.orderId)) continue;
+        next.push({ ...pending, reconciled: false, confirmedCancelled: false });
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [presentationScope]);
+
+  const previousUsername = useRef<string | null>(null);
+  useEffect(() => {
+    if (authStatus === "logged-out" || authStatus === "setup-required") {
+      if (cancelMutation.submittedAt !== undefined) ignoredCancelSubmissions.current.add(cancelMutation.submittedAt);
+      setCancelAcknowledgements([]);
+    }
+  }, [authStatus, cancelMutation.submittedAt]);
+  useEffect(() => {
+    const next = sessionUsername?.trim() || null;
+    const previous = previousUsername.current;
+    previousUsername.current = next;
+    if (previous && next && previous !== next) setCancelAcknowledgements([]);
+  }, [sessionUsername]);
+
+  useEffect(() => {
+    writeForeverPendingCancels(
+      presentationScope,
+      cancelAcknowledgements
+        .filter((acknowledgement) => acknowledgement.scope === presentationScope && !acknowledgement.reconciled)
+        .map(({ scope, orderId, submittedAt, receivedAt, listUpdatedAt }) => ({
+          scope, orderId, submittedAt, receivedAt, listUpdatedAt,
+        })),
+    );
+  }, [presentationScope, cancelAcknowledgements]);
 
   useEffect(() => {
     if (!listAvailable || listQuery.isFetching) return;
@@ -323,9 +375,15 @@ export default function ForeverOrdersWidget() {
           || !(listQuery.dataUpdatedAt > acknowledgement.receivedAt)
           || !(listQuery.dataUpdatedAt > acknowledgement.listUpdatedAt)) return acknowledgement;
         const rows = listQuery.data?.filter((row) => extractRowId(row, ORDER_ID_KEYS) === acknowledgement.orderId) ?? [];
+        // A newer complete list that no longer contains this trigger ends the
+        // pending cancel. It does not say the order was cancelled.
+        if (rows.length === 0) {
+          changed = true;
+          return { ...acknowledgement, reconciled: true, confirmedCancelled: false };
+        }
         // Only newer successful evidence for this trigger/account resolves its ACK.
-        // Missing rows and terminal triggers say nothing about spawned children.
-        if (rows.length === 0 || !rows.every((row) => {
+        // A present row that is not terminal says nothing about spawned children.
+        if (!rows.every((row) => {
           if ((row.broker !== undefined && String(row.broker).toLowerCase() !== selectedBroker)
             || (row.account_id !== undefined && row.account_id !== target?.account_id)) return false;
           const identities = ORDER_ID_KEYS.filter((key) => row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "");
@@ -335,7 +393,7 @@ export default function ForeverOrdersWidget() {
           return statuses.length > 0 && statuses.every((key) => statusEndsPendingCancel(String(row[key] ?? "")));
         })) return acknowledgement;
         changed = true;
-        return { ...acknowledgement, reconciled: true };
+        return { ...acknowledgement, reconciled: true, confirmedCancelled: rows.every((row) => rowIsCancelled(row)) };
       });
       return changed ? next : previous;
     });
@@ -559,7 +617,7 @@ export default function ForeverOrdersWidget() {
   function rowActions(row: BrokerOrderRow) {
     const orderId = extractRowId(row, ORDER_ID_KEYS);
     const cancelReconciled = cancelAcknowledgements.some((ack) =>
-      ack.scope === presentationScope && ack.orderId === orderId && ack.reconciled);
+      ack.scope === presentationScope && ack.orderId === orderId && ack.confirmedCancelled);
     const cancelPending = orderStatusIsCancelPending(rowText(row, ["status", "order_status", "orderStatus", "gtt_status"]))
       || cancelAcknowledgements.some((ack) => ack.scope === presentationScope && ack.orderId === orderId && !ack.reconciled)
       || (cancelResultMatches && cancelMutation.isSuccess && cancelMutation.variables?.order_id === orderId
