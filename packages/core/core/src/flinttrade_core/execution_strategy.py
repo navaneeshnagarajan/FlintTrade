@@ -33,7 +33,12 @@ class _BoundStrategyRunner(StrategyRunner):
             if type(run.adapter) is not PracticeAgentAdapter:
                 raise ValueError("canonical strategy adapter required")
             run.adapter.validate_session()
-            if not self.scheduler.accepts_new_entries(self.strategy.exchange, symbol=self.symbol):
+            # The old scheduler open check was the runner session. Admission
+            # alone is wider during cash auction entry, so a new order needs both.
+            exchange = self.strategy.exchange
+            if not self.scheduler.session_active(exchange, symbol=self.symbol):
+                return
+            if not self.scheduler.accepts_new_entries(exchange, symbol=self.symbol):
                 return
             data = await run.adapter.quotes(symbol=self.symbol, exchange=self.strategy.exchange)
             quote = Quote.model_validate({**data["data"], "symbol": self.symbol, "exchange": self.strategy.exchange})

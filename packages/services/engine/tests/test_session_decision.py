@@ -236,6 +236,110 @@ def test_entry_admission_and_runner_session_at_each_instant(  # type: ignore[no-
     assert (published in {"open", "auction_entry"}) is admitted
 
 
+def _practice_tick_rows() -> list[tuple[int, int, int, bool]]:
+    """December day, hour, minute, and whether the practice tick may place an order.
+
+    15:20 is inside both the runner session and admission. 15:30 is still inside
+    the session and already closed to a new order. On 7 Dec 2026, 15:31 and
+    15:37 are cash auction entry, which is outside the runner session. 15:38
+    is closed on both clocks. 4 Dec 2026 has no auction entry.
+    """
+    rows: list[tuple[int, int, int, bool]] = []
+    for day in (4, 7):
+        rows.append((day, 15, 20, True))
+        for minute in (30, 31, 37, 38):
+            rows.append((day, 15, minute, False))
+    return rows
+
+
+@pytest.mark.parametrize(("day", "hour", "minute", "places"), _practice_tick_rows())
+async def test_practice_tick_places_an_order_only_inside_session_and_admission(
+    day: int,
+    hour: int,
+    minute: int,
+    places: bool,
+) -> None:
+    from contextlib import contextmanager
+
+    from flinttrade_core.execution_strategy import _BoundStrategyRunner
+    from flinttrade_core.models import Order
+    from flinttrade_core.practice_agent_adapter import PracticeAgentAdapter
+
+    at = datetime(2026, 12, day, hour, minute, tzinfo=IST)
+    scheduler = TimeScheduler()
+    scheduler.now_ist = lambda: at  # type: ignore[method-assign]
+    generated: list[Order] = []
+    retired: list[object] = []
+    routed: list[Order] = []
+
+    adapter = object.__new__(PracticeAgentAdapter)
+    adapter.validate_session = lambda: None  # type: ignore[method-assign]
+
+    async def quotes(*, symbol: str, exchange: str) -> dict[str, dict[str, float]]:
+        return {"data": {"ltp": 2500.0}}
+
+    async def route_order(order: Order) -> object:
+        routed.append(order)
+        return type("Result", (), {"passed": True})()
+
+    adapter.quotes = quotes  # type: ignore[method-assign]
+    adapter.route_order = route_order  # type: ignore[method-assign]
+
+    class _Strategy:
+        exchange = "NSE"
+        symbol = "RELIANCE"
+
+        def on_tick(self, quote: object) -> None:
+            del quote
+
+        def generate_orders(self) -> list[Order]:
+            order = Order(symbol="RELIANCE", exchange="NSE", product="MIS", action="BUY", quantity="1")
+            generated.append(order)
+            return [order]
+
+    @contextmanager
+    def _fence():  # type: ignore[no-untyped-def]
+        yield
+
+    owner = type("Owner", (), {})()
+    owner.run = type("Run", (), {})()
+    owner.run.adapter = adapter
+    owner.run.config = {"exchange": "NSE", "product": "MIS", "max_position_size": 10}
+    owner.sandbox = type("Sandbox", (), {"get_positions": staticmethod(lambda: [])})()
+    owner.execution_binding = type("Binding", (), {})()
+    owner.execution_binding.fence = _fence
+    owner.execution_binding.scope = "practice-tick"
+    owner.execution_binding.registry = type(
+        "Registry",
+        (),
+        {"retire_entries": staticmethod(lambda scope: retired.append(scope))},
+    )()
+
+    runner = object.__new__(_BoundStrategyRunner)
+    runner.owner = owner
+    runner.scheduler = scheduler
+    runner.strategy = _Strategy()
+    runner.symbol = "RELIANCE"
+    runner._task = None
+    runner._tick_count = 0
+
+    await runner._tick()
+
+    assert scheduler.session_active("NSE") is scheduler.session_active("NSE", at=at)
+    assert scheduler.accepts_new_entries("NSE") is scheduler.accepts_new_entries("NSE", at=at)
+    if places:
+        assert scheduler.session_active("NSE", at=at) is True
+        assert scheduler.accepts_new_entries("NSE", at=at) is True
+        assert len(generated) == 1
+        assert len(routed) == 1
+        assert retired == []
+    else:
+        assert not (scheduler.session_active("NSE", at=at) and scheduler.accepts_new_entries("NSE", at=at))
+        assert generated == []
+        assert routed == []
+        assert retired == []
+
+
 def test_deprecated_open_alias_maps_to_the_runner_session() -> None:
     """The old name is the runner session, and internal code does not call it."""
     at = datetime(2026, 11, 9, 23, 40, tzinfo=IST)
