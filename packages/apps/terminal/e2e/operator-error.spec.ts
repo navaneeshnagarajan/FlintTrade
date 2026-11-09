@@ -1,4 +1,4 @@
-import { LIVE_TOKEN, assertRequest, captureEvidence, deferredResponse, expect, notifications, test, tickUntil } from "./order-flow-fixtures";
+import { LIVE_TOKEN, assertRequest, captureEvidence, deferredResponse, expect, notifications, registerRead, test, tickUntil } from "./order-flow-fixtures";
 import { accountSnapshot, selectIndstocksScope } from "./indstocks-disclosure-fixtures";
 import { ERROR_A, ERROR_B, ERROR_BODY, ERROR_SCOPE, ERROR_WRITE, assertPainted, errorPad, errorPath, errorRaw, mountErrorPad, registerErrorReads } from "./operator-error-fixtures";
 import { UNICODE_ERROR_CASES, UNICODE_ERROR_MARKS, CAPTURED_ORIGIN_CASES, assertCapturedTextPainted, measureCapturedTextPainted, observeCapturedOriginReads, awaitCapturedOriginStartup, registerCapturedOriginReads, selectCapturedOrigin } from "./operator-error-fixtures";
@@ -266,5 +266,40 @@ for (const viewport of [
     expect(getRequests.filter((path) => path !== "/ft-api/api/v1/ping")).toEqual(beforeGets.filter((path) => path !== "/ft-api/api/v1/ping"));
     for (const read of reads) expect(syntheticApi.callCount("GET", read.path)).toBe(read.count);
     presentationEvidence.assertWrites([{ method: "POST", path: ERROR_WRITE, body }]);
+  });
+});
+
+test.describe("dropped Order Pad Close", () => {
+  test.use({
+    benignConsoleErrors: [{
+      text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+      url: `http://localhost:5173${ERROR_WRITE}`,
+      expectedCalls: 1,
+    }],
+  });
+
+  test("shows the unknown sentence, has no Retry, and sends one order POST", async ({ page, syntheticApi }) => {
+    registerErrorReads(syntheticApi);
+    registerRead(syntheticApi, `${errorPath("margin")}?symbol=INFY&exchange=NSE&qty=1&product=MIS&action=SELL&pricetype=MARKET`, {
+      json: { status: "success", data: { total_margin: 100, span_margin: 100, exposure_margin: 0 } },
+    }, { minimum: 0, maximum: 2 });
+    const closeBody = {
+      symbol: "INFY", exchange: "NSE", action: "SELL", product: "MIS", orderType: "MARKET",
+      quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad",
+      order_type: "MARKET", trigger_price: 0, broker: "kotakneo", account_id: ERROR_A,
+    };
+    let posts = 0;
+    await page.route(`**${ERROR_WRITE}`, async (route) => {
+      posts += 1;
+      expect(route.request().postDataJSON()).toEqual(closeBody);
+      await route.abort("connectionreset");
+    });
+    await mountErrorPad(page);
+    await errorPad(page).getByRole("button", { name: "Close", exact: true }).click();
+    const outcome = errorPad(page).getByRole("status").filter({ hasText: unknownCopy });
+    await tickUntil(page, outcome);
+    await expect(outcome).toBeVisible();
+    await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+    expect(posts).toBe(1);
   });
 });

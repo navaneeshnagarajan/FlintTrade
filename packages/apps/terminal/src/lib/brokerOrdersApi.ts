@@ -34,11 +34,14 @@ import { useModeStore } from "@/stores/modeStore";
 export class BrokerOrdersApiError extends Error {
   /** HTTP status of the failed response (undefined for network failures). */
   status?: number;
+  /** Parsed response body, when the server sent one. */
+  body?: unknown;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, body?: unknown) {
     super(message);
     this.name = "BrokerOrdersApiError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -204,7 +207,13 @@ async function request<T>(
   } catch {
     const message = "Cannot reach the FlintTrade backend — check that it is running.";
     noteObservedFailure({ message, httpStatus: null, provenance: "order", scope: incidentScope });
-    throw new BrokerOrdersApiError(message);
+    throw new BrokerOrdersApiError(message, undefined, {
+      status: "error",
+      order_outcome: "unknown",
+      reason: "response_unconfirmed",
+      retry_safe: false,
+      message,
+    });
   }
 
   let json: unknown;
@@ -215,7 +224,12 @@ async function request<T>(
       ? `Broker orders API ${path}: invalid JSON response.`
       : `Broker orders API ${path}: HTTP ${resp.status}`;
     noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order", scope: incidentScope });
-    throw new BrokerOrdersApiError(failureMessage, resp.status);
+    throw new BrokerOrdersApiError(failureMessage, resp.status, {
+      status: "error",
+      order_outcome: resp.status === 408 || resp.status >= 500 ? "unknown" : undefined,
+      reason: resp.status === 408 || resp.status >= 500 ? "response_unconfirmed" : undefined,
+      retry_safe: false,
+    });
   }
   const message = extractMessage(json);
   const isErrorBody =
@@ -227,14 +241,30 @@ async function request<T>(
   if (!resp.ok || isErrorBody) {
     const failureMessage = message ?? `Broker orders API ${path}: HTTP ${resp.status}`;
     noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order", scope: incidentScope });
-    throw new BrokerOrdersApiError(failureMessage, resp.status);
+    throw new BrokerOrdersApiError(failureMessage, resp.status, json);
   }
 
   const data =
     json !== null && typeof json === "object" && "data" in json
       ? (json as { data: unknown }).data
       : json;
-  return data as T;
+  return withOrderOutcome(data, json) as T;
+}
+
+function withOrderOutcome(data: unknown, json: unknown): unknown {
+  if (json === null || typeof json !== "object" || !("order_outcome" in json)) return data;
+  const envelope = json as { order_outcome?: unknown; reason?: unknown; message?: unknown; retry_safe?: unknown };
+  if (typeof envelope.order_outcome !== "string") return data;
+  const outcome = {
+    order_outcome: envelope.order_outcome,
+    ...(typeof envelope.reason === "string" ? { reason: envelope.reason } : {}),
+    ...(typeof envelope.message === "string" ? { message: envelope.message } : {}),
+    ...(typeof envelope.retry_safe === "boolean" ? { retry_safe: envelope.retry_safe } : {}),
+  };
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    return { ...(data as Record<string, unknown>), ...outcome };
+  }
+  return { ...outcome, data };
 }
 
 const brokerOrderRowsSchema = z.array(z.record(z.string(), z.unknown()));
@@ -484,6 +514,7 @@ function useInvalidating<TVariables>(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
+    retry: false,
     // Capture the invalidation scope before dispatch; a late account-A ACK
     // must not refetch the currently mounted account-B listing.
     onMutate: (variables) => typeof invalidateKeys === "function" ? invalidateKeys(variables) : invalidateKeys,

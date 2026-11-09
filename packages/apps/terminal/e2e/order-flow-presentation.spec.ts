@@ -110,6 +110,7 @@ test("a cancellation ACK and a missing trigger retain execution uncertainty", as
     await page.clock.runFor(50);
     await page.getByRole("button", { name: "Refresh forever orders" }).click();
     await tickUntil(page, table.getByText("CANCELLED", { exact: true }));
+    await expect(page.getByText("Order cancelled", { exact: true })).toBeVisible();
     await expect(page.getByText(CANCEL_WARNING, { exact: false })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
@@ -204,7 +205,7 @@ test.describe("production-equivalent frozen GTT refusal (not native availability
     await page.getByRole("button", { name: "Place GTT", exact: true }).click();
     await tickUntil(page, page.getByRole("alert").filter({ hasText: GTT_REFUSAL }));
     await expect(page.getByText("Forever order requested.", { exact: false })).toHaveCount(0);
-    await expect(page.getByText("GTT placement status unknown.", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Order status unknown. Check Forever Orders before trying again.", { exact: true })).toHaveCount(0);
     await captureEvidence(page, info, "desktop-frozen-409-422-refusals");
     await captureNarrow(page, info, "narrow-frozen-409-422-refusals");
     presentationEvidence.assertWrites([{ method: "POST", path: "/ft-api/api/v1/orders/place", body: expectedBody }]);
@@ -409,7 +410,9 @@ test.describe("lost cancellation response", () => {
     const table = page.getByRole("table", { name: "Forever orders" });
     await tickUntil(page, table);
     await table.getByRole("button", { name: "Cancel", exact: true }).click();
-    await tickUntil(page, page.getByRole("alert").filter({ hasText: "Cancel status unknown. This order may still fill." }));
+    await tickUntil(page, page.getByRole("status").filter({ hasText: "Cancellation requested" }));
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
     await expect(page.getByRole("alert").filter({ hasText: "Synthetic cancel response lost; execution outcome unknown." })).toBeVisible();
     await expect(table.getByText("ACTIVE", { exact: true })).toBeVisible();
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();

@@ -3682,7 +3682,40 @@ def _gated_verb_write(
     response: dict[str, Any] = {"status": "success", "data": result}
     if ref:
         response["orderid"] = ref
+    if verb == "cancel_forever":
+        response.update(_forever_cancel_fields(result))
     return jsonify(response), 200
+
+
+def _forever_cancel_fields(result: object) -> dict[str, Any]:
+    """Label a forever-order cancel without turning an acknowledgement into a fill."""
+    if isinstance(result, dict):
+        token = ""
+        for key in ("status", "order_status", "orderStatus", "attempt_state"):
+            raw = result.get(key)
+            if isinstance(raw, str) and raw.strip():
+                token = "_".join(
+                    part for part in "".join(
+                        ch if ch.isalnum() else "_" for ch in raw.strip().upper()
+                    ).split("_") if part
+                )
+                break
+        if token == "REJECTED":
+            message = result.get("message")
+            fields: dict[str, Any] = {
+                "order_outcome": "rejected",
+                "reason": REASON_BROKER_REJECTED,
+                "retry_safe": False,
+            }
+            if isinstance(message, str) and message:
+                fields["message"] = message
+            return fields
+    labelled = dict(cancel_acknowledgement(
+        result if isinstance(result, dict) else {},
+        message=ORDER_CANCELLED,
+    ))
+    labelled["retry_safe"] = False
+    return labelled
 
 
 def _gated_broker_read(

@@ -263,7 +263,8 @@ describe("ForeverOrders real-hook cancellation evidence", () => {
       });
       expect(screen.getByText(rowB.symbol)).toBeInTheDocument();
       expect(screen.queryByText(CANCEL_PENDING)).not.toBeInTheDocument();
-      expect(screen.queryByText("Cancel status unknown. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
       expect(screen.queryByText("A cancellation response lost")).not.toBeInTheDocument();
       expect(fetchMock.mock.calls.filter(([url]) => String(url) === SECONDARY_LIST_URL)).toHaveLength(1);
     },
@@ -307,4 +308,121 @@ describe("ForeverOrders real-hook modification races", () => {
       expect(fetchMock.mock.calls.filter(([url]) => String(url) === SECONDARY_LIST_URL)).toHaveLength(1);
     },
   );
+});
+
+const FOREVER_UNKNOWN = "Order status unknown. Check Forever Orders before trying again.";
+const PLACE_URL = "/ft-api/api/v1/orders/place";
+
+describe("synthetic Dhan GTT outcomes", () => {
+  async function openBook() {
+    renderAccountSurface(() => <ForeverOrdersWidget />);
+    expect(await screen.findByRole("button", { name: "Place GTT" })).toBeInTheDocument();
+  }
+
+  function placeForever() {
+    fireEvent.change(screen.getByLabelText("GTT symbol"), { target: { value: "RELIANCE" } });
+    fireEvent.change(screen.getByLabelText("GTT quantity"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("GTT trigger price"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("GTT limit price"), { target: { value: "101" } });
+    fireEvent.click(screen.getByRole("button", { name: "Place GTT" }));
+  }
+
+  it("a dropped place says to check Forever Orders, offers no Retry, and sends one POST", async () => {
+    let posts = 0;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [] });
+      if (init.method === "POST" && url === PLACE_URL) {
+        posts += 1;
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    placeForever();
+    expect(await screen.findByText(FOREVER_UNKNOWN)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(posts).toBe(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("a lost cancel says Cancellation requested and does not resubmit", async () => {
+    let deletes = 0;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [ROW] });
+      if (init.method === "DELETE" && url === "/ft-api/api/v1/orders/forever/TRIGGER-A?broker=dhan&account_id=A1") {
+        deletes += 1;
+        return jsonResponse({
+          status: "error",
+          message: "Synthetic cancel response lost",
+          order_outcome: "unknown",
+          reason: "response_unconfirmed",
+          retry_safe: false,
+        }, 504);
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    expect(await screen.findByText(ROW.symbol)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(deletes).toBe(1);
+  });
+
+  it("shows Order cancelled only after the synthetic status confirms it", async () => {
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [ROW] });
+      if (init.method === "DELETE" && url === "/ft-api/api/v1/orders/forever/TRIGGER-A?broker=dhan&account_id=A1") {
+        return jsonResponse({
+          status: "success",
+          order_outcome: "cancel_requested",
+          reason: "awaiting_confirmation",
+          message: "Cancellation requested",
+          retry_safe: false,
+          data: { orderId: ROW.order_id, status: "PENDING" },
+        });
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) {
+        return jsonResponse({ status: "success", data: [{ ...ROW, status: "CANCELLED" }] });
+      }
+      return refuseUnexpected(url, init);
+    };
+    await refreshListing();
+    expect(await screen.findByText("Order cancelled")).toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("a broker rejection stays a refusal and does not offer Retry", async () => {
+    let posts = 0;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [] });
+      if (init.method === "POST" && url === PLACE_URL) {
+        posts += 1;
+        return jsonResponse({
+          status: "error",
+          message: "GTT rejected by broker",
+          order_outcome: "rejected",
+          reason: "broker_rejected",
+          retry_safe: false,
+        }, 400);
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    placeForever();
+    expect(await screen.findByText("GTT rejected by broker")).toBeInTheDocument();
+    expect(screen.queryByText(FOREVER_UNKNOWN)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
 });
