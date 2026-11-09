@@ -1594,8 +1594,10 @@ class UserStrategyRunner:
             strategy_id: ID of the strategy.
 
         Returns:
-            Dict with keys: strategy_id, name, state (running/stopped/crashed),
-            pid, memory_mb, uptime_seconds, log_path.
+            Dict with keys: strategy_id, name, state
+            (running/stopped/crashed/unknown), pid, memory_mb,
+            uptime_seconds, log_path. ``unknown`` includes
+            ``ownership_retained`` and does not mean the process stopped.
 
         Raises:
             FileNotFoundError: If the strategy does not exist.
