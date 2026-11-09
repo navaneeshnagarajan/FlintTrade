@@ -215,7 +215,7 @@ export async function assertCapturedTextPainted(locator: Locator, info: TestInfo
 export function registerErrorReads(registry: SyntheticFixtureRegistry, mode: "live" | "practice" = "live", switchAccount = false): void {
   registerDeskReads(registry, switchAccount, { broker: ERROR_BROKER, accountIds: [ERROR_A, ERROR_B] });
   for (const account of [ERROR_A, ERROR_B]) {
-    registerRead(registry, errorPath("positions", account), { json: { status: "success", data: account === ERROR_B ? [{ symbol: "INFY", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 100, ltp: 101, pnl: 10, pnlPercent: 1 }] : [] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
+    registerRead(registry, errorPath("positions", account), { json: { status: "success", data: [{ symbol: "INFY", exchange: "NSE", product: "MIS", quantity: account === ERROR_B ? 10 : 1, averagePrice: 100, ltp: 101, pnl: account === ERROR_B ? 10 : 1, pnlPercent: 1 }] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
     registerRead(registry, errorPath("orders", account), { json: { status: "success", data: [] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
     registerRead(registry, errorPath("funds", account), { json: { status: "success", data: { available_balance: 100_000, used_margin: 0, total_balance: 100_000 } } }, { minimum: 0, maximum: 2 });
     registerRead(registry, `${errorPath("search", account)}?query=INFY&exchange=NSE`, { json: { status: "success", data: [{ symbol: "INFY", exchange: "NSE", lotsize: 1, tick_size: 0.05 }] } }, { minimum: 0, maximum: 2 });
