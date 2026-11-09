@@ -226,7 +226,7 @@ for (const viewport of [
     const arrived = page.waitForResponse((response) => response.url().endsWith(ERROR_WRITE));
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished(); expect(response.status()).toBe(status); expect(await response.json()).toEqual(raw);
-    const alert = errorPad(page).getByRole("status"); await tickUntil(page, alert);
+    const alert = errorPad(page).getByRole(fixture.title === "Order failed" ? "alert" : "status"); await tickUntil(page, alert);
     await expect(alert).toHaveText(expected);
     await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Not placed|Try again in a few|Position flat|ACK/);
     if (status === 500) await expect(alert).not.toContainText("No order was sent");

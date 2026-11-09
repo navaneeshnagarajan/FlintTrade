@@ -1055,6 +1055,7 @@ function OrderPadWidget(props: WidgetProps) {
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
         const unknown = presentation.body === ORDER_STATUS_UNKNOWN;
+        if (unknown) setPracticeReview(null);
         showToast(unknown ? "unknown" : "error", presentation.body, 6000, false);
         emitNotification({ category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true, ...presentation });
         return false;
@@ -1083,6 +1084,7 @@ function OrderPadWidget(props: WidgetProps) {
       setAdmission(null);
       const outcome = presentSubmitError(err);
       if (outcome.kind === "unknown") {
+        setPracticeReview(null);
         showToast("unknown", outcome.message, 6000);
         emitNotification({
           category: "order",
