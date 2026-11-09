@@ -105,7 +105,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     state.cancel = { ...state.cancel, isSuccess: true, variables: { broker: "dhan", account_id: "A", order_id: ROW.order_id } };
     rerender(<ForeverOrdersWidget />);
     const row = screen.getByText(ROW.symbol).closest("tr")!;
-    expect(within(row).getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+    expect(within(row).getByText("Cancellation requested")).toBeInTheDocument();
     expect(within(row).getByText("ACTIVE")).toBeInTheDocument();
   });
 
@@ -129,7 +129,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.list = { ...state.list, dataUpdatedAt: 2000, ...query };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent(ROW.order_id);
       expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
         .toBeInTheDocument();
@@ -137,7 +137,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", child_status: "UNKNOWN" }],
         isSuccess: true, isError: false, isLoading: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
     });
 
@@ -146,11 +146,11 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       const { rerender } = render(<ForeverOrdersWidget />);
       acknowledge();
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByText("CANCELLED")).toBeInTheDocument();
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(state.cancelRequest).not.toHaveBeenCalled();
     });
 
@@ -162,8 +162,8 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         variables: { broker: "dhan", account_id: "A", order_id: "TRIGGER-2" } };
       state.list = { ...state.list, data: [], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent("Cancel pending. This order may still fill.");
-      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toHaveTextContent("Cancel pending. This order may still fill.");
+      expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent("Cancellation requested");
+      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toHaveTextContent("Cancellation requested");
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 3000 };
       rerender(<ForeverOrdersWidget />);
       expect(screen.queryByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).not.toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.list = { ...state.list, data: [{ ...ROW, gtt_order_id: "OTHER-ID", status: "CANCELLED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
     });
 
     it.each(["CANCELLED", "REJECTED", "EXPIRED"])(
@@ -187,7 +187,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         state.list = { ...state.list, data: [{ ...ROW, status, child_order_id: "CHILD-1", child_status: "UNKNOWN" }], dataUpdatedAt: 2000 };
         rerender(<ForeverOrdersWidget />);
         expect(screen.getByText(status)).toBeInTheDocument();
-        expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+        expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
         expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
           .toBeInTheDocument();
         expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
@@ -208,7 +208,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], ...query };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     });
 
@@ -219,7 +219,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         rerender(<ForeverOrdersWidget />);
         state.list = { ...state.list, data: [{ ...ROW, status }], dataUpdatedAt: 2000 };
         rerender(<ForeverOrdersWidget />);
-        expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+        expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       },
     );
 
@@ -230,14 +230,14 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       state.target = { broker: "dhan", account_id: "B" };
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       state.target = { broker: "dhan", account_id: "A" };
       state.list = { ...state.list, dataUpdatedAt: 100 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       state.list = { ...state.list, dataUpdatedAt: 3000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
     });
 
     it.each([{ account_id: "B" }, { broker: "upstox" }])(
@@ -247,10 +247,10 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         rerender(<ForeverOrdersWidget />);
         state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", ...scope }], dataUpdatedAt: 2000 };
         rerender(<ForeverOrdersWidget />);
-        expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+        expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
         state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", broker: "dhan", account_id: "A" }], dataUpdatedAt: 3000 };
         rerender(<ForeverOrdersWidget />);
-        expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+        expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       },
     );
 
@@ -261,7 +261,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       state.list = { ...state.list, data: [ROW, { ...ROW, order_id: "TRIGGER-2", status: "CANCELLED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
       const row = screen.getAllByText(ROW.symbol)[0].closest("tr")!;
-      expect(within(row).getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(within(row).getByText("Cancellation requested")).toBeInTheDocument();
     });
 
     it.each([
@@ -273,7 +273,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.list = { ...state.list, data: rows, dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.getAllByText("Cancel pending. This order may still fill.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
     });
 
     it("does not resurrect a reconciled ACK from later error data", () => {
@@ -282,10 +282,10 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.list = { ...state.list, data: [{ ...ROW, status: "EXPIRED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       state.list = { ...state.list, isSuccess: false, isError: true, error: new Error("Listing unavailable") };
       rerender(<ForeverOrdersWidget />);
-      expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(screen.getByTestId("forever-orders-unavailable")).toBeInTheDocument();
     });
   });
@@ -294,7 +294,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     state.list.data = [{ ...ROW, status: "CANCEL_REQUESTED" }];
     render(<ForeverOrdersWidget />);
     expect(screen.getByText(ROW.symbol)).toBeInTheDocument();
-    expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
   });
 
   it("an unfamiliar trigger status cannot imply its spawned order is terminal", () => {
@@ -338,7 +338,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     state.target = { broker: "dhan", account_id: "B" };
     rerender(<ForeverOrdersWidget />);
     expect(screen.queryByText("Account A refusal")).not.toBeInTheDocument();
-    expect(screen.queryByText("Cancel pending. This order may still fill.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
     expect(screen.queryByText("Forever order requested. Check broker triggers and orders for the outcome.")).not.toBeInTheDocument();
   });
 

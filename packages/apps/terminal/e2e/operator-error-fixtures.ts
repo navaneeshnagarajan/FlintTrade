@@ -8,12 +8,12 @@ export const ERROR_A = "KOTAK-OFFLINE";
 export const ERROR_B = "KOTAK-OFFLINE-B";
 export const ERROR_WRITE = "/ft-api/api/v1/orders/kotakneo/place";
 export const ERROR_SCOPE = "live:native:kotakneo:KOTAK-OFFLINE";
-export const ERROR_BODY = { symbol: "INFY", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET", quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "", order_type: "MARKET", trigger_price: 0, broker: ERROR_BROKER, account_id: ERROR_A };
+export const ERROR_BODY = { symbol: "INFY", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET", quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "", order_type: "MARKET", trigger_price: 0, lotSize: 1, lot_size: 1, broker: ERROR_BROKER, account_id: ERROR_A };
 export const errorPath = (kind: string, account = ERROR_A) => nativePath(kind, account, ERROR_BROKER);
 export const errorRaw = (outcome = "unknown_after_dispatch") => ({ status: "error", message: "Order dispatch failed", dispatch_outcome: outcome, retry_safe: false, affected_item: { broker: ERROR_BROKER, account_id: ERROR_A, operation: "place", symbol: "INFY", exchange: "NSE", product: "MIS", action: "BUY" }, broker_code: "1021", broker_message: "Order is completed" });
 export const errorPad = (page: Page): Locator => page.locator('[data-tour-target="order-pad"]').first();
 
-const unicodeUnknown = "Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.";
+const unicodeUnknown = "Order status unknown. Check Orders before trying again.";
 const unicodeRefused = "Order refused before dispatch. No order was sent. No automatic retry.";
 const unicodeOrigin = " Origin: kotakneo / KOTAK-OFFLINE · BUY INFY (NSE / MIS).";
 const unicodeCode = " Broker code: 1021.";
@@ -30,7 +30,7 @@ export const UNICODE_ERROR_CASES = [
   ...UNICODE_ERROR_MARKS.map(({ name, mark }) => ({
     name: `${name} omitted from unknown native reason`, status: 500,
     raw: { ...errorRaw(), broker_message: `Order${mark} is completed` },
-    expected: unicodeUnknown + unicodeOrigin + unicodeCode, refused: false,
+    expected: unicodeUnknown, refused: false,
   })),
   ...UNICODE_ERROR_MARKS.map(({ name, mark }) => ({
     name: `${name} omitted from structured refusal summary`, status: 400,
@@ -41,7 +41,7 @@ export const UNICODE_ERROR_CASES = [
   {
     name: "ordinary Arabic and Devanagari printable reason stays literal", status: 500,
     raw: { ...errorRaw(), broker_message: printableReason },
-    expected: unicodeUnknown + unicodeOrigin + ` Broker reason (observation): ${printableReason}.` + unicodeCode,
+    expected: unicodeUnknown,
     refused: false,
   },
 ] as const;

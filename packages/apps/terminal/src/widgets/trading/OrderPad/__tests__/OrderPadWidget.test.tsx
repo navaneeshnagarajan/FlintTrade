@@ -745,7 +745,7 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("Order outcome unknown. An order may still execute.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     // A new explicit operator action retains the original reducing path; a
@@ -756,6 +756,86 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
+  });
+
+  it("tells Practice a dropped submit is unknown and does not offer Retry", async () => {
+    selectedMode.current = "practice";
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockRejectedValueOnce(new Error("Connection failed. Check FlintTrade backend is running."));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+
+    const outcome = await screen.findByRole("status");
+    expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(outcome.className).not.toMatch(/text-loss/);
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/order failed|rejected|try again in a few seconds/i)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a Practice 500 without a broker result as unknown, not a rejection", async () => {
+    selectedMode.current = "practice";
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "FlintTrade backend error. Try again in a few seconds.",
+      500,
+      { status: "error", message: "Practice trading engine encountered an error" },
+    ));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+
+    const outcome = await screen.findByRole("status");
+    expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("still shows a confirmed Practice rejection as a rejection", async () => {
+    selectedMode.current = "practice";
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Practice order rejected",
+      400,
+      { status: "error", message: "Practice order rejected", order_outcome: "rejected", reason: "broker_rejected" },
+    ));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    fireEvent.click(screen.getByTestId("orderpad-close"));
+
+    const outcome = await screen.findByRole("alert");
+    expect(outcome).toHaveTextContent("Practice order rejected");
+    expect(outcome).not.toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
   it("keeps GTT visible and disabled", async () => {

@@ -32,7 +32,7 @@ const ROW = {
 const PRIMARY_LIST_URL = "/ft-api/api/v1/orders/forever?broker=dhan&account_id=A1";
 const SECONDARY_LIST_URL = "/ft-api/api/v1/orders/forever?broker=upstox&account_id=B2";
 const PRIMARY_KEY = brokerOrderKeys.forever.list({ broker: "dhan", account_id: "A1" });
-const CANCEL_PENDING = "Cancel pending. This order may still fill.";
+const CANCEL_PENDING = "Cancellation requested";
 const CHILD_CAVEAT = "Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders.";
 
 function jsonResponse(body: unknown, status = 200): Response {

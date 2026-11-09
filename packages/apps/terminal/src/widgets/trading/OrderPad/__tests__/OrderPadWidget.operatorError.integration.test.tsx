@@ -60,7 +60,7 @@ async function submit() {
   renderAccountSurface(() => <Surface />);
   await screen.findByText("Lot: 1");
   fireEvent.click(screen.getByRole("button", { name: "Place BUY Order" }));
-  const alert = await screen.findByRole("alert");
+  const alert = await screen.findByTestId("order-pad-outcome");
   await waitFor(() => expect(events).toHaveLength(1));
   expect(getSnapshot()[0]).toMatchObject({ title: events[0]?.title, body: events[0]?.body });
   expect(events[0]).toMatchObject({ accountScopeKey: "live:native:kotakneo:KOTAK-OFFLINE", skipAccountRefresh: true });
@@ -68,9 +68,9 @@ async function submit() {
   return alert;
 }
 function assertUnknown(alert: HTMLElement) {
-  expect(alert).toHaveTextContent("Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.");
-  expect(alert).not.toHaveTextContent(/Not placed|No order was sent|Order filled|Position closed|Try again/i);
-  expect(events[0]?.title).toBe("Order outcome unknown: BUY INFY");
+  expect(alert).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+  expect(alert).not.toHaveTextContent(/Not placed|No order was sent|Order filled|Position closed|Try again in a few/i);
+  expect(events[0]?.title).toBe("Order status unknown: BUY INFY");
   expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   expect(getSnapshot()[0]).not.toHaveProperty("action");
 }
@@ -98,7 +98,7 @@ describe("bounded truthful operator order errors", () => {
   it("renders the literal native code/reason separately from unknown outcome in the pad and central feed", async () => {
     const beforeFault = useOperatorSignalStore.getState().brokerReject;
     const alert = await submit(); assertUnknown(alert);
-    expect(alert).toHaveTextContent("Broker reason (observation): Order is completed. Broker code: 1021.");
+    expect(alert).not.toHaveTextContent(/Broker reason|Order is completed|Broker code/);
     expect(getSnapshot()[0]?.body).toBe(alert.textContent);
     expect(useOperatorSignalStore.getState().brokerReject).toEqual(beforeFault);
   });
@@ -169,7 +169,7 @@ describe("bounded truthful operator order errors", () => {
     const alert = await submit(); assertUnknown(alert);
     expect(alert).not.toHaveTextContent("SYNTHETIC_REASON");
     expect(alert.textContent).not.toContain(control);
-    expect(alert).toHaveTextContent("Broker code: 1021.");
+    expect(alert).not.toHaveTextContent("Broker code");
     expect(getSnapshot()[0]?.body).toBe(alert.textContent);
     expect(JSON.stringify(getSnapshot())).not.toContain("SYNTHETIC_REASON");
   });
@@ -187,7 +187,8 @@ describe("bounded truthful operator order errors", () => {
   it.each(["السوق مغلق", "बाज़ार बंद है"])("retains printable native Unicode reason %s literally", async (reason) => {
     fault = { ...rawUnknown(), broker_message: reason };
     const alert = await submit(); assertUnknown(alert);
-    expect(alert).toHaveTextContent(`Broker reason (observation): ${reason}. Broker code: 1021.`);
+    expect(alert).not.toHaveTextContent(reason);
+    expect(alert).not.toHaveTextContent("Broker code");
     expect(getSnapshot()[0]?.body).toBe(alert.textContent);
   });
   it.each(bidiControls)("omits an unsafe captured $name symbol whole from the notification title without changing the request", async ({ control }) => {
@@ -195,10 +196,10 @@ describe("bounded truthful operator order errors", () => {
     props = makeWidgetPanelProps({ params: { symbol: suppliedSymbol, exchange: "NSE" } });
     fault = rawUnknown();
     const alert = await submit();
-    expect(alert).toHaveTextContent("Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.");
+    expect(alert).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(alert.textContent).not.toContain("SYNTHETIC_SYMBOL");
-    expect(events[0]?.title).toBe("Order outcome unknown");
-    expect(getSnapshot()[0]?.title).toBe("Order outcome unknown");
+    expect(events[0]?.title).toBe("Order status unknown");
+    expect(getSnapshot()[0]?.title).toBe("Order status unknown");
     expect(getSnapshot()[0]?.body).toBe(alert.textContent);
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(getSnapshot()[0]).not.toHaveProperty("action");
@@ -210,8 +211,8 @@ describe("bounded truthful operator order errors", () => {
     props = makeWidgetPanelProps({ params: { symbol, exchange: "NSE" } });
     fault = rawUnknown();
     const alert = await submit();
-    expect(alert).toHaveTextContent("Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.");
-    expect(events[0]?.title).toBe(`Order outcome unknown: BUY ${symbol}`);
+    expect(alert).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(events[0]?.title).toBe(`Order status unknown: BUY ${symbol}`);
     expect(getSnapshot()[0]?.title).toBe(events[0]?.title);
     expect(getSnapshot()[0]?.body).toBe(alert.textContent);
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -254,13 +255,13 @@ describe("bounded truthful operator order errors", () => {
     const write = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(String(write?.[1]?.body)).symbol).toBe(suppliedSymbol);
   });
-  it("preserves the documented 64/256 native field bounds literally", async () => {
+  it("does not show a native observation as a completed or rejected order", async () => {
     fault = { ...rawUnknown(), broker_code: "C".repeat(64), broker_message: "R".repeat(256) };
-    const alert = await submit(); assertUnknown(alert); expect(alert).toHaveTextContent("C".repeat(64)); expect(alert).toHaveTextContent("R".repeat(256));
+    const alert = await submit(); assertUnknown(alert); expect(alert).not.toHaveTextContent("C".repeat(64)); expect(alert).not.toHaveTextContent("R".repeat(256));
   });
-  it("renders native markup as text rather than HTML", async () => {
+  it("does not render a native observation as HTML on an unknown outcome", async () => {
     fault = { ...rawUnknown(), broker_message: '<img src=x onerror="throw 1">' };
-    const alert = await submit(); assertUnknown(alert); expect(alert).toHaveTextContent('<img src=x onerror="throw 1">'); expect(alert.querySelector("img")).toBeNull();
+    const alert = await submit(); assertUnknown(alert); expect(alert).not.toHaveTextContent("<img"); expect(alert.querySelector("img")).toBeNull();
   });
   it("does not show oversized arbitrary unstructured HTTP error text", async () => {
     fault = { status: "error", message: "SECRET".repeat(200), raw_response: { token: "SECRET" } }; status = 400;
@@ -306,8 +307,8 @@ describe("bounded truthful operator order errors", () => {
       const beforeQueries = client.getQueryCache().getAll().map((query) => ({ key: query.queryKey, data: query.state.data }));
       const before = [...getSnapshot()]; const beforeEvents = [...events];
       try { await act(async () => { release(response(fault, status)); }); await waitFor(() => expect(events.length).toBe(beforeEvents.length + 1));
-        expect(events.at(-1)).toMatchObject({ accountScopeKey: "live:native:kotakneo:KOTAK-OFFLINE", skipAccountRefresh: true, body: expect.stringContaining("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY") });
-        expect(events.at(-1)?.title).toBe(outcome === "unknown_after_dispatch" ? "Order outcome unknown: BUY INFY" : "Order refused: BUY INFY");
+        expect(events.at(-1)).toMatchObject({ accountScopeKey: "live:native:kotakneo:KOTAK-OFFLINE", skipAccountRefresh: true, body: outcome === "unknown_after_dispatch" ? "Order status unknown. Check Orders before trying again." : expect.stringContaining("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY") });
+        expect(events.at(-1)?.title).toBe(outcome === "unknown_after_dispatch" ? "Order status unknown: BUY INFY" : "Order refused: BUY INFY");
         expect(getSnapshot().slice(1)).toEqual(before); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
         expect(fetchMock.mock.calls.filter(([, init]) => !init?.method || init.method === "GET").map(([url]) => String(url))).toEqual(beforeReads);
         expect(client.getQueryCache().getAll().map((query) => ({ key: query.queryKey, data: query.state.data }))).toEqual(beforeQueries);
@@ -320,7 +321,7 @@ describe("bounded truthful operator order errors", () => {
     renderAccountSurface(() => <Surface />); await screen.findByText("Lot: 1");
     fireEvent.click(screen.getByRole("button", { name: mode === "practice" ? "Practice Buy" : "Example Buy" }));
     await screen.findByRole("dialog"); fireEvent.click(screen.getByRole("button", { name: mode === "practice" ? "Confirm simulated Practice order" : "Confirm Example order" }));
-    const alert = await screen.findByRole("alert"); expect(alert).not.toHaveTextContent(/Broker reason|Order outcome unknown/);
+    const alert = await screen.findByRole("alert"); expect(alert).not.toHaveTextContent(/Broker reason|Order status unknown/);
     expect(fetchMock.mock.calls.filter(([input, init]) => String(input) === writeUrl && init?.method === "POST")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(mode === "practice" ? 1 : 0);
   });

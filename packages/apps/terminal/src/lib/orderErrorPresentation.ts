@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { OrderApiError } from "@/services/api";
 import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { NATIVE_TARGET_NOT_READY_MESSAGE } from "@/services/brokerTargets";
@@ -66,9 +67,9 @@ function originText(origin: OrderErrorOrigin): string {
 /** Presentation only: never write/retry, change authority or infer a fill. */
 export function nativeOrderErrorPresentation(error: unknown, origin: OrderErrorOrigin): OrderErrorPresentation | null {
   const unknown = (): OrderErrorPresentation => ({
-    title: capturedOrderTitle("Order outcome unknown", origin.params),
+    title: capturedOrderTitle("Order status unknown", origin.params),
     originDisclosure: capturedOrderOriginDisclosure(origin),
-    body: `Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.${originText(origin)}`,
+    body: ORDER_STATUS_UNKNOWN,
   });
   if (!(error instanceof OrderApiError)) {
     // Only known local pre-transport guard copy may use the existing refusal
@@ -91,10 +92,7 @@ export function nativeOrderErrorPresentation(error: unknown, origin: OrderErrorO
     const reason = boundedText.safeParse(body?.broker_message);
     const code = nativeCode.safeParse(body?.broker_code);
     const observations = `${reason.success ? ` Broker reason (observation): ${reason.data}.` : ""}${code.success ? ` Broker code: ${code.data}.` : ""}`;
-    if (outcome === "unknown_after_dispatch") {
-      const presentation = unknown();
-      return { ...presentation, body: presentation.body + observations };
-    }
+    if (outcome === "unknown_after_dispatch") return unknown();
     const summary = boundedText.safeParse(body?.message);
     return {
       title: capturedOrderTitle("Order refused", params),

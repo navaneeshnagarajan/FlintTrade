@@ -606,6 +606,9 @@ class TestPracticeMode:
         assert resp.get_json() == {
             "status": "error",
             "message": "A market order needs a live price (LTP) to fill",
+            "order_outcome": "rejected",
+            "reason": "broker_rejected",
+            "retry_safe": False,
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):

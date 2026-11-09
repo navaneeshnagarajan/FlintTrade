@@ -320,6 +320,54 @@ describe("OrdersWidget", () => {
     });
   });
 
+  it("shows Cancellation requested when the cancel is acknowledged but not confirmed", async () => {
+    mockCancelOrder.mockResolvedValue({
+      status: "success",
+      orderid: "ORD123",
+      order_outcome: "cancel_requested",
+      reason: "awaiting_confirmation",
+    });
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
+    renderWidget();
+    fireEvent.click(screen.getByLabelText("Cancel order ORD123"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(mockCancelOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Order cancelled only after the order status is confirmed cancelled", async () => {
+    mockCancelOrder.mockResolvedValue({
+      status: "CANCELLED",
+      order_id: "ORD123",
+      order_outcome: "cancelled",
+      reason: "status_confirmed",
+    });
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
+    renderWidget();
+    fireEvent.click(screen.getByLabelText("Cancel order ORD123"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Order cancelled");
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+  });
+
+  it("keeps a dropped cancel unknown instead of calling it cancelled", async () => {
+    mockCancelOrder.mockRejectedValue(Object.assign(new Error("Failed to fetch"), { status: 0 }));
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
+    renderWidget();
+    fireEvent.click(screen.getByLabelText("Cancel order ORD123"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
+
+    const outcome = await screen.findByRole("status");
+    expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(mockCancelOrder).toHaveBeenCalledTimes(1);
+  });
+
   it("does not cancel when the confirmation is dismissed", () => {
     mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
     renderWidget();
