@@ -15,6 +15,7 @@ import logging
 import math
 import threading
 import time as _time
+import warnings
 from collections.abc import Awaitable as AwaitableABC, Coroutine as CoroutineABC, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -308,7 +309,9 @@ class TimeScheduler:
     Usage::
 
         sched = TimeScheduler()
-        if sched.is_market_open("NSE"):
+        if sched.accepts_new_entries("NSE"):
+            ...
+        if sched.session_active("MCX"):
             ...
         if sched.is_deploy_frozen(["NSE", "NFO"]):
             ...
@@ -330,7 +333,7 @@ class TimeScheduler:
     def get_schedule(self, exchange: str) -> ExchangeSchedule | None:
         return EXCHANGE_SCHEDULES.get(exchange.strip().upper())
 
-    def is_market_open(
+    def accepts_new_entries(
         self,
         exchange: str,
         at: datetime | None = None,
@@ -339,31 +342,46 @@ class TimeScheduler:
         expiry_calendar: Sequence[date | str] | None = None,
         risk_increasing: bool = True,
     ) -> bool:
-        """Check whether the exchange is open on the trading calendar and clock."""
+        """True only when admission would accept a new risk-increasing order.
+
+        The answer matches ``safety.is_market_open`` and market timings
+        ``order_entry`` for this scheduler's holiday calendar. Cash auction
+        entry counts. The runner's exit window does not.
+        """
+        from flinttrade_engine.safety import is_market_open  # noqa: PLC0415
+
+        current = _as_ist(at) if at is not None else self.now_ist()
+        return is_market_open(
+            exchange,
+            at=current,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+            market_calendar=self,
+        )
+
+    def session_active(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
+    ) -> bool:
+        """True while the runner session, including exit and square-off, is running.
+
+        MCX stays active until 23:55. NCDEX stays active at the 17:00 gate.
+        A calendar session that replaces the ordinary close is this window.
+        """
         exchange = exchange.strip().upper()
         sched = EXCHANGE_SCHEDULES.get(exchange)
         if sched is None:
             return False
-
         if sched.is_24x7:
             return True
 
         current = _as_ist(at) if at is not None else self.now_ist()
-        from .market_hours import session_decision  # noqa: PLC0415
-
-        decision = session_decision(
-            exchange,
-            current,
-            symbol=symbol,
-            expiry_calendar=expiry_calendar,
-            risk_increasing=risk_increasing,
-        )
-        # Cash auction entry is the decision. The runner window below is not:
-        # MCX stays open until 23:55 until that policy change.
-        if exchange in {"NSE", "BSE"} and decision.reason in {"auction_entry", "auction_closed"}:
-            if self.get_market_session(exchange, on=current.date(), symbol=symbol) is None:
-                return False
-            return decision.order_entry == "auction_entry"
         return (
             self._active_market_window(
                 exchange,
@@ -373,6 +391,36 @@ class TimeScheduler:
                 risk_increasing=risk_increasing,
             )
             is not None
+        )
+
+    def is_market_open(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
+    ) -> bool:
+        """Deprecated alias of :meth:`session_active`.
+
+        This is the runner session, including the exit and square-off window.
+        It is not order admission. A new risk-increasing order uses
+        :meth:`accepts_new_entries`.
+        """
+        warnings.warn(
+            "TimeScheduler.is_market_open is deprecated and means session_active, "
+            "the runner session including its exit window. "
+            "Use accepts_new_entries for a new risk-increasing order.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.session_active(
+            exchange,
+            at=at,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
         )
 
     def get_market_session(
@@ -758,7 +806,7 @@ class StrategyRunner:
     """Runs a single strategy in an async tick loop.
 
     Flow per tick:
-    1. Check market open + not deploy-frozen
+    1. Check the runner session is active, including its exit window
     2. Fetch live quote via BrokerClient
     3. Call strategy.on_tick(quote)
     4. Check should_square_off — trigger auto square-off if needed
@@ -1296,7 +1344,8 @@ class StrategyRunner:
 
         The decision is computed here so the tick frame does not keep clock
         objects while user strategy code is running. 23:55 stays the MCX
-        runner session end until that policy change.
+        runner session end until that policy change. The tick keeps running
+        through that exit window; a new entry is a separate admission check.
         """
         from .market_hours import session_decision  # noqa: PLC0415
 
@@ -1306,7 +1355,7 @@ class StrategyRunner:
             symbol=self.symbol,
             risk_increasing=False,
         )
-        if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
+        if not self.scheduler.session_active(exchange, symbol=self.symbol):
             return "closed"
         if decision.square_off is not None and self.scheduler.should_square_off(exchange, symbol=self.symbol):
             return "square_off"
@@ -2084,8 +2133,8 @@ class CronStrategyScheduler:
     ) -> str:
         """Register a strategy callback on a cron expression.
 
-        The callback is wrapped with a market-hours gate that silently skips
-        execution whenever the effective exchange session is closed.
+        The callback is wrapped with a session gate that silently skips
+        execution when the runner session, including its exit window, is closed.
 
         Args:
             strategy_id: Unique identifier for the strategy.  Used as the
@@ -2302,8 +2351,9 @@ class CronStrategyScheduler:
         The gate logic (in order):
 
         1. If :attr:`_check_market` is ``False`` — always execute (test bypass).
-        2. Ask the canonical :class:`TimeScheduler` whether the exchange is open.
-        3. If closed, derive a useful skip reason from that scheduler's session.
+        2. Ask :meth:`TimeScheduler.session_active` whether the runner session,
+           including its exit window, is still running.
+        3. If not, derive a useful skip reason from that scheduler's session.
         """
         time_scheduler = self._time_scheduler
 
@@ -2329,7 +2379,7 @@ class CronStrategyScheduler:
             exchange = config.exchange
             symbol = config.symbol or None
             sched = EXCHANGE_SCHEDULES.get(exchange)
-            if not time_scheduler.is_market_open(
+            if not time_scheduler.session_active(
                 exchange,
                 at=now_ist,
                 symbol=symbol,

@@ -392,8 +392,8 @@ def test_option_session_uses_the_runtime_scheduler_holiday() -> None:
             year="2026",
         )
         option = "NIFTY24APR2625500CE"
-        assert fresh.is_market_open("NFO", symbol=option) is True
-        assert runtime.is_market_open("NFO", symbol=option) is False
+        assert fresh.session_active("NFO", symbol=option) is True
+        assert runtime.session_active("NFO", symbol=option) is False
         app = Flask(__name__)
         app.config["TIME_SCHEDULER"] = runtime
         with app.app_context():
@@ -458,8 +458,8 @@ def test_option_session_honours_a_runtime_special_session() -> None:
             year="2026",
         )
         option = "NIFTY24APR25500CE"
-        assert fresh.is_market_open("NFO", symbol=option) is False
-        assert runtime.is_market_open("NFO", symbol=option) is True
+        assert fresh.session_active("NFO", symbol=option) is False
+        assert runtime.session_active("NFO", symbol=option) is True
         app = Flask(__name__)
         app.config["TIME_SCHEDULER"] = runtime
         with app.app_context():

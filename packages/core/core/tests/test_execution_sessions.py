@@ -248,7 +248,7 @@ def test_real_strategy_runner_has_two_exact_paper_owners_not_name_only(desk, tmp
     from flinttrade_core.protection_grants import install_protection_services
     protection = install_protection_services(desk.app, tmp_path / "strategy-protection")
     desk.app.config["EXECUTION_STRATEGY_FACTORIES"] = {"synthetic-tick": SyntheticTickStrategy}
-    desk.app.config["TIME_SCHEDULER"].is_market_open = lambda *_args, **_kwargs: True
+    desk.app.config["TIME_SCHEDULER"].accepts_new_entries = lambda *_args, **_kwargs: True
     install_execution_sessions(desk.app, tmp_path)
     headers = {"Authorization": "Bearer " + desk.token(mode="live", scopes=["admin.services.read", "admin.services.write", "admin.accounts.read", "admin.accounts.write"])}
     sessions = None

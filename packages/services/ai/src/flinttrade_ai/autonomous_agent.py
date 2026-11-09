@@ -496,7 +496,12 @@ class AutonomousTrader:
         )
 
     def _is_market_open(self, symbol: str | None = None) -> bool:
-        """Return whether any requested instrument has an effective open session."""
+        """Return whether the effective session is still running.
+
+        This follows the session window, including an exit that runs past
+        order admission. It does not say a new risk-increasing order would
+        be accepted. That answer is admission.
+        """
         symbols = [symbol] if symbol is not None else self.config.symbols
         return any(self._effective_session(candidate) is not None for candidate in symbols)
 

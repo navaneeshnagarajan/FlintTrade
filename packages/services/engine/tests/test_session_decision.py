@@ -1,12 +1,14 @@
 """One session answer, checked through the real callers.
 
-The same IST instants go through safety.is_market_open, the scheduler's
-session window, square-off, and GET /api/v1/market/timings.
+The same IST instants go through safety.is_market_open, entry admission,
+the runner session, square-off, and GET /api/v1/market/timings.
 """
 
 from __future__ import annotations
 
+import warnings
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from flask import Flask
@@ -39,7 +41,7 @@ _REVISED_PHASE = {
 
 
 def _rows() -> list[tuple[str, int, int, int, bool, bool, bool, str | None, str | None]]:
-    """exchange, day, hour, minute, safety, scheduler, square-off, close, phase."""
+    """exchange, day, hour, minute, safety, session, square-off, close, phase."""
     rows: list[tuple[str, int, int, int, bool, bool, bool, str | None, str | None]] = []
     afternoon = ((15, 14), (15, 15), (15, 20), (15, 30), (15, 40), (15, 45))
     for day, phases, nfo_close in ((6, _PRE_PHASE, "15:40"), (7, _REVISED_PHASE, "15:45")):
@@ -59,8 +61,8 @@ def _rows() -> list[tuple[str, int, int, int, bool, bool, bool, str | None, str 
                 nse = (True, True, True)
             elif (hour, minute) == (15, 30):
                 # Auction order entry is shut at the 15:30 reference. The runner
-                # window still includes 15:30, so square-off is already due.
-                nse = (False, False, True)
+                # session still includes 15:30, so square-off is already due.
+                nse = (False, True, True)
             else:
                 nse = (False, False, False)
             rows.append(("NSE", day, hour, minute, *nse, "15:30", phase))
@@ -105,7 +107,7 @@ def test_ncdex_standard_hours_and_mcx_runner_end_are_unchanged() -> None:
 
 
 @pytest.mark.parametrize(
-    ("exchange", "day", "hour", "minute", "safety_open", "scheduler_open", "square_off", "close", "phase"),
+    ("exchange", "day", "hour", "minute", "safety_open", "session_running", "square_off", "close", "phase"),
     _rows(),
 )
 def test_one_session_answer_across_callers(  # type: ignore[no-untyped-def]
@@ -115,7 +117,7 @@ def test_one_session_answer_across_callers(  # type: ignore[no-untyped-def]
     hour: int,
     minute: int,
     safety_open: bool,
-    scheduler_open: bool,
+    session_running: bool,
     square_off: bool,
     close: str | None,
     phase: str | None,
@@ -123,7 +125,8 @@ def test_one_session_answer_across_callers(  # type: ignore[no-untyped-def]
     at = datetime(2026, 12, day, hour, minute, tzinfo=IST)
     scheduler = TimeScheduler()
     assert is_market_open(exchange, at=at) is safety_open
-    assert scheduler.is_market_open(exchange, at=at) is scheduler_open
+    assert scheduler.accepts_new_entries(exchange, at=at) is safety_open
+    assert scheduler.session_active(exchange, at=at) is session_running
     assert scheduler.should_square_off(exchange, at=at) is square_off
 
     response = client.get(
@@ -134,3 +137,129 @@ def test_one_session_answer_across_callers(  # type: ignore[no-untyped-def]
     body = response.get_json()
     assert body["close"] == close
     assert body["phase"] == phase
+
+
+def _stamp(day: int, hour: int, minute: int, *, month: int = 11) -> datetime:
+    return datetime(2026, month, day, hour, minute, tzinfo=IST)
+
+
+def _exit_window_rows() -> list[tuple[str, datetime, bool, bool, bool, str]]:
+    """exchange, instant, entries, session, square-off, timings order_entry."""
+    rows: list[tuple[str, datetime, bool, bool, bool, str]] = []
+    for hour, minute, entries, active, square, order_entry in (
+        (23, 29, True, True, False, "open"),
+        (23, 30, False, True, True, "closed"),
+        (23, 40, False, True, True, "closed"),
+        (23, 55, False, True, True, "closed"),
+        (23, 56, False, False, False, "closed"),
+    ):
+        rows.append(("MCX", _stamp(9, hour, minute), entries, active, square, order_entry))
+    for hour, minute, entries, active, square, order_entry in (
+        (16, 59, True, True, True, "open"),
+        (17, 0, False, True, True, "closed"),
+        (18, 0, False, False, False, "closed"),
+    ):
+        rows.append(("NCDEX", _stamp(9, hour, minute), entries, active, square, order_entry))
+    for hour, minute, entries, active, square, order_entry in (
+        (11, 0, True, True, False, "open"),
+        (15, 20, True, True, True, "open"),
+        (15, 30, False, True, True, "closed"),
+        (15, 31, False, False, False, "closed"),
+    ):
+        rows.append(("NSE", _stamp(9, hour, minute), entries, active, square, order_entry))
+    rows.append(("NSE", _stamp(7, 11, 0), False, False, False, "closed"))
+    rows.append(("MCX", _stamp(7, 23, 40), False, False, False, "closed"))
+    rows.append(("NSE", _stamp(16, 11, 0), False, False, False, "closed"))
+    rows.append(("MCX", _stamp(16, 11, 0), False, False, False, "closed"))
+    for exchange, hour, minute, entries, active, square, order_entry in (
+        ("NSE", 14, 19, False, False, False, "closed"),
+        ("NSE", 15, 0, True, True, False, "open"),
+        ("NSE", 15, 30, True, True, True, "open"),
+        ("NSE", 15, 31, False, False, False, "closed"),
+        ("NFO", 15, 40, True, True, True, "open"),
+        ("NFO", 15, 41, False, False, False, "closed"),
+        ("MCX", 15, 0, True, True, False, "open"),
+        ("MCX", 23, 40, False, False, False, "closed"),
+    ):
+        rows.append((exchange, _stamp(8, hour, minute), entries, active, square, order_entry))
+    return rows
+
+
+@pytest.fixture()
+def entry_client():  # type: ignore[no-untyped-def]
+    scheduler = TimeScheduler()
+    scheduler.set_holidays(
+        {
+            "data": [
+                {
+                    "date": "2026-11-16",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": ["NSE", "MCX"],
+                }
+            ]
+        },
+        year="2026",
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["TIME_SCHEDULER"] = scheduler
+    app.register_blueprint(holidays_bp)
+    return app.test_client(), scheduler
+
+
+@pytest.mark.parametrize(
+    ("exchange", "at", "entries", "active", "square_off", "order_entry"),
+    _exit_window_rows(),
+)
+def test_entry_admission_and_runner_session_at_each_instant(  # type: ignore[no-untyped-def]
+    entry_client,
+    exchange: str,
+    at: datetime,
+    entries: bool,
+    active: bool,
+    square_off: bool,
+    order_entry: str,
+) -> None:
+    client, scheduler = entry_client
+    admitted = is_market_open(exchange, at=at, market_calendar=scheduler)
+    assert scheduler.accepts_new_entries(exchange, at=at) is entries
+    assert scheduler.accepts_new_entries(exchange, at=at) is admitted
+    assert scheduler.session_active(exchange, at=at) is active
+    assert scheduler.should_square_off(exchange, at=at) is square_off
+    response = client.get(
+        "/api/v1/market/timings",
+        query_string={"exchange": exchange, "at": at.isoformat()},
+    )
+    assert response.status_code == 200
+    published = response.get_json()["order_entry"]
+    assert published == order_entry
+    assert (published in {"open", "auction_entry"}) is admitted
+
+
+def test_deprecated_open_alias_maps_to_the_runner_session() -> None:
+    """The old name is the runner session, and internal code does not call it."""
+    at = datetime(2026, 11, 9, 23, 40, tzinfo=IST)
+    scheduler = TimeScheduler()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        reported = scheduler.is_market_open("MCX", at=at)
+    assert reported is True
+    assert scheduler.session_active("MCX", at=at) is True
+    assert scheduler.accepts_new_entries("MCX", at=at) is False
+    assert any(item.category is DeprecationWarning for item in caught)
+
+    root = Path(__file__).resolve().parents[4]
+    allowed = {
+        Path("packages/services/engine/src/flinttrade_engine/scheduler.py"),
+        Path("packages/services/engine/tests/test_session_decision.py"),
+    }
+    offenders: list[str] = []
+    for base in (root / "packages", root / "tests"):
+        for path in base.rglob("*.py"):
+            relative = path.relative_to(root)
+            if relative in allowed or "__pycache__" in relative.parts:
+                continue
+            text = path.read_text(encoding="utf-8").replace("safety.is_market_open", "")
+            if ".is_market_open" in text or "is_market_open=" in text:
+                offenders.append(str(relative))
+    assert offenders == []

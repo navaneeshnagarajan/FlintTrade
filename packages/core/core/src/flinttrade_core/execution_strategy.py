@@ -33,7 +33,7 @@ class _BoundStrategyRunner(StrategyRunner):
             if type(run.adapter) is not PracticeAgentAdapter:
                 raise ValueError("canonical strategy adapter required")
             run.adapter.validate_session()
-            if not self.scheduler.is_market_open(self.strategy.exchange, symbol=self.symbol):
+            if not self.scheduler.accepts_new_entries(self.strategy.exchange, symbol=self.symbol):
                 return
             data = await run.adapter.quotes(symbol=self.symbol, exchange=self.strategy.exchange)
             quote = Quote.model_validate({**data["data"], "symbol": self.symbol, "exchange": self.strategy.exchange})
