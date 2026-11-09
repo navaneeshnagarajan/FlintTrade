@@ -875,11 +875,23 @@ class OrderLifecycleLedger:
                 self._harden_sidecars()
 
     def _harden_sidecars(self) -> None:
+        """Restrict the ledger and any SQLite sidecars that are still present.
+
+        The last connection to a WAL database deletes ``-wal``, ``-shm``, and
+        ``-journal``. Another instance can remove a sidecar after this process
+        sees it and before ``chmod``. A missing sidecar has nothing left to
+        restrict; a missing ledger file is still a fault.
+        """
         path = self._path()
         for suffix in ("", "-wal", "-shm", "-journal"):
             candidate = path.with_name(path.name + suffix)
-            if candidate.exists() and not candidate.is_symlink():
+            try:
+                if candidate.is_symlink() or not candidate.exists():
+                    continue
                 harden(candidate)
+            except FileNotFoundError:
+                if not suffix:
+                    raise
 
     def _initialise(self) -> None:
         with self._connection() as connection:

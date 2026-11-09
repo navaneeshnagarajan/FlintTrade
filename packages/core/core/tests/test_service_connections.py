@@ -664,7 +664,16 @@ def test_repr_public_dto_errors_and_actual_logs_never_expose_binding_or_supplied
     rendered = (
         repr(connection) + repr(secret_version) + repr(connection.to_public_dict()) + str(exc_info.value) + caplog.text
     )
-    assert len(caplog.records) == 4
+    # filelock logs its own acquire/release lines at DEBUG. A worker that is
+    # also booting apps emits those on another thread, and the root capture
+    # would count them. They are not records from the code under test. The
+    # secret scan below still reads the full capture, including those lines.
+    observed = [
+        record
+        for record in caplog.records
+        if record.name != "filelock" and not record.name.startswith("filelock.")
+    ]
+    assert len(observed) == 4
     assert connection.to_public_dict()["credential_configured"] is True
     for sensitive in sensitive_values:
         assert sensitive not in rendered
