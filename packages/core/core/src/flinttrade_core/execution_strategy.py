@@ -64,7 +64,8 @@ class _BoundStrategyRunner(StrategyRunner):
                     raise ValueError("strategy position limit")
                 to_route.append(order)
                 signed_routed += signed
-            if self.scheduler.should_square_off(exchange, symbol=self.symbol):
+            square_off = getattr(self.scheduler, "should_square_off", None)
+            if callable(square_off) and square_off(exchange, symbol=self.symbol):
                 with owner.execution_binding.fence():
                     net = self._net_quantity()
                 if net > 0:
