@@ -32,7 +32,7 @@ import {
   triggerRow,
 } from "./order-flow-fixtures";
 
-test("a cancellation ACK and a missing trigger retain execution uncertainty", async ({
+test("a complete empty list drops a cancellation ACK without saying the order was cancelled", async ({
   page, syntheticApi, presentationEvidence,
 }, info) => {
   registerDeskReads(syntheticApi);
@@ -95,13 +95,14 @@ test("a cancellation ACK and a missing trigger retain execution uncertainty", as
     await page.clock.runFor(50);
     await page.getByRole("button", { name: "Refresh forever orders" }).click();
     await tickUntil(page, page.getByText(GTT_EMPTY, { exact: true }));
-    // Empty listing after this ACK does NOT prove cancellation, absence of a
-    // spawned child, or risk release. The warning must survive without its row.
-    await expect(page.getByText(CANCEL_WARNING, { exact: false }).first()).toBeVisible();
+    // A complete empty book ends the pending cancel. It does not prove the
+    // trigger was cancelled, and it does not speak for a spawned child.
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     await captureEvidence(page, info, "desktop-missing-trigger-uncertainty");
     await captureNarrow(page, info, "narrow-missing-trigger-uncertainty");
-    await expect(page.getByText(CANCEL_WARNING, { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
 
     const missingReads = await syntheticApi.retireRead(foreverPath());
     expect(missingReads).toEqual({ calls: pendingReads.calls + 1, completed: pendingReads.completed + 1,
@@ -112,8 +113,8 @@ test("a cancellation ACK and a missing trigger retain execution uncertainty", as
     await page.clock.runFor(50);
     await page.getByRole("button", { name: "Refresh forever orders" }).click();
     await tickUntil(page, table.getByText("CANCELLED", { exact: true }));
-    await expect(page.getByText("Order cancelled", { exact: true })).toBeVisible();
-    await expect(page.getByText(CANCEL_WARNING, { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
     expect(syntheticApi.callCount("GET", foreverPath())).toBe(4);
