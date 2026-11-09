@@ -185,11 +185,11 @@ function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date:
  *
  * DELTA (crypto) is always considered open (24/7).
  */
-export function isMarketHours(
+function evaluateMarketHours(
+  now: Date,
   target?: MarketHoursTarget,
   holidays: readonly Holiday[] = shippedMuhuratHolidays(),
 ): boolean {
-  const now = new Date();
   const { exchange, hours } = resolveMarketHours(target, now);
   if (exchange === "DELTA") return true;
   const ist = new Date(
@@ -206,6 +206,43 @@ export function isMarketHours(
 
   const mins = ist.getHours() * 60 + ist.getMinutes();
   return mins >= hours.open && mins <= hours.close;
+}
+
+/**
+ * Check if a given exchange is currently within trading hours.
+ *
+ * When called without an exchange argument, defaults to NSE/BSE equity hours
+ * (9:15 AM – 3:30 PM IST, Mon–Fri) for backward compatibility.
+ *
+ * DELTA (crypto) is always considered open (24/7).
+ */
+export function isMarketHours(
+  target?: MarketHoursTarget,
+  holidays: readonly Holiday[] = shippedMuhuratHolidays(),
+): boolean {
+  return evaluateMarketHours(new Date(), target, holidays);
+}
+
+export interface OrderPadSessionBadge {
+  /** True only for the green continuous cash session, or an open selected venue. */
+  greenContinuous: boolean;
+  label: string;
+}
+
+/**
+ * Order Pad session badge.
+ *
+ * NSE and BSE follow the dated cash phase. Any other selected exchange uses
+ * that venue's own hours. The flat 09:15–15:30 window is not this badge.
+ */
+export function orderPadSessionBadge(now: Date, exchange = "NSE"): OrderPadSessionBadge {
+  const venue = exchange.trim().toUpperCase() || "NSE";
+  if (venue === "NSE" || venue === "BSE" || venue === "NSE_INDEX" || venue === "BSE_INDEX") {
+    const session = resolveNseCashSession(now);
+    return { greenContinuous: session.isGreenOpen, label: session.label };
+  }
+  const open = evaluateMarketHours(now, venue);
+  return { greenContinuous: open, label: open ? "Session open" : "Closed" };
 }
 
 export type MarketSessionStatus =

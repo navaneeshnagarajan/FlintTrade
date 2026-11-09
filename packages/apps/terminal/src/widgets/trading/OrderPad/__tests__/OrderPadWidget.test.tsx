@@ -86,6 +86,7 @@ const selectedMode = {
 vi.mock("@/lib/market", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/market")>()),
   isMarketHours: () => false,
+  orderPadSessionBadge: () => ({ greenContinuous: false, label: "Closed" }),
 }));
 
 // Jotai atoms — default to null tick (no LTP) unless test overrides

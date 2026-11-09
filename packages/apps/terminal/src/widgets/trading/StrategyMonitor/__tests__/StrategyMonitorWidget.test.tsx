@@ -242,6 +242,11 @@ describe("StrategyMonitorWidget — real uploaded strategies", () => {
       "title",
       "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.",
     );
+    const ownership = screen.getByText(
+      "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.",
+    );
+    expect(row).toHaveAttribute("aria-describedby", ownership.id);
+    expect(ownership.closest("[role='listitem']")).toBe(row);
     expect(screen.getByText("Degraded")).toBeTruthy();
     expect(screen.queryAllByRole("button", { name: /^Start / })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: /^Pause / })).toHaveLength(0);
@@ -276,5 +281,25 @@ describe("StrategyMonitorWidget — real uploaded strategies", () => {
     expect(await screen.findByRole("listitem", { name: "Strategy Live Runner: Running" })).toBeTruthy();
     expect(screen.getByRole("listitem", { name: "Strategy Idle Runner: Stopped" })).toBeTruthy();
     expect(screen.queryByText("Unknown")).toBeNull();
+  });
+
+  it("shows a load error when the strategy list fails", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockRejectedValue(new Error("offline"));
+
+    renderMonitor();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load strategies.");
+    expect(screen.queryByText("No strategies configured")).toBeNull();
+  });
+
+  it("keeps the empty state when the strategy list is empty", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([]);
+
+    renderMonitor();
+
+    expect(await screen.findByText("No strategies configured")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
