@@ -254,7 +254,7 @@ def test_check_order_stays_closed_on_an_ordinary_weekend_and_holiday() -> None:
         ("NFO", "RELIANCE26NOV26FUT"),
         ("BFO", "RELIANCE26NOV26FUT"),
     ):
-        assert not scheduler.is_market_open(exchange, at=sunday, symbol=symbol)
+        assert not scheduler.session_active(exchange, at=sunday, symbol=symbol)
         assert not is_market_open(exchange, at=sunday, symbol=symbol)
         fresh = _order(symbol, exchange)
         increased = _order(symbol, exchange)
@@ -311,7 +311,7 @@ def test_check_order_stays_closed_on_an_ordinary_weekend_and_holiday() -> None:
         ("NFO", "RELIANCE26NOV26FUT"),
         ("BFO", "RELIANCE26NOV26FUT"),
     ):
-        assert not holiday.is_market_open(exchange, at=monday, symbol=symbol)
+        assert not holiday.session_active(exchange, at=monday, symbol=symbol)
         assert not is_market_open(exchange, at=monday, symbol=symbol, market_calendar=holiday)
         assert not _passed(safety.check_order(
             _order(symbol, exchange),

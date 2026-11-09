@@ -64,7 +64,7 @@ def test_aware_at_time_is_converted_to_ist() -> None:
     scheduler = TimeScheduler()
     at_utc = datetime(2026, 3, 16, 4, 0, tzinfo=timezone.utc)
 
-    assert scheduler.is_market_open("NSE", at=at_utc)
+    assert scheduler.session_active("NSE", at=at_utc)
     assert scheduler.is_deploy_frozen(["NSE"], at=at_utc)
 
 
@@ -76,11 +76,11 @@ def test_partial_holiday_closes_equities_but_keeps_only_mcx_special_session() ->
 
     assert not scheduler.is_trading_day("NSE", on=date(2026, 3, 3))
     assert scheduler.is_trading_day("MCX", on=date(2026, 3, 3))
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "MCX",
         at=datetime(2026, 3, 3, 12, 0, tzinfo=IST),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "MCX",
         at=datetime(2026, 3, 3, 18, 0, tzinfo=IST),
     )
@@ -98,11 +98,11 @@ def test_weekend_special_session_overrides_closure_only_inside_session() -> None
         time(18, 0),
         time(19, 0),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "NSE",
         at=datetime(2026, 11, 8, 18, 30, tzinfo=IST),
     )
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NSE",
         at=datetime(2026, 11, 8, 10, 0, tzinfo=IST),
     )
@@ -129,8 +129,8 @@ def test_symbol_scoped_special_session_does_not_open_other_contracts() -> None:
     scheduler.set_holidays(_calendar_payload(), year="2026")
     at = datetime(2026, 12, 12, 18, 30, tzinfo=IST)
 
-    assert scheduler.is_market_open("CDS", at=at, symbol="EURUSD29JUL26FUT")
-    assert not scheduler.is_market_open("CDS", at=at, symbol="USDINR29JUL26FUT")
+    assert scheduler.session_active("CDS", at=at, symbol="EURUSD29JUL26FUT")
+    assert not scheduler.session_active("CDS", at=at, symbol="USDINR29JUL26FUT")
 
 
 def test_cross_midnight_special_session_continues_into_next_day() -> None:
@@ -161,15 +161,15 @@ def test_cross_midnight_special_session_continues_into_next_day() -> None:
         time(18, 0),
         time(0, 15),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "MCX",
         at=datetime(2026, 4, 17, 23, 55, tzinfo=IST),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "MCX",
         at=datetime(2026, 4, 18, 0, 10, tzinfo=IST),
     )
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "MCX",
         at=datetime(2026, 4, 18, 0, 16, tzinfo=IST),
     )
@@ -199,19 +199,19 @@ def test_special_session_boundaries_preserve_seconds() -> None:
         year="2026",
     )
 
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NSE",
         at=datetime(2026, 4, 13, 18, 0, 29, tzinfo=IST),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "NSE",
         at=datetime(2026, 4, 13, 18, 0, 30, tzinfo=IST),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "NSE",
         at=datetime(2026, 4, 13, 18, 1, 15, tzinfo=IST),
     )
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NSE",
         at=datetime(2026, 4, 13, 18, 1, 16, tzinfo=IST),
     )
@@ -242,7 +242,7 @@ def test_implausible_near_daylong_cross_midnight_session_fails_closed() -> None:
     )
 
     assert scheduler.get_market_session("MCX", on=date(2026, 4, 13)) is None
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "MCX",
         at=datetime(2026, 4, 13, 12, 0, tzinfo=IST),
     )
@@ -269,22 +269,22 @@ def test_muhurat_2026_fo_window_is_open_without_a_broker_calendar() -> None:
         time(14, 20),
         time(15, 30),
     )
-    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 20, tzinfo=IST))
-    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
-    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 30, tzinfo=IST))
-    assert not scheduler.is_market_open("NSE", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
-    assert not scheduler.is_market_open("NSE_INDEX", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
-    assert scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
-    assert not scheduler.is_market_open("CDS", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
-    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
-    assert not scheduler.is_market_open("MCX", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 14, 19, tzinfo=IST))
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 15, 41, tzinfo=IST))
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 11, 8, 18, 30, tzinfo=IST))
+    assert scheduler.session_active("NFO", at=datetime(2026, 11, 8, 14, 20, tzinfo=IST))
+    assert scheduler.session_active("NFO", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.session_active("NFO", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.session_active("NSE", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.session_active("NSE", at=datetime(2026, 11, 8, 15, 30, tzinfo=IST))
+    assert not scheduler.session_active("NSE", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert not scheduler.session_active("NSE_INDEX", at=datetime(2026, 11, 8, 15, 40, tzinfo=IST))
+    assert scheduler.session_active("CDS", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert scheduler.session_active("MCX", at=datetime(2026, 11, 8, 15, 0, tzinfo=IST))
+    assert not scheduler.session_active("CDS", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.session_active("MCX", at=datetime(2026, 11, 8, 15, 31, tzinfo=IST))
+    assert not scheduler.session_active("MCX", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
+    assert not scheduler.session_active("NFO", at=datetime(2026, 11, 8, 14, 19, tzinfo=IST))
+    assert not scheduler.session_active("NFO", at=datetime(2026, 11, 8, 10, 0, tzinfo=IST))
+    assert not scheduler.session_active("NFO", at=datetime(2026, 11, 8, 15, 41, tzinfo=IST))
+    assert not scheduler.session_active("NFO", at=datetime(2026, 11, 8, 18, 30, tzinfo=IST))
 
 
 def test_missing_muhurat_record_fails_closed(monkeypatch) -> None:
@@ -296,7 +296,7 @@ def test_missing_muhurat_record_fails_closed(monkeypatch) -> None:
     )
     scheduler = TimeScheduler()
     assert scheduler.get_market_session("NFO", on=date(2026, 11, 8)) is None
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NFO",
         at=datetime(2026, 11, 8, 15, 0, tzinfo=IST),
     )
@@ -325,11 +325,11 @@ def test_loaded_calendar_window_replaces_the_shipped_muhurat_session() -> None:
         },
         year="2026",
     )
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NFO",
         at=datetime(2026, 11, 8, 15, 0, tzinfo=IST),
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "NFO",
         at=datetime(2026, 11, 8, 18, 30, tzinfo=IST),
     )
@@ -368,10 +368,10 @@ def test_scheduler_uses_the_revised_derivative_close_on_both_sides_of_dec_7() ->
     scheduler = TimeScheduler()
     before = datetime(2026, 12, 4, 15, 42, tzinfo=IST)
     after = datetime(2026, 12, 7, 15, 42, tzinfo=IST)
-    assert not scheduler.is_market_open("NFO", at=before, symbol="RELIANCE10DEC26FUT")
-    assert scheduler.is_market_open("NFO", at=after, symbol="RELIANCE10DEC26FUT")
-    assert scheduler.is_market_open("BFO", at=after, symbol="RELIANCE10DEC26FUT")
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 12, 7, 15, 45, tzinfo=IST), symbol="RELIANCE10DEC26FUT")
+    assert not scheduler.session_active("NFO", at=before, symbol="RELIANCE10DEC26FUT")
+    assert scheduler.session_active("NFO", at=after, symbol="RELIANCE10DEC26FUT")
+    assert scheduler.session_active("BFO", at=after, symbol="RELIANCE10DEC26FUT")
+    assert not scheduler.session_active("NFO", at=datetime(2026, 12, 7, 15, 45, tzinfo=IST), symbol="RELIANCE10DEC26FUT")
 
 
 def test_scheduler_rejects_an_expiring_index_contract_and_an_unknown_expiry() -> None:
@@ -380,26 +380,26 @@ def test_scheduler_rejects_an_expiring_index_contract_and_an_unknown_expiry() ->
     scheduler = TimeScheduler()
     expiry_day = datetime(2026, 12, 10, 15, 31, tzinfo=IST)
     calendar = ["2026-12-10", "2026-12-17"]
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "NFO",
         at=expiry_day,
         symbol="NIFTY10DEC2624000CE",
         expiry_calendar=calendar,
     )
-    assert scheduler.is_market_open(
+    assert scheduler.session_active(
         "NFO",
         at=expiry_day,
         symbol="NIFTY17DEC2624000CE",
         expiry_calendar=calendar,
     )
-    assert not scheduler.is_market_open(
+    assert not scheduler.session_active(
         "BFO",
         at=expiry_day,
         symbol="SENSEX10DEC2680000CE",
         expiry_calendar=calendar,
     )
-    assert not scheduler.is_market_open("NFO", at=datetime(2026, 12, 10, 11, 0, tzinfo=IST), symbol="NIFTY")
-    assert scheduler.is_market_open(
+    assert not scheduler.session_active("NFO", at=datetime(2026, 12, 10, 11, 0, tzinfo=IST), symbol="NIFTY")
+    assert scheduler.session_active(
         "NFO",
         at=datetime(2026, 12, 4, 15, 31, tzinfo=IST),
         symbol="NIFTY04DEC2624000CE",
@@ -407,12 +407,30 @@ def test_scheduler_rejects_an_expiring_index_contract_and_an_unknown_expiry() ->
     )
 
 
-def test_scheduler_closes_cash_auction_entry_from_1538_and_leaves_derivatives_open() -> None:
+def test_cash_auction_entry_is_admission_and_not_the_runner_session() -> None:
     from flinttrade_engine.scheduler import TimeScheduler
 
     scheduler = TimeScheduler()
-    assert scheduler.is_market_open("NSE", at=datetime(2026, 12, 7, 15, 37, tzinfo=IST))
-    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 7, 15, 38, tzinfo=IST))
-    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 4, 15, 37, tzinfo=IST))
-    assert scheduler.is_market_open("NFO", at=datetime(2026, 12, 7, 15, 38, tzinfo=IST), symbol="RELIANCE10DEC26FUT")
-    assert not scheduler.is_market_open("NSE", at=datetime(2026, 12, 6, 15, 37, tzinfo=IST))
+    auction = datetime(2026, 12, 7, 15, 37, tzinfo=IST)
+    assert scheduler.accepts_new_entries("NSE", at=auction)
+    assert not scheduler.session_active("NSE", at=auction)
+    after_random_close = datetime(2026, 12, 7, 15, 38, tzinfo=IST)
+    assert not scheduler.accepts_new_entries("NSE", at=after_random_close)
+    assert not scheduler.session_active("NSE", at=after_random_close)
+    before_revision = datetime(2026, 12, 4, 15, 37, tzinfo=IST)
+    assert not scheduler.accepts_new_entries("NSE", at=before_revision)
+    assert not scheduler.session_active("NSE", at=before_revision)
+    derivative = datetime(2026, 12, 7, 15, 38, tzinfo=IST)
+    assert scheduler.accepts_new_entries(
+        "NFO",
+        at=derivative,
+        symbol="RELIANCE10DEC26FUT",
+    )
+    assert scheduler.session_active(
+        "NFO",
+        at=derivative,
+        symbol="RELIANCE10DEC26FUT",
+    )
+    sunday = datetime(2026, 12, 6, 15, 37, tzinfo=IST)
+    assert not scheduler.accepts_new_entries("NSE", at=sunday)
+    assert not scheduler.session_active("NSE", at=sunday)
