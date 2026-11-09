@@ -166,6 +166,9 @@ const UNKNOWN_REPORT_TITLE =
 /** Map a runner report onto a monitor row. Unread, missing, and unrecognised states stay unknown. */
 export function projectUploadedStrategy(status: UploadedStrategyStatus): StrategyStatus {
   const state = status.state?.trim().toLowerCase() ?? "";
+  if (state !== "running" && state !== "stopped" && state !== "crashed") return "unknown";
+  const lifecycle = status.lifecycle?.trim().toUpperCase() ?? "";
+  if (lifecycle === "PAUSED" && (state === "running" || state === "stopped")) return "paused";
   if (state === "running") return "running";
   if (state === "stopped") return "stopped";
   if (state === "crashed") return "error";

@@ -1,5 +1,9 @@
 """Strategy instance lifecycle manager.
 
+No production caller constructs this machine for a live runner. Do not wire
+it through the live strategy runner. Live runners keep BaseStrategy lifecycle
+and process ownership on their own.
+
 Manages the full create → deploy → monitor → stop lifecycle of strategy
 instances in a production trading environment.
 
