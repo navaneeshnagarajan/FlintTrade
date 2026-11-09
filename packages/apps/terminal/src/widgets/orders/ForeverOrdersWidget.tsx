@@ -60,6 +60,7 @@ import {
   orderStatusIsCancelPending,
   orderStatusIsOpen,
 } from "@/widgets/trading/Positions/positionReconcile";
+import { readForeverPendingCancels, writeForeverPendingCancels } from "./foreverPendingCancel";
 
 const SUPPORTED_GTT_BROKERS = ["dhan", "upstox"] as const;
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
@@ -230,8 +231,11 @@ export default function ForeverOrdersWidget() {
   const placeMutation = usePlaceForeverOrder();
   const modifyMutation = useModifyForeverOrder();
   const cancelMutation = useCancelForeverOrder();
-  // In-session presentation only, not a durable intent ledger or write authority.
-  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>([]);
+  // Tab-session presentation for this operator, mode and account. Not a
+  // dispatch ledger, and not authority for another broker write.
+  const [cancelAcknowledgements, setCancelAcknowledgements] = useState<CancelAcknowledgement[]>(
+    () => readForeverPendingCancels(presentationScope).map((pending) => ({ ...pending, reconciled: false })),
+  );
 
   // Mutation variables identify the response's target; a response from another
   // account must never be shown as the selected account's result.
@@ -313,6 +317,32 @@ export default function ForeverOrdersWidget() {
     });
   }, [cancelConfirmed, cancelLost, cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
     cancelMutation.submittedAt, presentationScope, listQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    const stored = readForeverPendingCancels(presentationScope);
+    if (stored.length === 0) return;
+    setCancelAcknowledgements((previous) => {
+      let changed = false;
+      const next = [...previous];
+      for (const pending of stored) {
+        if (next.some((existing) => existing.scope === pending.scope && existing.orderId === pending.orderId)) continue;
+        next.push({ ...pending, reconciled: false });
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [presentationScope]);
+
+  useEffect(() => {
+    writeForeverPendingCancels(
+      presentationScope,
+      cancelAcknowledgements
+        .filter((acknowledgement) => acknowledgement.scope === presentationScope && !acknowledgement.reconciled)
+        .map(({ scope, orderId, submittedAt, receivedAt, listUpdatedAt }) => ({
+          scope, orderId, submittedAt, receivedAt, listUpdatedAt,
+        })),
+    );
+  }, [presentationScope, cancelAcknowledgements]);
 
   useEffect(() => {
     if (!listAvailable || listQuery.isFetching) return;

@@ -1,5 +1,5 @@
 import type { Page, Locator } from "@playwright/test";
-import type { SyntheticPhasedFixtureRegistry, SyntheticResponse } from "./fixture-registry";
+import type { SyntheticHandlerRegistration, SyntheticPhasedFixtureRegistry, SyntheticResponse } from "./fixture-registry";
 import {
   ACCOUNT_A,
   ACCOUNT_B,
@@ -485,6 +485,42 @@ test.describe("a dropped cancel settles from a later trigger row", () => {
       await syntheticApi.retireRead(foreverPath());
     });
   }
+
+  test("a reload keeps the dropped cancel until the row is CANCELLED", async ({ page, syntheticApi, presentationEvidence }) => {
+    const registrations: SyntheticHandlerRegistration[] = [];
+    const recording = new Proxy(syntheticApi, { get(target, key) {
+      if (key === "register") return (registration: SyntheticHandlerRegistration) => {
+        registrations.push(registration);
+        target.register(registration);
+      };
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    await dropCancel(page, recording as SyntheticPhasedFixtureRegistry);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+      .some((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toBe(true);
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      await syntheticApi.retireRead(registration.path);
+    }
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      syntheticApi.register({ ...registration, name: `reload: ${registration.name}` });
+    }
+    registerRead(syntheticApi, foreverPath(), {
+      json: { status: "success", data: [triggerRow(ACCOUNT_A, "CANCELLED")] },
+    }, 2, "required");
+    await page.reload();
+    const table = page.getByRole("table", { name: "Forever orders" });
+    await tickUntil(page, table);
+    await page.clock.runFor(50);
+    await page.getByRole("button", { name: "Refresh forever orders" }).click();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(table.getByText("CANCELLED", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
+    presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
+  });
 });
 
 for (const action of ["square-off", "exit-all"] as const) {
