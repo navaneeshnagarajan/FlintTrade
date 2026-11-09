@@ -26,6 +26,7 @@ from typing import Annotated, Any, Callable, TypeAliasType, Union, get_args, get
 from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import Quote
 
+from .state_manager import InvalidTransitionError
 from .strategy import BaseStrategy, StrategyState
 from .strategy_status import (
     REASON_CLEANUP_UNPROVEN,
@@ -1047,6 +1048,8 @@ class StrategyRunner:
                     self._stop_failed = True
                 raise TimeoutError("Strategy lifecycle transition did not stop before the deadline") from exc
 
+            task: asyncio.Task[None] | None = None
+            caller_owns_tick = False
             try:
                 if not self._requires_stop():
                     return
@@ -1084,25 +1087,20 @@ class StrategyRunner:
                         worker_active=stop_hook_worker_active,
                         settlement=stop_settlement,
                     )
+            except InvalidTransitionError:
+                # Rollback stops a strategy that never left STOPPED. The
+                # strategy method raises. Ownership release still completes.
+                if self.strategy.state is not StrategyState.STOPPED:
+                    with self._ownership_lock:
+                        self._stop_failed = True
+                    raise
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             except BaseException:
                 with self._ownership_lock:
                     self._stop_failed = True
                 raise
             else:
-                with self._ownership_lock:
-                    self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
-                    if not self_stop_handoff:
-                        self._stop_hook_task = None
-                        self._stop_hook_worker_active = None
-                        self._stop_hook_settlement = None
-                    self._cleanup_required = self_stop_handoff
-                    self._quarantined = False
-                    self._stop_failed = False
-                logger.info(
-                    "StrategyRunner stopped: %s (ticks=%d)",
-                    self.strategy.name,
-                    self._tick_count,
-                )
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             finally:
                 self._transition_lock.release()
         finally:
@@ -1110,6 +1108,28 @@ class StrategyRunner:
                 self._stop_request_count -= 1
                 if self._stop_request_count < 0:
                     raise RuntimeError("Strategy stop request ownership underflow")
+
+    def _release_stop_ownership(
+        self,
+        *,
+        caller_owns_tick: bool,
+        task: asyncio.Task[None] | None,
+    ) -> None:
+        """Clear stop ownership after the strategy hook has settled."""
+        with self._ownership_lock:
+            self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
+            if not self_stop_handoff:
+                self._stop_hook_task = None
+                self._stop_hook_worker_active = None
+                self._stop_hook_settlement = None
+            self._cleanup_required = self_stop_handoff
+            self._quarantined = False
+            self._stop_failed = False
+        logger.info(
+            "StrategyRunner stopped: %s (ticks=%d)",
+            self.strategy.name,
+            self._tick_count,
+        )
 
     def _create_lifecycle_hook_task(
         self,
@@ -1465,20 +1485,8 @@ class StrategyRunner:
             self._running = False
             self._cleanup_required = True
         stop_hook, worker_active, settlement = self._get_or_create_stop_hook()
-        try:
-            if not stop_hook.done():
-                await self._wait_for_task(
-                    stop_hook,
-                    label="stop hook",
-                    cancel_on_timeout=True,
-                    worker_active=worker_active,
-                    settlement=settlement,
-                )
-        except Exception:
-            with self._ownership_lock:
-                self._stop_failed = True
-            raise
-        else:
+
+        def finish_square_off_stop() -> None:
             with self._ownership_lock:
                 task = self._task
                 self_stop_handoff = bool(task is asyncio.current_task() and task is not None and not task.done())
@@ -1489,6 +1497,28 @@ class StrategyRunner:
                 self._cleanup_required = self_stop_handoff
                 self._quarantined = False
                 self._stop_failed = False
+
+        try:
+            if not stop_hook.done():
+                await self._wait_for_task(
+                    stop_hook,
+                    label="stop hook",
+                    cancel_on_timeout=True,
+                    worker_active=worker_active,
+                    settlement=settlement,
+                )
+        except InvalidTransitionError:
+            if self.strategy.state is not StrategyState.STOPPED:
+                with self._ownership_lock:
+                    self._stop_failed = True
+                raise
+            finish_square_off_stop()
+        except Exception:
+            with self._ownership_lock:
+                self._stop_failed = True
+            raise
+        else:
+            finish_square_off_stop()
 
 
 # ---------------------------------------------------------------------------
