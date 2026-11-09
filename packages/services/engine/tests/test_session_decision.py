@@ -327,17 +327,111 @@ async def test_practice_tick_places_an_order_only_inside_session_and_admission(
 
     assert scheduler.session_active("NSE") is scheduler.session_active("NSE", at=at)
     assert scheduler.accepts_new_entries("NSE") is scheduler.accepts_new_entries("NSE", at=at)
+    session = scheduler.session_active("NSE", at=at)
     if places:
-        assert scheduler.session_active("NSE", at=at) is True
+        assert session is True
         assert scheduler.accepts_new_entries("NSE", at=at) is True
         assert len(generated) == 1
-        assert len(routed) == 1
+        assert [str(order.action) for order in routed] == ["BUY"]
         assert retired == []
-    else:
-        assert not (scheduler.session_active("NSE", at=at) and scheduler.accepts_new_entries("NSE", at=at))
+    elif not session:
         assert generated == []
         assert routed == []
         assert retired == []
+    else:
+        assert scheduler.accepts_new_entries("NSE", at=at) is False
+        assert generated != []
+        assert routed == []
+        assert retired == []
+
+
+def _exit_window_practice_rows() -> list[tuple[str, str, int, int]]:
+    """Exchange, symbol, hour, minute on Monday 9 Nov 2026."""
+    return [("MCX", "GOLD", 23, 40), ("NCDEX", "GUARSEED", 17, 0)]
+
+
+@pytest.mark.parametrize(("exchange", "symbol", "hour", "minute"), _exit_window_practice_rows())
+async def test_practice_tick_squares_off_without_a_new_entry(
+    exchange: str,
+    symbol: str,
+    hour: int,
+    minute: int,
+) -> None:
+    from contextlib import contextmanager
+
+    from flinttrade_core.execution_strategy import _BoundStrategyRunner
+    from flinttrade_core.models import Order
+    from flinttrade_core.practice_agent_adapter import PracticeAgentAdapter
+
+    at = datetime(2026, 11, 9, hour, minute, tzinfo=IST)
+    scheduler = TimeScheduler()
+    scheduler.now_ist = lambda: at  # type: ignore[method-assign]
+    assert scheduler.session_active(exchange, at=at, symbol=symbol) is True
+    assert scheduler.accepts_new_entries(exchange, at=at, symbol=symbol) is False
+    assert scheduler.should_square_off(exchange, at=at, symbol=symbol) is True
+    routed: list[Order] = []
+    retired: list[object] = []
+
+    adapter = object.__new__(PracticeAgentAdapter)
+    adapter.validate_session = lambda: None  # type: ignore[method-assign]
+
+    async def quotes(*, symbol: str, exchange: str) -> dict[str, dict[str, float]]:
+        del symbol, exchange
+        return {"data": {"ltp": 2500.0}}
+
+    async def route_order(order: Order) -> object:
+        routed.append(order)
+        return type("Result", (), {"passed": True})()
+
+    adapter.quotes = quotes  # type: ignore[method-assign]
+    adapter.route_order = route_order  # type: ignore[method-assign]
+
+    class _Strategy:
+        def __init__(self) -> None:
+            self.exchange = exchange
+
+        def on_tick(self, quote: object) -> None:
+            del quote
+
+        def generate_orders(self) -> list[Order]:
+            return [Order(symbol=symbol, exchange=exchange, product="MIS", action="BUY", quantity="1")]
+
+    @contextmanager
+    def _fence():  # type: ignore[no-untyped-def]
+        yield
+
+    owner = type("Owner", (), {})()
+    owner.run = type("Run", (), {})()
+    owner.run.adapter = adapter
+    owner.run.config = {"exchange": exchange, "product": "MIS", "max_position_size": 10}
+    owner.sandbox = type(
+        "Sandbox",
+        (),
+        {"get_positions": staticmethod(lambda: [{
+            "symbol": symbol, "exchange": exchange, "product": "MIS", "net_qty": 2,
+        }])},
+    )()
+    owner.execution_binding = type("Binding", (), {})()
+    owner.execution_binding.fence = _fence
+    owner.execution_binding.scope = "practice-exit"
+    owner.execution_binding.registry = type(
+        "Registry",
+        (),
+        {"retire_entries": staticmethod(lambda scope: retired.append(scope))},
+    )()
+
+    runner = object.__new__(_BoundStrategyRunner)
+    runner.owner = owner
+    runner.scheduler = scheduler
+    runner.strategy = _Strategy()
+    runner.symbol = symbol
+    runner._task = None
+    runner._tick_count = 0
+
+    await runner._tick()
+
+    assert retired == []
+    assert [(str(order.action), order.quantity) for order in routed] == [("SELL", "2")]
 
 
 def test_deprecated_open_alias_maps_to_the_runner_session() -> None:

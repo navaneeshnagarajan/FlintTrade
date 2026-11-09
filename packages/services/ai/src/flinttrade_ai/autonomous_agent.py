@@ -498,12 +498,28 @@ class AutonomousTrader:
     def _is_market_open(self, symbol: str | None = None) -> bool:
         """Return whether the effective session is still running.
 
-        This follows the session window, including an exit that runs past
-        order admission. It does not say a new risk-increasing order would
-        be accepted. That answer is admission.
+        This is the runner session, including an exit that runs past order
+        admission. Exits and flatten use this. A new entry also needs
+        :meth:`_accepts_new_entries`.
         """
         symbols = [symbol] if symbol is not None else self.config.symbols
         return any(self._effective_session(candidate) is not None for candidate in symbols)
+
+    def _accepts_new_entries(self, symbol: str | None = None) -> bool:
+        """Return whether admission would accept a new risk-increasing order."""
+        from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+        try:
+            now = self._ist_now()
+        except (AttributeError, TypeError, ValueError):
+            logger.exception("Autonomous trader clock failed; refusing a new entry")
+            return False
+        scheduler = TimeScheduler()
+        symbols = [symbol] if symbol is not None else self.config.symbols
+        return any(
+            scheduler.accepts_new_entries(self.config.exchange, at=now, symbol=candidate)
+            for candidate in symbols
+        )
 
     def _is_square_off_time(self, symbol: str | None = None) -> bool:
         """Return True in the final 15 minutes of an effective session."""
@@ -934,6 +950,16 @@ class AutonomousTrader:
         if not risk.allowed:
             logger.info("Execution blocked for %s: %s", symbol, risk.reason)
             return {"status": "blocked", "reason": risk.reason}
+
+        # A configured session clock is the live trader. A new entry then needs
+        # the runner session and admission. Exits do not come through here.
+        if self._market_session_provider is not None:
+            if not self._is_market_open(symbol):
+                logger.info("Execution blocked for %s: session is not active", symbol)
+                return {"status": "blocked", "reason": "market_closed"}
+            if not self._accepts_new_entries(symbol):
+                logger.info("Execution blocked for %s: admission is closed", symbol)
+                return {"status": "blocked", "reason": "admission_closed"}
 
         if self.entry_intent_sink is None and self.order_executor is None:
             logger.warning(
