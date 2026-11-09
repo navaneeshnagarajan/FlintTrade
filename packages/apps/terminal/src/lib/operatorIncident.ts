@@ -79,6 +79,13 @@ export const EXIT_ALL_REQUESTED =
 export const ORDER_STATUS_UNKNOWN =
   "Order status unknown. Check Orders before trying again.";
 
+/**
+ * A Forever (GTT) submit whose response was dropped, timed out, or came back
+ * without a definitive broker result. Practice and Live use this same sentence.
+ */
+export const FOREVER_ORDER_STATUS_UNKNOWN =
+  "Order status unknown. Check Forever Orders before trying again.";
+
 /** The cancel was accepted. The order is not confirmed cancelled yet. */
 export const CANCELLATION_REQUESTED = "Cancellation requested";
 

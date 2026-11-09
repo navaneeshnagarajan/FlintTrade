@@ -27,7 +27,7 @@ function statusToken(value: unknown): string {
 }
 
 /** A lost response is not a rejection. A 4xx refusal, other than 408, still is. */
-export function presentSubmitError(error: unknown): SubmitOutcome {
+export function presentSubmitError(error: unknown, unknownMessage = ORDER_STATUS_UNKNOWN): SubmitOutcome {
   if (error instanceof OrderPreflightRefusal) return { kind: "rejected", message: error.message };
   const { status, body, message } = errorRecord(error);
   const outcome = typeof body?.order_outcome === "string" ? body.order_outcome : "";
@@ -36,8 +36,8 @@ export function presentSubmitError(error: unknown): SubmitOutcome {
     const refusal = typeof body?.message === "string" && body.message ? body.message : message;
     return { kind: "rejected", message: refusal };
   }
-  if (outcome === "unknown" || dispatch === "unknown_after_dispatch" || message === ORDER_STATUS_UNKNOWN) {
-    return { kind: "unknown", message: ORDER_STATUS_UNKNOWN };
+  if (outcome === "unknown" || dispatch === "unknown_after_dispatch" || message === ORDER_STATUS_UNKNOWN || message === unknownMessage) {
+    return { kind: "unknown", message: unknownMessage };
   }
   if (typeof status === "number" && status >= 400 && status < 500 && status !== 408) {
     const refusal = typeof body?.message === "string" && body.message ? body.message : message;
@@ -50,15 +50,19 @@ export function presentSubmitError(error: unknown): SubmitOutcome {
   if (status === undefined && serverMessage && !/connection failed|failed to fetch|timed out|timeout|network error|server error|econn|aborted/i.test(serverMessage)) {
     return { kind: "rejected", message: serverMessage };
   }
-  return { kind: "unknown", message: ORDER_STATUS_UNKNOWN };
+  return { kind: "unknown", message: unknownMessage };
 }
 
 /** An acknowledgement is not a cancel. Confirmed status is. */
-export function presentCancelResult(result: unknown, error?: unknown): CancelOutcome {
+export function presentCancelResult(
+  result: unknown,
+  error?: unknown,
+  unknownMessage = ORDER_STATUS_UNKNOWN,
+): CancelOutcome {
   if (error) {
-    const submit = presentSubmitError(error);
+    const submit = presentSubmitError(error, unknownMessage);
     return submit.kind === "unknown"
-      ? { kind: "unknown", message: ORDER_STATUS_UNKNOWN }
+      ? { kind: "unknown", message: unknownMessage }
       : { kind: "rejected", message: submit.message };
   }
   const body = result && typeof result === "object" ? result as Record<string, unknown> : {};
@@ -67,7 +71,7 @@ export function presentCancelResult(result: unknown, error?: unknown): CancelOut
   if (outcome === "cancelled" || CONFIRMED_CANCELLED.has(status)) {
     return { kind: "cancelled", message: ORDER_CANCELLED };
   }
-  if (outcome === "unknown") return { kind: "unknown", message: ORDER_STATUS_UNKNOWN };
+  if (outcome === "unknown") return { kind: "unknown", message: unknownMessage };
   if (outcome === "rejected" || status === "REJECTED" || status === "ERROR") {
     const refusal = typeof body.message === "string" && body.message ? body.message : "Cancel refused.";
     return { kind: "rejected", message: refusal };
