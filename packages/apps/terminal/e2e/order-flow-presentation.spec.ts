@@ -1,9 +1,10 @@
 import type { Page, Locator } from "@playwright/test";
-import type { SyntheticPhasedFixtureRegistry, SyntheticResponse } from "./fixture-registry";
+import type { SyntheticHandlerRegistration, SyntheticPhasedFixtureRegistry, SyntheticResponse } from "./fixture-registry";
 import {
   ACCOUNT_A,
   ACCOUNT_B,
   BROKER,
+  LIVE_TOKEN,
   EXECUTION_WARNING,
   GTT_READ_FROZEN,
   GTT_REFUSAL,
@@ -31,7 +32,7 @@ import {
   triggerRow,
 } from "./order-flow-fixtures";
 
-test("a cancellation ACK and a missing trigger retain execution uncertainty", async ({
+test("a complete empty list drops a cancellation ACK without saying the order was cancelled", async ({
   page, syntheticApi, presentationEvidence,
 }, info) => {
   registerDeskReads(syntheticApi);
@@ -94,13 +95,14 @@ test("a cancellation ACK and a missing trigger retain execution uncertainty", as
     await page.clock.runFor(50);
     await page.getByRole("button", { name: "Refresh forever orders" }).click();
     await tickUntil(page, page.getByText(GTT_EMPTY, { exact: true }));
-    // Empty listing after this ACK does NOT prove cancellation, absence of a
-    // spawned child, or risk release. The warning must survive without its row.
-    await expect(page.getByText(CANCEL_WARNING, { exact: false }).first()).toBeVisible();
+    // A complete empty book ends the pending cancel. It does not prove the
+    // trigger was cancelled, and it does not speak for a spawned child.
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     await captureEvidence(page, info, "desktop-missing-trigger-uncertainty");
     await captureNarrow(page, info, "narrow-missing-trigger-uncertainty");
-    await expect(page.getByText(CANCEL_WARNING, { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
 
     const missingReads = await syntheticApi.retireRead(foreverPath());
     expect(missingReads).toEqual({ calls: pendingReads.calls + 1, completed: pendingReads.completed + 1,
@@ -111,8 +113,8 @@ test("a cancellation ACK and a missing trigger retain execution uncertainty", as
     await page.clock.runFor(50);
     await page.getByRole("button", { name: "Refresh forever orders" }).click();
     await tickUntil(page, table.getByText("CANCELLED", { exact: true }));
-    await expect(page.getByText("Order cancelled", { exact: true })).toBeVisible();
-    await expect(page.getByText(CANCEL_WARNING, { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(CANCEL_WARNING, { exact: true })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
     expect(syntheticApi.callCount("GET", foreverPath())).toBe(4);
@@ -485,6 +487,107 @@ test.describe("a dropped cancel settles from a later trigger row", () => {
       await syntheticApi.retireRead(foreverPath());
     });
   }
+
+  test("a reload keeps the dropped cancel until the row is CANCELLED", async ({ page, syntheticApi, presentationEvidence }) => {
+    const registrations: SyntheticHandlerRegistration[] = [];
+    const recording = new Proxy(syntheticApi, { get(target, key) {
+      if (key === "register") return (registration: SyntheticHandlerRegistration) => {
+        registrations.push(registration);
+        target.register(registration);
+      };
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    await dropCancel(page, recording as SyntheticPhasedFixtureRegistry);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+      .some((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toBe(true);
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      await syntheticApi.retireRead(registration.path);
+    }
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      syntheticApi.register({ ...registration, name: `reload: ${registration.name}` });
+    }
+    registerRead(syntheticApi, foreverPath(), {
+      json: { status: "success", data: [triggerRow(ACCOUNT_A, "CANCELLED")] },
+    }, 2, "required");
+    await page.reload();
+    const table = page.getByRole("table", { name: "Forever orders" });
+    await tickUntil(page, table);
+    await page.clock.runFor(50);
+    await page.getByRole("button", { name: "Refresh forever orders" }).click();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(table.getByText("CANCELLED", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
+    presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
+  });
+
+  test("signing out drops the pending cancel and signing in again does not restore it", async ({ page, syntheticApi, presentationEvidence }) => {
+    const registrations: SyntheticHandlerRegistration[] = [];
+    const recording = new Proxy(syntheticApi, { get(target, key) {
+      if (key === "register") return (registration: SyntheticHandlerRegistration) => {
+        registrations.push(registration);
+        target.register(registration);
+      };
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    await dropCancel(page, recording as SyntheticPhasedFixtureRegistry);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+      .some((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toBe(true);
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      await syntheticApi.retireRead(registration.path);
+    }
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      syntheticApi.register({ ...registration, name: `signed-in-again: ${registration.name}` });
+    }
+    syntheticApi.register({
+      name: "sign out",
+      method: "POST",
+      path: "/ft-api/v1/auth/logout",
+      expectedCalls: 1,
+      handler: () => ({ json: { status: "success" } }),
+    });
+    registerRead(syntheticApi, foreverPath(), {
+      json: { status: "success", data: [triggerRow()] },
+    }, { minimum: 1, maximum: 4 });
+    await page.evaluate(async ({ token, account }) => {
+      const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+      const session = await importModule("/src/services/sessionLogout.ts") as { logoutSession: () => Promise<unknown> };
+      await session.logoutSession();
+      const pending = Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"));
+      if (pending.length > 0) throw new Error(`pending cancels survived sign-out: ${pending.join(",")}`);
+      const auth = await importModule("/src/stores/authStore.ts") as {
+        useAuthStore: { getState: () => { setLoggedIn: (token: string, user: string, expiresAt: string) => void } };
+      };
+      const mode = await importModule("/src/stores/modeStore.ts") as {
+        useModeStore: { getState: () => { setMode: (mode: "live") => void } };
+      };
+      const brokers = await importModule("/src/stores/brokerStore.ts") as {
+        useBrokerStore: { getState: () => { setActiveAccount: (id: string) => void } };
+      };
+      auth.useAuthStore.getState().setLoggedIn(token, "synthetic-order-flow-operator", "");
+      mode.useModeStore.getState().setMode("live");
+      brokers.useBrokerStore.getState().setActiveAccount(`native:dhan:${account}`);
+      window.history.pushState(null, "", "/trade");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, { token: LIVE_TOKEN, account: ACCOUNT_A });
+    const table = page.getByRole("table", { name: "Forever orders" });
+    await tickUntil(page, table);
+    await expect(table.getByText("ACTIVE", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => Object.keys(sessionStorage)
+      .filter((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toEqual([]);
+    presentationEvidence.assertWrites([
+      { method: "DELETE", path: cancelPath, body: null },
+      { method: "POST", path: "/ft-api/v1/auth/logout", body: {} },
+    ]);
+  });
 });
 
 for (const action of ["square-off", "exit-all"] as const) {
