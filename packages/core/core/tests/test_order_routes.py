@@ -711,7 +711,7 @@ class TestPracticeMode:
 
     def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
         class Closed:
-            def is_market_open(self, exchange, symbol=None):
+            def session_active(self, exchange, symbol=None):
                 return False
 
         monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Closed())

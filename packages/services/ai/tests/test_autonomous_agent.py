@@ -818,6 +818,60 @@ def test_initial_status_idle() -> None:
     assert agent.status == AgentStatus.IDLE
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exchange", "symbol", "at", "session_open"),
+    [
+        ("MCX", "GOLD", datetime(2026, 11, 9, 23, 40, tzinfo=timezone(timedelta(hours=5, minutes=30))), True),
+        ("NCDEX", "GUARSEED", datetime(2026, 11, 9, 17, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))), True),
+        ("NSE", "RELIANCE", datetime(2026, 12, 7, 15, 31, tzinfo=timezone(timedelta(hours=5, minutes=30))), False),
+        ("NSE", "RELIANCE", datetime(2026, 12, 7, 15, 37, tzinfo=timezone(timedelta(hours=5, minutes=30))), False),
+        ("NSE", "RELIANCE", datetime(2026, 12, 7, 15, 38, tzinfo=timezone(timedelta(hours=5, minutes=30))), False),
+    ],
+)
+async def test_new_entry_stops_before_route_and_exit_uses_the_session(
+    exchange: str,
+    symbol: str,
+    at: datetime,
+    session_open: bool,
+) -> None:
+    """Admission closes the entry. The exit still routes while the session is active."""
+    from flinttrade_engine.scheduler import TimeScheduler
+
+    scheduler = TimeScheduler()
+
+    def session_for(provider_exchange: str, provider_symbol: str, day: date) -> Any:
+        return scheduler.get_market_session(provider_exchange, on=day, symbol=provider_symbol)
+
+    agent = make_agent(
+        symbols=[symbol],
+        exchange=exchange,
+        market_session_provider=session_for,
+        clock=lambda: at,
+    )
+    agent.analyze_all = AsyncMock(return_value={symbol: MarketData(symbol=symbol, ltp=100.0)})
+    agent.decide = AsyncMock(return_value=TradeSignal.BUY)
+
+    await agent.run_cycle()
+
+    agent.order_executor.route_order.assert_not_awaited()
+    if not session_open:
+        return
+
+    agent.state.active_positions[symbol] = 100.0
+    agent.state.position_details[symbol] = {
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+    assert await agent._square_off_all() is True
+    agent.order_executor.route_order.assert_awaited_once()
+    order = agent.order_executor.route_order.await_args.args[0]
+    assert (order.symbol, order.action.value, order.quantity) == (symbol, "SELL", "1")
+
+
 def test_market_open_fails_closed_without_effective_session_provider() -> None:
     agent = make_agent(
         clock=lambda: datetime(2026, 7, 10, 10, 0, tzinfo=timezone(timedelta(hours=5, minutes=30))),

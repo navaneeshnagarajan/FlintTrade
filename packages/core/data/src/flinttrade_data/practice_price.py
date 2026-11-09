@@ -86,18 +86,20 @@ class PracticeMarketPrice:
 
 
 def practice_market_is_open(exchange: str, symbol: str) -> bool:
-    """Whether the running scheduler says this instrument's session is open.
+    """Whether the running scheduler's session, including its exit window, is active.
 
     Session times, exchange holidays, and broker special sessions stay on
     the scheduler already loaded into ``app.config["TIME_SCHEDULER"]``.
     A fresh clock has none of that calendar, so this does not build one.
     With no running scheduler the session is closed and an option is refused.
+    An option price stays usable through square-off. A new order is still
+    refused by admission when the entry gate has closed.
     """
     scheduler = _runtime_scheduler()
     if scheduler is None:
         return False
     try:
-        return bool(scheduler.is_market_open(exchange, symbol=symbol or None))
+        return bool(scheduler.session_active(exchange, symbol=symbol or None))
     except Exception:
         logger.debug(
             "Practice market-hours check failed for %s %s",
@@ -117,7 +119,7 @@ def _runtime_scheduler() -> Any | None:
     if not has_app_context():
         return None
     scheduler = current_app.config.get("TIME_SCHEDULER")
-    if not callable(getattr(scheduler, "is_market_open", None)):
+    if not callable(getattr(scheduler, "session_active", None)):
         return None
     return scheduler
 

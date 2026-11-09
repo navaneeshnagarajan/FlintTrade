@@ -3216,7 +3216,7 @@ def _wire_ml_signal_runtime(
         "ml_signal_cycle",
         handler=make_ml_signal_job(
             pipeline,
-            lambda exchange, symbol: bool(time_scheduler.is_market_open(exchange, symbol=symbol)),
+            lambda exchange, symbol: bool(time_scheduler.session_active(exchange, symbol=symbol)),
         ),
         description="Publish scheduled LightGBM signals into the canonical feed",
         trigger_type="interval",
