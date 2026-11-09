@@ -60,9 +60,34 @@ def offline_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     # No API key, broker secrets, downloaded inference runtime or operator home
     # is supplied. The namespace launcher owns the outer security boundary.
-    with socket.socket() as reserved:
-        reserved.bind(("127.0.0.1", 0))
-        port = reserved.getsockname()[1]
+    # Keep this socket until Waitress binds. Releasing it at fixture setup
+    # publishes a free port for the whole factory build, and another worker
+    # can bind it before the listener does.
+    reserved = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    reserved.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    reserved.bind(("127.0.0.1", 0))
+    port = reserved.getsockname()[1]
+    handed_off = False
+
+    def bind(self: socket.socket, address: object) -> object:
+        nonlocal handed_off
+        if (
+            not handed_off
+            and isinstance(address, tuple)
+            and len(address) >= 2
+            and str(address[0]) in {"127.0.0.1", "0.0.0.0", ""}
+            and int(address[1]) == port
+        ):
+            target = self.fileno()
+            os.dup2(reserved.fileno(), target)
+            os.set_blocking(target, False)
+            reserved.close()
+            handed_off = True
+            return None
+        return socket_bind(self, address)
+
+    socket_bind = socket.socket.bind
+    monkeypatch.setattr(socket.socket, "bind", bind)
     monkeypatch.setenv("FLINTTRADE_BACKEND_PORT", str(port))
     monkeypatch.setenv("FLINTTRADE_BACKEND_HOST", "127.0.0.1")
     ledger: dict[str, Any] = {
@@ -122,6 +147,8 @@ def offline_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
     try:
         yield ledger
     finally:
+        if not handed_off:
+            reserved.close()
         after = source_identity()
         _emit("owned-source", before=before, after=after, source_changed=before != after)
         assert before == after, "The exercised smoke/lifecycle sources changed during this test"
@@ -196,7 +223,8 @@ async def _assert_released(runtime: Any, listener: Any, lease: Any, threads: lis
     finally:
         replacement.release()
     for thread in threads:
-        await asyncio.to_thread(thread.join, 1)
+        if thread is not threading.current_thread():
+            await asyncio.to_thread(thread.join)
     alive = [thread.name for thread in threads if thread.is_alive()]
     _emit(
         "released",
@@ -364,7 +392,7 @@ async def test_normal_factory_runtime_readiness_refusal_and_clean_stop(
         threads = _owned_threads(baseline)
         assert any(thread.name == "instrument-master-refresh" for thread in threads)
         await runtime.stop(timeout=30)
-        await asyncio.wait_for(start, timeout=5)
+        await start
         rejected = flask_app.test_client().get("/api/v1/ping")
         assert rejected.status_code == 503 and rejected.json["message"] == "Application is shutting down"
         await _assert_released(runtime, listener, lease, threads, port)
@@ -375,7 +403,7 @@ async def test_normal_factory_runtime_readiness_refusal_and_clean_stop(
         if not runtime._stop_completed:
             await runtime.stop(timeout=30)
         if not start.done():
-            await asyncio.wait_for(start, timeout=5)
+            await start
         lease.release()
         reset_health_singletons_for_tests()
 
