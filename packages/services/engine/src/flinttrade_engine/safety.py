@@ -2086,14 +2086,17 @@ def is_market_open(
     else:
         now = now.astimezone(IST)
 
-    from flinttrade_engine.market_hours import session_decision  # noqa: PLC0415
+    from flinttrade_engine.market_hours import admit_session  # noqa: PLC0415
 
-    decision = session_decision(
+    # Weekends, holidays, and special sessions are applied inside admit_session,
+    # which is the same answer market timings publishes.
+    decision = admit_session(
         exchange,
         now,
         symbol=symbol,
         expiry_calendar=expiry_calendar,
         risk_increasing=risk_increasing,
+        market_calendar=_market_calendar(market_calendar),
     )
     if exchange in _QUOTE_ONLY_EXCHANGES or decision.reason == "quote_only":
         return False
@@ -2103,27 +2106,6 @@ def is_market_open(
         return True
 
     if exchange not in MARKET_HOURS or decision.reason == "unknown_exchange":
-        return False
-
-    # Weekends and exchange holidays use the scheduler's calendar. A closed
-    # day stays closed for a new order and for a reduce-only exit. Muhurat
-    # remains open only inside its published window, which the scheduler
-    # already records as a session.
-    from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
-
-    calendar = _market_calendar(market_calendar)
-    if calendar is None:
-        calendar = TimeScheduler()
-    if (
-        calendar.get_market_session(
-            exchange,
-            on=now.date(),
-            symbol=symbol,
-            expiry_calendar=expiry_calendar,
-            risk_increasing=False,
-        )
-        is None
-    ):
         return False
 
     return decision.order_entry in {"open", "auction_entry"}

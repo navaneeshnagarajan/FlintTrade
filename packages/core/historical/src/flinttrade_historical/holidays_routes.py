@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -163,11 +163,11 @@ def get_timings() -> tuple[Any, int]:
     try:
         from flinttrade_engine.market_hours import (  # noqa: PLC0415
             STANDARD_HOURS,
+            admit_session,
             get_market_hours,
             get_standard_hours,
             is_special_session,
             list_upcoming_sessions,
-            session_decision,
         )
     except ImportError as exc:
         logger.error("market_hours module not available: %s", exc)
@@ -186,6 +186,7 @@ def get_timings() -> tuple[Any, int]:
             400,
         )
 
+    ist = timezone(timedelta(hours=5, minutes=30))
     try:
         session_date = date.fromisoformat(on_text) if on_text else date.today()
     except ValueError:
@@ -193,43 +194,50 @@ def get_timings() -> tuple[Any, int]:
 
     at_text = (request.args.get("at") or "").strip()
     try:
-        probe = datetime.fromisoformat(at_text) if at_text else datetime.combine(session_date, time(12, 0))
+        if at_text:
+            probe = datetime.fromisoformat(at_text)
+        else:
+            probe = datetime.now(ist)
+            if on_text:
+                probe = datetime.combine(session_date, probe.time().replace(tzinfo=None), tzinfo=ist)
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid date"}), 400
-    if at_text and not on_text:
+    if probe.tzinfo is None:
+        probe = probe.replace(tzinfo=ist)
+    else:
+        probe = probe.astimezone(ist)
+    if at_text:
         session_date = probe.date()
 
     expiry_calendar = [item.strip() for item in expiries_text.split(",") if item.strip()] or None
 
     try:
-        # Open stays the ordinary published open. A special session stays on
-        # the list below and does not replace this row.
-        if exchange in {"NFO", "BFO"} and is_special_session(session_date, exchange=exchange) is None:
-            open_t, _ordinary_close = get_market_hours(exchange, session_date)
+        # Open stays the ordinary published open unless this date is a special
+        # session. The close below follows the live admission decision.
+        special_row = is_special_session(session_date, exchange=exchange)
+        if special_row is not None:
+            open_t = special_row.open_time
+        elif exchange in {"NFO", "BFO"}:
+            open_t = get_market_hours(exchange, session_date)[0]
         else:
-            open_t, _ordinary_close = get_standard_hours(exchange)
+            open_t = get_standard_hours(exchange)[0]
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 
-    # NSE, BSE, NFO, BFO, MCX, and NCDEX publish the gate close from the
-    # session decision. NCDEX is 17:00. MCX is 23:30. The ordinary row does
-    # not apply a special session.
-    decision = session_decision(
+    # Same admission path as safety.is_market_open / check_order: special
+    # sessions, weekends, and the loaded holiday calendar.
+    decision = admit_session(
         exchange,
         probe,
         symbol=symbol,
         expiry_calendar=expiry_calendar,
-        apply_special=False,
     )
-    phase = decision.phase if exchange in {"NSE", "BSE", "NFO", "BFO", "MCX", "NCDEX"} else None
-    order_entry = "open"
-    close_t = _ordinary_close
-    if exchange in {"NSE", "BSE", "NFO", "BFO", "MCX", "NCDEX"}:
-        if decision.reason == "unknown_expiry" or decision.order_close is None:
-            order_entry = "closed"
-            close_t = None
-        else:
-            close_t = decision.order_close.time().replace(tzinfo=None)
+    phase = decision.phase
+    order_entry = decision.order_entry if decision.order_entry in {"open", "auction_entry"} else "closed"
+    if decision.order_close is None:
+        close_t = None
+    else:
+        close_t = decision.order_close.time().replace(tzinfo=None)
 
     # Pre-open is 15 min before open for equity exchanges, same as open otherwise
     _equity = {"NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"}
@@ -262,7 +270,7 @@ def get_timings() -> tuple[Any, int]:
     revised_derivatives = exchange in {"NFO", "BFO"} and session_date >= date(2026, 12, 7)
     if is_special_session(session_date, exchange=exchange) is not None:
         revised_derivatives = False
-    close_label = None if order_entry == "closed" else f"{close_t.hour:02d}:{close_t.minute:02d}"
+    close_label = None if close_t is None else f"{close_t.hour:02d}:{close_t.minute:02d}"
     return (
         jsonify(
             {
@@ -273,6 +281,7 @@ def get_timings() -> tuple[Any, int]:
                 "close": close_label,
                 "phase": phase,
                 "order_entry": order_entry,
+                "reason": decision.reason,
                 "expiring_index_close": "15:30" if revised_derivatives else None,
                 "special_sessions": special,
             }

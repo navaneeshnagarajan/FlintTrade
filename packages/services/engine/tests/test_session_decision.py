@@ -38,19 +38,20 @@ _REVISED_PHASE = {
 }
 
 
-def _rows() -> list[tuple[str, int, int, int, bool, bool, bool, str, str | None]]:
+def _rows() -> list[tuple[str, int, int, int, bool, bool, bool, str | None, str | None]]:
     """exchange, day, hour, minute, safety, scheduler, square-off, close, phase."""
-    rows: list[tuple[str, int, int, int, bool, bool, bool, str, str | None]] = []
+    rows: list[tuple[str, int, int, int, bool, bool, bool, str | None, str | None]] = []
     afternoon = ((15, 14), (15, 15), (15, 20), (15, 30), (15, 40), (15, 45))
     for day, phases, nfo_close in ((6, _PRE_PHASE, "15:40"), (7, _REVISED_PHASE, "15:45")):
         sunday = day == 6
         for hour, minute in afternoon:
             phase = phases[(hour, minute)]
             if sunday:
-                rows.append(("NSE", day, hour, minute, False, False, False, "15:30", phase))
-                rows.append(("NFO", day, hour, minute, False, False, False, nfo_close, None))
-                rows.append(("MCX", day, hour, minute, False, False, False, "23:30", None))
-                rows.append(("NCDEX", day, hour, minute, False, False, False, "17:00", None))
+                # A closed day does not advertise the ordinary close or a continuous phase.
+                rows.append(("NSE", day, hour, minute, False, False, False, None, "closed"))
+                rows.append(("NFO", day, hour, minute, False, False, False, None, "closed"))
+                rows.append(("MCX", day, hour, minute, False, False, False, None, "closed"))
+                rows.append(("NCDEX", day, hour, minute, False, False, False, None, "closed"))
                 continue
             if (hour, minute) == (15, 14):
                 nse = (True, True, False)
@@ -74,12 +75,12 @@ def _rows() -> list[tuple[str, int, int, int, bool, bool, bool, str, str | None]
             rows.append(("NCDEX", day, hour, minute, True, True, False, "17:00", None))
         for hour, minute, safety, scheduler, square in ((23, 30, False, True, True), (23, 40, False, True, True)):
             if sunday:
-                rows.append(("MCX", day, hour, minute, False, False, False, "23:30", None))
+                rows.append(("MCX", day, hour, minute, False, False, False, None, "closed"))
             else:
                 rows.append(("MCX", day, hour, minute, safety, scheduler, square, "23:30", None))
         for hour, minute, safety, scheduler, square in ((17, 0, False, True, True), (18, 0, False, False, False)):
             if sunday:
-                rows.append(("NCDEX", day, hour, minute, False, False, False, "17:00", None))
+                rows.append(("NCDEX", day, hour, minute, False, False, False, None, "closed"))
             else:
                 rows.append(("NCDEX", day, hour, minute, safety, scheduler, square, "17:00", None))
     return rows
@@ -116,7 +117,7 @@ def test_one_session_answer_across_callers(  # type: ignore[no-untyped-def]
     safety_open: bool,
     scheduler_open: bool,
     square_off: bool,
-    close: str,
+    close: str | None,
     phase: str | None,
 ) -> None:
     at = datetime(2026, 12, day, hour, minute, tzinfo=IST)

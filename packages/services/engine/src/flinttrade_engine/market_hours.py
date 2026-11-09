@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.market_hours")
 
@@ -737,6 +738,81 @@ def session_decision(
         special=special,
     )
     return SessionDecision(venue, phase, order_entry, order_close, square_off, reason)
+
+
+def _admission_calendar(market_calendar: Any):
+    """Holiday calendar shared with ``safety.is_market_open``."""
+    if market_calendar is not None:
+        return market_calendar
+    try:
+        from flinttrade_engine.safety import _market_calendar  # noqa: PLC0415
+    except ImportError:
+        _market_calendar = None  # type: ignore[assignment]
+    if _market_calendar is not None:
+        found = _market_calendar(None)
+        if found is not None:
+            return found
+    from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+    return TimeScheduler()
+
+
+def admit_session(
+    exchange: str,
+    at: datetime,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+    *,
+    market_calendar: Any = None,
+) -> SessionDecision:
+    """Admission answer used by ``safety.is_market_open`` and market timings.
+
+    Special sessions stay on. A weekend or an exchange holiday closes the
+    day: order entry is closed, the phase is closed, and the close is not
+    the ordinary published close. A live session keeps that session's close.
+    """
+    decision = session_decision(
+        exchange,
+        at,
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=risk_increasing,
+    )
+    if decision.reason in {"quote_only", "always_open", "unknown_exchange"}:
+        return decision
+
+    instant = _as_ist(at)
+    calendar = _admission_calendar(market_calendar)
+    session = calendar.get_market_session(
+        decision.exchange,
+        on=instant.date(),
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=False,
+    )
+    if session is None:
+        reason = "weekend" if instant.weekday() >= 5 else "holiday"
+        return replace(
+            decision,
+            phase="closed",
+            order_entry="closed",
+            order_close=None,
+            reason=reason,
+        )
+
+    reason = decision.reason
+    phase = decision.phase
+    current = instant.time().replace(tzinfo=None)
+    open_t, _close_t = session
+    if decision.order_entry == "closed" and reason in {"outside_hours", "auction_closed"}:
+        reason = "before_open" if current < open_t else "after_close"
+    special = is_special_session(instant.date(), exchange=decision.exchange)
+    if phase is None and special is not None:
+        phase = "continuous" if decision.order_entry in {"open", "auction_entry"} else "closed"
+    if phase == decision.phase and reason == decision.reason:
+        return decision
+    return replace(decision, phase=phase, reason=reason)
 
 
 def _hhmm(minutes: int) -> str:
