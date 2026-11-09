@@ -126,13 +126,20 @@ export function nseCashSchedule(on: Date): NseCashSchedule {
 }
 
 /** Chip tooltip/title, e.g. `CAS · 15:15–15:35 (as of Aug 2026)`. */
-export function formatNseCashSessionTitle(phase: NseCashSessionPhase, on?: Date): string {
-  const schedule = on ? nseCashSchedule(on) : preRevisionSchedule();
+export function formatNseCashSessionTitle(phase: NseCashSessionPhase, on: Date): string {
+  const schedule = nseCashSchedule(requireSessionDate(on));
   return `${NSE_CASH_PHASE_LABEL[phase]} · ${schedule.phaseWindow[phase]} (${schedule.scheduleNote})`;
 }
 
-export function nseCashPhaseAtMinutes(minutes: number, on?: Date): NseCashSessionPhase {
-  const schedule = on ? nseCashSchedule(on) : preRevisionSchedule();
+function requireSessionDate(on: Date): Date {
+  if (!(on instanceof Date) || Number.isNaN(on.getTime())) {
+    throw new TypeError("NSE cash phase requires the session date");
+  }
+  return on;
+}
+
+export function nseCashPhaseAtMinutes(minutes: number, on: Date): NseCashSessionPhase {
+  const schedule = nseCashSchedule(requireSessionDate(on));
   if (minutes >= NSE_CONTINUOUS_START_MIN && minutes < schedule.casStart) {
     return "continuous";
   }

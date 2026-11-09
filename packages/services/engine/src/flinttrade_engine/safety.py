@@ -2080,22 +2080,30 @@ def is_market_open(
     - NSE and BSE cash auction entry stops from 15:38 from 7 Dec 2026
     - Known exchanges: True only if current IST time is within market hours
     """
-    if exchange in _QUOTE_ONLY_EXCHANGES:
-        return False
-
-    # Delta Exchange — 24/7 via native broker broker integration
-    if exchange == "DELTA":
-        return True
-
-    if exchange not in MARKET_HOURS:
-        return False
-
     now = at or datetime.now(IST)
     if now.tzinfo is None or now.utcoffset() is None:
         now = now.replace(tzinfo=IST)
     else:
         now = now.astimezone(IST)
-    current_time = now.time().replace(tzinfo=None)
+
+    from flinttrade_engine.market_hours import session_decision  # noqa: PLC0415
+
+    decision = session_decision(
+        exchange,
+        now,
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=risk_increasing,
+    )
+    if exchange in _QUOTE_ONLY_EXCHANGES or decision.reason == "quote_only":
+        return False
+
+    # Delta Exchange — 24/7 via native broker broker integration
+    if exchange == "DELTA" or decision.reason == "always_open":
+        return True
+
+    if exchange not in MARKET_HOURS or decision.reason == "unknown_exchange":
+        return False
 
     # Weekends and exchange holidays use the scheduler's calendar. A closed
     # day stays closed for a new order and for a reduce-only exit. Muhurat
@@ -2118,35 +2126,7 @@ def is_market_open(
     ):
         return False
 
-    from flinttrade_engine.market_hours import is_special_session  # noqa: PLC0415
-
-    special = is_special_session(now.date(), exchange=exchange)
-    if special is not None:
-        return special.open_time <= current_time <= special.close_time
-
-    if exchange in {"NSE", "BSE"}:
-        from flinttrade_engine.market_hours import cash_auction_order_entry  # noqa: PLC0415
-
-        auction = cash_auction_order_entry(now)
-        if auction is not None:
-            return auction
-
-    if exchange in {"NFO", "BFO"}:
-        from flinttrade_engine.market_hours import derivative_contract_close  # noqa: PLC0415
-
-        close_time = derivative_contract_close(
-            exchange,
-            now.date(),
-            symbol=symbol,
-            expiry_calendar=expiry_calendar,
-            risk_increasing=risk_increasing,
-        )
-        if close_time is None:
-            return False
-        return dt_time(9, 15) <= current_time < close_time
-
-    open_time, close_time = MARKET_HOURS[exchange]
-    return open_time <= current_time < close_time
+    return decision.order_entry in {"open", "auction_entry"}
 
 
 def get_expiry_time(exchange: str) -> dt_time:

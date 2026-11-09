@@ -63,6 +63,23 @@ class TestMarketTimingsRoute:
         assert data["open"] == "09:00"
         assert data["close"] == "23:30"
 
+    def test_ncdex_timings_use_the_gate_close(self, client) -> None:  # type: ignore[no-untyped-def]
+        """NCDEX timings publish the 17:00 gate close, not the 23:30 standard hours."""
+        response = client.get("/api/v1/market/timings?exchange=NCDEX&on=2026-12-07")
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["open"] == "10:00"
+        assert data["close"] == "17:00"
+        assert data["phase"] is None
+
+    def test_nse_timings_publish_the_cash_phase(self, client) -> None:  # type: ignore[no-untyped-def]
+        before = client.get("/api/v1/market/timings?exchange=NSE&on=2026-12-06&at=2026-12-06T15:20:00%2B05:30")
+        after = client.get("/api/v1/market/timings?exchange=BSE&on=2026-12-07&at=2026-12-07T15:20:00%2B05:30")
+        assert before.get_json()["close"] == "15:30"
+        assert before.get_json()["phase"] == "cas"
+        assert after.get_json()["close"] == "15:30"
+        assert after.get_json()["phase"] == "continuous"
+
     def test_unknown_exchange_returns_400(self, client) -> None:  # type: ignore[no-untyped-def]
         """Unrecognised exchange code returns HTTP 400 with supported list."""
         response = client.get("/api/v1/market/timings?exchange=INVALID")

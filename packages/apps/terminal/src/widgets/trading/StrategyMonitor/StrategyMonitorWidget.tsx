@@ -189,6 +189,9 @@ interface StrategyRowProps {
 function StrategyRow({ strategy }: StrategyRowProps) {
   const [logsOpen, setLogsOpen] = useState(false);
   const { name, status, symbol, pnl, tradesToday, signalsGenerated, logs } = strategy;
+  const ownershipId = status === "unknown" && strategy.ownershipRetained
+    ? `strategy-${strategy.id}-ownership`
+    : undefined;
   const unknownTitle = status !== "unknown"
     ? undefined
     : strategy.ownershipRetained
@@ -200,6 +203,7 @@ function StrategyRow({ strategy }: StrategyRowProps) {
       className="border-b border-border-default last:border-0"
       role="listitem"
       aria-label={`Strategy ${name}: ${STATUS_LABEL[status]}`}
+      aria-describedby={ownershipId}
       title={unknownTitle}
     >
       {/* Main row */}
@@ -223,6 +227,11 @@ function StrategyRow({ strategy }: StrategyRowProps) {
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold text-text-primary truncate" title={name}>{name}</div>
           <div className="text-xxs text-text-muted">{symbol}</div>
+          {ownershipId ? (
+            <p id={ownershipId} className="text-xxs text-warning leading-snug">
+              {UNKNOWN_OWNERSHIP_TITLE}
+            </p>
+          ) : null}
         </div>
 
         {/* Status badge */}
@@ -333,6 +342,7 @@ function StrategyMonitorWidget() {
     () => (strategiesQuery.data ?? []).map(toStrategyRow),
     [strategiesQuery.data],
   );
+  const strategiesFailed = isConnected && strategiesQuery.isError;
   const strategies = isConnected ? liveStrategies : SAMPLE_STRATEGIES;
 
   useEffect(() => {
@@ -398,7 +408,11 @@ function StrategyMonitorWidget() {
         role="list"
         aria-label="Strategy list"
       >
-        {strategies.length === 0 ? (
+        {strategiesFailed ? (
+          <div className="flex flex-col items-center justify-center gap-2 h-full px-4 text-center">
+            <p role="alert" className="text-sm text-text-muted">Could not load strategies.</p>
+          </div>
+        ) : strategies.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 h-full px-4 text-center">
             <p className="text-sm text-text-muted">No strategies configured</p>
             <p className="text-xxs text-text-muted leading-snug">

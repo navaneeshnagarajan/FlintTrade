@@ -81,7 +81,7 @@ import {
   deskContractName,
   missingLotRefusal,
 } from "@/lib/instrumentLots";
-import { isMarketHours, tickKeyFor } from "@/lib/market";
+import { orderPadSessionBadge, tickKeyFor } from "@/lib/market";
 import { muhuratAmoNote } from "@/lib/muhuratSession";
 import {
   SESSION_OPEN_LABEL,
@@ -1404,7 +1404,7 @@ function OrderPadWidget(props: WidgetProps) {
         <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
           Order Pad
         </span>
-        {isMarketHours() && (
+        {orderPadSessionBadge(new Date(), exchange).greenContinuous && (
           <span
             className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium"
             aria-label="Market session open"

@@ -171,6 +171,8 @@ EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
     "BFO": ExchangeSchedule("BFO", time(9, 15), time(15, 40), time(15, 15)),
     "CDS": ExchangeSchedule("CDS", time(9, 0), time(17, 0), time(16, 45)),
     "BCD": ExchangeSchedule("BCD", time(9, 0), time(17, 0), time(16, 45)),
+    # 23:55 stays the runner's session end until that policy change.
+    # Order admission and timings close at 23:30.
     "MCX": ExchangeSchedule("MCX", time(9, 0), time(23, 55), time(23, 30)),
     "NCDEX": ExchangeSchedule("NCDEX", time(10, 0), time(17, 0), time(16, 45)),
     # NCO (NSE Commodities) — Zerodha-only on upstream as of v2.0.0.7.
@@ -347,14 +349,21 @@ class TimeScheduler:
             return True
 
         current = _as_ist(at) if at is not None else self.now_ist()
-        if exchange in {"NSE", "BSE"}:
-            from .market_hours import cash_auction_order_entry  # noqa: PLC0415
+        from .market_hours import session_decision  # noqa: PLC0415
 
-            auction = cash_auction_order_entry(current)
-            if auction is not None:
-                if self.get_market_session(exchange, on=current.date(), symbol=symbol) is None:
-                    return False
-                return auction
+        decision = session_decision(
+            exchange,
+            current,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+        )
+        # Cash auction entry is the decision. The runner window below is not:
+        # MCX stays open until 23:55 until that policy change.
+        if exchange in {"NSE", "BSE"} and decision.reason in {"auction_entry", "auction_closed"}:
+            if self.get_market_session(exchange, on=current.date(), symbol=symbol) is None:
+                return False
+            return decision.order_entry == "auction_entry"
         return (
             self._active_market_window(
                 exchange,
@@ -412,18 +421,18 @@ class TimeScheduler:
             return special.open_time, special.close_time
         market_close = time(19, 30) if exchange_key == "CDS" and _is_cds_cross_currency(symbol) else sched.market_close
         if exchange_key in {"NFO", "BFO"}:
-            from .market_hours import derivative_contract_close  # noqa: PLC0415
+            from .market_hours import session_decision  # noqa: PLC0415
 
-            contract_close = derivative_contract_close(
+            decision = session_decision(
                 exchange_key,
-                session_date,
+                datetime.combine(session_date, time(12, 0), tzinfo=IST),
                 symbol=symbol,
                 expiry_calendar=expiry_calendar,
                 risk_increasing=risk_increasing,
             )
-            if contract_close is None:
+            if decision.order_close is None:
                 return None
-            market_close = contract_close
+            market_close = decision.order_close.timetz().replace(tzinfo=None)
         return sched.market_open, market_close
 
     def is_trading_day(
@@ -529,23 +538,37 @@ class TimeScheduler:
 
         Square-off reads the expiry on the contract symbol. A missing
         calendar does not stop it on a day that symbol is not expiring.
+        The decision owns the ordinary instant. A calendar session that
+        replaces the close keeps the same lead.
         """
-        sched = EXCHANGE_SCHEDULES.get(exchange.strip().upper())
+        exchange_key = exchange.strip().upper()
+        sched = EXCHANGE_SCHEDULES.get(exchange_key)
         if sched is None or sched.is_24x7:
             return False
 
         now = _as_ist(at) if at is not None else self.now_ist()
+        from .market_hours import session_decision  # noqa: PLC0415
+
+        decision = session_decision(
+            exchange_key,
+            now,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=False,
+        )
         active_window = self._active_market_window(
-            exchange,
+            exchange_key,
             at=now,
             symbol=symbol,
             expiry_calendar=expiry_calendar,
             risk_increasing=False,
         )
-        if active_window is None:
+        if active_window is None or decision.square_off is None:
             return False
         _, closes_at = active_window
-        return now >= closes_at - self._square_off_offset(sched)
+        scheduled = closes_at - self._square_off_offset(sched)
+        square_off = decision.square_off if scheduled == decision.square_off else scheduled
+        return now >= square_off
 
     # ------------------------------------------------------------------
     # Deploy freeze
@@ -1268,20 +1291,39 @@ class StrategyRunner:
                     self._running = False
                     self._release_completed_self_stop_unlocked()
 
+    def _tick_session_action(self, exchange: str) -> str:
+        """Return ``closed``, ``square_off``, or ``tick``.
+
+        The decision is computed here so the tick frame does not keep clock
+        objects while user strategy code is running. 23:55 stays the MCX
+        runner session end until that policy change.
+        """
+        from .market_hours import session_decision  # noqa: PLC0415
+
+        decision = session_decision(
+            exchange,
+            self.scheduler.now_ist(),
+            symbol=self.symbol,
+            risk_increasing=False,
+        )
+        if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
+            return "closed"
+        if decision.square_off is not None and self.scheduler.should_square_off(exchange, symbol=self.symbol):
+            return "square_off"
+        return "tick"
+
     async def _tick(self) -> None:
         """Single tick iteration."""
         exchange = self.strategy.exchange
-
-        # Skip if market is closed. The symbol carries the contract expiry.
-        if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
+        action = self._tick_session_action(exchange)
+        if action == "closed":
             return
 
         # NOTE: is_deploy_frozen() guards code *deployment*, not tick delivery.
         # Strategies must receive ticks during market hours regardless of
         # whether a deployment freeze is active. Do not gate ticks here.
 
-        # Check auto square-off
-        if self.scheduler.should_square_off(exchange, symbol=self.symbol):
+        if action == "square_off":
             await self._handle_square_off()
             return
 
