@@ -4,6 +4,7 @@ import {
   ACCOUNT_A,
   ACCOUNT_B,
   BROKER,
+  LIVE_TOKEN,
   EXECUTION_WARNING,
   GTT_READ_FROZEN,
   GTT_REFUSAL,
@@ -520,6 +521,71 @@ test.describe("a dropped cancel settles from a later trigger row", () => {
     await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
     await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
     presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
+  });
+
+  test("signing out drops the pending cancel and signing in again does not restore it", async ({ page, syntheticApi, presentationEvidence }) => {
+    const registrations: SyntheticHandlerRegistration[] = [];
+    const recording = new Proxy(syntheticApi, { get(target, key) {
+      if (key === "register") return (registration: SyntheticHandlerRegistration) => {
+        registrations.push(registration);
+        target.register(registration);
+      };
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    await dropCancel(page, recording as SyntheticPhasedFixtureRegistry);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+      .some((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toBe(true);
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      await syntheticApi.retireRead(registration.path);
+    }
+    for (const registration of registrations) {
+      if (registration.method !== "GET" || registration.path === foreverPath()) continue;
+      syntheticApi.register({ ...registration, name: `signed-in-again: ${registration.name}` });
+    }
+    syntheticApi.register({
+      name: "sign out",
+      method: "POST",
+      path: "/ft-api/v1/auth/logout",
+      expectedCalls: 1,
+      handler: () => ({ json: { status: "success" } }),
+    });
+    registerRead(syntheticApi, foreverPath(), {
+      json: { status: "success", data: [triggerRow()] },
+    }, { minimum: 1, maximum: 4 });
+    await page.evaluate(async ({ token, account }) => {
+      const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+      const session = await importModule("/src/services/sessionLogout.ts") as { logoutSession: () => Promise<unknown> };
+      await session.logoutSession();
+      const pending = Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"));
+      if (pending.length > 0) throw new Error(`pending cancels survived sign-out: ${pending.join(",")}`);
+      const auth = await importModule("/src/stores/authStore.ts") as {
+        useAuthStore: { getState: () => { setLoggedIn: (token: string, user: string, expiresAt: string) => void } };
+      };
+      const mode = await importModule("/src/stores/modeStore.ts") as {
+        useModeStore: { getState: () => { setMode: (mode: "live") => void } };
+      };
+      const brokers = await importModule("/src/stores/brokerStore.ts") as {
+        useBrokerStore: { getState: () => { setActiveAccount: (id: string) => void } };
+      };
+      auth.useAuthStore.getState().setLoggedIn(token, "synthetic-order-flow-operator", "");
+      mode.useModeStore.getState().setMode("live");
+      brokers.useBrokerStore.getState().setActiveAccount(`native:dhan:${account}`);
+      window.history.pushState(null, "", "/trade");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, { token: LIVE_TOKEN, account: ACCOUNT_A });
+    const table = page.getByRole("table", { name: "Forever orders" });
+    await tickUntil(page, table);
+    await expect(table.getByText("ACTIVE", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => Object.keys(sessionStorage)
+      .filter((key) => key.startsWith("flinttrade:forever-pending-cancels:")))).toEqual([]);
+    presentationEvidence.assertWrites([
+      { method: "DELETE", path: cancelPath, body: null },
+      { method: "POST", path: "/ft-api/v1/auth/logout", body: {} },
+    ]);
   });
 });
 

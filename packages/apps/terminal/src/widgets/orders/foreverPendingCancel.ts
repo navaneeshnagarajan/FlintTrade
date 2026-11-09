@@ -13,6 +13,14 @@ import { safeParse } from "@/lib/safeParse";
 
 const STORAGE_PREFIX = "flinttrade:forever-pending-cancels";
 
+export function clearForeverPendingCancels(): void {
+  const storage = sessionStorageOrNull();
+  if (!storage) return;
+  for (const key of Object.keys(storage)) {
+    if (key.startsWith(`${STORAGE_PREFIX}:`)) storage.removeItem(key);
+  }
+}
+
 const storedPendingCancelSchema = z.array(z.object({
   orderId: z.string().min(1),
   submittedAt: z.number().finite(),

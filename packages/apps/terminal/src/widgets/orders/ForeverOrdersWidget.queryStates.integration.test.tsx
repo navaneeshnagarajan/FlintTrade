@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { brokerOrderKeys } from "@/lib/brokerOrdersApi";
 import { writePersistedAuthSession } from "@/lib/homeEntry";
+import { useAuthStore } from "@/stores/authStore";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import {
@@ -215,27 +216,34 @@ describe("ForeverOrders real-hook cancellation evidence", () => {
     expect(await screen.findByText(CANCEL_PENDING)).toBeInTheDocument();
     expect(screen.getByText(ROW.symbol)).toBeInTheDocument();
     await waitFor(() => expect(getCount).toBe(2));
-    clock.mockReturnValue(2000);
-    await act(async () => { listing.resolve(jsonResponse({ status: "success", data: [] })); });
-    await waitFor(() => expect(client.getQueryData(PRIMARY_KEY)).toEqual([]));
-    expect(await screen.findByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent(CANCEL_PENDING);
-
+    await act(async () => { listing.resolve(jsonResponse({ status: "success", data: [ROW] })); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh forever orders" })).toBeEnabled());
     nextListing = () => Promise.resolve(jsonResponse({ status: "error", message: "Native broker HTTP reads are unavailable until the read cutover" }, 409));
     await refreshListing();
     expect(await screen.findByText("Native broker HTTP reads are unavailable until the read cutover")).toBeInTheDocument();
     expect(screen.getByTestId("forever-orders-unavailable")).toBeInTheDocument();
     expect(screen.getByText(CANCEL_PENDING)).toBeInTheDocument();
 
+    clock.mockReturnValue(2000);
+    nextListing = () => Promise.resolve(jsonResponse({ status: "success", data: [] }));
+    await refreshListing();
+    await waitFor(() => expect(client.getQueryData(PRIMARY_KEY)).toEqual([]));
+    expect(screen.queryAllByText(CANCEL_PENDING)).toEqual([]);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.getByText("No resting forever orders for this broker account.")).toBeInTheDocument();
+
     clock.mockReturnValue(3000);
     nextListing = () => Promise.resolve(jsonResponse({ status: "success", data: [{ ...ROW, order_id: "UNRELATED", status: "CANCELLED" }] }));
     await refreshListing();
     expect(screen.getByText("UNRELATED")).toBeInTheDocument();
-    expect(screen.getByText(CANCEL_PENDING)).toBeInTheDocument();
+    expect(screen.queryAllByText(CANCEL_PENDING)).toEqual([]);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
 
     clock.mockReturnValue(4000);
     nextListing = () => Promise.resolve(jsonResponse({ status: "success", data: [{ ...ROW, status: "CANCELLED", child_order_id: "CHILD-A", child_status: "UNKNOWN" }] }));
     await refreshListing();
-    await waitFor(() => expect(screen.queryByText(CANCEL_PENDING)).not.toBeInTheDocument());
+    expect(screen.queryAllByText(CANCEL_PENDING)).toEqual([]);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.getByText("CANCELLED")).toBeInTheDocument();
     expect(screen.getByText(CHILD_CAVEAT)).toBeInTheDocument();
     expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
@@ -653,5 +661,65 @@ describe("a dropped Forever cancel survives a fresh client", () => {
     expect(await screen.findByText(CANCEL_PENDING)).toBeInTheDocument();
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(sessionStorage.getItem(pendingCancelKey("live", "A1"))).toBe(liveRecord);
+  });
+
+  it("signing out drops the pending cancel and signing in again does not restore it", async () => {
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [ROW] });
+      if (init.method === "DELETE" && url === DELETE_URL) return Promise.reject(new TypeError("Failed to fetch"));
+      return refuseUnexpected(url, init);
+    };
+    await dropCancel();
+    act(() => useAuthStore.getState().setLoggedOut());
+    await waitFor(() => expect(screen.queryAllByText(CANCEL_PENDING)).toEqual([]));
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"))).toEqual([]);
+    act(() => {
+      useAuthStore.getState().setLoggedIn("operator-session", OPERATOR, "");
+      setAccountRuntime({ activeAccountId: brokerAccountKey(PRIMARY_NATIVE_ACCOUNT) });
+    });
+    remount();
+    expect(await screen.findByText(ROW.symbol)).toBeInTheDocument();
+    expect(screen.queryByText(CANCEL_PENDING)).not.toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingCancelKey("live", "A1"))).toBeNull();
+  });
+
+  it("a complete list that omits the trigger drops the stored pending cancel", async () => {
+    let listed = true;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) {
+        return jsonResponse({ status: "success", data: listed ? [ROW] : [] });
+      }
+      if (init.method === "DELETE" && url === DELETE_URL) return Promise.reject(new TypeError("Failed to fetch"));
+      return refuseUnexpected(url, init);
+    };
+    await dropCancel();
+    listed = false;
+    await refreshSettledBook();
+    await waitFor(() => expect(screen.queryAllByText(CANCEL_PENDING)).toEqual([]));
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.getByText("No resting forever orders for this broker account.")).toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingCancelKey("live", "A1"))).toBeNull();
+  });
+
+  it("a failed list read keeps the stored pending cancel", async () => {
+    let fail = false;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) {
+        return fail
+          ? jsonResponse({ status: "error", message: "Forever orders unavailable" }, 503)
+          : jsonResponse({ status: "success", data: [ROW] });
+      }
+      if (init.method === "DELETE" && url === DELETE_URL) return Promise.reject(new TypeError("Failed to fetch"));
+      return refuseUnexpected(url, init);
+    };
+    await dropCancel();
+    const stored = sessionStorage.getItem(pendingCancelKey("live", "A1"));
+    fail = true;
+    await refreshSettledBook();
+    expect(screen.getAllByText(CANCEL_PENDING).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingCancelKey("live", "A1"))).toBe(stored);
   });
 });

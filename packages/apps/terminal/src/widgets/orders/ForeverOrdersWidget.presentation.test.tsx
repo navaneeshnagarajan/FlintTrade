@@ -120,9 +120,26 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     it.each([
       { data: [] },
       { data: [{ ...ROW, order_id: "UNRELATED", status: "CANCELLED" }] },
+    ])("a complete list that no longer contains the trigger drops the pending cancel: %j", (query) => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      acknowledge();
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
+      state.list = { ...state.list, dataUpdatedAt: 2000, isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle", ...query };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+      expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
+        .toBeInTheDocument();
+      expect(state.cancelRequest).not.toHaveBeenCalled();
+    });
+
+    it.each([
       { data: undefined, isSuccess: false, isError: true, error: new Error("Listing unavailable") },
       { data: undefined, isSuccess: false, isLoading: true },
       { data: undefined, fetchStatus: "paused" },
+      { data: [], isFetching: true, fetchStatus: "fetching" },
+      { data: [], dataUpdatedAt: 100 },
     ])("retains a visible scoped cancellation warning when the row is absent: %j", (query) => {
       const { rerender } = render(<ForeverOrdersWidget />);
       acknowledge();
@@ -135,7 +152,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         .toBeInTheDocument();
       expect(state.cancelRequest).not.toHaveBeenCalled();
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", child_status: "UNKNOWN" }],
-        isSuccess: true, isError: false, isLoading: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
+        isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
       rerender(<ForeverOrdersWidget />);
       expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
@@ -162,14 +179,21 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.cancel = { ...state.cancel, submittedAt: 600,
         variables: { broker: "dhan", account_id: "A", order_id: "TRIGGER-2" } };
-      state.list = { ...state.list, data: [], dataUpdatedAt: 2000 };
+      state.list = { ...state.list, data: [], dataUpdatedAt: 2000, fetchStatus: "paused", isSuccess: false };
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent("Cancellation requested");
       expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toHaveTextContent("Cancellation requested");
-      state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 3000 };
+      state.list = {
+        ...state.list,
+        data: [{ ...ROW, status: "CANCELLED" }, { ...ROW, order_id: "TRIGGER-2", status: "ACTIVE" }],
+        dataUpdatedAt: 3000,
+        isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle",
+      };
       rerender(<ForeverOrdersWidget />);
       expect(screen.queryByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).not.toBeInTheDocument();
-      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toBeInTheDocument();
+      expect(screen.getByText("Order cancelled")).toBeInTheDocument();
+      expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("alert", { name: "Cancellation for TRIGGER-2" })).not.toBeInTheDocument();
     });
 
     it("contradictory trigger identities cannot reconcile a matching cancellation ACK", () => {
