@@ -217,12 +217,32 @@ async def test_normal_factory_runtime_readiness_refusal_and_clean_stop(
     import flinttrade_core.app as app_module
     from flinttrade_core.auth_routes import _create_token
     from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning, acquire_backend_instance_lease
-    from flinttrade_core.health_routes import reset_health_singletons_for_tests
+    from flinttrade_core.health_monitor import HealthCheck, HealthMonitor
+    from flinttrade_core.health_routes import init_health_monitor, reset_health_singletons_for_tests
+
+    class _SteadyHostMemory(HealthMonitor):
+        """Keep /health about this process. Host RAM pressure is not readiness."""
+
+        def check_memory(self) -> HealthCheck:
+            return HealthCheck(
+                name="memory",
+                status="healthy",
+                message="Memory OK: process=1.0% system=10.0%",
+                metrics={
+                    "rss_mb": 32.0,
+                    "vms_mb": 64.0,
+                    "process_percent": 1.0,
+                    "system_total_mb": 1024.0,
+                    "system_available_mb": 921.6,
+                    "system_percent": 10.0,
+                },
+            )
 
     baseline = set(threading.enumerate())
     # Pytest re-publishes this variable when the fixture enters its call phase.
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     reset_health_singletons_for_tests()
+    init_health_monitor(_SteadyHostMemory())
     runtime = app_module.FlintTradeApp()
     reached = asyncio.Event()
     real_wait = runtime._wait_for_shutdown_result

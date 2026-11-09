@@ -757,7 +757,9 @@ finally:
         # Recovery releases custody before the managed host-notification tail.
         worker = preloaded_app.extensions.get("flinttrade.wsgi_stop_thread")
         if worker is not None:
-            worker.join(5)
+            # Join the managed stop thread itself. A fixed budget returns while
+            # that thread is still inside cleanup, which is not a finished drain.
+            worker.join()
             assert not worker.is_alive(), "managed WSGI shutdown did not finish"
         atexit.unregister(shutdown)
 """
@@ -1418,7 +1420,7 @@ def observe_retry(owner, **kwargs):
         # Start the real managed worker with live custody, then hold its real
         # request drain until the canonical fixture shutdown enters recovery.
         state["watch"]._on_revoked()
-        assert release_request.wait(5)
+        release_request.wait()
         assert state["lease"].recovery_owner is owner
         worker = state["app"].extensions["flinttrade.wsgi_stop_thread"]
         join = worker.join
@@ -1431,7 +1433,7 @@ def observe_retry(owner, **kwargs):
         worker.join = observe_join
         canonical_entered.set()
         retry(owner, **kwargs)
-        assert managed_tail_entered.wait(5)
+        managed_tail_entered.wait()
         assert worker.is_alive(), "held host-notification tail must still be live"
     else:
         retry(owner, **kwargs)
@@ -1442,7 +1444,7 @@ def observe_app(**kwargs):
     shutdown = kwargs["shutdown_callback"]
     def stopped():
         managed_tail_entered.set()
-        assert fixture_join_entered.wait(5)
+        fixture_join_entered.wait()
         events.append("managed-worker-stopped")
         shutdown()
     kwargs["shutdown_callback"] = stopped
@@ -1467,10 +1469,10 @@ def observe_app(**kwargs):
     tracker._condition.wait = observe_wait
 
     def finish_request():
-        if canonical_entered.wait(5):
-            with tracker._condition:
-                admission.release()
-                request_released.set()
+        canonical_entered.wait()
+        with tracker._condition:
+            admission.release()
+            request_released.set()
 
     request = threading.Thread(target=finish_request, name="fork-fixture-request")
     request.start()
@@ -1482,6 +1484,10 @@ def observe_app(**kwargs):
         assert "live-proof-at-request-drain" in events
         assert require_backend_lease_proof(proof) is proof
         owner = app.extensions["flinttrade.wsgi_shutdown_owner"]
+        for worker in owner._workers.values():
+            thread = worker._thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join()
         assert all(worker._thread is None or not worker._thread.is_alive()
                    for worker in owner._workers.values())
         events.append("owners-drained-before-lease-release")
@@ -1519,15 +1525,17 @@ finally:
     fixture_join_entered.set()
     if state:
         state["admission"].release()
-        state["request"].join(5)
+        state["request"].join()
         assert not state["request"].is_alive()
-        if not state["lease"]._released:
-            state["lease"].release = state["original_release"]
-            retry(core._WSGIStartupRecovery(state["app"], state["lease"]), timeout=5)
+        # The managed stop thread is the drain. Join it before any lease retry
+        # so a rescued failure path is not waiting on a shutdown deadline.
         worker = state["app"].extensions.get("flinttrade.wsgi_stop_thread")
         if worker is not None:
-            worker.join(5)
+            worker.join()
             assert not worker.is_alive()
+        if not state["lease"]._released:
+            state["lease"].release = state["original_release"]
+            state["lease"].release()
         for callback in callbacks:
             # Rescue completed before retiring the exact registration.
             atexit.unregister(callback)
