@@ -62,6 +62,7 @@ import {
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import { resolveAccountAuthorityIdentity, resolveDataScope, useDataScope } from "@/hooks/useDataScope";
 import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErrorPresentation";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
@@ -94,7 +95,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, ORDER_STATUS_UNKNOWN, liveWritesMuted } from "@/lib/operatorIncident";
 import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -365,7 +366,7 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
 }
 
 interface ToastMsg {
-  type: "success" | "error";
+  type: "success" | "error" | "unknown";
   text: string;
   scopeKey: string;
   retryable?: boolean;
@@ -373,39 +374,25 @@ interface ToastMsg {
   kind?: typeof QUANTITY_CHECK_ERROR;
 }
 
-interface ToastProps {
-  msg: ToastMsg | null;
-  onRetry?: () => void;
-}
-
-function Toast({ msg, onRetry }: ToastProps) {
+function Toast({ msg }: { msg: ToastMsg | null }) {
   if (!msg) return null;
   const ok = msg.type === "success";
-  // Transient errors (network, server 500) are retryable; auth/validation errors are not
-  const showRetry = !ok && msg.retryable && !!onRetry;
+  const unknown = msg.type === "unknown";
   return (
     <div
-      role="alert"
-      aria-live="assertive"
+      role={unknown ? "status" : "alert"}
+      aria-live={unknown ? "polite" : "assertive"}
+      data-testid="order-pad-outcome"
       className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
-        ok
-          ? "bg-profit/10 border-profit/20 text-profit"
-          : "bg-loss/10 border-loss/20 text-loss"
+        unknown
+          ? "bg-warning/10 border-warning/20 text-warning"
+          : ok
+            ? "bg-profit/10 border-profit/20 text-profit"
+            : "bg-loss/10 border-loss/20 text-loss"
       }`}
     >
-      {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
+      {unknown ? <AlertCircle size={13} aria-hidden="true" /> : ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
       <span className="flex-1 min-w-0 leading-tight [overflow-wrap:anywhere]">{msg.text}</span>
-      {showRetry && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onRetry}
-          className="shrink-0 h-auto px-2 py-0.5 rounded border border-loss/30 text-loss hover:bg-loss/10 transition-colors text-xxs font-medium"
-        >
-          Retry
-        </Button>
-      )}
     </div>
   );
 }
@@ -954,14 +941,14 @@ function OrderPadWidget(props: WidgetProps) {
   }, [handleSelect, query, suggestions, symbol]);
 
   const showToast = useCallback((
-    type: "success" | "error",
+    type: "success" | "error" | "unknown",
     text: string,
     ms = 4000,
-    retryable = false,
+    _retryable = false,
     kind?: typeof QUANTITY_CHECK_ERROR,
   ) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text, retryable, kind, scopeKey: resolveDataScope({
+    setToast({ type, text, retryable: false, kind, scopeKey: resolveDataScope({
       ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
     }) });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
@@ -977,15 +964,6 @@ function OrderPadWidget(props: WidgetProps) {
   useEffect(() => {
     return () => clearTimeout(toastTimerRef.current);
   }, []);
-
-  // Determine whether an error message warrants a retry button
-  function isRetryableError(msg: string): boolean {
-    return (
-      msg.includes("Connection failed") ||
-      msg.includes("server error") ||
-      msg.includes("Rate limit")
-    );
-  }
 
   const submitOrder = useCallback(async (
     params: Readonly<PlaceOrderParams>,
@@ -1076,7 +1054,8 @@ function OrderPadWidget(props: WidgetProps) {
         // Reconciliation guidance and native reason observations are not
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
-        showToast("error", presentation.body, 6000, false);
+        const unknown = presentation.body === ORDER_STATUS_UNKNOWN;
+        showToast(unknown ? "unknown" : "error", presentation.body, 6000, false);
         emitNotification({ category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true, ...presentation });
         return false;
       }
@@ -1102,6 +1081,18 @@ function OrderPadWidget(props: WidgetProps) {
         return false;
       }
       setAdmission(null);
+      const outcome = presentSubmitError(err);
+      if (outcome.kind === "unknown") {
+        showToast("unknown", outcome.message, 6000);
+        emitNotification({
+          category: "order",
+          ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+          ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
+          title: capturedOrderTitle("Order status unknown", params),
+          body: outcome.message,
+        });
+        return false;
+      }
       const code = err instanceof OrderApiError && err.body && typeof err.body === "object" && "code" in err.body
         && typeof (err.body as { code?: unknown }).code === "string"
         ? (err.body as { code: string }).code
@@ -1118,12 +1109,11 @@ function OrderPadWidget(props: WidgetProps) {
         }
       }
       noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
-      const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
       showToast(
         "error",
         msg,
         6000,
-        retryable,
+        false,
         code === "quantity_admission" ? QUANTITY_CHECK_ERROR : undefined,
       );
       emitNotification({
@@ -1132,9 +1122,6 @@ function OrderPadWidget(props: WidgetProps) {
         ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
         title: capturedOrderTitle("Order failed", params),
         body: msg,
-        // A retryable failure (timeout, transient connection) sends the operator
-        // back to the trade terminal to re-place; a hard rejection does not.
-        ...(retryable ? { action: { label: "Back to terminal", href: "/trade" } } : {}),
       });
       return false;
     } finally {
@@ -1399,26 +1386,6 @@ function OrderPadWidget(props: WidgetProps) {
     lastExitRef.current = true;
     await submitOrder(params, { mode: authorityMode }, { exit: true });
   }, [appMode, exitAlreadyPending, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
-
-  function handleRetry() {
-    const mode = useModeStore.getState().mode;
-    setToast(null);
-    if (mode === "practice" || mode === "explore") {
-      // A paper retry must be reviewed again; it can never call placement
-      // directly from a stale toast action.
-      void handleSubmit(onSubmit)();
-      return;
-    }
-    if (mode === "live" && lastSubmissionModeRef.current === "live" && lastParamsRef.current) {
-      void submitOrder(
-        lastParamsRef.current,
-        { mode: "live" },
-        lastExitRef.current ? { exit: true } : undefined,
-      );
-      return;
-    }
-    showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);
-  }
 
   const amoNote = muhuratAmoNote();
   const btnBase =
@@ -2051,7 +2018,7 @@ function OrderPadWidget(props: WidgetProps) {
       </form>
 
       {/* Toast */}
-      <Toast msg={toast?.scopeKey === dataScope ? toast : null} onRetry={handleRetry} />
+      <Toast msg={toast?.scopeKey === dataScope ? toast : null} />
 
       {practiceReview ? (
         <PracticeOrderReviewStage

@@ -24,6 +24,8 @@ import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hook
 import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
+import { EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -471,7 +473,8 @@ function ScalperWidget(props: WidgetProps) {
         showStatus(`${action} ${sym} placed`, "success");
         announceOrder(action, sym, qty);
       } catch (err) {
-        showStatus(err instanceof Error ? err.message : "Order failed", "error");
+        const outcome = presentSubmitError(err);
+        showStatus(outcome.message, outcome.kind === "unknown" ? "unknown" : "error");
       }
     },
     // `mode` is load-bearing: `checkOrderEntryMode(mode)` above is this widget's
@@ -539,9 +542,10 @@ function ScalperWidget(props: WidgetProps) {
     showStatus("Closing all…", "pending", 0);
     try {
       await exitAllPositions();
-      showStatus("All positions closed", "success");
+      showStatus(EXIT_ALL_REQUESTED, "unknown");
     } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Close failed", "error");
+      const outcome = presentSubmitError(err);
+      showStatus(outcome.message, outcome.kind === "unknown" ? "unknown" : "error");
     }
   }, [showStatus, isExplore]);
 
@@ -553,10 +557,12 @@ function ScalperWidget(props: WidgetProps) {
     }
     showStatus("Cancelling…", "pending", 0);
     try {
-      await cancelAllOrders();
-      showStatus("All orders cancelled", "success");
+      const result = await cancelAllOrders();
+      const presented = presentCancelResult(result);
+      showStatus(presented.message, presented.kind === "cancelled" ? "success" : presented.kind === "rejected" ? "error" : "unknown");
     } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Cancel failed", "error");
+      const presented = presentCancelResult(undefined, err);
+      showStatus(presented.message, presented.kind === "unknown" ? "unknown" : "error");
     }
   }, [showStatus, isExplore]);
 

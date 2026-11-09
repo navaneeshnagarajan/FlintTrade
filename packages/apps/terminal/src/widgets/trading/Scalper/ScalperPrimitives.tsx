@@ -212,6 +212,7 @@ export function StatusPill({ message, type = "idle" }: StatusPillProps) {
     success: "text-profit bg-profit/10 border-profit/30",
     error:   "text-loss bg-loss/10 border-loss/30",
     pending: "text-warning bg-warning/10 border-warning/30",
+    unknown: "text-warning bg-warning/10 border-warning/30",
     idle:    "text-text-muted bg-surface-hover border-border-default",
   };
   return (

@@ -72,6 +72,19 @@ export const EXIT_REQUESTED =
 export const EXIT_ALL_REQUESTED =
   "Exit-all requested. Check positions and orders for the outcome.";
 
+/**
+ * A submit whose response was dropped, timed out, or came back without a
+ * definitive broker or engine result. Practice and Live use this same sentence.
+ */
+export const ORDER_STATUS_UNKNOWN =
+  "Order status unknown. Check Orders before trying again.";
+
+/** The cancel was accepted. The order is not confirmed cancelled yet. */
+export const CANCELLATION_REQUESTED = "Cancellation requested";
+
+/** Shown only after an order-status read, the ledger, or a stream says cancelled. */
+export const ORDER_CANCELLED = "Order cancelled";
+
 export type OperatorStripLevel = "info" | "degraded" | "blocked";
 
 export type TransportReason = "dns" | "timeout" | "connection_refused" | "failed_fetch";

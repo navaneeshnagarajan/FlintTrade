@@ -4304,7 +4304,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
     fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     await expect(placeOrder({} as Parameters<typeof placeOrder>[0])).rejects.toThrow(
-      "Connection failed. Check FlintTrade backend is running.",
+      "Order status unknown. Check Orders before trying again.",
     );
   });
 

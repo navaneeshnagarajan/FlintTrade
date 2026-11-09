@@ -26,7 +26,7 @@ export const LIVE_TOKEN = [
   "synthetic-presentation-not-a-signature",
 ].join(".");
 
-export const CANCEL_WARNING = "Cancel pending. This order may still fill.";
+export const CANCEL_WARNING = "Cancellation requested";
 export const CHILD_CAVEAT = "Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders.";
 export const EXECUTION_WARNING = "This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.";
 export const GTT_EMPTY = "No resting forever orders for this broker account.";
