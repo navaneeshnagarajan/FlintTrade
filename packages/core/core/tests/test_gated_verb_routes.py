@@ -861,6 +861,31 @@ def test_synthetic_dhan_gtt_cancel_timeout_is_unknown(*, backend_lease_factory) 
     assert body["message"] != "Order cancelled"
 
 
+def test_synthetic_dhan_gtt_modify_timeout_is_unknown(*, backend_lease_factory) -> None:
+    router = _gated_router()
+
+    async def dropped(*_args, **kwargs):
+        kwargs["on_adapter_invoke"]()
+        raise TimeoutError("synthetic modify response dropped")
+
+    router.execute_gated = dropped
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.put(
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": _dhan_forever_changes(), "broker": "dhan", "account_id": "personal"},
+        headers=_live_headers(),
+    )
+    body = resp.get_json()
+    assert resp.status_code == 500
+    assert body["order_outcome"] == "unknown"
+    assert body["reason"] == "response_unconfirmed"
+    assert body["retry_safe"] is False
+    assert body["dispatch_outcome"] == "unknown_after_dispatch"
+    assert "GTT modification status unknown" not in body["message"]
+
+
 def test_forever_cancel_is_blocked_by_kill_switch(*, backend_lease_factory) -> None:
     """An ordinary cancel may remove a protective exit; only L5 policy bypasses."""
     safety = MagicMock()

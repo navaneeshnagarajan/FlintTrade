@@ -105,6 +105,12 @@ function rowIsCancelled(row: BrokerOrderRow): boolean {
   return statuses.length > 0 && statuses.every((key) => CONFIRMED_CANCELLED.has(statusToken(row[key])));
 }
 
+/** A later read ends a pending cancel when that cancel can no longer succeed. */
+function statusEndsPendingCancel(status: string): boolean {
+  // TRIGGERED stays open for resting-order checks, but the trigger has fired.
+  return status.trim().toUpperCase() === "TRIGGERED" || !orderStatusIsOpen(status);
+}
+
 function rowText(row: BrokerOrderRow, keys: string[], fallback = ""): string {
   const value = pickField(row, keys);
   return value === "—" ? fallback : value;
@@ -254,8 +260,21 @@ export default function ForeverOrdersWidget() {
   const placeStatusUnknown = placeResultMatches && placeMutation.isError && !placeExplicitRefusal
     && (presentSubmitError(placeMutation.error, FOREVER_ORDER_STATUS_UNKNOWN).kind === "unknown"
       || orderRequestOutcomeIsUnknown(placeMutation.error));
-  const modifyStatusUnknown = modifyResultMatches && modifyMutation.isError
-    && orderRequestOutcomeIsUnknown(modifyMutation.error);
+  const modifyErrorRecord = modifyMutation.error && typeof modifyMutation.error === "object"
+    && "body" in modifyMutation.error && modifyMutation.error.body
+    && typeof modifyMutation.error.body === "object"
+    ? modifyMutation.error.body as Record<string, unknown>
+    : undefined;
+  const modifyStatusCode = modifyMutation.error && typeof modifyMutation.error === "object"
+    && "status" in modifyMutation.error && typeof modifyMutation.error.status === "number"
+    ? modifyMutation.error.status
+    : undefined;
+  const modifyExplicitRefusal = modifyErrorRecord?.order_outcome === "rejected"
+    || modifyErrorRecord?.dispatch_outcome === "refused_before_dispatch"
+    || (modifyStatusCode !== undefined && modifyStatusCode >= 400 && modifyStatusCode < 500 && modifyStatusCode !== 408);
+  const modifyStatusUnknown = modifyResultMatches && modifyMutation.isError && !modifyExplicitRefusal
+    && (presentSubmitError(modifyMutation.error, FOREVER_ORDER_STATUS_UNKNOWN).kind === "unknown"
+      || orderRequestOutcomeIsUnknown(modifyMutation.error));
   const cancelErrorRecord = cancelMutation.error && typeof cancelMutation.error === "object"
     && "body" in cancelMutation.error && cancelMutation.error.body
     && typeof cancelMutation.error.body === "object"
@@ -279,7 +298,10 @@ export default function ForeverOrdersWidget() {
 
   useEffect(() => {
     const orderId = cancelMutation.variables?.order_id;
-    if (!cancelResultMatches || !cancelMutation.isSuccess || orderId === undefined || cancelConfirmed) return;
+    // A lost, dropped, or timed-out cancel is still a pending cancel. Record it
+    // so a later trigger read can confirm or retire it.
+    const pendingCancel = (cancelMutation.isSuccess && !cancelConfirmed) || cancelLost;
+    if (!cancelResultMatches || !pendingCancel || orderId === undefined) return;
     setCancelAcknowledgements((previous) => {
       const existing = previous.find((ack) => ack.scope === presentationScope && ack.orderId === orderId);
       if (existing && existing.submittedAt === cancelMutation.submittedAt) return previous;
@@ -289,7 +311,7 @@ export default function ForeverOrdersWidget() {
       };
       return [...previous.filter((ack) => ack !== existing), acknowledgement];
     });
-  }, [cancelConfirmed, cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
+  }, [cancelConfirmed, cancelLost, cancelResultMatches, cancelMutation.isSuccess, cancelMutation.variables?.order_id,
     cancelMutation.submittedAt, presentationScope, listQuery.dataUpdatedAt]);
 
   useEffect(() => {
@@ -310,7 +332,7 @@ export default function ForeverOrdersWidget() {
           if (!identities.every((key) => String(row[key]) === acknowledgement.orderId)) return false;
           const statuses = ["status", "order_status", "orderStatus", "gtt_status"]
             .filter((key) => row[key] !== undefined);
-          return statuses.length > 0 && statuses.every((key) => !orderStatusIsOpen(String(row[key] ?? "")));
+          return statuses.length > 0 && statuses.every((key) => statusEndsPendingCancel(String(row[key] ?? "")));
         })) return acknowledgement;
         changed = true;
         return { ...acknowledgement, reconciled: true };
@@ -1062,12 +1084,13 @@ export default function ForeverOrdersWidget() {
         )}
         {modifyResultMatches && modifyMutation.isError && <ForeverOrdersErrorNotice error={modifyMutation.error} />}
         {modifyStatusUnknown && (
-          <p role="alert" className="text-xs text-warning">
-            GTT modification status unknown. The trigger or order may still execute.
+          <p role="status" className="text-xs text-warning">
+            {FOREVER_ORDER_STATUS_UNKNOWN}
           </p>
         )}
         {cancelResultMatches && cancelMutation.isError && <ForeverOrdersErrorNotice error={cancelMutation.error} />}
-        {cancelLost && (
+        {cancelLost && !cancelAcknowledgements.some((ack) => ack.scope === presentationScope
+          && ack.orderId === cancelMutation.variables?.order_id && ack.reconciled) && (
           <p role="status" className="text-xs text-warning">{CANCELLATION_REQUESTED}</p>
         )}
         {cancelConfirmed && (

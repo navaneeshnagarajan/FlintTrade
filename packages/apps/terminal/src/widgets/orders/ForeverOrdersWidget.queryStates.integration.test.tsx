@@ -304,6 +304,7 @@ describe("ForeverOrders real-hook modification races", () => {
       });
       expect(screen.getByRole("form", { name: "Modify forever order" })).toBeInTheDocument();
       expect(screen.queryByText("A modification response timed out")).not.toBeInTheDocument();
+      expect(screen.queryByText("Order status unknown. Check Forever Orders before trying again.")).not.toBeInTheDocument();
       expect(screen.queryByText("GTT modification status unknown. The trigger or order may still execute.")).not.toBeInTheDocument();
       expect(fetchMock.mock.calls.filter(([url]) => String(url) === SECONDARY_LIST_URL)).toHaveLength(1);
     },
@@ -369,6 +370,86 @@ describe("synthetic Dhan GTT outcomes", () => {
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(deletes).toBe(1);
+  });
+
+  it("a dropped cancel becomes Order cancelled when the row is later CANCELLED", async () => {
+    let deletes = 0;
+    let confirmed = false;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) {
+        return jsonResponse({ status: "success", data: [{ ...ROW, status: confirmed ? "CANCELLED" : "ACTIVE" }] });
+      }
+      if (init.method === "DELETE" && url === "/ft-api/api/v1/orders/forever/TRIGGER-A?broker=dhan&account_id=A1") {
+        deletes += 1;
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    confirmed = true;
+    await refreshListing();
+    expect(await screen.findByText("Order cancelled")).toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(deletes).toBe(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+  });
+
+  it.each(["TRIGGERED", "FILLED"])(
+    "a dropped cancel followed by %s does not claim the cancel is still pending", async (status) => {
+      let deletes = 0;
+      let followedUp = false;
+      respond = (url, init) => {
+        if (init.method === "GET" && url === PRIMARY_LIST_URL) {
+          return jsonResponse({ status: "success", data: [{ ...ROW, status: followedUp ? status : "ACTIVE" }] });
+        }
+        if (init.method === "DELETE" && url === "/ft-api/api/v1/orders/forever/TRIGGER-A?broker=dhan&account_id=A1") {
+          deletes += 1;
+          return Promise.reject(new TypeError("Failed to fetch"));
+        }
+        return refuseUnexpected(url, init);
+      };
+      await openBook();
+      fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+      expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+      followedUp = true;
+      await refreshListing();
+      expect(await screen.findByText(status)).toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+      expect(screen.getByText(CHILD_CAVEAT)).toBeInTheDocument();
+      expect(deletes).toBe(1);
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+    },
+  );
+
+  it("a dropped modify says to check Forever Orders, offers no Retry, and sends one PUT", async () => {
+    let puts = 0;
+    respond = (url, init) => {
+      if (init.method === "GET" && url === PRIMARY_LIST_URL) return jsonResponse({ status: "success", data: [ROW] });
+      if (init.method === "PUT" && url === "/ft-api/api/v1/orders/forever/TRIGGER-A") {
+        puts += 1;
+        return jsonResponse({
+          status: "error",
+          message: "Synthetic modify response lost",
+          order_outcome: "unknown",
+          reason: "response_unconfirmed",
+          retry_safe: false,
+        }, 504);
+      }
+      return refuseUnexpected(url, init);
+    };
+    await openBook();
+    expect(await screen.findByText(ROW.symbol)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Modify" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByText(FOREVER_UNKNOWN)).toBeInTheDocument();
+    expect(screen.queryByText("GTT modification status unknown. The trigger or order may still execute.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(puts).toBe(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
   });
 
   it("shows Order cancelled only after the synthetic status confirms it", async () => {

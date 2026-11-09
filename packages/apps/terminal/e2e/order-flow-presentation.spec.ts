@@ -1,4 +1,5 @@
-import type { SyntheticResponse } from "./fixture-registry";
+import type { Page, Locator } from "@playwright/test";
+import type { SyntheticPhasedFixtureRegistry, SyntheticResponse } from "./fixture-registry";
 import {
   ACCOUNT_A,
   ACCOUNT_B,
@@ -422,6 +423,68 @@ test.describe("lost cancellation response", () => {
     presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
     expect(syntheticApi.callCount("GET", foreverPath())).toBe(1);
   });
+});
+
+test.describe("a dropped cancel settles from a later trigger row", () => {
+  const cancelPath = `/ft-api/api/v1/orders/forever/SYNTHETIC-GTT-${ACCOUNT_A}?broker=dhan&account_id=${ACCOUNT_A}`;
+  test.use({ benignConsoleErrors: [{
+    text: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    url: `http://localhost:5173${cancelPath}`, expectedCalls: 1,
+  }] });
+
+  async function dropCancel(page: Page, syntheticApi: SyntheticPhasedFixtureRegistry): Promise<Locator> {
+    registerDeskReads(syntheticApi);
+    registerAccountBooks(syntheticApi);
+    registerRead(syntheticApi, foreverPath(), { json: { status: "success", data: [triggerRow()] } }, 1, "required");
+    syntheticApi.register({
+      name: "one synthetic dropped cancellation", method: "DELETE", path: cancelPath, expectedCalls: 1,
+      handler: (request) => {
+        assertRequest(request, "DELETE", cancelPath);
+        return { status: 503, json: { status: "error", message: "Synthetic cancel response lost; execution outcome unknown." } };
+      },
+    });
+    await mountWidget(page, "foreverorders");
+    const table = page.getByRole("table", { name: "Forever orders" });
+    await tickUntil(page, table);
+    await table.getByRole("button", { name: "Cancel", exact: true }).click();
+    await tickUntil(page, page.getByRole("status").filter({ hasText: "Cancellation requested" }));
+    await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+    const initialReads = await syntheticApi.retireRead(foreverPath());
+    expect(initialReads.completed).toBe(1);
+    return table;
+  }
+
+  test("a later CANCELLED row says Order cancelled", async ({ page, syntheticApi, presentationEvidence }) => {
+    const table = await dropCancel(page, syntheticApi);
+    registerRead(syntheticApi, foreverPath(), {
+      json: { status: "success", data: [triggerRow(ACCOUNT_A, "CANCELLED")] },
+    }, 1, "required");
+    await page.clock.runFor(50);
+    await page.getByRole("button", { name: "Refresh forever orders" }).click();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(table.getByText("CANCELLED", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
+    presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
+    await syntheticApi.retireRead(foreverPath());
+  });
+
+  for (const status of ["TRIGGERED", "FILLED"] as const) {
+    test(`a later ${status} row does not keep the pending cancel`, async ({ page, syntheticApi, presentationEvidence }) => {
+      const table = await dropCancel(page, syntheticApi);
+      registerRead(syntheticApi, foreverPath(), {
+        json: { status: "success", data: [triggerRow(ACCOUNT_A, status)] },
+      }, 1, "required");
+      await page.clock.runFor(50);
+      await page.getByRole("button", { name: "Refresh forever orders" }).click();
+      await tickUntil(page, table.getByText(status, { exact: true }));
+      await expect(page.getByText("Order cancelled", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Cancellation requested", { exact: true })).toHaveCount(0);
+      await expect(page.getByText(CHILD_CAVEAT, { exact: true })).toBeVisible();
+      presentationEvidence.assertWrites([{ method: "DELETE", path: cancelPath, body: null }]);
+      await syntheticApi.retireRead(foreverPath());
+    });
+  }
 });
 
 for (const action of ["square-off", "exit-all"] as const) {
