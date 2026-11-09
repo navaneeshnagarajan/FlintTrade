@@ -421,13 +421,13 @@ pending and retry the same event without repeating the account mutation.
 ```mermaid
 stateDiagram-v2
     [*] --> Practice
-    Practice --> Live: /auth/live +\n6-digit PIN
-    Live --> Practice: /auth/mode {mode:practice}
-    ExampleData --> Practice: /auth/mode {mode:practice}
+    Practice --> Live: POST /v1/auth/live\n+ 6-digit PIN
+    Live --> Practice: POST /v1/auth/mode\n{mode:practice}
+    Guest --> Setup: Mode menu Practice
 
-    state ExampleData {
-        [*] --> noLiveOrders
-        noLiveOrders: Example data. Not a menu Mode.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: Terminal Order Pad\nExample Buy is a local\nexample fill
+    state Guest {
+        [*] --> exampleChip
+        exampleChip: Chip Example.\nClaim explore.\nNot a menu Mode.\nThis choice does not call\nPOST /v1/auth/mode.
     }
     state Practice {
         [*] --> practiceFills
@@ -449,7 +449,11 @@ here. Switch to Live via POST /v1/auth/live with PIN verification.` and
 leaves the current session in place. That call does not latch the kill
 switch. The Mode menu lists Practice, Connected (read), and Live. A fresh
 browser, account setup, and a finished password sign-in open in Practice.
-Example data is not a menu Mode. The guard lives at
+Example data is not a menu Mode. The visible chip is **Example**, **Practice**,
+or **Live**. The JWT claim is `explore`, `practice`, or `live`. Connected
+(read), the idle lock, broker connectivity, and Laya readiness are not that
+claim. Choosing **Practice** while signed in as **Guest** (chip **Example**)
+opens Setup and does not call `POST /v1/auth/mode`. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 Example data has no Live broker order authority: backend and Live-intent

@@ -276,9 +276,9 @@ that action.
 | `ai/local-runtime/models/digests/accept` (**POST**) | Confirm one exact live digest and create a digest-derived inference alias. |
 | `ai/local-runtime/models/digests/reset` (**POST**) | Remove invalid FlintTrade trust metadata without deleting Ollama model data. |
 
-### Sandbox / paper trading (`/ft-api/v1/sandbox/*`)
+### Practice sandbox (`/ft-api/v1/sandbox/*`)
 
-Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade_data/sandbox_routes.py`.
+Practice simulated fills. The session claim for this book is `practice`. Source: `packages/core/data/src/flinttrade_data/sandbox_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -652,7 +652,15 @@ capabilities and workspace overrides. Every Live write still needs a one-shot
 
 ## 6. Mode system
 
-`explore | practice | live` — server-side JWT-claim enforcement. The claim `explore` is example data. Operators see **Example**, not a Mode in the menu. The
+`explore | practice | live` — server-side JWT-claim enforcement. These strings are the claim, not the visible labels.
+
+| Claim `mode` | Visible label |
+|---|---|
+| `explore` | **Example**. Sample data. Not a menu Mode. The signed-in name is **Guest**. |
+| `practice` | **Practice**. **Connected (read)** can appear on this claim as a broker status. It is not a claim. |
+| `live` | **Live**. `live_mode_unlocked` is a separate claim, set only by `POST /v1/auth/live`. |
+
+Idle lock, broker connectivity, and Laya readiness are not `mode`. Laya is the shipped name of the admission-readiness row. Operators see **Example**, not the claim `explore`. The
 guard lives at `packages/services/engine/src/flinttrade_engine/mode_guard.py`. Every order-path
 endpoint asks the guard whether the current JWT permits live orders;
 the guard returns one of three verdicts:
@@ -662,6 +670,8 @@ the guard returns one of three verdicts:
 | `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. The Terminal Order Pad records a sample fill on the client for that click (`Example order placed`, id starting `SAMPLE-`). This HTTP refusal is what the route returns when a client calls it. |
 | `practice` | Admitted orders execute in the local sandbox. Practice never calls a broker adapter. |
 | `live` | Requires a PIN-unlocked Live session, an exact native account target, safety admission and `BrokerRouter`. Evidence-gated native availability still applies; choosing this mode does not activate a broker. |
+
+On the desk, choosing **Practice** while signed in as **Guest** opens Setup and does not call `POST /v1/auth/mode`. That route is the downgrade from a session that already has a full login token.
 
 `POST /v1/auth/mode` accepts **only** a downgrade to `practice`. That call
 issues a fresh JWT and revokes the previous `jti`. Any other value,

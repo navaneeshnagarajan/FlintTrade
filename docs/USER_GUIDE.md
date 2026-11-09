@@ -252,15 +252,20 @@ redirect (HTTP 308) to `/demo-app/welcome`.
 | Label | What it means |
 |---|---|
 | **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
-| **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
+| **Connected (read)** | Read-only posture on a Practice session. Until the desk already reports a connected native account, the menu item stays disabled and shows `Connect a broker first`. That sentence is a label, not a setup step. A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. It is not a separate session claim. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
 | **Example** | Sample data. The chip reads **Example**. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
-fills. A sample-data session, signed in as **Guest**, is sent to Setup instead of
-switching in place. Choose **Connected (read)** only when a broker is
-connected. Choose **Live** only when the item is enabled. Opening the menu
+fills. A sample-data session, signed in as **Guest**, opens Setup instead of
+switching in place, and that choice does not call `POST /v1/auth/mode`.
+A Live session downgrades with that route. **Connected (read)** stays
+disabled until the desk already reports a connected native account, and
+until then it shows `Connect a broker first`. A broker session cannot be
+started from the terminal today, so that label is not a setup step.
+Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409.
+Choose **Live** only when the item is enabled. Opening the menu
 does not open the Live dialog. An eligible Live choice opens **Switch to Live
 Trading?** with the line `You are about to switch to Live mode. All orders will be executed with real money through your broker.` Enter
 the 6-digit PIN (`Enter your PIN to confirm`) and choose **Switch to Live**.
@@ -269,8 +274,10 @@ Cancel leaves the current Mode.
 **When Live is locked.** The Live item lists every reason that applies, in
 this order:
 
-- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no
-  broker is connected. Either gap is enough for this one reason. When the
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or the
+  desk reports no broker connection. Either gap is enough for this one reason.
+  The connect half is the shipped label, not an available connection action.
+  A broker session cannot be started from the terminal today. When the
   authenticator is not enrolled, including after **Later** on
   **Two-factor authentication**, **Enrol authenticator in Settings** links
   to Settings → Security (`/settings#security`). The Live switch does not
@@ -310,7 +317,7 @@ subsystem.
   no feed reads `No live feed (Practice)`. The Practice ticker shows
   `Last close prices · Connect a broker for live prices →` only when the
   market session is not unavailable and neither the WebSocket nor a fresh
-  REST fallback is producing quotes. The link opens `/settings#brokers`.
+  REST fallback is producing quotes. The link opens `/settings#brokers` and does not start a broker session.
   An unavailable session is never labelled last close.
 - **Broker** lives once, as the **Broker** row in the TopBar **Status** menu:
   **Connected**, **Connected (read)**, or **Unavailable**, plus a plain failure
@@ -322,7 +329,8 @@ subsystem.
 
 
 **Market session.** The TopBar market chip shows the open phase
-(**Continuous**, **CAS**, **Matching**, or **Post-close**). A confirmed
+(**Continuous**, **CAS**, **Matching**, or **Post-close**). From 7 December
+2026 the same chip can also read **Transition**. A confirmed
 closed cash session reads `Market closed · opens 09:15`, not the word
 Closed on its own. Unavailable timings read `Market unavailable`, and
 are never labelled last close. The chip tooltip/title is the window, for example
@@ -333,12 +341,13 @@ widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
 and NSE/FAOP/77356: continuous until 15:30, auction 15:30–15:40, matching
-15:40–15:45, post-close 15:50–16:00, and `F&O open · till 15:45`. An index
+15:40–15:45, Transition 15:45–15:50, post-close 15:50–16:00, and `F&O open · till 15:45`. An index
 contract stops at 15:30 on the expiry written on its symbol. A supplied
 expiry calendar confirms that date. A new order stays closed when the expiry
 cannot be read, or when a supplied calendar does not list it. Stock derivatives stay
 open until 15:45. BSE equity derivatives use the same close. Dates before
-7 December 2026, and the Muhurat session, keep the earlier clock. There is no
+7 December 2026, and the Muhurat session, keep the earlier clock, which has
+no Transition phase. There is no
 flat "Market open until 15:30" or "VWAP last 30 min" closing-price copy. The
 September 2026 consultation stays out of the UI.
 
@@ -818,10 +827,10 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 
 1. Open Terminal (http://127.0.0.1:5100/terminal on the installed web app;
    http://localhost:5173/terminal on the Vite dev server). A bookmark of `/trade` opens the same screen.
-2. A fresh desk is already in **Practice**. Open the Mode menu if the
-   chip says **Example** and choose **Practice** (a sample-data session is
-   sent to Setup). Practice does not ask for a PIN. The UI calls
-   `POST /v1/auth/mode` so the session matches. To look at sample data
+2. A fresh desk is already in **Practice**. If the chip says **Example**,
+   the session is **Guest**. Choosing **Practice** opens Setup and does not
+   call `POST /v1/auth/mode`. A Live session downgrades with that route and
+   does not ask for a PIN on the downgrade. To look at sample data
    instead, use **Try with example data** from Welcome or sign-in.
 3. Open **+ Widget** (the dialog title is **Add Widget**) and choose
    **Order Pad**, or pick a preset that contains it. If an Order Pad is

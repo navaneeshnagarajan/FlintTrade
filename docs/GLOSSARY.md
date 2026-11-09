@@ -21,7 +21,15 @@ A supplied layout that a person can use as-is or customise. A preset is a starti
 _Avoid_: Persona, feature tier
 
 **Execution session**:
-A scoped period of Live or paper trading, associated with a specific account or simulation ledger. Concurrent sessions do not share trading authority merely because they share an app.
+A scoped period of Live or Practice, associated with a specific account or simulation ledger. Concurrent sessions do not share trading authority merely because they share an app.
+
+**Mode**:
+Practice or Live on the session. The chip **Example** is sample data, not a Mode. Its JWT claim is `explore`. **Connected (read)** is a broker status on a Practice session, not a claim. Idle lock and Laya readiness are separate from the Mode.
+_Avoid_: paper, App
+
+**Laya**:
+The shipped name of the order-admission readiness row. Values are Ready, Degraded, Down, Still loading, Checking, and Downloading. It starts Down.
+_Avoid_: treating Laya as a Mode or as broker connectivity
 
 **Trading permission**:
 The user's time-limited authorisation for specified automated actions on specified accounts, within stated risk limits. Permission to open trades is distinct from a pre-authorised duty to close existing exposure.

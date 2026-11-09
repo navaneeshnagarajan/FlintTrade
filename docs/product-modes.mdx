@@ -7,6 +7,18 @@ description: Practice and Live are Modes. Connected (read) is a broker status. E
 
 FlintTrade distinguishes Modes from sample data and from data provenance.
 
+## Separate facts
+
+These are different facts. None of them implies the others.
+
+| Fact | Visible label | Contract |
+|---|---|---|
+| Session claim | Chip **Example**, **Practice**, or **Live** | JWT `mode` is `explore`, `practice`, or `live`. `explore` is example data. Operators see **Example**, not the claim string. |
+| Mode | **Practice** and **Live** | Only these two are session Modes. **Example** is not a Mode. **Connected (read)** is not a claim. |
+| Broker read connectivity | Status row **Connected**, **Connected (read)**, or **Unavailable** | Not a Mode and not Laya. A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503. Native HTTP reads return HTTP 409. |
+| Lock | Idle headings `Practice desk locked`, `Live desk locked`, or `Locked` | Quick Unlock reopens the same Mode. The Live menu lock reasons are a separate list. |
+| Laya readiness | **Ready**, **Degraded**, **Down**, **Still loading**, **Checking**, or **Downloading** | Laya is the shipped name of this row. It starts **Down**. It is not the Mode and it is not broker connectivity. |
+
 ## Modes
 
 A fresh browser with no saved Mode opens in Practice. Password sign-in and account setup open in Practice. A fresh login opens Practice. Quick Unlock restores the existing session and keeps its Mode. Live is entered only through the Live switch (`POST /v1/auth/live`). `POST /v1/auth/mode` accepts only a switch to Practice.
@@ -18,18 +30,18 @@ Live place is `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
 The Mode chip in the TopBar opens the Mode menu. Practice and Live are the session Modes. **Connected (read)** is a broker status on a Practice session, not a separate Mode. The menu lists **Practice**, **Connected (read)**, and **Live**.
 
 - **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` The confirm button reads **Confirm simulation**. Kotak Neo has no sandbox — never offer “Neo Practice”.
-- **Connected (read)**: a read-only posture on a Practice session after a broker is connected. The menu item stays disabled until then and shows `Connect a broker first`. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
+- **Connected (read)**: a read-only posture on a Practice session. The menu item stays disabled until the desk already reports a connected native account, and until then it shows `Connect a broker first`. That sentence is a label. A broker session cannot be started from the terminal today, so the words are not a setup step. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. Non-funded live reads use this label. Copy for Neo is `Live read only until funded unlock.`
 - **Live**: real-money capable when a broker is Connected. Orders place only on a live session. The Mode line reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Choosing an eligible Live item asks for the 6-digit PIN (**Switch to Live Trading?**). Opening the menu does not open that dialog.
 
 Live stays locked while any of these reasons apply, in this order:
 
-- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no broker is connected. Either gap is enough. When the authenticator is not enrolled, including after **Later** on **Two-factor authentication**, **Enrol authenticator in Settings** links to Settings → Security (`/settings#security`). The Live switch does not ask for an authenticator code.
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or the desk reports no broker connection. Either gap is enough. The connect half is the shipped label, not an available connection action: a broker session cannot be started from the terminal today. When the authenticator is not enrolled, including after **Later** on **Two-factor authentication**, **Enrol authenticator in Settings** links to Settings → Security (`/settings#security`). The Live switch does not ask for an authenticator code.
 - `Create a PIN in Settings` — no PIN exists. Live stays locked, and those words link to Settings → Security (`/settings#security`).
 - `Not qualified for Live` — only when the place gate reports that this operator is not qualified. A missing report adds nothing. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
 
 ## Example data
 
-Example is sample data, not a Mode. The chip reads **Example**. The signed-in name is **Guest**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**. The public site paths `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`.
+Example is sample data, not a Mode. The chip reads **Example**. The signed-in name is **Guest**. The JWT claim is `explore`. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Choosing **Practice** while signed in as **Guest** opens Setup. That choice does not call `POST /v1/auth/mode`. The public web demo (`/demo-app`) is **Demo (example data)**. The public site paths `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`.
 
 On Terminal, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). **Continue** records a sample fill. The success line is `Example order placed` and the id starts with `SAMPLE-`. The server refusal `Orders are not available for Example. Switch to Practice or Live to trade.` is the HTTP path. Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
 
@@ -39,8 +51,8 @@ The sample-data banner reads `Example data. Connect a broker to see your own.` I
 
 Each status has one home.
 
-- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. The Practice ticker shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`, only when the market session is not unavailable and neither the WebSocket nor a fresh REST fallback is producing quotes. An unavailable session is never labelled last close.
-- **Broker, Laya, and LLM** — the TopBar **Status** menu. Each row has its own label and a one-line description. Broker's value is **Connected**, **Connected (read)**, or **Unavailable**. Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**, or **Checking**. Laya starts **Down** and is never painted **Ready** by default. While the value is **Checking**, the row reads `Checking Laya…`. The button's dot is neutral on example data (`Example data only`), including when Laya is **Down**. **Checking** and **Still loading** stay neutral. Download and model lines are `Downloading the model · X of Y GB`, `Can't download the model`, `Wrong model version`, and `Can't verify the model`. The pause line is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. The Practice ticker shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`, only when the market session is not unavailable and neither the WebSocket nor a fresh REST fallback is producing quotes. That link does not start a broker session. An unavailable session is never labelled last close.
+- **Broker, Laya, and LLM** — the TopBar **Status** menu. Each row has its own label and a one-line description. Broker's value is **Connected**, **Connected (read)**, or **Unavailable**. Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**, **Checking**, or **Downloading**. Laya starts **Down** and is never painted **Ready** by default. While the value is **Checking**, the row reads `Checking Laya…`. The button's dot is neutral on example data (`Example data only`), including when Laya is **Down**. **Checking**, **Still loading**, and **Downloading** stay neutral. **Downloading** is the chip value while the model download runs; the progress line is `Downloading the model · X of Y GB`. Other model lines are `Can't download the model`, `Wrong model version`, and `Can't verify the model`. The pause line is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
 - **Market** — the TopBar market-session chip. A confirmed closed cash session reads `Market closed · opens 09:15`. Unavailable timings read `Market unavailable`. That chip is not a Mode.
 
 ## Provenance labels
