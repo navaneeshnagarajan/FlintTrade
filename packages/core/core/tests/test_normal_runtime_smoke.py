@@ -542,6 +542,17 @@ async def test_normal_stop_retains_a_blocked_public_master_owner_until_retry(
         assert flask_app is not None and listener is not None
         owner = flask_app.config["INSTRUMENT_MASTER_REFRESH_OWNER"]
         threads = _owned_threads(baseline)
+        # The lease watcher only notices stop after its revocation poll returns.
+        # A 0.05s shutdown budget is the same length as that poll, so joining
+        # the watcher inside the short stop races the poll. Wait until the
+        # watcher has actually stopped, then keep the short budget for the
+        # blocked public-master owner.
+        watch = flask_app.extensions["flinttrade.backend_lease_watch"]
+
+        def _stop_lease_watch() -> bool:
+            return watch.stop(timeout=2)
+
+        assert await asyncio.to_thread(_stop_lease_watch)
         with pytest.raises(RuntimeError, match="shutdown encountered errors"):
             await runtime.stop(timeout=0.05)
         with pytest.raises(RuntimeError, match="shutdown encountered errors"):
