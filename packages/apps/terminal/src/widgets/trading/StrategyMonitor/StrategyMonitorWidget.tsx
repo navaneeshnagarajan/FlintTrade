@@ -3,7 +3,7 @@
  *
  * Features:
  *   - One row per strategy: name, status, symbol, P&L, trade count, signal count
- *   - Status: Running (green) / Paused (amber) / Stopped (grey) / Error (red)
+ *   - Status: Running / Paused / Stopped / Error / Unknown
  *   - Overall health indicator in header (all OK / degraded / critical)
  *   - Log viewer: last 5 log messages per strategy (expandable)
  *   - Sample data when broker disconnected
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 // Types
 // ---------------------------------------------------------------------------
 
-export type StrategyStatus = "running" | "paused" | "stopped" | "error";
+export type StrategyStatus = "running" | "paused" | "stopped" | "error" | "unknown";
 
 export interface StrategyLogEntry {
   ts: string;
@@ -42,6 +42,8 @@ export interface Strategy {
   tradesToday: number;
   signalsGenerated: number;
   logs: StrategyLogEntry[];
+  /** True when the runner still owns a process whose state could not be read. */
+  ownershipRetained?: boolean;
 }
 
 type OverallHealth = "ok" | "degraded" | "critical";
@@ -124,8 +126,10 @@ export const SAMPLE_STRATEGIES: Strategy[] = [
 function computeHealth(strategies: Strategy[]): OverallHealth {
   const errorCount = strategies.filter((s) => s.status === "error").length;
   if (errorCount > 0) return "critical";
-  const pausedCount = strategies.filter((s) => s.status === "paused").length;
-  if (pausedCount > 0) return "degraded";
+  const uncertainCount = strategies.filter(
+    (s) => s.status === "paused" || s.status === "unknown",
+  ).length;
+  if (uncertainCount > 0) return "degraded";
   return "ok";
 }
 
@@ -143,6 +147,7 @@ const STATUS_LABEL: Record<StrategyStatus, string> = {
   paused:  "Paused",
   stopped: "Stopped",
   error:   "Error",
+  unknown: "Unknown",
 };
 
 const STATUS_CLASS: Record<StrategyStatus, string> = {
@@ -150,7 +155,22 @@ const STATUS_CLASS: Record<StrategyStatus, string> = {
   paused:  "text-warning bg-warning/10 border-warning/30",
   stopped: "text-text-muted bg-surface-hover border-border-default",
   error:   "text-loss bg-loss/10 border-loss/30",
+  unknown: "text-warning bg-warning/10 border-warning/30",
 };
+
+const UNKNOWN_OWNERSHIP_TITLE =
+  "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.";
+const UNKNOWN_REPORT_TITLE =
+  "This report is not a confirmed stop. The runner did not say the process is running or stopped.";
+
+/** Map a runner report onto a monitor row. Unread, missing, and unrecognised states stay unknown. */
+export function projectUploadedStrategy(status: UploadedStrategyStatus): StrategyStatus {
+  const state = status.state?.trim().toLowerCase() ?? "";
+  if (state === "running") return "running";
+  if (state === "stopped") return "stopped";
+  if (state === "crashed") return "error";
+  return "unknown";
+}
 
 const LOG_COLOUR: Record<StrategyLogEntry["level"], string> = {
   info:  "text-text-muted",
@@ -169,12 +189,18 @@ interface StrategyRowProps {
 function StrategyRow({ strategy }: StrategyRowProps) {
   const [logsOpen, setLogsOpen] = useState(false);
   const { name, status, symbol, pnl, tradesToday, signalsGenerated, logs } = strategy;
+  const unknownTitle = status !== "unknown"
+    ? undefined
+    : strategy.ownershipRetained
+      ? UNKNOWN_OWNERSHIP_TITLE
+      : UNKNOWN_REPORT_TITLE;
 
   return (
     <div
       className="border-b border-border-default last:border-0"
       role="listitem"
       aria-label={`Strategy ${name}: ${STATUS_LABEL[status]}`}
+      title={unknownTitle}
     >
       {/* Main row */}
       <div className="flex items-center gap-2 px-3 py-2.5">
@@ -274,20 +300,16 @@ const HEALTH_LABEL: Record<OverallHealth, string> = {
  * "not reported" dash for them instead of a plausible number.
  */
 function toStrategyRow(status: UploadedStrategyStatus): Strategy {
-  const state = status.state?.toLowerCase() ?? "";
-  const mapped: StrategyStatus =
-    state === "running" ? "running"
-    : state === "crashed" ? "error"
-    : "stopped";
   return {
     id: status.strategy_id,
     name: status.name || status.strategy_id,
-    status: mapped,
+    status: projectUploadedStrategy(status),
     symbol: "—",
     pnl: 0,
     tradesToday: 0,
     signalsGenerated: 0,
     logs: [],
+    ownershipRetained: status.ownership_retained === true,
   };
 }
 

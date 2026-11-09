@@ -39,6 +39,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Strategy Monitor unknown process.** When an uploaded strategy's process tree cannot be read, the monitor shows Unknown and keeps the runner's ownership flag. A missing or unrecognised state is not shown as Stopped. Confirmed running and stopped reports stay on those labels. Start, pause, and stop controls stay unavailable on this preview.
+
 - **NSE F&O Muhurat session.** Sunday 8 Nov 2026 opens for F&O 14:20–15:40 IST. Equity and indexes use the normal-day close: non-CAS cash to 15:30, CAS names 14:20–15:15, closing auction 15:20–15:35. Currency and commodity run 14:20–15:30. Equity after-market orders are collected until 14:03 IST. A missing special-session record stays closed.
 
 - **Broker sessions are not available in the terminal.** Broker-account

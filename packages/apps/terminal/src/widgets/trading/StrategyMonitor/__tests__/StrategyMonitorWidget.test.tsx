@@ -218,4 +218,63 @@ describe("StrategyMonitorWidget — real uploaded strategies", () => {
     renderMonitor();
     expect(mockListStrategies).not.toHaveBeenCalled();
   });
+
+  it("keeps an unread process unknown and does not call it stopped", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      {
+        strategy_id: "unread",
+        name: "Unread Tree",
+        state: "unknown",
+        ownership_retained: true,
+        pid: 808,
+        memory_mb: null,
+        uptime_seconds: null,
+      },
+    ]);
+
+    renderMonitor();
+
+    const row = await screen.findByRole("listitem", { name: "Strategy Unread Tree: Unknown" });
+    expect(row).toHaveTextContent("Unknown");
+    expect(row).not.toHaveTextContent("Stopped");
+    expect(row).toHaveAttribute(
+      "title",
+      "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.",
+    );
+    expect(screen.getByText("Degraded")).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: /^Start / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Pause / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Stop / })).toHaveLength(0);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["blank", ""],
+    ["unrecognized", "pending"],
+  ])("shows %s runner state as unknown", async (_label, state) => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      { strategy_id: "opaque", name: "Opaque Runner", state, pid: 1, memory_mb: null, uptime_seconds: null },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByRole("listitem", { name: "Strategy Opaque Runner: Unknown" })).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "Strategy Opaque Runner: Stopped" })).toBeNull();
+  });
+
+  it("keeps a confirmed running or stopped process on that label", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      { strategy_id: "live", name: "Live Runner", state: "running", pid: 1, memory_mb: 1, uptime_seconds: 1 },
+      { strategy_id: "idle", name: "Idle Runner", state: "stopped", pid: null, memory_mb: null, uptime_seconds: null },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByRole("listitem", { name: "Strategy Live Runner: Running" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "Strategy Idle Runner: Stopped" })).toBeTruthy();
+    expect(screen.queryByText("Unknown")).toBeNull();
+  });
 });
