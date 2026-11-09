@@ -47,6 +47,7 @@ class _BoundStrategyRunner(StrategyRunner):
             if type(orders) is not list:
                 raise ValueError("strategy intents unavailable")
             signed_routed = 0
+            to_route: list[Order] = []
             for order in orders:
                 if (not isinstance(order, Order) or order.symbol != self.symbol
                         or str(order.exchange) != run.config["exchange"] or str(order.product) != run.config["product"]):
@@ -61,35 +62,32 @@ class _BoundStrategyRunner(StrategyRunner):
                     continue
                 if risk_increasing and abs(after) > run.config["max_position_size"]:
                     raise ValueError("strategy position limit")
+                to_route.append(order)
+                signed_routed += signed
+            if self.scheduler.should_square_off(exchange, symbol=self.symbol):
+                with owner.execution_binding.fence():
+                    net = self._net_quantity()
+                if net > 0:
+                    covered = max(0, -signed_routed)
+                    action = "SELL"
+                else:
+                    covered = max(0, signed_routed)
+                    action = "BUY"
+                remaining = abs(net) - covered
+                if remaining > 0:
+                    to_route.append(Order(
+                        symbol=self.symbol,
+                        exchange=run.config["exchange"],
+                        product=run.config["product"],
+                        action=action,
+                        quantity=str(remaining),
+                        pricetype="MARKET",
+                    ))
+            for order in to_route:
                 result = await run.adapter.route_order(order)
                 if not result.passed:
                     owner.execution_binding.registry.retire_entries(owner.execution_binding.scope)
                     break
-                signed_routed += signed
-            else:
-                if self.scheduler.should_square_off(exchange, symbol=self.symbol):
-                    with owner.execution_binding.fence():
-                        net = self._net_quantity()
-                    if net > 0:
-                        covered = max(0, -signed_routed)
-                        action = "SELL"
-                    else:
-                        covered = max(0, signed_routed)
-                        action = "BUY"
-                    remaining = abs(net) - covered
-                    if remaining > 0:
-                        flatten = Order(
-                            symbol=self.symbol,
-                            exchange=run.config["exchange"],
-                            product=run.config["product"],
-                            action=action,
-                            quantity=str(remaining),
-                            pricetype="MARKET",
-                        )
-                        result = await run.adapter.route_order(flatten)
-                        if not result.passed:
-                            owner.execution_binding.registry.retire_entries(owner.execution_binding.scope)
-                            return
             self._tick_count += 1
         except Exception:
             owner.execution_binding.registry.retire_entries(owner.execution_binding.scope)
