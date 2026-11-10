@@ -180,5 +180,14 @@ describe("modeStore", () => {
       expect(fresh.useModeStore.getState().mode).toBe("unavailable");
       expect(fresh.useModeStore.getState().mode).not.toBe("live");
     });
+
+    it("shows unavailable for a connected claim instead of Example or Live", async () => {
+      seedModeCache("live");
+      seedSession(sessionJwt("connected"));
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("unavailable");
+      expect(fresh.useModeStore.getState().mode).not.toBe("live");
+      expect(fresh.useModeStore.getState().mode).not.toBe("explore");
+    });
   });
 });

@@ -14,7 +14,7 @@ const areas = [
   {
     icon: KeyRound,
     title: 'Mode and auth model',
-    copy: 'Practice, Connected (read), and Live behaviour is documented with server-side enforcement notes. Example data is not a Mode.',
+    copy: 'Practice and Live are session modes. Connected (read) is a broker status. Example data is not a Mode.',
   },
 ];
 

@@ -32,7 +32,7 @@ import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
 import { ScalperChartPanel } from "./ScalperChartPanel";
 import { CancelAllDialog, CloseAllDialog, OrderConfirmModal } from "./ScalperDialogs";
-import { EXPLORE_SCALPER_ORDER_HELPER, scalperOrdersArmed } from "./exploreGate";
+import { scalperOneClickTitle, scalperOrderBlockCopy, scalperOrdersArmed } from "./exploreGate";
 import { buildOptionSymbol, roundToStrike } from "./helpers";
 import {
   DEFAULT_SYMBOL,
@@ -98,6 +98,8 @@ function ScalperWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
   const ordersArmed = scalperOrdersArmed(mode);
+  const orderBlockCopy = scalperOrderBlockCopy(mode);
+  const oneClickLockedTitle = scalperOneClickTitle(mode);
   const pinnedSymbol = typeof props.params?.symbol === "string" ? props.params.symbol : undefined;
   const isPinned = typeof pinnedSymbol === "string" && pinnedSymbol in INDEX_CONFIG;
   const [symbol, setSymbol] = useState(isPinned ? pinnedSymbol : DEFAULT_SYMBOL);
@@ -335,7 +337,7 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       if (!ordersArmed) {
-        showStatus(EXPLORE_SCALPER_ORDER_HELPER, "error");
+        showStatus(orderBlockCopy ?? "", "error");
         return;
       }
       const modeRefusal = checkOrderEntryMode(mode);
@@ -482,13 +484,13 @@ function ScalperWidget(props: WidgetProps) {
     // that used to sit in this array is not read by the callback and did not
     // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
     // callback kept checking against the mode it was created under.
-    [mode, ordersArmed, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
+    [mode, ordersArmed, orderBlockCopy, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
   );
 
   const handleOrder = useCallback(
     (sym: string | null, exch: string, action: OrderAction) => {
       if (!ordersArmed) {
-        showStatus(EXPLORE_SCALPER_ORDER_HELPER, "error");
+        showStatus(orderBlockCopy ?? "", "error");
         return;
       }
       if (oneClick) {
@@ -497,7 +499,7 @@ function ScalperWidget(props: WidgetProps) {
         if (sym) setPendingOrder({ sym, exch, action });
       }
     },
-    [ordersArmed, oneClick, executeOrder, showStatus],
+    [ordersArmed, orderBlockCopy, oneClick, executeOrder, showStatus],
   );
 
   const confirmOrder = useCallback(() => {
@@ -688,6 +690,8 @@ function ScalperWidget(props: WidgetProps) {
           setOneClick((v) => !v);
         }}
         ordersArmed={ordersArmed}
+        orderBlockCopy={orderBlockCopy}
+        oneClickLockedTitle={oneClickLockedTitle}
         isExplore={isExplore}
       />
 
@@ -707,6 +711,7 @@ function ScalperWidget(props: WidgetProps) {
         onCloseAll={() => setCloseAllOpen(true)}
         onCancelAll={() => setCancelAllOpen(true)}
         ordersArmed={ordersArmed}
+        orderBlockCopy={orderBlockCopy}
       />
 
       <OrderConfirmModal

@@ -424,7 +424,9 @@ keeps its Mode. `/v1/auth/mode` accepts only `{ "mode": "practice" }`. Any
 other value returns HTTP 400 with `Only a downgrade to practice is allowed
 here. Switch to Live via POST /v1/auth/live with PIN verification.` and
 leaves the current session in place. That call does not latch the kill
-switch. The Mode menu lists Practice, Connected (read), and Live. A fresh
+switch. The Mode menu lists Practice and Live. Connected (read) is a broker
+status, not a menu item. A session whose mode cannot be confirmed shows
+Unavailable. A fresh
 browser, account setup, and a finished password sign-in open in Practice.
 Example data is not a menu Mode. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.

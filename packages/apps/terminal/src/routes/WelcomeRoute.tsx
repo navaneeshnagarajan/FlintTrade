@@ -61,7 +61,7 @@ export const CINEMATIC_STEP_SCHEDULE = [
 
 const WELCOME_FEATURES = [
   "Supported native brokers",
-  "Practice, Connected (read), and Live",
+  "Example, Practice, and Live",
   "Option chain, Greeks, order flow, and depth",
   "Strategy lab, SIP tracking, and AI context",
 ] as const;

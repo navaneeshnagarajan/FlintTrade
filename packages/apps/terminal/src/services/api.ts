@@ -2316,7 +2316,7 @@ async function postOrder<T>(
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new OrderPreflightRefusal(
-        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentModeForExplore)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2330,7 +2330,7 @@ async function postOrder<T>(
   const currentMode = sessionMode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new OrderPreflightRefusal(
-      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentMode)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {

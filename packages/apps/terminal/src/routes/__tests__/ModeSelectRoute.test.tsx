@@ -38,10 +38,10 @@ describe("ModeSelectRoute", () => {
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Practice");
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Live");
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent("Explore");
-
-    const connectedRead = screen.getByRole("radio", { name: /Connected \(read\)/i });
-    expect(connectedRead).toBeDisabled();
-    expect(connectedRead).toHaveTextContent("Connect a broker first");
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent(
+      "Connected (read)",
+    );
+    expect(screen.queryByRole("radio", { name: /Connected \(read\)/i })).not.toBeInTheDocument();
 
     // Live stays fail-closed until funded unlock — never a Live place call to action.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
@@ -143,7 +143,8 @@ describe("ModeSelectRoute", () => {
     render(<ModeSelectRoute initialMode="practice" onSelect={onSelect} />);
 
     expect(screen.getByRole("radio", { name: /Practice/i })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: /Connected \(read\)/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: /^Live/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("radio", { name: /Connected \(read\)/i })).not.toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
   });
 });
