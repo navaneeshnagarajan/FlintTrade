@@ -1,6 +1,7 @@
 /**
- * Public docs keep the session claim, the visible Mode, broker connectivity,
- * the lock, and Laya readiness apart, and they quote only labels the desk ships.
+ * Public docs take the Mode chip from the JWT session claim, keep broker
+ * connectivity, the lock, and the decision model apart, and quote only
+ * labels the desk ships.
  */
 
 import { readFileSync } from 'node:fs';
@@ -46,9 +47,22 @@ describe('public mode vocabulary', () => {
     expect(modes).toContain('A broker session cannot be started from the terminal today');
     expect(modes).toContain('Broker-account writes return HTTP 503');
     expect(modes).toContain('native HTTP reads return HTTP 409');
-    expect(modes).toContain('not a setup step');
+    expect(modes).toContain('not in the Mode menu');
+    expect(modes).not.toContain('Connect a broker first');
     expect(guide).toContain('not an available connection action');
-    expect(guide).toContain('that label is not a setup step');
+    expect(guide).toContain('not in the Mode menu');
+    expect(guide).not.toContain('Connect a broker first');
+  });
+
+  it('takes the chip from the session claim and keeps an unconfirmed session Unavailable', () => {
+    expect(modes).toContain('The Mode chip is taken from the JWT `mode` claim');
+    expect(modes).toContain('never Example');
+    expect(guide).toContain('taken from the JWT `mode` claim');
+    expect(guide).toContain('never Example');
+    expect(guide).not.toContain('session claim is example or demo');
+    expect(api).toContain('`GET /api/v1/operator/status`');
+    expect(api).toContain('the decision model');
+    expect(modes).toContain('**Laya decision model**');
   });
 
   it('names Downloading, and names Transition only on the revised clock', () => {

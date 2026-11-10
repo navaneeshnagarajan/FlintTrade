@@ -81,6 +81,17 @@ describe("isDemoSessionActive (hard-refresh remount)", () => {
     expect(isDemoSessionActive()).toBe(false);
   });
 
+  it("does not treat an unconfirmed or connected cache as Example", () => {
+    localStorage.setItem("flinttrade:demo-session", "active");
+    for (const mode of ["unavailable", "connected"]) {
+      localStorage.setItem(
+        "flinttrade:mode",
+        JSON.stringify({ state: { mode }, version: 2 }),
+      );
+      expect(isDemoSessionActive()).toBe(false);
+    }
+  });
+
   it("markDemoSessionActive writes a durable Explore mode record", () => {
     markDemoSessionActive();
     expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");

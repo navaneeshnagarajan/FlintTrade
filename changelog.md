@@ -8,7 +8,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Mode, broker, and Laya docs.** The public pages keep the session claim (`explore`, `practice`, `live`) separate from the visible chip, from broker read connectivity, from the idle lock, and from Laya readiness. Choosing Practice as Guest opens Setup. Laya can read Downloading. The market chip reads Transition only from 7 December 2026. The Practice sandbox is no longer described as paper trading. A broker session still cannot be started from the terminal.
+- **Mode, broker, and decision-model docs.** The Mode chip is taken from the JWT session claim (`explore`, `practice`, or `live`) and shows **Example**, **Practice**, **Live**, or **Unavailable**. An unconfirmed claim shows Unavailable, never Example. Connected (read) is a broker status, not a Mode and not a menu item. Choosing Practice as Guest opens Setup and does not call `POST /v1/auth/mode`. The Status row is labelled Laya. Its value can be Downloading. `GET /api/v1/operator/status` reports that check as the decision model, under `laya`. The market chip reads Transition only from 7 December 2026. The Practice sandbox is no longer described as paper trading. A broker session still cannot be started from the terminal.
+
+- **Entry admission and the runner session are separate answers.** `accepts_new_entries` is true only when a new risk-increasing order would be admitted, and it matches order admission and market timings. `session_active` stays true through the runner's exit window, including MCX until 23:55 and NCDEX at the 17:00 gate. The practice strategy tick and the autonomous trader keep running through the exit window. A new risk-increasing order needs both the runner session and admission. An exit or square-off needs only the runner session, so cash auction entry does not open a new order after 15:30. Square-off times, NCDEX standard hours, and the timings payload are unchanged. The old scheduler open check remains as a deprecated alias of the runner session.
+
+- **One session answer.** Order admission, the scheduler, the strategy runner, and market timings read one session decision. Timings publish that live decision, including weekends, exchange holidays, and special sessions. A closed day does not advertise the ordinary close. NCDEX timings use the 17:00 gate close. MCX timings use the 23:30 gate close on an ordinary day, and the Muhurat window on that session. The MCX runner still treats 23:55 as the session end. Cash phase helpers take the session date. The Order Pad session badge follows the dated cash phase, or the selected exchange.
 
 - **NSE session clock from 7 December 2026.** Cash continuous trading runs until 15:30. The closing auction is 15:30–15:40. Order matching is 15:40–15:45, then a transition until 15:50, and the post-close session stays 15:50–16:00. Cash auction order entry stops from 15:38, when that entry can already have closed at random. Equity derivatives are not in the auction. NSE and BSE equity derivatives run until 15:45. An index contract stops at 15:30 on the expiry written on its symbol. A supplied expiry calendar confirms that date. A new order stays closed when the expiry cannot be read, or when a supplied calendar does not list it. Stock derivatives stay open until 15:45, including on expiry day. Order admission, including a live order and a modify, reads the expiry on the contract symbol and confirms it with the expiry calendar when one is supplied. A new order is refused after that expiry date, and on a Saturday, Sunday, or exchange holiday. A reduce-only exit is not blocked by a missing calendar on a day that symbol is not expiring, and it stays closed when the exchange itself is closed. NSE and BSE index names, including BANKEX, use the index close. The safety check uses the Muhurat session hours and stays closed outside them. The scheduler and the timings API use this same close. Dates before 7 December 2026 keep the current clock, and the Muhurat session still overrides it. Follows SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 October 2026), sections 4.2.4 and 4.2.5, and NSE circulars NSE/CMTR/77355 and NSE/FAOP/77356 (6 November 2026).
 
@@ -58,6 +62,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Operator status.** `GET /api/v1/operator/status` is an authenticated read of the session mode, whether Live is unlocked, whether a broker is Connected (read), the decision model, the kill switch, the session, broker account status, dispatch counts, strategy rows, and whether startup is paused. Connected (read) is a broker status, not a mode. Each part is taken from the check that already owns it. A part that cannot be read is unknown, with a fixed reason, and the rest of the document is still returned. The route does not place an order, latch the kill switch, start or stop a strategy, or refresh a broker token.
+
 - **Mode honesty bar.** One line under the TopBar for Example, and for
   Practice and Live. Widgets also identify illustrative and fallback figures
   with Sample/Example source labels. An incident, when one is showing, sits
@@ -82,6 +88,28 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
 
 ### Fixed
+
+- **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
+
+- **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.
+
+- **Unavailable is not Example.** When the session mode cannot be confirmed, the Scalper and the line above the widgets say Unavailable and ask the operator to sign in again or reload. That copy does not say Example or Sample. Example appears only for an example or demo session.
+
+- **Connected (read) is a broker status.** The mode chip shows Practice, Live, Example, or Unavailable. The mode menu lists Practice and Live. A read-only broker connection is reported on the broker status, including the Status menu.
+
+- **Workspace log teardown.** Building the backend again in the same process closes the previous workspace log only while that file is still the one the handler opened. A descriptor that is already gone does not abort startup. A descriptor number the kernel has given to another file stays open.
+
+- **Uncertain order outcomes.** A submit whose response was dropped, timed out, or came back without a definitive broker or engine result says "Order status unknown. Check Orders before trying again." The order pad, positions, and other submit surfaces do not show that as a rejection and do not offer a retry. A cancel that was only acknowledged says "Cancellation requested". "Order cancelled" appears only after the order status is confirmed cancelled. Practice and Live use the same sentences. The order API, the practice agent, and the MCP order-intent result add `order_outcome` and `reason` beside the existing status. A retry still cannot create a second order while the dispatch ledger holds an unknown write.
+
+- **Uncertain Forever orders.** A dropped or timed-out GTT place or modify says "Order status unknown. Check Forever Orders before trying again." It does not offer a retry and it is not sent again on its own. A lost GTT cancel says "Cancellation requested" and is remembered, so a later trigger read can settle it. "Order cancelled" appears only after that read says the trigger is cancelled. A later triggered or filled row does not keep the pending-cancel line and does not say the order was cancelled. The forever-order cancel and modify results carry the same `order_outcome` and `reason` values as the other order surfaces.
+
+- **Forever cancel after reload.** A dropped, lost, or timed-out GTT cancel stays pending for the signed-in tab session, and only for the account and mode that requested it. Reloading the terminal still shows "Cancellation requested". Signing out removes that pending cancel, so signing in again on the same tab does not bring it back. A complete Forever list that no longer contains the trigger also removes it. A failed, partial, or stale list does not. "Order cancelled" appears only after a later trigger read says the trigger is cancelled. A later triggered or filled row clears the pending line and does not say the order was cancelled. The dispatch ledger's duplicate-order protection is unchanged.
+
+- **Strategy Monitor unknown process.** When an uploaded strategy's process tree cannot be read, the monitor shows Unknown and keeps the runner's ownership flag on the row itself. A missing or unrecognised state is not shown as Stopped. Confirmed running and stopped reports stay on those labels. A strategy list that fails to load says so, and an empty list still says no strategies are configured. Start, pause, and stop controls stay unavailable on this preview.
+
+- **Strategy status reasons.** Uploaded strategy status adds a stable reason: idle, running, leader_exited, tree_unreadable, exit_nonzero, exit_clean, exit_missing, or cleanup_unproven. When the runner holds a strategy, the status also includes that lifecycle: ACTIVE, PAUSED, STOPPED, or ERROR. The Strategy Monitor shows Paused for a paused lifecycle. Unknown stays Unknown. A runner whose process tree cannot be read, or that still holds ownership, is not shown as stopped and is not treated as free.
+
+- **Illegal strategy lifecycle moves.** Starting, pausing, resuming, or stopping a strategy from a state that does not allow that move raises an error. A second start of a runner that is already running still returns without raising.
 
 - **NSE F&O Muhurat session.** Sunday 8 Nov 2026 opens for F&O 14:20–15:40 IST. Equity and indexes use the normal-day close: non-CAS cash to 15:30, CAS names 14:20–15:15, closing auction 15:20–15:35. Currency and commodity run 14:20–15:30. Equity after-market orders are collected until 14:03 IST. A missing special-session record stays closed.
 
@@ -275,7 +303,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   Practice shows sidecar Ready, Degraded, Down, Still loading, or
   Checking. Live shows Live-facing status. "Not qualified for Live" is the tooltip
   and the popover line when Live lacks qualification. Ping
-  publishes Live-facing `laya`, Practice `laya_practice`, and
+  publishes Live-facing `laya`, sidecar `laya_practice`, and
   `laya_live_qualified`, plus a reason code and port. During the first
   load the chip says Still loading and does not read Down. Orders stay
   refused with the Down sentence. A port clash says which port is in use.

@@ -63,6 +63,14 @@ function connectBroker() {
   });
 }
 
+function sessionJwt(mode?: string): string {
+  const payload = btoa(JSON.stringify(mode === undefined ? { typ: "session" } : { mode, typ: "session" }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  return `header.${payload}.sig`;
+}
+
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -111,16 +119,46 @@ describe("ModeIndicator", () => {
       expect(screen.queryByText("EXPLORE")).not.toBeInTheDocument();
     });
 
-    it("opens Practice, Connected (read), and Live without the Live dialog", async () => {
+    it("paints Practice when the cache says live and the session token is Practice", async () => {
+      const token = sessionJwt("practice");
+      localStorage.setItem(
+        "flinttrade:mode",
+        JSON.stringify({ state: { mode: "live" }, version: 2 }),
+      );
+      sessionStorage.setItem(
+        "flinttrade:auth-session",
+        JSON.stringify({ token, username: "operator", expiresAt: "" }),
+      );
+      vi.resetModules();
+      const freshMode = await import("@/stores/modeStore");
+      const { default: FreshIndicator } = await import("../ModeIndicator");
+      render(<FreshIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent(/^Practice$/);
+      expect(chip).not.toHaveTextContent(/Live/);
+      expect(freshMode.useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("names Unavailable when the session claim is missing and does not fall through to Live", () => {
+      useModeStore.setState({ mode: "unavailable" });
+      render(<ModeIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent(/^Unavailable$/);
+      expect(chip).not.toHaveTextContent(/Live|Practice|Example|Connected/);
+      expect(useModeStore.getState().mode).not.toBe("live");
+    });
+
+    it("opens Practice and Live without Connected (read) or the Live dialog", async () => {
       resetStore("practice");
       render(<ModeIndicator />);
 
       await openMenu();
 
       expect(screen.getByRole("menuitem", { name: "Practice" })).toBeInTheDocument();
-      expect(screen.getByRole("menuitem", { name: /Connected \(read\)/ })).toHaveTextContent(
-        "Connect a broker first",
-      );
+      expect(screen.queryByRole("menuitem", { name: /Connected \(read\)/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("Connected (read)")).not.toBeInTheDocument();
       expect(screen.getByRole("menuitem", { name: /Live/ })).toHaveTextContent(
         "Enrol 2FA and connect a broker",
       );
@@ -141,24 +179,51 @@ describe("ModeIndicator", () => {
       expect(screen.queryByLabelText(/authenticator/i)).not.toBeInTheDocument();
     });
 
-    it("enables Connected (read) once a broker is connected and still skips Live", async () => {
+    it("keeps Practice on the chip when a broker is connected and omits Connected (read)", async () => {
       resetStore("practice");
       connectBroker();
       render(<ModeIndicator />);
-      const user = await openMenu();
 
-      const connected = screen.getByRole("menuitem", { name: "Connected (read)" });
-      expect(connected).not.toHaveTextContent("Connect a broker first");
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent(/^Practice$/);
+      expect(chip).toHaveAccessibleName("Practice mode. Open the mode menu.");
+      expect(chip).not.toHaveTextContent(/Connected|Example|Sample/);
+
+      await openMenu();
+
+      expect(screen.queryByRole("menuitem", { name: /Connected \(read\)/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("Connected (read)")).not.toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Practice" })).toBeInTheDocument();
       expect(screen.getByRole("menuitem", { name: /Live/ })).toHaveTextContent(
         "Enrol 2FA and connect a broker",
       );
-
-      await user.click(connected);
-
-      expect(screen.getByTestId("execution-mode")).toHaveTextContent(/^Connected \(read\)$/);
-      expect(screen.getByTestId("execution-mode")).not.toHaveTextContent(/Sandbox/);
       expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
       expect(useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("names Unavailable for a missing claim and for a connected claim", async () => {
+      for (const claim of [undefined, "connected"] as const) {
+        const token = sessionJwt(claim);
+        localStorage.setItem(
+          "flinttrade:mode",
+          JSON.stringify({ state: { mode: "live" }, version: 2 }),
+        );
+        sessionStorage.setItem(
+          "flinttrade:auth-session",
+          JSON.stringify({ token, username: "operator", expiresAt: "" }),
+        );
+        vi.resetModules();
+        const freshMode = await import("@/stores/modeStore");
+        const { default: FreshIndicator } = await import("../ModeIndicator");
+        const view = render(<FreshIndicator />);
+
+        const chip = screen.getByTestId("execution-mode");
+        expect(chip).toHaveTextContent(/^Unavailable$/);
+        expect(chip).not.toHaveTextContent(/Example|Sample|Live|Practice|Connected/);
+        expect(freshMode.useModeStore.getState().mode).toBe("unavailable");
+        view.unmount();
+        sessionStorage.clear();
+      }
     });
 
     it("lists Not qualified for Live beside the 2FA and broker reason", async () => {

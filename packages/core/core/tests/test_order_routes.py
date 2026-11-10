@@ -606,6 +606,9 @@ class TestPracticeMode:
         assert resp.get_json() == {
             "status": "error",
             "message": "A market order needs a live price (LTP) to fill",
+            "order_outcome": "rejected",
+            "reason": "broker_rejected",
+            "retry_safe": False,
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
@@ -708,7 +711,7 @@ class TestPracticeMode:
 
     def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
         class Closed:
-            def is_market_open(self, exchange, symbol=None):
+            def session_active(self, exchange, symbol=None):
                 return False
 
         monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Closed())

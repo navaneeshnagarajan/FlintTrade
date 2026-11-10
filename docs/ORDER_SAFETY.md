@@ -310,7 +310,7 @@ Anything that would flip or add to a position takes the full admit.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in managed Laya process when
 one is registered. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the watched pid, key, and runtime record the same way an order does, then
-publishes Live-facing `laya`, Practice `laya_practice`,
+publishes Live-facing `laya`, sidecar `laya_practice`,
 `laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
 the current mode, so Practice shows the managed Laya process and does not read Down while
 Practice orders are being admitted. During the first load the chip says

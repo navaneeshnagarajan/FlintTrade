@@ -27,6 +27,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         pass
 
 import asyncio
+import errno
 import json
 import logging
 import logging.handlers
@@ -3216,7 +3217,7 @@ def _wire_ml_signal_runtime(
         "ml_signal_cycle",
         handler=make_ml_signal_job(
             pipeline,
-            lambda exchange, symbol: bool(time_scheduler.is_market_open(exchange, symbol=symbol)),
+            lambda exchange, symbol: bool(time_scheduler.session_active(exchange, symbol=symbol)),
         ),
         description="Publish scheduled LightGBM signals into the canonical feed",
         trigger_type="interval",
@@ -3381,6 +3382,15 @@ def shutdown_ditto_runtime(app: Flask, *, timeout: float = 5.0) -> bool:
 
 
 _LOG_FILE_SENTINEL = "_flinttrade_log_file_handler"
+# Streams whose descriptors this process no longer owns. Their destructors
+# would close that number: EBADF when it is already gone, or someone else's
+# file when the kernel has reused it. Holding them avoids both.
+_detached_log_streams: list[Any] = []
+
+
+def _relinquish_log_stream(stream: Any) -> None:
+    """Keep *stream* alive so it cannot close a descriptor it no longer owns."""
+    _detached_log_streams.append(stream)
 
 
 class _WorkspaceLogFileHandler(logging.handlers.RotatingFileHandler):
@@ -3398,12 +3408,60 @@ class _WorkspaceLogFileHandler(logging.handlers.RotatingFileHandler):
     def _open(self) -> Any:
         stream = super()._open()
         try:
+            identity = os.fstat(stream.fileno())
+        except OSError:
+            self._log_identity = None
+        else:
+            self._log_identity = (identity.st_dev, identity.st_ino)
+        try:
             from .secure_file import harden  # noqa: PLC0415
 
             harden(Path(self.baseFilename))
         except OSError:
             pass
         return stream
+
+    def _stream_still_owns_log(self, stream: Any) -> bool:
+        """Whether *stream* still names the log file this handler opened."""
+        fileno = getattr(stream, "fileno", None)
+        if not callable(fileno):
+            return True
+        try:
+            descriptor = fileno()
+        except (OSError, ValueError):
+            return False
+        if not isinstance(descriptor, int) or descriptor < 0:
+            return False
+        try:
+            current = os.fstat(descriptor)
+        except OSError as exc:
+            if exc.errno == errno.EBADF:
+                return False
+            raise
+        identity = getattr(self, "_log_identity", None)
+        if identity is None:
+            return True
+        return (current.st_dev, current.st_ino) == identity
+
+    def _release_unowned_stream(self) -> None:
+        stream = self.stream
+        if stream is None or getattr(stream, "closed", False):
+            return
+        if self._stream_still_owns_log(stream):
+            return
+        _relinquish_log_stream(stream)
+        self.stream = None
+
+    def close(self) -> None:
+        # Another owner may have closed this descriptor, or the kernel may
+        # have reused the number. Closing it then aborts startup or closes
+        # that owner's file.
+        self._release_unowned_stream()
+        super().close()
+
+    def doRollover(self) -> None:
+        self._release_unowned_stream()
+        super().doRollover()
 
 
 def _attach_log_file_handler(root_logger: logging.Logger, shared_processors: list[Any]) -> None:
@@ -3799,6 +3857,7 @@ def create_flask_app(
             # Release the file handle so a re-run (tests build the app
             # repeatedly in one process) never double-writes and Windows can
             # rotate or delete the file — removeHandler alone keeps it open.
+            # close() drops the handle only while this process still owns it.
             _h.close()
 
     _formatter = structlog.stdlib.ProcessorFormatter(

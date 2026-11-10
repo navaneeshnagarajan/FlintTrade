@@ -48,6 +48,14 @@ from flask import Blueprint, current_app, jsonify, request
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
 from .order_input import json_object_body, normalise_order_type_fields
+from .order_outcome import (
+    ORDER_CANCELLED,
+    ORDER_STATUS_UNKNOWN,
+    REASON_BROKER_REJECTED,
+    REASON_RESPONSE_UNCONFIRMED,
+    annotate,
+    cancel_acknowledgement,
+)
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
@@ -196,10 +204,13 @@ def _live_write_error(
         if type(value) is str and value and len(value) <= 256 and value.isprintable():
             affected[name] = value
     response = {
-        "status": "error", "message": fail_message if unknown else message,
+        "status": "error", "message": ORDER_STATUS_UNKNOWN if unknown else message,
         "dispatch_outcome": "unknown_after_dispatch" if unknown else "refused_before_dispatch",
         "retry_safe": False, "affected_item": affected, **_http_broker_error_fields(exc, adapter_id),
     }
+    if unknown:
+        response["order_outcome"] = "unknown"
+        response["reason"] = REASON_RESPONSE_UNCONFIRMED
     return jsonify(response), (502 if http_status == 502 else 500) if unknown else http_status
 
 
@@ -2025,7 +2036,11 @@ def _gated_write_dispatch(
 
     _audit_write_event(audit_event, adapter_id, account_id, request_ctx.actor_id, order_id)
     logger.info("Live %s dispatched | order=%s adapter=%s account=%s", op, safe_order, adapter_id, safe_account)
-    return jsonify({"status": "success", "orderid": order_id}), 200
+    body = {"status": "success", "orderid": order_id}
+    if op == "cancel":
+        # The broker return is an acknowledgement unless its own status says cancelled.
+        body.update(cancel_acknowledgement(result, message=ORDER_CANCELLED))
+    return jsonify(body), 200
 
 
 def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
@@ -2480,12 +2495,12 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                 body.get("symbol", "?"),
                 exc,
             )
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Practice trading engine encountered an error",
-                }
-            ), 500
+            return jsonify(annotate(
+                {"status": "error"},
+                outcome="unknown",
+                reason=REASON_RESPONSE_UNCONFIRMED,
+                message=ORDER_STATUS_UNKNOWN,
+            )), 500
 
         logger.info(
             "Practice order | action=%s symbol=%s exchange=%s qty=%s → %s",
@@ -2496,13 +2511,15 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             result.get("status", "?"),
         )
         if str(result.get("status", "")).upper() == "REJECTED":
-            return jsonify(
+            return jsonify(annotate(
                 {
                     "status": "error",
                     "message": str(result.get("message") or "Practice order rejected"),
-                }
-            ), 400
-        return jsonify(result), 200
+                },
+                outcome="rejected",
+                reason=REASON_BROKER_REJECTED,
+            )), 400
+        return jsonify(_practice_result(ft_action, result)), 200
 
     # ------------------------------------------------------------------
     # Live mode — single gated, selector-bound execution channel (C1).
@@ -2595,6 +2612,17 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             "message": (f"Live action '{ft_action}' is disabled until it is routed through the gated broker router"),
         }
     ), 501
+
+
+def _practice_result(ft_action: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Keep the engine status and add whether a cancel is confirmed."""
+    if ft_action not in {"cancel", "cancel-all"}:
+        return result
+    acknowledgement = cancel_acknowledgement(
+        result,
+        message=ORDER_CANCELLED if ft_action == "cancel" else None,
+    )
+    return {**result, **acknowledgement}
 
 
 def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -2924,12 +2952,19 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
             body.get("symbol", "?"),
             exc,
         )
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Practice trading engine encountered an error",
-            }
-        ), 500
+        if not sandbox_write_started:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Practice trading engine encountered an error",
+                }
+            ), 500
+        return jsonify(annotate(
+            {"status": "error"},
+            outcome="unknown",
+            reason=REASON_RESPONSE_UNCONFIRMED,
+            message=ORDER_STATUS_UNKNOWN,
+        )), 500
 
     logger.info(
         "Practice order | action=place symbol=%s exchange=%s qty=%s → %s",
@@ -2939,15 +2974,17 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         result.get("status", "?"),
     )
     if str(result.get("status", "")).upper() == "REJECTED":
-        return jsonify(
+        return jsonify(annotate(
             {
                 "status": "error",
                 "message": _visible_practice_refusal(
                     str(result.get("message") or "Practice order rejected"),
                     str(body.get("symbol") or ""),
                 ),
-            }
-        ), 400
+            },
+            outcome="rejected",
+            reason=REASON_BROKER_REJECTED,
+        )), 400
     if fill is not None and getattr(fill, "label", None):
         result = {
             **result,
@@ -3645,7 +3682,40 @@ def _gated_verb_write(
     response: dict[str, Any] = {"status": "success", "data": result}
     if ref:
         response["orderid"] = ref
+    if verb == "cancel_forever":
+        response.update(_forever_cancel_fields(result))
     return jsonify(response), 200
+
+
+def _forever_cancel_fields(result: object) -> dict[str, Any]:
+    """Label a forever-order cancel without turning an acknowledgement into a fill."""
+    if isinstance(result, dict):
+        token = ""
+        for key in ("status", "order_status", "orderStatus", "attempt_state"):
+            raw = result.get(key)
+            if isinstance(raw, str) and raw.strip():
+                token = "_".join(
+                    part for part in "".join(
+                        ch if ch.isalnum() else "_" for ch in raw.strip().upper()
+                    ).split("_") if part
+                )
+                break
+        if token == "REJECTED":
+            message = result.get("message")
+            fields: dict[str, Any] = {
+                "order_outcome": "rejected",
+                "reason": REASON_BROKER_REJECTED,
+                "retry_safe": False,
+            }
+            if isinstance(message, str) and message:
+                fields["message"] = message
+            return fields
+    labelled = dict(cancel_acknowledgement(
+        result if isinstance(result, dict) else {},
+        message=ORDER_CANCELLED,
+    ))
+    labelled["retry_safe"] = False
+    return labelled
 
 
 def _gated_broker_read(

@@ -15,6 +15,7 @@ import logging
 import math
 import threading
 import time as _time
+import warnings
 from collections.abc import Awaitable as AwaitableABC, Coroutine as CoroutineABC, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -25,7 +26,14 @@ from typing import Annotated, Any, Callable, TypeAliasType, Union, get_args, get
 from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import Quote
 
+from .state_manager import InvalidTransitionError
 from .strategy import BaseStrategy, StrategyState
+from .strategy_status import (
+    REASON_CLEANUP_UNPROVEN,
+    REASON_IDLE,
+    REASON_RUNNING,
+    annotate_status,
+)
 
 logger = logging.getLogger("flinttrade.engine.scheduler")
 
@@ -171,6 +179,8 @@ EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
     "BFO": ExchangeSchedule("BFO", time(9, 15), time(15, 40), time(15, 15)),
     "CDS": ExchangeSchedule("CDS", time(9, 0), time(17, 0), time(16, 45)),
     "BCD": ExchangeSchedule("BCD", time(9, 0), time(17, 0), time(16, 45)),
+    # 23:55 stays the runner's session end until that policy change.
+    # Order admission and timings close at 23:30.
     "MCX": ExchangeSchedule("MCX", time(9, 0), time(23, 55), time(23, 30)),
     "NCDEX": ExchangeSchedule("NCDEX", time(10, 0), time(17, 0), time(16, 45)),
     # NCO (NSE Commodities) — Zerodha-only on upstream as of v2.0.0.7.
@@ -306,7 +316,9 @@ class TimeScheduler:
     Usage::
 
         sched = TimeScheduler()
-        if sched.is_market_open("NSE"):
+        if sched.accepts_new_entries("NSE"):
+            ...
+        if sched.session_active("MCX"):
             ...
         if sched.is_deploy_frozen(["NSE", "NFO"]):
             ...
@@ -328,7 +340,7 @@ class TimeScheduler:
     def get_schedule(self, exchange: str) -> ExchangeSchedule | None:
         return EXCHANGE_SCHEDULES.get(exchange.strip().upper())
 
-    def is_market_open(
+    def accepts_new_entries(
         self,
         exchange: str,
         at: datetime | None = None,
@@ -337,24 +349,46 @@ class TimeScheduler:
         expiry_calendar: Sequence[date | str] | None = None,
         risk_increasing: bool = True,
     ) -> bool:
-        """Check whether the exchange is open on the trading calendar and clock."""
+        """True only when admission would accept a new risk-increasing order.
+
+        The answer matches ``safety.is_market_open`` and market timings
+        ``order_entry`` for this scheduler's holiday calendar. Cash auction
+        entry counts. The runner's exit window does not.
+        """
+        from flinttrade_engine.safety import is_market_open  # noqa: PLC0415
+
+        current = _as_ist(at) if at is not None else self.now_ist()
+        return is_market_open(
+            exchange,
+            at=current,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+            market_calendar=self,
+        )
+
+    def session_active(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
+    ) -> bool:
+        """True while the runner session, including exit and square-off, is running.
+
+        MCX stays active until 23:55. NCDEX stays active at the 17:00 gate.
+        A calendar session that replaces the ordinary close is this window.
+        """
         exchange = exchange.strip().upper()
         sched = EXCHANGE_SCHEDULES.get(exchange)
         if sched is None:
             return False
-
         if sched.is_24x7:
             return True
 
         current = _as_ist(at) if at is not None else self.now_ist()
-        if exchange in {"NSE", "BSE"}:
-            from .market_hours import cash_auction_order_entry  # noqa: PLC0415
-
-            auction = cash_auction_order_entry(current)
-            if auction is not None:
-                if self.get_market_session(exchange, on=current.date(), symbol=symbol) is None:
-                    return False
-                return auction
         return (
             self._active_market_window(
                 exchange,
@@ -364,6 +398,36 @@ class TimeScheduler:
                 risk_increasing=risk_increasing,
             )
             is not None
+        )
+
+    def is_market_open(
+        self,
+        exchange: str,
+        at: datetime | None = None,
+        symbol: str | None = None,
+        *,
+        expiry_calendar: Sequence[date | str] | None = None,
+        risk_increasing: bool = True,
+    ) -> bool:
+        """Deprecated alias of :meth:`session_active`.
+
+        This is the runner session, including the exit and square-off window.
+        It is not order admission. A new risk-increasing order uses
+        :meth:`accepts_new_entries`.
+        """
+        warnings.warn(
+            "TimeScheduler.is_market_open is deprecated and means session_active, "
+            "the runner session including its exit window. "
+            "Use accepts_new_entries for a new risk-increasing order.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.session_active(
+            exchange,
+            at=at,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
         )
 
     def get_market_session(
@@ -412,18 +476,18 @@ class TimeScheduler:
             return special.open_time, special.close_time
         market_close = time(19, 30) if exchange_key == "CDS" and _is_cds_cross_currency(symbol) else sched.market_close
         if exchange_key in {"NFO", "BFO"}:
-            from .market_hours import derivative_contract_close  # noqa: PLC0415
+            from .market_hours import session_decision  # noqa: PLC0415
 
-            contract_close = derivative_contract_close(
+            decision = session_decision(
                 exchange_key,
-                session_date,
+                datetime.combine(session_date, time(12, 0), tzinfo=IST),
                 symbol=symbol,
                 expiry_calendar=expiry_calendar,
                 risk_increasing=risk_increasing,
             )
-            if contract_close is None:
+            if decision.order_close is None:
                 return None
-            market_close = contract_close
+            market_close = decision.order_close.timetz().replace(tzinfo=None)
         return sched.market_open, market_close
 
     def is_trading_day(
@@ -529,23 +593,37 @@ class TimeScheduler:
 
         Square-off reads the expiry on the contract symbol. A missing
         calendar does not stop it on a day that symbol is not expiring.
+        The decision owns the ordinary instant. A calendar session that
+        replaces the close keeps the same lead.
         """
-        sched = EXCHANGE_SCHEDULES.get(exchange.strip().upper())
+        exchange_key = exchange.strip().upper()
+        sched = EXCHANGE_SCHEDULES.get(exchange_key)
         if sched is None or sched.is_24x7:
             return False
 
         now = _as_ist(at) if at is not None else self.now_ist()
+        from .market_hours import session_decision  # noqa: PLC0415
+
+        decision = session_decision(
+            exchange_key,
+            now,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=False,
+        )
         active_window = self._active_market_window(
-            exchange,
+            exchange_key,
             at=now,
             symbol=symbol,
             expiry_calendar=expiry_calendar,
             risk_increasing=False,
         )
-        if active_window is None:
+        if active_window is None or decision.square_off is None:
             return False
         _, closes_at = active_window
-        return now >= closes_at - self._square_off_offset(sched)
+        scheduled = closes_at - self._square_off_offset(sched)
+        square_off = decision.square_off if scheduled == decision.square_off else scheduled
+        return now >= square_off
 
     # ------------------------------------------------------------------
     # Deploy freeze
@@ -735,7 +813,7 @@ class StrategyRunner:
     """Runs a single strategy in an async tick loop.
 
     Flow per tick:
-    1. Check market open + not deploy-frozen
+    1. Check the runner session is active, including its exit window
     2. Fetch live quote via BrokerClient
     3. Call strategy.on_tick(quote)
     4. Check should_square_off — trigger auto square-off if needed
@@ -800,6 +878,9 @@ class StrategyRunner:
             return self._has_live_owner_unlocked()
 
     def _has_live_owner_unlocked(self) -> bool:
+        # An unknown or ownership-retained projection is not a free stop.
+        # project_status() reports that case as unknown, and this predicate
+        # stays true for the same unfinished ownership flags.
         return bool(
             self._running
             or self._cleanup_required
@@ -810,6 +891,48 @@ class StrategyRunner:
             or self._stop_request_count
             or self._stop_failed
             or self.strategy.state != StrategyState.STOPPED
+        )
+
+    def project_status(self) -> dict[str, Any]:
+        """Project this runner onto the uploaded-strategy status contract.
+
+        ``state`` is the process fact (running, stopped, or unknown).
+        ``lifecycle`` is the held ``BaseStrategy`` state. A quarantined or
+        otherwise unfinished owner is ``unknown`` with ownership retained,
+        never a free stop.
+        """
+        with self._ownership_lock:
+            return self._project_status_unlocked()
+
+    def _project_status_unlocked(self) -> dict[str, Any]:
+        lifecycle = self.strategy.state.value
+        running = self._running
+        task_live = self._task is not None and not self._task.done()
+        hooks = self._start_hook_task is not None or self._stop_hook_task is not None
+        uncertain = bool(
+            self._quarantined
+            or self._stop_failed
+            or hooks
+            or self._stop_request_count
+            or (self._cleanup_required and not running and not task_live)
+            or (lifecycle == StrategyState.ERROR.value and not running and not task_live)
+        )
+        if uncertain:
+            return annotate_status(
+                {"state": "unknown", "ownership_retained": True},
+                reason=REASON_CLEANUP_UNPROVEN,
+                strategy=self.strategy,
+            )
+        if running or task_live or lifecycle in {StrategyState.ACTIVE.value, StrategyState.PAUSED.value}:
+            return annotate_status(
+                {"state": "running"},
+                reason=REASON_RUNNING,
+                strategy=self.strategy,
+            )
+        return annotate_status(
+            {"state": "stopped"},
+            reason=REASON_IDLE,
+            strategy=self.strategy,
         )
 
     def _retire(self) -> None:
@@ -925,6 +1048,8 @@ class StrategyRunner:
                     self._stop_failed = True
                 raise TimeoutError("Strategy lifecycle transition did not stop before the deadline") from exc
 
+            task: asyncio.Task[None] | None = None
+            caller_owns_tick = False
             try:
                 if not self._requires_stop():
                     return
@@ -962,25 +1087,20 @@ class StrategyRunner:
                         worker_active=stop_hook_worker_active,
                         settlement=stop_settlement,
                     )
+            except InvalidTransitionError:
+                # Rollback stops a strategy that never left STOPPED. The
+                # strategy method raises. Ownership release still completes.
+                if self.strategy.state is not StrategyState.STOPPED:
+                    with self._ownership_lock:
+                        self._stop_failed = True
+                    raise
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             except BaseException:
                 with self._ownership_lock:
                     self._stop_failed = True
                 raise
             else:
-                with self._ownership_lock:
-                    self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
-                    if not self_stop_handoff:
-                        self._stop_hook_task = None
-                        self._stop_hook_worker_active = None
-                        self._stop_hook_settlement = None
-                    self._cleanup_required = self_stop_handoff
-                    self._quarantined = False
-                    self._stop_failed = False
-                logger.info(
-                    "StrategyRunner stopped: %s (ticks=%d)",
-                    self.strategy.name,
-                    self._tick_count,
-                )
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             finally:
                 self._transition_lock.release()
         finally:
@@ -988,6 +1108,28 @@ class StrategyRunner:
                 self._stop_request_count -= 1
                 if self._stop_request_count < 0:
                     raise RuntimeError("Strategy stop request ownership underflow")
+
+    def _release_stop_ownership(
+        self,
+        *,
+        caller_owns_tick: bool,
+        task: asyncio.Task[None] | None,
+    ) -> None:
+        """Clear stop ownership after the strategy hook has settled."""
+        with self._ownership_lock:
+            self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
+            if not self_stop_handoff:
+                self._stop_hook_task = None
+                self._stop_hook_worker_active = None
+                self._stop_hook_settlement = None
+            self._cleanup_required = self_stop_handoff
+            self._quarantined = False
+            self._stop_failed = False
+        logger.info(
+            "StrategyRunner stopped: %s (ticks=%d)",
+            self.strategy.name,
+            self._tick_count,
+        )
 
     def _create_lifecycle_hook_task(
         self,
@@ -1268,20 +1410,40 @@ class StrategyRunner:
                     self._running = False
                     self._release_completed_self_stop_unlocked()
 
+    def _tick_session_action(self, exchange: str) -> str:
+        """Return ``closed``, ``square_off``, or ``tick``.
+
+        The decision is computed here so the tick frame does not keep clock
+        objects while user strategy code is running. 23:55 stays the MCX
+        runner session end until that policy change. The tick keeps running
+        through that exit window; a new entry is a separate admission check.
+        """
+        from .market_hours import session_decision  # noqa: PLC0415
+
+        decision = session_decision(
+            exchange,
+            self.scheduler.now_ist(),
+            symbol=self.symbol,
+            risk_increasing=False,
+        )
+        if not self.scheduler.session_active(exchange, symbol=self.symbol):
+            return "closed"
+        if decision.square_off is not None and self.scheduler.should_square_off(exchange, symbol=self.symbol):
+            return "square_off"
+        return "tick"
+
     async def _tick(self) -> None:
         """Single tick iteration."""
         exchange = self.strategy.exchange
-
-        # Skip if market is closed. The symbol carries the contract expiry.
-        if not self.scheduler.is_market_open(exchange, symbol=self.symbol):
+        action = self._tick_session_action(exchange)
+        if action == "closed":
             return
 
         # NOTE: is_deploy_frozen() guards code *deployment*, not tick delivery.
         # Strategies must receive ticks during market hours regardless of
         # whether a deployment freeze is active. Do not gate ticks here.
 
-        # Check auto square-off
-        if self.scheduler.should_square_off(exchange, symbol=self.symbol):
+        if action == "square_off":
             await self._handle_square_off()
             return
 
@@ -1323,20 +1485,8 @@ class StrategyRunner:
             self._running = False
             self._cleanup_required = True
         stop_hook, worker_active, settlement = self._get_or_create_stop_hook()
-        try:
-            if not stop_hook.done():
-                await self._wait_for_task(
-                    stop_hook,
-                    label="stop hook",
-                    cancel_on_timeout=True,
-                    worker_active=worker_active,
-                    settlement=settlement,
-                )
-        except Exception:
-            with self._ownership_lock:
-                self._stop_failed = True
-            raise
-        else:
+
+        def finish_square_off_stop() -> None:
             with self._ownership_lock:
                 task = self._task
                 self_stop_handoff = bool(task is asyncio.current_task() and task is not None and not task.done())
@@ -1347,6 +1497,28 @@ class StrategyRunner:
                 self._cleanup_required = self_stop_handoff
                 self._quarantined = False
                 self._stop_failed = False
+
+        try:
+            if not stop_hook.done():
+                await self._wait_for_task(
+                    stop_hook,
+                    label="stop hook",
+                    cancel_on_timeout=True,
+                    worker_active=worker_active,
+                    settlement=settlement,
+                )
+        except InvalidTransitionError:
+            if self.strategy.state is not StrategyState.STOPPED:
+                with self._ownership_lock:
+                    self._stop_failed = True
+                raise
+            finish_square_off_stop()
+        except Exception:
+            with self._ownership_lock:
+                self._stop_failed = True
+            raise
+        else:
+            finish_square_off_stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1750,13 +1922,20 @@ class StrategyScheduler:
         """Return status of all registered runners."""
         result: dict[str, dict[str, Any]] = {}
         for name, runner in self._runners.items():
-            result[name] = {
+            projection = runner.project_status()
+            row = {
                 "state": runner.strategy.state.value,
                 "is_running": runner.is_running,
                 "exchange": runner.strategy.exchange,
                 "tick_count": runner.tick_count,
                 "quarantined": runner.is_quarantined,
+                "reason": projection["reason"],
+                "lifecycle": projection["lifecycle"],
+                "process_state": projection["state"],
             }
+            if projection.get("ownership_retained") is True:
+                row["ownership_retained"] = True
+            result[name] = row
         return result
 
 
@@ -2042,8 +2221,8 @@ class CronStrategyScheduler:
     ) -> str:
         """Register a strategy callback on a cron expression.
 
-        The callback is wrapped with a market-hours gate that silently skips
-        execution whenever the effective exchange session is closed.
+        The callback is wrapped with a session gate that silently skips
+        execution when the runner session, including its exit window, is closed.
 
         Args:
             strategy_id: Unique identifier for the strategy.  Used as the
@@ -2260,8 +2439,9 @@ class CronStrategyScheduler:
         The gate logic (in order):
 
         1. If :attr:`_check_market` is ``False`` — always execute (test bypass).
-        2. Ask the canonical :class:`TimeScheduler` whether the exchange is open.
-        3. If closed, derive a useful skip reason from that scheduler's session.
+        2. Ask :meth:`TimeScheduler.session_active` whether the runner session,
+           including its exit window, is still running.
+        3. If not, derive a useful skip reason from that scheduler's session.
         """
         time_scheduler = self._time_scheduler
 
@@ -2287,7 +2467,7 @@ class CronStrategyScheduler:
             exchange = config.exchange
             symbol = config.symbol or None
             sched = EXCHANGE_SCHEDULES.get(exchange)
-            if not time_scheduler.is_market_open(
+            if not time_scheduler.session_active(
                 exchange,
                 at=now_ist,
                 symbol=symbol,

@@ -8,6 +8,7 @@ Provides a Blueprint with these routes:
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
 - ``GET /api/v1/ping``    — simple liveness check with IST timestamp
+- ``GET /api/v1/operator/status`` — authenticated read-only operator status
 - ``GET /api/v1/versions`` — authenticated, read-only About metadata
 - ``GET /api/v1/versions/ollama`` — bounded, observational Ollama version probe
 - ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
@@ -410,3 +411,13 @@ def health_aggregated() -> tuple[Any, int]:
     result = get_health_aggregator().get_health(registry=registry)
     http_status = 200 if result["status"] == "ok" else 503
     return jsonify(result), http_status
+
+
+def _install_operator_status() -> None:
+    """Mount the operator status document beside the liveness and decision-model reads."""
+    from flinttrade_core.operator_status import install
+
+    install(health_bp)
+
+
+_install_operator_status()

@@ -59,6 +59,7 @@ import { useDepthData } from "@/hooks/useDepthData";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder, getSymbol } from "@/services/api";
+import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import {
   checkLotMultiple,
@@ -590,7 +591,8 @@ function OrderLadderWidget(props: Props) {
       );
       track("trade", `order_ladder_${action.toLowerCase()}`);
     } catch (err) {
-      showMsg(err instanceof Error ? err.message : "Order failed");
+      const outcome = presentSubmitError(err);
+      showMsg(outcome.message);
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
   }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note]);
@@ -605,11 +607,17 @@ function OrderLadderWidget(props: Props) {
     const brokerOrderId = order.brokerOrderId;
     setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "cancelling" } : o));
     try {
-      await cancelOrder(brokerOrderId, "orderladder", order.authority);
-      setPendingOrders((p) => p.filter((o) => o.localId !== localId));
-      showMsg("Order cancelled");
+      const result = await cancelOrder(brokerOrderId, "orderladder", order.authority);
+      const presented = presentCancelResult(result);
+      if (presented.kind === "cancelled") {
+        setPendingOrders((p) => p.filter((o) => o.localId !== localId));
+      } else {
+        setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "open" } : o));
+      }
+      showMsg(presented.message);
     } catch (err) {
-      showMsg(err instanceof Error ? err.message : "Cancel failed");
+      const presented = presentCancelResult(undefined, err);
+      showMsg(presented.message);
       setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "open" } : o));
     }
   }, [pendingOrders, showMsg]);

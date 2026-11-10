@@ -23,7 +23,7 @@ before enabling Live mode.
 - **Backend services** — Python 3.14 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 
-- **Safety model** — Practice, Connected (read), and Live, with Example for sample data, server-side checks,
+- **Safety model** — Practice and Live are session modes. Connected (read) is a broker status. Example is sample data. Server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,

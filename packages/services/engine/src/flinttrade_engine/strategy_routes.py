@@ -389,7 +389,8 @@ def create_strategy_schedule(strategy_id: str) -> Response:
     """Attach a cron schedule to an existing strategy.
 
     The scheduler fires the strategy's start endpoint at the specified cron
-    time if market is open and the day is not a holiday.
+    time while the runner session is active, including its exit window, and
+    the day is not a holiday.
 
     Request body (JSON):
 

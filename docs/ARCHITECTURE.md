@@ -447,12 +447,17 @@ keeps its Mode. `/v1/auth/mode` accepts only `{ "mode": "practice" }`. Any
 other value returns HTTP 400 with `Only a downgrade to practice is allowed
 here. Switch to Live via POST /v1/auth/live with PIN verification.` and
 leaves the current session in place. That call does not latch the kill
-switch. The Mode menu lists Practice, Connected (read), and Live. A fresh
+switch. The Mode menu lists Practice and Live. Connected (read) is a broker
+status, not a menu item. The visible chip is taken from the JWT `mode` claim
+when the session token has one: **Example**, **Practice**, **Live**, or
+**Unavailable**. The claim is `explore`, `practice`, or `live`. An opaque
+sample session has no claim to apply and stays **Example**. A JWT whose mode
+is missing, or is not one of those three, shows **Unavailable** and never
+Example. Connected (read),
+the idle lock, broker connectivity, and the decision model are not that
+claim. A fresh
 browser, account setup, and a finished password sign-in open in Practice.
-Example data is not a menu Mode. The visible chip is **Example**, **Practice**,
-or **Live**. The JWT claim is `explore`, `practice`, or `live`. Connected
-(read), the idle lock, broker connectivity, and Laya readiness are not that
-claim. Choosing **Practice** while signed in as **Guest** (chip **Example**)
+Example data is not a menu Mode. Choosing **Practice** while signed in as **Guest** (chip **Example**)
 opens Setup and does not call `POST /v1/auth/mode`. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
@@ -585,7 +590,7 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or
-  `live`), `jti` (unique ID), plus `oid` and `epoch`. Operators see Example, Practice, or Live. Connected (read) is a broker status on a Practice session, not a session Mode.
+  `live`), `jti` (unique ID), plus `oid` and `epoch`. The Mode chip is taken from that claim. Operators see Example, Practice, Live, or Unavailable. A missing or unusable claim shows Unavailable, never Example. Connected (read) is a broker status, not a session Mode.
 - PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
   returns a new token. The previous token stops working. The Live
   switch does the same rotation when it enters Live.

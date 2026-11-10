@@ -242,28 +242,32 @@ Quick Unlock restores the existing session and keeps its Mode. Live is
 entered only through `POST /v1/auth/live`. `POST /v1/auth/mode` accepts
 only a switch to Practice.
 
-The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
-**Connected (read)**, and **Live**. Practice and Live are the session Modes.
-**Connected (read)** is a broker status on a Practice session, not a separate
-Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
+The Mode chip in the TopBar is taken from the JWT `mode` claim when the
+session token has one, and shows **Practice**, **Live**, **Example**, or
+**Unavailable**. An opaque sample session has no claim to apply and stays
+**Example**. The menu lists **Practice** and **Live**. **Unavailable** means
+the session mode could not be confirmed. The Scalper and the line above the widgets say so, and ask the
+operator to sign in again or reload. That copy never says Example or Sample.
+**Connected (read)** is a broker status on the Broker row, not a menu item
+and not a session claim.
+**Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
 **Demo (example data)**. The public site paths `/demo` and `/explore` permanently
 redirect (HTTP 308) to `/demo-app/welcome`.
 
 | Label | What it means |
 |---|---|
 | **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
-| **Connected (read)** | Read-only posture on a Practice session. Until the desk already reports a connected native account, the menu item stays disabled and shows `Connect a broker first`. That sentence is a label, not a setup step. A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. It is not a separate session claim. |
+| **Connected (read)** | Broker status for a native Dhan or Kotak Neo account after a read check succeeds. It is not a session claim, not a Mode, and not in the Mode menu. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.` A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
-| **Example** | Sample data. The chip reads **Example**. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
+| **Example** | Sample data. The chip reads **Example** for claim `explore`, including **Try with example data**, which has no JWT payload. A JWT whose `mode` is missing or not `explore`, `practice`, or `live` reads **Unavailable**, never Example. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
+| **Unavailable** | The session mode could not be confirmed. The chip reads **Unavailable**. Orders stay blocked. Sign in again or reload. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
-fills. A sample-data session, signed in as **Guest**, opens Setup instead of
-switching in place, and that choice does not call `POST /v1/auth/mode`.
-A Live session downgrades with that route. **Connected (read)** stays
-disabled until the desk already reports a connected native account, and
-until then it shows `Connect a broker first`. A broker session cannot be
-started from the terminal today, so that label is not a setup step.
+fills. Choosing **Practice** opens Setup and does not
+call `POST /v1/auth/mode` while the signed-in name is **Guest**.
+A Live session downgrades with that route. **Connected (read)** is not in the Mode menu.
+A broker session cannot be started from the terminal today.
 Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409.
 Choose **Live** only when the item is enabled. Opening the menu
 does not open the Live dialog. An eligible Live choice opens **Switch to Live
@@ -302,7 +306,7 @@ Both reviews offer **Back to edit**. While the confirm is in flight the
 button reads `Confirming…`.
 
 **Mode, session, and sample data.** Practice and Live name the session Mode.
-**Connected (read)** is a broker status on a Practice session. TopBar session chips (Continuous · CAS · Matching ·
+**Connected (read)** is a broker status, not a Mode. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are market-session status, never Live mode. Example data
 uses **Example Buy** / **Example Sell**. After review, **Continue** records
 a sample fill (`Example order placed`, id starting `SAMPLE-`). Practice keeps **Practice Buy** / **Practice Sell**. Live uses
@@ -322,7 +326,7 @@ subsystem.
 - **Broker** lives once, as the **Broker** row in the TopBar **Status** menu:
   **Connected**, **Connected (read)**, or **Unavailable**, plus a plain failure
   when a money-path incident darkens the session. Account switching does not
-  add a second broker row. Laya and LLM are the other rows in that menu.
+  add a second broker row. The decision model, labelled Laya, and LLM are the other rows in that menu.
 - **Market** lives once, in the TopBar market-session chip. A confirmed
   closed cash session reads `Market closed · opens 09:15`. Unavailable
   timings read `Market unavailable`. Neither sentence is Live mode.
@@ -374,8 +378,10 @@ rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
-The TopBar **Status** menu is the one home for **Broker**, **Laya**, and
-**LLM**. Each row has its own label, value, and one-line description.
+The TopBar **Status** menu is the one home for **Broker**, the decision model, and
+**LLM**. The decision-model row is labelled **Laya**. That label is the model
+name, and the value is the readiness word. Settings shows the same model as
+**Laya decision model**. Each row has its own label, value, and one-line description.
 Broker's line is `Your broker account for live orders and holdings.`
 Laya's line is the current reason, or `Checks every order before it is placed.`
 LLM's line is `Optional AI model for chat and suggestions.` The same three
@@ -424,7 +430,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, Practice `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -1037,7 +1043,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
   collapses behind the menu button at the top left.
 - **Top bar.** Search (symbols, pages and commands; also Ctrl+K or ⌘K), the
   Mode menu, one market chip (NSE session and IST clock), the **Status**
-  menu (broker, Laya and LLM), **Ask AI**, **Tools** (Quick Settings and
+  menu (broker, the decision model labelled Laya, and LLM), **Ask AI**, **Tools** (Quick Settings and
   Settings), full screen, notifications and your profile. The account
   switcher appears once a broker account is connected. Feed provenance is
   the chip at the start of the ticker.
@@ -1446,8 +1452,8 @@ Practice ticker shows
 `/settings#brokers`, only when the market session is not unavailable and
 neither the WebSocket nor a fresh REST fallback is producing quotes.
 Unavailable timings read `Market unavailable` and are never labelled last
-close. Feed provenance is independent of Practice, Connected (read), and
-Live, so silent-stale is a fail.
+close. Feed provenance is independent of Practice and Live, so silent-stale
+is a fail. Connected (read) is a broker status, not a feed label.
 
 With example data, Terminal Watchlist checked LTP and % change columns
 use the same sample quotes as the ticker tape.
