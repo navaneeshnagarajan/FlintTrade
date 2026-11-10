@@ -61,12 +61,31 @@ def test_config_preserves_explicit_zero_rejection_and_normalises_symbols():
         validate_practice_config({"symbols": ["RELIANCE"], "max_position_size": 0})
 
 
-def _wait_for(predicate, timeout=5):
+def _wait_for(predicate, timeout=None):
+    """Wait until the practice worker publishes the observed state.
+
+    The worker publishes a cycle only after its quote read returns, and that
+    read is allowed to block for the quote-age allowance. Waiting on the
+    publication signal follows that read instead of a shorter wall-clock poll.
+    """
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    if timeout is None:
+        timeout = PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    progress = runtime.PracticeAgentSupervisor.progress
+    while True:
         if predicate():
             return
-        time.sleep(0.01)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        with progress:
+            if predicate():
+                return
+            # Publication wakes this wait immediately. The short bound only
+            # rechecks state a worker thread cannot signal after it returns.
+            progress.wait(min(0.05, remaining))
     assert predicate(), "Practice worker did not reach the expected state"
 
 
@@ -212,6 +231,45 @@ def _supervisor(desk):
 
 def _run_finished(desk):
     return _supervisor(desk).run.thread is not None and not _supervisor(desk).run.thread.is_alive()
+
+
+def test_cycle_publication_waits_for_a_quote_read_slower_than_the_old_poll(desk, monkeypatch):
+    """One quote read may block for its full allowance before the cycle is published."""
+    from flinttrade_core import ai_broker_context
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    entered = threading.Event()
+    release = threading.Event()
+    observed = ai_broker_context.collect_configured_broker_context
+
+    def slow_read(symbol, exchange):
+        entered.set()
+        assert release.wait(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS)
+        return observed(symbol, exchange)
+
+    monkeypatch.setattr(ai_broker_context, "collect_configured_broker_context", slow_read)
+    assert _start(desk, cycle_interval_sec=3600).status_code == 202
+    assert entered.wait(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS), "Practice worker did not start its quote read"
+    error = []
+
+    def observe():
+        try:
+            _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
+        except AssertionError as exc:
+            error.append(exc)
+
+    waiter = threading.Thread(target=observe, name="practice-publication-waiter")
+    waiter.start()
+    # Past the previous five-second poll, still inside the quote-read allowance.
+    held_seconds = 6
+    assert held_seconds < PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+    time.sleep(held_seconds)
+    still_waiting = waiter.is_alive()
+    release.set()
+    waiter.join(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS)
+    assert still_waiting, error
+    assert error == []
+    assert _supervisor(desk).run.status == "running"
 
 
 @pytest.mark.parametrize(
