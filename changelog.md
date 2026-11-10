@@ -18,6 +18,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Operator status.** `GET /api/v1/operator/status` is an authenticated read of the session mode, whether Live is unlocked, whether a broker is Connected (read), the decision model, the kill switch, the session, broker account status, dispatch counts, strategy rows, and whether startup is paused. Connected (read) is a broker status, not a mode. Each part is taken from the check that already owns it. A part that cannot be read is unknown, with a fixed reason, and the rest of the document is still returned. The route does not place an order, latch the kill switch, start or stop a strategy, or refresh a broker token.
+
 - **Mode honesty bar.** One line under the TopBar for Example, and for
   Practice and Live. Widgets also identify illustrative and fallback figures
   with Sample/Example source labels. An incident, when one is showing, sits

@@ -51,6 +51,16 @@ _DISPATCH_STATES = {
     DISPATCH_CONFIRMED_NOT_APPLIED,
     DISPATCH_CONFIRMED_PARTIAL,
 }
+# Not a confirmed result, and not a failure before the broker was called.
+# OUTCOME_UNKNOWN stays in this set: the attempt is unresolved, not a fill.
+NON_TERMINAL_DISPATCH_STATES = frozenset(
+    {
+        DISPATCH_PREPARED,
+        DISPATCH_INVOKED,
+        DISPATCH_ACKNOWLEDGED,
+        DISPATCH_OUTCOME_UNKNOWN,
+    }
+)
 _RESOLUTION_OUTCOMES = {
     "confirmed_applied",
     "confirmed_not_applied",
@@ -3607,6 +3617,7 @@ JournalLocalStateProvider = OrderLifecycleLedger
 
 __all__ = [
     "DISPATCH_ACKNOWLEDGED",
+    "NON_TERMINAL_DISPATCH_STATES",
     "DISPATCH_CONFIRMED_APPLIED",
     "DISPATCH_CONFIRMED_NOT_APPLIED",
     "DISPATCH_CONFIRMED_PARTIAL",
