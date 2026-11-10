@@ -91,17 +91,20 @@ export interface InvestContextValue {
  * settled empty — a cold load must not flash sample over a pending book.
  * A Practice or Live account snapshot (funds returned, even with an empty
  * holdings book) keeps that book. The sample portfolio must not supply a
- * second net-worth figure next to Practice cash (FT-UX-HOME-INVEST-001).
+ * second net-worth figure next to Practice cash.
  * A connected broker keeps the live query result — an empty funded book
- * stays at 0 (FT-TRADE-010).
+ * stays at 0.
  */
 export function resolveInvestHoldings(
-  mode: AppMode,
+  mode: AppMode | "unavailable",
   liveHoldings: Holding[],
   brokerConnected = false,
   holdingsQuerySettled = true,
   hasAccountSnapshot = false,
 ): { holdings: Holding[]; isSampleData: boolean } {
+  if (mode === "unavailable") {
+    return { holdings: [], isSampleData: false };
+  }
   if (mode === "explore") {
     return { holdings: getDemoHoldings(), isSampleData: true };
   }

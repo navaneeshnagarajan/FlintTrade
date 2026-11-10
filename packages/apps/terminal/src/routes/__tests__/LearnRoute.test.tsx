@@ -47,6 +47,11 @@ vi.mock("@/lib/tourDefinitions", () => ({
 
 import LearnRoute from "../LearnRoute";
 import { indexLotLine, setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows, lotTestClock } from "@/test-utils/futureIndexLotRows";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["initialEntries"] = ["/learn"]) {
   return render(
@@ -56,7 +61,7 @@ function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["in
   );
 }
 
-// Locked FT-LEARN-003 copy (USER_GUIDE Learn → Resource Hub).
+// Locked copy (USER_GUIDE Learn → Resource Hub).
 const DOC_LOADING = "Loading document…";
 const DOC_SOFT_FAIL = "Document isn’t ready yet.";
 const DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";
@@ -190,6 +195,9 @@ describe("LearnRoute", () => {
   });
 
   it("teaches the master index lot line, with an em dash for a missing underlying", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(lotTestClock());
+    setInstrumentLotRows(futureIndexLotRows());
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Glossary" }));
 

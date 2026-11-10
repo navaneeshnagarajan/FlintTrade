@@ -352,6 +352,234 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
 });
 
+test.describe("dropped Practice order response", () => {
+  test.use({
+    benignConsoleErrors: [
+      {
+        text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+        url: "http://localhost:5173/ft-api/api/v1/orders/place",
+        expectedCalls: 1,
+      },
+    ],
+  });
+
+  test("a dropped Practice submit says the outcome is unknown and does not offer Retry", async ({
+    page,
+    syntheticApi,
+  }) => {
+  const discoveryOutcomes: string[] = [];
+  const isDiscovery = (request: Request) => request.method() === "GET"
+    && request.url() === "http://localhost:5173/ft-api/api/v1/native/accounts";
+  page.on("requestfinished", request => {
+    if (isDiscovery(request)) discoveryOutcomes.push("completed");
+  });
+  page.on("requestfailed", request => {
+    if (isDiscovery(request)) discoveryOutcomes.push(request.failure()?.errorText ?? "unknown failure");
+  });
+  // Freeze application timers before mounting the product route. Terminal polls
+  // safety state and accounts; wall-clock refetches must not change exact counts.
+  const controlledTime = new Date("2026-08-11T00:00:00.000Z");
+  await page.clock.install({ time: controlledTime });
+  await page.clock.pauseAt(controlledTime);
+  await seedOrderPadWorkspace(page);
+  registerSystemDiagnosticsRead(syntheticApi, LIVE_AUTHORITY_TOKEN);
+  // This desk discovers native accounts through the endpoint below. Leave
+  // unused gateway-account routes unregistered so any new request fails closed.
+  syntheticApi.register({
+    name: "list native accounts for Practice market-data resolution",
+    method: "GET",
+    path: "/ft-api/api/v1/native/accounts",
+    // Shared nativeAccountDiscovery coalesces borrowers. The two StrictMode
+    // transport pairs originate in useBrokerAccounts and nativeCapabilityBroker;
+    // a transport initiator is not a census of the symbol/timing borrowers.
+    // The old independent-consumer 5–9 range no longer describes this mount.
+    // Require four transports AND their native completion/cancellation split.
+    expectedCalls: 4,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { accounts: [] } };
+    },
+  });
+
+  syntheticApi.register({
+    name: "read Practice sandbox funds",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/funds",
+    expectedCalls: 2,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return {
+        json: {
+          status: "success",
+          data: {
+            funds: {
+              starting_capital: 100_000,
+              available_balance: 100_000,
+              used_margin: 0,
+              realized_pnl: 0,
+              current_balance: 100_000,
+              ledger_balance: 100_000,
+              futures_mtm_in_ledger: false,
+            },
+          },
+        },
+      };
+    },
+  });
+  syntheticApi.register({
+    name: "read empty Practice sandbox positions",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/positions",
+    expectedCalls: 2,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { status: "success", data: { positions: [] } } };
+    },
+  });
+  syntheticApi.register({
+    name: "read empty Practice sandbox orders",
+    method: "GET",
+    path: "/ft-api/v1/sandbox/orders",
+    // The paused mount reads the book three times. A visible-desk rearm
+    // may add one more read before the assertion.
+    expectedCalls: { minimum: 3, maximum: 4 },
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return { json: { status: "success", data: { orders: [] } } };
+    },
+  });
+  // The desk mounts Chat readiness beside the tutor pill. Strict Mode can
+  // invoke each read twice; the place handler below stays the JWT check.
+  registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });
+  registerOperatorStatusProbes(syntheticApi, { expectedCalls: { minimum: 1, maximum: 4 } });
+  // Welcome probes this before the synthetic session exists. The Mode menu
+  // reads it again once that session is installed.
+  syntheticApi.register({
+    name: "welcome and Mode menu Live-arm status",
+    method: "GET",
+    path: "/ft-api/v1/auth/status",
+    expectedCalls: { minimum: 1, maximum: 4 },
+    handler: (request) => {
+      expect(request.postData()).toBeNull();
+      const authorization = request.headers()["authorization"];
+      if (authorization !== undefined) {
+        expect(authorization).toBe(`Bearer ${LIVE_AUTHORITY_TOKEN}`);
+      }
+      return {
+        json: {
+          status: "success",
+          data: {
+            is_setup: true,
+            is_locked: false,
+            has_pin: false,
+            totp_enabled: false,
+          },
+        },
+      };
+    },
+  });
+  syntheticApi.register({
+    name: "read inactive safety configuration",
+    method: "GET",
+    path: "/ft-api/api/v1/safety/config",
+    expectedCalls: 1,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return {
+        json: {
+          status: "success",
+          data: {
+            l1_order: {},
+            l2_position: {},
+            l3_portfolio: {},
+            l4_pnl: {},
+            l5_kill: {},
+          },
+        },
+      };
+    },
+  });
+  syntheticApi.register({
+    name: "read broker capabilities without a connected account",
+    method: "GET",
+    path: "/ft-api/api/v1/broker/capabilities",
+    expectedCalls: 1,
+    handler: (request) => {
+      expectAuthenticatedGet(request);
+      return {
+        json: {
+          status: "success",
+          data: {
+            broker_name: "Practice",
+            broker_type: "multi",
+            supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+            features: {},
+          },
+        },
+      };
+    },
+  });
+  let droppedSubmits = 0;
+  await page.route("**/ft-api/api/v1/orders/place", async (route) => {
+    droppedSubmits += 1;
+    await route.abort("connectionreset");
+  });
+
+  await page.goto("/welcome");
+  await installMismatchedPracticeAuthority(page);
+
+  // Await real module loading before spending the bounded virtual-time budget.
+  // Cold Vite transforms must not strand React/layout work behind a paused clock.
+  await page.evaluate(async () => {
+    const importModule = new Function("path", "return import(path)") as (
+      path: string,
+    ) => Promise<unknown>;
+    await Promise.all([
+      importModule("/src/routes/UnifiedAppRoute.tsx"),
+      importModule("/src/widgets/trading/OrderPad/OrderPadWidget.tsx"),
+    ]);
+  });
+
+  await expect(page).toHaveURL(/\/terminal$/);
+  const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
+  // Lazy widget imports can schedule immediate work after their network module
+  // resolves. Stay below usePositions' three-second stale window: a cold import
+  // must not age the shared cache and add a mount refetch before this journey.
+  for (let advanced = 0; advanced < 2_000 && !(await limitOrderType.isVisible()); advanced += 100) {
+    await page.clock.runFor(100);
+  }
+  await expect(page.getByText("Order Pad", { exact: true }).first()).toBeVisible();
+  await expect(limitOrderType).toBeVisible();
+  await expect.poll(
+    () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
+  ).toBe(4);
+  await expect.poll(() => [...discoveryOutcomes].sort()).toEqual([
+    "completed", "completed", "net::ERR_ABORTED", "net::ERR_ABORTED",
+  ]);
+  await limitOrderType.click();
+  await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
+  await page.getByRole("button", { name: "Practice Buy" }).click();
+
+  const review = page.getByRole("dialog", { name: "Review Practice order" });
+  await expect(review).toBeVisible();
+  await expect(review.getByText("NIFTY · NSE", { exact: true })).toBeVisible();
+  await expect(review.getByText("₹123.45", { exact: true })).toHaveCount(2);
+  await expect(review.getByText("₹123.45", { exact: true }).first()).toBeVisible();
+  await review.getByRole("button", { name: "Confirm simulated Practice order" }).click();
+
+  const outcome = page.getByRole("status").filter({
+    hasText: "Order status unknown. Check Orders before trying again.",
+  });
+  await expect(outcome).toBeVisible();
+  await expect(outcome).not.toContainText(/rejected|order failed/i);
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+  await expect(review).toBeHidden();
+  expect(droppedSubmits).toBe(1);
+  await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
+  });
+});
+
+
 test.describe("quantity-check refusal clears when quantity changes", () => {
   test.use({ benignConsoleErrors: [] });
 
@@ -510,7 +738,7 @@ test.describe("quantity-check refusal clears when quantity changes", () => {
     await expect.poll(() => [...discoveryOutcomes].sort()).toEqual([
       "completed", "completed", "net::ERR_ABORTED", "net::ERR_ABORTED",
     ]);
-    await expect(page.getByText("Lot: 65", { exact: true })).toBeVisible();
+    await expect(page.getByText("Lot 65 · Max 1,755 per order", { exact: true })).toBeVisible();
 
     const refusal = "Quantity must be a multiple of the lot size (65).";
     const quantity = page.getByRole("spinbutton", { name: "Quantity" });

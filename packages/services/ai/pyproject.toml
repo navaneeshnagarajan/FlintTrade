@@ -2,7 +2,7 @@
 name = "flinttrade-ai"
 version = "0.0.1"
 description = "LLM client (multi-provider), optional RAG, signals, sentiment, MCP bridge, swarm executor"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "flinttrade-core",
     "flinttrade-screener",
@@ -27,7 +27,7 @@ ml = [
 ]
 # PDF support for the canonical RAG pipeline.
 rag = [
-    "pypdf==6.20.0",
+    "pypdf==6.21.4",
 ]
 
 [build-system]

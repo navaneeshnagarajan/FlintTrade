@@ -35,7 +35,7 @@ def _write_inputs(tmp_path: pathlib.Path, *, notes: str) -> tuple[pathlib.Path, 
             licence = "MIT"
             licence_source = "dhanhq-2.2.0.dist-info/LICENSE"
             sandbox_tested = "2026-05-23"
-            approved_by = "navaneeshnagarajan"
+            approved_by = "maintainers"
             notes = "{notes}"
             """
         ).strip(),

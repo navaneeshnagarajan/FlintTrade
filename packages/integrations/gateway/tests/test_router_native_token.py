@@ -99,7 +99,7 @@ async def test_upstox_write_accepted_through_real_router(*, backend_lease_factor
 
 @pytest.mark.asyncio
 async def test_kotakneo_write_fail_closed_through_real_router(*, backend_lease_factory):
-    """Monday Neo login is read-only until funded unlock — writes fail closed."""
+    """Neo login is read-only until funded unlock — writes fail closed."""
     from flinttrade_engine.safety import SafetyBypassError
 
     client = _MockNeoClient()

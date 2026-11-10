@@ -3,14 +3,22 @@
  */
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
+import { setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows } from "@/test-utils/futureIndexLotRows";
 import { PayoffTab } from "../PayoffTab";
 import { UNDERLYINGS, type Leg } from "../types";
 import { formatINR } from "../utils";
 
 const nifty = UNDERLYINGS[0];
-const lot = nifty.lotSize ?? 0;
+let lot = 0;
+
+beforeEach(() => {
+  setInstrumentLotRows(futureIndexLotRows());
+  lot = nifty.lotSize ?? 0;
+  expect(lot).toBeGreaterThan(0);
+});
 
 function callLeg(premium: number | null, extra: Partial<Leg> = {}): Leg {
   return {
@@ -25,7 +33,7 @@ function callLeg(premium: number | null, extra: Partial<Leg> = {}): Leg {
 }
 
 describe("PayoffTab", () => {
-  it("shows em-dash cards and does not model payoff when premium is unset (FT-LAB-003)", () => {
+  it("shows em-dash cards and does not model payoff when premium is unset", () => {
     render(<PayoffTab legs={[callLeg(null)]} atm={22500} underlying={nifty} />);
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("—");
@@ -48,7 +56,7 @@ describe("PayoffTab", () => {
     expect(screen.queryByText("None")).not.toBeInTheDocument();
   });
 
-  it("labels a sample-chain premium and still uses FT-LAB-001 max-loss maths", () => {
+  it("labels a sample-chain premium and still uses max-loss maths", () => {
     render(
       <PayoffTab
         legs={[callLeg(45, { premiumSource: "sample" })]}
@@ -72,7 +80,7 @@ describe("PayoffTab", () => {
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22680");
   });
 
-  it("shows Long Call Net Debit and Max Loss on the same position basis (FT-LAB-005)", () => {
+  it("shows Long Call Net Debit and Max Loss on the same position basis", () => {
     render(<PayoffTab legs={[callLeg(45)]} atm={22500} underlying={nifty} />);
 
     const maxLoss = screen.getByText("Max Loss").nextElementSibling;

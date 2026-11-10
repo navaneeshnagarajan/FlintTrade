@@ -1,7 +1,7 @@
 /**
  * backtestPnlReconcile.test.ts
  *
- * Pins FT-LAB-004: Lab headline Total Return is initial capital → final
+ * Pins Lab headline Total Return is initial capital → final
  * equity. Net trade P&L is the Trade Log *net* sum when ``net_pnl`` is
  * present; otherwise the helper reports a labelled gross fallback.
  */

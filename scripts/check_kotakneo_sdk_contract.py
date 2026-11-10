@@ -134,7 +134,7 @@ SCANNER_TARGETS = (
     "packages/integrations/gateway/src/flinttrade_gateway/brokers/kotakneo_sdk.py",
     "packages/integrations/gateway/src/flinttrade_gateway/brokers/kotakneo_streaming.py",
     "packages/integrations/gateway/src/flinttrade_gateway/native_login.py",
-    "packages/integrations/gateway/src/flinttrade_gateway/monday_read_smoke.py",
+    "packages/integrations/gateway/src/flinttrade_gateway/connected_read_smoke.py",
     "scripts/probe_native_broker_live.py",
     "scripts/probe_kotakneo_live.py",
 )

@@ -1,5 +1,5 @@
 /**
- * FT-TRADE-007 — OI Chart expiry honesty.
+ * OI Chart expiry honesty.
  *
  * Option Chain and OI Chart must share one expiry list for a symbol/exchange.
  * Explore lists those sample expiries and badges Sample. An empty list or an
@@ -103,7 +103,7 @@ function resetSharedExpiry() {
   useOptionExpiryStore.setState({ selectedByIdentity: {} });
 }
 
-describe("OI Chart expiry honesty (FT-TRADE-007)", () => {
+describe("OI Chart expiry honesty", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     plotlyMocks.reset();

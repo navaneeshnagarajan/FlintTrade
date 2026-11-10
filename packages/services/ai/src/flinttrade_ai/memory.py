@@ -945,9 +945,8 @@ class TradedMemory:
                     count,
                     _STEP_BATCH_WARN,
                 )
-            # TODO: page through in batches when ChromaDB exposes stable offset/limit
-            # on collection.get(). For now we fetch all at once; prune before this
-            # becomes a bottleneck (see warning threshold above).
+            # Fetch the layer in one read. Page it when the store exposes a stable
+            # offset and limit. Prune before the warning threshold above.
             results = collection.get(include=["metadatas", "documents"])
             all_ids: list[str] = results.get("ids", [])
             all_metas: list[dict[str, Any]] = results.get("metadatas", [])

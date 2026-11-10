@@ -14,6 +14,11 @@ import pytest
 
 from scripts import check_kotakneo_sdk_contract as checker
 
+# Repository fixture root. The probe only checks that the imported module sits
+# inside the declared environment, so the path stays inside this checkout
+# instead of a host interpreter layout.
+_FIXTURE_ENV = Path(__file__).resolve().parent / "fixtures" / "kotak-contract-env"
+
 
 def _write_brokers_lock(
     root: Path,
@@ -79,8 +84,8 @@ def _snapshot(
         },
         "distribution_counts": {"kotakneoapi": 1},
         "namespace_owners": ["kotakneoapi"],
-        "module_path": "/contract/env/lib/python3.12/site-packages/neo_api_client/__init__.py",
-        "environment_root": "/contract/env",
+        "module_path": str(_FIXTURE_ENV / "lib" / "site-packages" / "neo_api_client" / "__init__.py"),
+        "environment_root": str(_FIXTURE_ENV),
         "cwd_files": [],
         "contract_ok": True,
         "read_contract_ok": True,

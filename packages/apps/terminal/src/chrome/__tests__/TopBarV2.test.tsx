@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const topBarSource = () => readFileSync(resolve(testDir, "../TopBarV2.tsx"), "utf8");
 
-const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery } = vi.hoisted(() => ({
+const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery, mockHolidayQuery } = vi.hoisted(() => ({
   mockSetConnectionStatus: vi.fn(),
   mockDirectBrokerConnected: { value: false },
   mockTimingsQuery: {
@@ -25,6 +25,18 @@ const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery } =
     dataUpdatedAt: 0,
     isError: false,
     isLoading: false,
+  },
+  mockHolidayQuery: {
+    data: undefined as Array<{
+      date: string;
+      description: string;
+      holiday_type: string;
+      closed_exchanges: string[];
+      open_exchanges: Array<{ exchange: string; start_time: number; end_time: number }>;
+    }> | undefined,
+    isSuccess: false,
+    isError: false,
+    isLoading: true,
   },
 }));
 
@@ -96,6 +108,7 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 
 vi.mock("@/hooks/useMarketStatus", () => ({
   useTimings: vi.fn(() => mockTimingsQuery),
+  useHolidays: vi.fn(() => mockHolidayQuery),
   MARKET_TIMINGS_MAX_AGE_MS: 5_000,
 }));
 
@@ -171,6 +184,10 @@ describe("TopBarV2", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    mockHolidayQuery.data = undefined;
+    mockHolidayQuery.isSuccess = false;
+    mockHolidayQuery.isError = false;
+    mockHolidayQuery.isLoading = true;
     useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     useModeStore.setState({ mode: "explore" });
@@ -293,7 +310,7 @@ describe("TopBarV2", () => {
   });
 
   it("shows Continuous for Explore HHMM timings at Thursday mid-session IST", () => {
-    // 10 Sep 2026 12:08 IST — the FT-TRADE-004 observation window.
+    // 10 Sep 2026 12:08 IST — the observation window.
     setIstInstant("2026-09-10T06:38:00.000Z");
     setExploreHhmmTimings();
 
@@ -330,6 +347,28 @@ describe("TopBarV2", () => {
     expect(chip).not.toHaveTextContent("Closed");
     expect(chip).not.toHaveTextContent("Continuous");
     expect(screen.getByTestId("fo-session-status")).toHaveTextContent("F&O open · till 15:40");
+  });
+
+  it("shows Open for Explore HHMM timings during the F&O Muhurat window", () => {
+    setIstInstant("2026-11-08T09:30:00.000Z"); // Sunday 15:00 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    const chip = screen.getByTestId("market-session-status");
+    expect(chip).toHaveTextContent("Continuous");
+    expect(chip).toHaveAttribute("title", "Continuous · 14:20–15:15");
+    expect(chip).not.toHaveTextContent("Market closed");
+    expect(screen.getByTestId("fo-session-status")).toHaveTextContent("F&O open · till 15:40");
+  });
+
+  it("stays Closed on Muhurat Sunday outside the F&O window", () => {
+    setIstInstant("2026-11-08T04:30:00.000Z"); // Sunday 10:00 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
   });
 
   it("shows Closed for Explore HHMM timings on an IST weekend", () => {
@@ -610,7 +649,7 @@ describe("TopBarV2", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FT-MOBILE-002 — defensive skinny-window chrome (~390px)
+// defensive skinny-window chrome (~390px)
 // ---------------------------------------------------------------------------
 
 function stubViewportWidth(width: number) {
@@ -638,7 +677,7 @@ function stubViewportWidth(width: number) {
   });
 }
 
-describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
+describe("TopBarV2 skinny-window collapse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;
@@ -646,6 +685,10 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    mockHolidayQuery.data = undefined;
+    mockHolidayQuery.isSuccess = false;
+    mockHolidayQuery.isError = false;
+    mockHolidayQuery.isLoading = true;
     useSettingsStore.setState({ tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     stubViewportWidth(390);
@@ -813,7 +856,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(more).toHaveAttribute("aria-expanded", "false");
   });});
 
-describe("FT-UX-001 Compact desk chrome at 1280", () => {
+describe("Compact desk chrome at 1280", () => {
   beforeEach(() => {
     useSettingsStore.setState({ density: "compact", tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
@@ -908,7 +951,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
   });
 });
 
-describe("FT-UX-002 TopBar chrome consolidation", () => {
+describe("TopBar chrome consolidation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;
@@ -916,6 +959,10 @@ describe("FT-UX-002 TopBar chrome consolidation", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    mockHolidayQuery.data = undefined;
+    mockHolidayQuery.isSuccess = false;
+    mockHolidayQuery.isError = false;
+    mockHolidayQuery.isLoading = true;
     useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     useModeStore.setState({ mode: "explore" });

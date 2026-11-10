@@ -47,7 +47,7 @@ function renderChipWithFallback(status: {
   );
 }
 
-describe("FT-CORE-002 FeedFreshnessChip", () => {
+describe("FeedFreshnessChip", () => {
   beforeEach(() => {
     mockWs.diagnostics.lastTickTimestamp = 0;
     useModeStore.setState({ mode: "explore" });

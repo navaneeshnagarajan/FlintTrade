@@ -11,7 +11,9 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import date, time
+import re
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -20,12 +22,19 @@ from flinttrade_engine.market_hours import (
     STANDARD_HOURS,
     SpecialTradingSession,
     add_special_session,
+    derivative_contract_close,
+    fo_session_state,
     get_market_hours,
     get_standard_hours,
     is_special_session,
     list_upcoming_sessions,
+    muhurat_amo_note,
+    muhurat_equity_phase,
+    muhurat_funds_note,
     nse_cash_phase,
 )
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 # ---------------------------------------------------------------------------
@@ -112,18 +121,25 @@ class TestStandardHours:
 
 class TestNseCashPhase:
     def test_phase_boundaries(self) -> None:
-        assert nse_cash_phase(10 * 60) == "continuous"
-        assert nse_cash_phase(15 * 60 + 14) == "continuous"
-        assert nse_cash_phase(15 * 60 + 15) == "cas"
-        assert nse_cash_phase(15 * 60 + 30) == "cas"
-        assert nse_cash_phase(15 * 60 + 35) == "matching"
-        assert nse_cash_phase(15 * 60 + 50) == "post-close"
-        assert nse_cash_phase(16 * 60) == "closed"
+        # 3 Aug 2026 is the explicit pre-revision clock. Omitting the date is not allowed.
+        on = date(2026, 8, 3)
+        assert nse_cash_phase(10 * 60, on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 14, on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 15, on) == "cas"
+        assert nse_cash_phase(15 * 60 + 30, on) == "cas"
+        assert nse_cash_phase(15 * 60 + 35, on) == "matching"
+        assert nse_cash_phase(15 * 60 + 50, on) == "post-close"
+        assert nse_cash_phase(16 * 60, on) == "closed"
 
     def test_cas_is_not_closed_or_continuous(self) -> None:
-        assert nse_cash_phase(15 * 60 + 20) == "cas"
-        assert nse_cash_phase(15 * 60 + 20) != "closed"
-        assert nse_cash_phase(15 * 60 + 20) != "continuous"
+        on = date(2026, 8, 3)
+        assert nse_cash_phase(15 * 60 + 20, on) == "cas"
+        assert nse_cash_phase(15 * 60 + 20, on) != "closed"
+        assert nse_cash_phase(15 * 60 + 20, on) != "continuous"
+
+    def test_phase_requires_the_session_date(self) -> None:
+        with pytest.raises(TypeError):
+            nse_cash_phase(15 * 60 + 20)  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +159,21 @@ class TestIsSpecialSession:
         session = is_special_session(date(2026, 11, 8))
         assert session is not None
         assert "2026" in session.name
+        assert session.open_time == time(14, 20)
+        assert session.close_time == time(15, 40)
+        assert session.pre_open_time == time(14, 5)
+        assert "NFO" in session.exchanges
+        assert "NSE" not in session.exchanges
+        assert "CDS" not in session.exchanges
+        assert "MCX" not in session.exchanges
+        equity = is_special_session(date(2026, 11, 8), exchange="NSE")
+        assert equity is not None
+        assert equity.close_time == time(15, 30)
+        assert "NSE_INDEX" in equity.exchanges
+        currency = is_special_session(date(2026, 11, 8), exchange="CDS")
+        commodity = is_special_session(date(2026, 11, 8), exchange="MCX")
+        assert currency is not None and currency.close_time == time(15, 30)
+        assert commodity is not None and commodity.close_time == time(15, 30)
 
     def test_muhurat_2027_detected(self) -> None:
         session = is_special_session(date(2027, 10, 29))
@@ -195,6 +226,23 @@ class TestGetMarketHours:
     def test_nfo_on_muhurat(self) -> None:
         open_t, close_t = get_market_hours("NFO", date(2025, 10, 20))
         assert open_t == time(18, 15)
+
+    def test_nfo_muhurat_2026_uses_the_afternoon_window(self) -> None:
+        open_t, close_t = get_market_hours("NFO", date(2026, 11, 8))
+        assert open_t == time(14, 20)
+        assert close_t == time(15, 40)
+
+    def test_equity_muhurat_2026_uses_the_non_cas_close(self) -> None:
+        for exchange in ("NSE", "BSE", "NSE_INDEX", "BSE_INDEX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
+
+    def test_currency_and_commodity_muhurat_2026(self) -> None:
+        for exchange in ("CDS", "MCX"):
+            open_t, close_t = get_market_hours(exchange, date(2026, 11, 8))
+            assert open_t == time(14, 20)
+            assert close_t == time(15, 30)
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +297,287 @@ class TestListUpcomingSessions:
     def test_from_far_future_returns_empty(self) -> None:
         sessions = list_upcoming_sessions(from_date=date(2050, 1, 1))
         assert sessions == []
+
+
+def _at(hour: int, minute: int) -> datetime:
+    return datetime(2026, 11, 8, hour, minute, tzinfo=_IST)
+
+
+class TestMuhurat2026Window:
+    def test_open_during_the_fo_window(self) -> None:
+        assert fo_session_state(_at(14, 20), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NFO") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 30), SPECIAL_SESSIONS, "NSE") == "open"
+        assert fo_session_state(_at(15, 40), SPECIAL_SESSIONS, "NSE") == "closed"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "CDS") == "open"
+        assert fo_session_state(_at(15, 0), SPECIAL_SESSIONS, "MCX") == "open"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "CDS") == "closed"
+        assert fo_session_state(_at(15, 31), SPECIAL_SESSIONS, "MCX") == "closed"
+
+    def test_equity_phase_follows_the_bulletin(self) -> None:
+        assert muhurat_equity_phase(14 * 60 + 20) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 14) == "continuous"
+        assert muhurat_equity_phase(15 * 60 + 16) == "non-cas"
+        assert muhurat_equity_phase(15 * 60 + 20) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 35) == "cas"
+        assert muhurat_equity_phase(15 * 60 + 36) == "closed"
+        assert muhurat_equity_phase(15 * 60 + 40) == "closed"
+
+    def test_closed_outside_the_fo_window_on_that_sunday(self) -> None:
+        assert date(2026, 11, 8).weekday() == 6
+        assert fo_session_state(_at(10, 0), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(14, 10), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(14, 19), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(15, 41), SPECIAL_SESSIONS, "NFO") == "closed"
+        assert fo_session_state(_at(18, 30), SPECIAL_SESSIONS, "NFO") == "closed"
+
+    def test_missing_special_session_data_fails_closed(self) -> None:
+        assert fo_session_state(_at(15, 0), None, "NFO") == "absent"
+        assert fo_session_state(_at(15, 0), [], "NFO") == "absent"
+        assert muhurat_amo_note(_at(14, 0), []) is None
+        assert muhurat_funds_note(_at(15, 0), []) is None
+
+    def test_amo_and_funds_notes_follow_the_window(self) -> None:
+        early = muhurat_amo_note(_at(14, 0), SPECIAL_SESSIONS)
+        assert early is not None
+        assert "14:02 IST, 3 minutes before pre-open" in early
+        assert "14:16 IST, 4 minutes before the 14:20 normal open" in early
+        assert "14:03 IST, 2 minutes before the 14:05 equity pre-open" in early
+
+        at_pre_cutoff = muhurat_amo_note(_at(14, 2), SPECIAL_SESSIONS)
+        assert at_pre_cutoff is not None
+        assert "3 minutes before pre-open" in at_pre_cutoff
+
+        after_pre_cutoff = muhurat_amo_note(_at(14, 3), SPECIAL_SESSIONS)
+        assert after_pre_cutoff is not None
+        assert "pre-open have closed" in after_pre_cutoff
+        assert "until 14:16 IST" in after_pre_cutoff
+
+        normal_only = muhurat_amo_note(_at(14, 10), SPECIAL_SESSIONS)
+        assert normal_only is not None
+        assert "Equity after-market orders for the Muhurat session have closed" in normal_only
+        assert "until 14:16 IST" in normal_only
+
+        closed_collection = muhurat_amo_note(_at(14, 17), SPECIAL_SESSIONS)
+        assert closed_collection == "After-market orders for the Muhurat session have closed. F&O opens at 14:20 IST."
+
+        assert muhurat_amo_note(_at(15, 0), SPECIAL_SESSIONS) is None
+        assert muhurat_amo_note(_at(16, 0), SPECIAL_SESSIONS) is None
+
+        funds = muhurat_funds_note(_at(15, 0), SPECIAL_SESSIONS)
+        assert funds is not None
+        assert "6 November 2026" in funds
+        assert "not included in available funds" in funds
+        assert "settlement holiday" in funds
+        assert muhurat_funds_note(_at(14, 0), SPECIAL_SESSIONS) is None
+        assert muhurat_funds_note(_at(15, 41), SPECIAL_SESSIONS) is None
+
+
+# ---------------------------------------------------------------------------
+# Schedule from 7 Dec 2026 (NSE/CMTR/77355, NSE/FAOP/77356)
+# ---------------------------------------------------------------------------
+
+
+class TestCasRevisionBoundary:
+    def test_dec_6_keeps_the_current_cash_phases(self) -> None:
+        on = date(2026, 12, 6)
+        assert nse_cash_phase(15 * 60 + 14, on=on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 15, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 34, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 35, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 49, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 50, on=on) == "post-close"
+
+    def test_dec_7_uses_the_revised_cash_phases(self) -> None:
+        on = date(2026, 12, 7)
+        assert nse_cash_phase(15 * 60 + 29, on=on) == "continuous"
+        assert nse_cash_phase(15 * 60 + 30, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 39, on=on) == "cas"
+        assert nse_cash_phase(15 * 60 + 40, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 44, on=on) == "matching"
+        assert nse_cash_phase(15 * 60 + 45, on=on) == "transition"
+        assert nse_cash_phase(15 * 60 + 49, on=on) == "transition"
+        assert nse_cash_phase(15 * 60 + 50, on=on) == "post-close"
+        assert nse_cash_phase(16 * 60, on=on) == "closed"
+
+    def test_revision_vectors_match_the_rust_session_clock(self) -> None:
+        """The dated Python and Rust clocks share one revision table."""
+        vectors = (
+            (15 * 60 + 20, date(2026, 12, 6), "cas"),
+            (15 * 60 + 20, date(2026, 12, 7), "continuous"),
+            (15 * 60 + 30, date(2026, 12, 7), "cas"),
+            (15 * 60 + 40, date(2026, 12, 7), "matching"),
+            (15 * 60 + 44, date(2026, 12, 7), "matching"),
+            (15 * 60 + 45, date(2026, 12, 7), "transition"),
+            (15 * 60 + 50, date(2026, 12, 7), "post-close"),
+        )
+        source = _repo_file("packages/core/ticks/src/session.rs").read_text(encoding="utf-8")
+        for minutes, on, phase in vectors:
+            assert nse_cash_phase(minutes, on=on) == phase
+            minute = minutes % 60
+            rust_call = f'nse_cash_phase_on(15 * 60 + {minute}, {on.year}, {on.month}, {on.day}), "{phase}"'
+            assert rust_call in source
+
+    def test_undated_rust_phase_is_frozen_and_has_no_production_import(self) -> None:
+        """The short Rust helper is the 3 Aug 2026 clock, and nothing else calls it."""
+        session = _repo_file("packages/core/ticks/src/session.rs").read_text(encoding="utf-8")
+        assert "FROZEN" in session
+        assert "3 Aug 2026" in session
+        bare = re.compile(r"\bnse_cash_phase\b(?!_on)")
+        root = _repo_root()
+        offenders: list[str] = []
+        for path in root.rglob("*.rs"):
+            if any(part in {"target", ".git"} for part in path.parts):
+                continue
+            if path.name == "session.rs":
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if bare.search(text):
+                offenders.append(str(path.relative_to(root)))
+        assert offenders == []
+
+    def test_nfo_close_moves_on_dec_7_and_bfo_does_not(self) -> None:
+        assert get_market_hours("NFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
+        assert get_market_hours("NFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
+        assert get_market_hours("BFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
+        assert get_market_hours("BFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
+
+    def test_expiring_index_contract_closes_at_1530(self) -> None:
+        calendar = [date(2026, 12, 10), date(2026, 12, 17)]
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="NIFTY10DEC2624000CE",
+            expiry_calendar=calendar,
+        ) == time(15, 30)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="NIFTY17DEC2624000CE",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+
+    def test_stock_derivatives_run_until_1545_including_expiry_day(self) -> None:
+        calendar = [date(2026, 12, 10)]
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 10),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 8),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=calendar,
+        ) == time(15, 45)
+
+    def test_unknown_index_expiry_fails_closed(self) -> None:
+        session = date(2026, 12, 10)
+        symbol = "NIFTY10DEC2624000CE"
+        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=None) == time(15, 30)
+        assert derivative_contract_close(
+            "NFO",
+            session,
+            symbol="NIFTY17DEC2624000CE",
+            expiry_calendar=None,
+        ) == time(15, 45)
+        assert derivative_contract_close("NFO", session, symbol=symbol, expiry_calendar=[]) is None
+        assert (
+            derivative_contract_close(
+                "NFO",
+                session,
+                symbol=symbol,
+                expiry_calendar=[date(2026, 12, 17)],
+            )
+            is None
+        )
+        assert (
+            derivative_contract_close(
+                "NFO",
+                session,
+                symbol="NIFTY",
+                expiry_calendar=[date(2026, 12, 10)],
+            )
+            is None
+        )
+        assert derivative_contract_close("NFO", session, symbol="NOT A CONTRACT") is None
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+            )
+            is None
+        )
+        assert (
+            derivative_contract_close(
+                "NFO",
+                date(2026, 12, 11),
+                symbol="NIFTY10DEC2624000CE",
+                risk_increasing=False,
+            )
+            == time(15, 45)
+        )
+
+    def test_every_listed_index_closes_at_1530_on_its_expiry_day(self) -> None:
+        from flinttrade_core.symbol_utils import INDEX_UNDERLYINGS, detect_instrument_type
+
+        session = date(2026, 12, 10)
+        earlier = date(2026, 12, 9)
+        for name in sorted(INDEX_UNDERLYINGS):
+            assert detect_instrument_type(name) == "index"
+            symbol = f"{name}10DEC26FUT"
+            assert derivative_contract_close("NFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("BFO", session, symbol=symbol) == time(15, 30), name
+            assert derivative_contract_close("NFO", earlier, symbol=symbol) == time(15, 45), name
+
+    def test_bfo_uses_the_same_expiry_close_as_nse(self) -> None:
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 10),
+            symbol="SENSEX10DEC2680000CE",
+            expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 30)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 10),
+            symbol="RELIANCE10DEC26FUT",
+            expiry_calendar=[date(2026, 12, 10)],
+        ) == time(15, 45)
+        assert derivative_contract_close(
+            "BFO",
+            date(2026, 12, 4),
+            symbol="SENSEX04DEC2680000CE",
+            expiry_calendar=[date(2026, 12, 4)],
+        ) == time(15, 40)
+
+    def test_muhurat_still_overrides(self) -> None:
+        open_t, close_t = get_market_hours("NFO", date(2026, 11, 8))
+        assert open_t == time(14, 20)
+        assert close_t == time(15, 40)
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 11, 8),
+            symbol="NIFTY08NOV2624000CE",
+            expiry_calendar=[date(2026, 11, 8)],
+        ) == time(15, 40)
+        assert nse_cash_phase(15 * 60 + 20, on=date(2026, 11, 8)) == "cas"
+
+    def test_index_expiry_before_the_revision_does_not_close_early(self) -> None:
+        assert derivative_contract_close(
+            "NFO",
+            date(2026, 12, 4),
+            symbol="NIFTY04DEC2624000CE",
+            expiry_calendar=[date(2026, 12, 4)],
+        ) == time(15, 40)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _repo_file(relative: str) -> Path:
+    return _repo_root() / relative

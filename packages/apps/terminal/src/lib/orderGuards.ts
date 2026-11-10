@@ -19,7 +19,7 @@
  * inline field error, status line).
  */
 
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 // ---------------------------------------------------------------------------
 // Exchange classification
@@ -66,7 +66,8 @@ export function isDerivativeExchange(exchange: string): boolean {
  * broker. The backend still 403s Explore JWT writes (`mode_blocked`); this
  * guard exists so Live-intent surfaces tell the operator before a round trip.
  */
-export function checkOrderEntryMode(mode: AppMode): string | null {
+export function checkOrderEntryMode(mode: SessionMode): string | null {
+  if (mode === "unavailable") return "Unavailable. No order was sent.";
   if (mode === "explore") return "Connect a broker to place orders";
   return null;
 }
@@ -233,17 +234,19 @@ export function checkOrderQuantityLimit(exchange: string, quantity: number): str
 /**
  * NSE index quantity freeze limits.
  *
- * NSE/FAOP/76693 (1 October 2026, effective 5 October 2026). These apply
- * when the broker does not send `freeze_qty`. An order above the limit is
- * refused whole. It is not split.
+ * NSE/FAOP/77189, effective 2 November 2026. These apply when the broker
+ * does not send `freeze_qty`. The circular does not publish lot sizes. An
+ * order above the limit is refused whole. It is not split.
+ * `sliceOrderQuantities` only proposes the slices a caller may send as
+ * separate orders.
  */
 export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
-  NIFTY: 3510,
-  BANKNIFTY: 1440,
-  FINNIFTY: 3240,
-  MIDCPNIFTY: 5760,
-  NIFTYNXT50: 1125,
-  NIFTYFPI: 53900,
+  NIFTY: 1800,
+  BANKNIFTY: 900,
+  FINNIFTY: 1800,
+  MIDCPNIFTY: 2800,
+  NIFTYNXT50: 600,
+  NIFTYFPI: 8500,
 };
 
 const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
@@ -266,19 +269,42 @@ export function orderSymbolLabel(symbol: string): string {
   return text || "this contract";
 }
 
-/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
-export function lotMultipleRefusal(lotSize: number): string {
-  return `Quantity must be a multiple of the lot size (${lotSize}).`;
+/** Visible quantity sentences. Match engine admission so wording is one edit. */
+export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
+export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
+export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
+
+/** Indian digit grouping, matching en-IN. */
+export function formatIndianQuantity(value: number): string {
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(value);
 }
 
-/** Same freeze sentence as order admission. The number is the broker freeze when one was sent. */
-export function freezeQuantityRefusal(symbol: string, freeze: number): string {
-  return `Max ${freeze} per order for ${orderSymbolLabel(symbol)}. Place smaller orders.`;
+/** Same lot sentence as order admission. Shown under Quantity in Practice and Live. */
+export function lotMultipleRefusal(lotSize: number): string {
+  return LOT_MULTIPLE_REFUSAL.replace("{lot}", String(lotSize));
+}
+
+/**
+ * Same over-max sentence as order admission.
+ *
+ * `placeable` is the lot-aligned cap, not the raw freeze.
+ */
+export function freezeQuantityRefusal(symbol: string, placeable: number): string {
+  return OVER_MAX_REFUSAL
+    .replace("{cap}", formatIndianQuantity(placeable))
+    .replace("{symbol}", orderSymbolLabel(symbol));
+}
+
+/** Muted helper under Quantity. Never names the raw freeze. */
+export function quantityCapLabel(lotSize: number, placeable: number): string {
+  return QUANTITY_CAP_LABEL
+    .replace("{lot}", String(lotSize))
+    .replace("{cap}", formatIndianQuantity(placeable));
 }
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE/FAOP/76693 index table.
+ * NSE/FAOP/77189 index table.
  */
 export function resolveFreezeQuantity(
   symbol: string,
@@ -293,17 +319,94 @@ export function resolveFreezeQuantity(
 }
 
 /**
+ * Largest lot multiple that does not exceed the freeze quantity.
+ *
+ * The exchange ceiling is not always a whole number of lots. NIFTY's freeze
+ * of 1,800 at a lot of 65 places at most 1,755. Returns null when no freeze
+ * or lot size applies, and 0 when the freeze is smaller than one lot.
+ */
+export function maxPlaceableQuantity(
+  symbol: string,
+  lotSize: number,
+  brokerFreezeQty?: number | null,
+): number | null {
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || !Number.isInteger(lotSize) || lotSize <= 0) return null;
+  return Math.floor(limit / lotSize) * lotSize;
+}
+
+/**
+ * Split a lot-aligned quantity into orders at the placeable freeze.
+ *
+ * Each full slice is the index freeze quantity rounded down to a whole
+ * number of lots. The last slice is the remainder. Admission does not call
+ * this: an oversized single order is still refused. Returns an empty list
+ * when the quantity cannot be sliced.
+ */
+export function sliceOrderQuantities(
+  symbol: string,
+  quantity: number,
+  lotSize: number,
+  brokerFreezeQty?: number | null,
+): number[] {
+  const cap = maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty);
+  if (cap == null || cap < 1 || !Number.isInteger(lotSize) || lotSize <= 0) return [];
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity % lotSize !== 0) return [];
+  const slices: number[] = [];
+  let remaining = quantity;
+  while (remaining > 0) {
+    const piece = Math.min(remaining, cap);
+    slices.push(piece);
+    remaining -= piece;
+  }
+  return slices;
+}
+
+/**
+ * Refuse an over-cap quantity before a lot-multiple breach.
+ *
+ * With a lot size, the cap is the freeze rounded down to a whole number of
+ * lots. A quantity that breaks both rules returns only the over-max
+ * sentence. Without a lot size, the raw freeze is the cap. Returns null for
+ * non-positive values so the minimum check owns that sentence.
+ */
+export function quantityAdmissionRefusal(
+  symbol: string,
+  quantity: number,
+  lotSize?: number | null,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  const lot = typeof lotSize === "number" && Number.isInteger(lotSize) && lotSize > 0 ? lotSize : null;
+  if (lot != null) {
+    const cap = maxPlaceableQuantity(symbol, lot, brokerFreezeQty);
+    if (cap != null && quantity > cap) return freezeQuantityRefusal(symbol, cap);
+    if (quantity % lot !== 0) return lotMultipleRefusal(lot);
+    return null;
+  }
+  const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
+  if (limit == null || quantity <= limit) return null;
+  return freezeQuantityRefusal(symbol, limit);
+}
+
+/**
  * Refuse a quantity above the freeze quantity.
  *
- * Returns null for non-positive values so the minimum check owns that
- * sentence. The visible message matches order admission.
+ * Pass `lotSize` so the sentence uses the lot-aligned cap. Returns null for
+ * non-positive values so the minimum check owns that sentence.
  */
 export function checkFreezeQuantity(
   symbol: string,
   quantity: number,
   brokerFreezeQty?: number | null,
+  lotSize?: number | null,
 ): string | null {
   if (!Number.isInteger(quantity) || quantity < 1) return null;
+  if (typeof lotSize === "number" && Number.isInteger(lotSize) && lotSize > 0) {
+    const cap = maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty);
+    if (cap == null || quantity <= cap) return null;
+    return freezeQuantityRefusal(symbol, cap);
+  }
   const limit = resolveFreezeQuantity(symbol, brokerFreezeQty);
   if (limit == null || quantity <= limit) return null;
   return freezeQuantityRefusal(symbol, limit);

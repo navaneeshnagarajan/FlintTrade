@@ -17,16 +17,16 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted workflow workspace',
-    copy: 'React, FlexLayout, Python services, Rust tick processing, and the native broker gateway in one inspectable workspace. Native broker HTTP is evidence-gated and frozen until Task 9D and Task 7C.2.',
+    copy: 'React, FlexLayout, Python services, Rust tick processing, and the native broker gateway in one inspectable workspace. A broker session cannot be started from the terminal today. Practice mode works without a broker.',
   },
   {
     icon: ShieldCheck,
     title: 'Safety before automation',
-    copy: 'Practice, Connected (read), and Live keep simulated fills, broker reads, and live orders apart. Example data is not a Mode.',
+    copy: 'Practice and Live are session modes. Connected (read) is a broker status. Example data is not a Mode.',
   },
   {
     icon: Bot,
-    title: 'Agent-ready contribution docs',
+    title: 'Documentation for contributors',
     copy: 'Generated docs indexes, llms files, and read-only MCP tools help contributors understand the repo before editing.',
   },
 ];
@@ -37,7 +37,7 @@ const docsCards = [
     label: 'Install',
     copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
   },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, open Practice, and learn the workspace. Native connections remain frozen.' },
+  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, open Practice, and learn the workspace. Broker sessions are not available in the terminal yet.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade terminal endpoints, authentication, and native broker contracts.' },
@@ -54,8 +54,8 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
-  'Six native adapters with evidence-gated availability',
-  'Practice, Connected (read), and Live',
+  'Supported native brokers',
+  'Example, Practice, and Live',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
 ] as const;
@@ -109,13 +109,14 @@ export default async function HomePage() {
             ))}
           </div>
           <p>
-            Open-source self-hosted trading software for local research, sample-data
-            testing, manual orders, automation, and AI-assisted workflows. It runs in
+            Open-source self-hosted trading software for
+            manual orders, automation, and AI-assisted workflows. Practice mode and
+            example data work without a broker. It runs in
             the browser from your own machine. A desktop shell comes after a checksummed
             Electron release.
           </p>
           <p className="hero-disclaimer">
-            v0.0.1 is not production ready. Use Practice and example data first; Live mode remains your own risk.
+            v0.0.1 is not production ready. It is pre-release software. Use Practice and example data first. Trading involves the risk of loss.
           </p>
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
@@ -179,7 +180,7 @@ export default async function HomePage() {
         <div className="metric-rail" aria-label="Project facts">
           <div>
             <strong>Gateway</strong>
-            <span>Broker connections use the native gateway. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
+            <span>Broker connections use the native gateway. A broker session cannot be started from the terminal today. Practice mode works without a broker. Adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
           </div>
           <div>
             <strong>18</strong>

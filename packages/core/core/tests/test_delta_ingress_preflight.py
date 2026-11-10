@@ -344,12 +344,17 @@ def test_ordinary_crypto_stays_frozen_by_real_l1_before_mint_or_consume(delta_st
 def _diagnostic_crypto_membership(stack, monkeypatch):
     """Explicit instance-only L1 diagnostic, not production/native eligibility."""
     original = stack.safety.l1_order.validate
-    def validate(order, ltp=None, at=None):
+    def validate(order, ltp=None, at=None, **kwargs):
         if order.symbol == "BTCUSD" and order.exchange is Exchange.CRYPTO:
-            result = original(order.model_copy(update={"exchange": Exchange.NSE}), ltp, at=at)
+            result = original(
+                order.model_copy(update={"exchange": Exchange.NSE}),
+                ltp,
+                at=at,
+                **kwargs,
+            )
             stack.l1_projections.append({"synthetic_only": True, "passed": result.passed, "reason": result.reason})
             return result
-        return original(order, ltp, at=at)
+        return original(order, ltp, at=at, **kwargs)
     monkeypatch.setattr(stack.safety.l1_order, "validate", validate)
 
 

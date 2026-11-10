@@ -1,12 +1,12 @@
 /**
- * FT-CORE-002 — feed-freshness honesty.
+ * feed-freshness honesty.
  *
  * Execution mode (Explore / Practice / Live) is independent of quote
  * provenance. Explore is always Example. Practice and Live may show Live,
  * Delayed, Stale, or Unknown. Quotes are never silently stale.
  */
 
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 export type FeedFreshnessState = "live" | "delayed" | "sample" | "stale" | "unknown";
 
@@ -25,7 +25,7 @@ export const FEED_FRESHNESS_LABEL: Record<FeedFreshnessState, string> = {
 export const FEED_STALE_AFTER_MS = 10_000;
 
 export interface FeedFreshnessInput {
-  mode: AppMode;
+  mode: SessionMode;
   wsConnected: boolean;
   fallbackActive: boolean;
   fallbackStale: boolean;
@@ -79,6 +79,17 @@ export function resolveFeedFreshness(input: FeedFreshnessInput): FeedFreshness {
       ageLabel,
       chipText: FEED_FRESHNESS_LABEL.sample,
       muted: false,
+    };
+  }
+
+  if (input.mode === "unavailable") {
+    return {
+      state: "unknown",
+      label: FEED_FRESHNESS_LABEL.unknown,
+      ageMs,
+      ageLabel,
+      chipText: FEED_FRESHNESS_LABEL.unknown,
+      muted: true,
     };
   }
 

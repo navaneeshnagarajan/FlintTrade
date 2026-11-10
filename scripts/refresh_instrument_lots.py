@@ -1,7 +1,7 @@
 """Download the public Dhan and Kotak Neo masters into the shipped excerpt.
 
-The file covers NIFTY, BANKNIFTY and SENSEX futures for the near month and
-the next month. When those URLs cannot be reached the excerpt is written
+The file covers NIFTY, BANKNIFTY and SENSEX futures for the near, next and
+far month. When those URLs cannot be reached the excerpt is written
 with an empty ``rows`` list, the source URLs and ``fetched_at``. Rows are
 never invented.
 

@@ -8,13 +8,7 @@
  *   1. Every generated docs-index entry (docs[].content and
  *      packages[].content) — what the site and docs MCP actually publish.
  *   2. The repo files readme.md, AGENTS.md, changelog.md, disclaimer.md,
- *      PLAN.md (the curated public roadmap since 2026-07-28; the detailed
- *      working plan moved to the maintainer's private workspace) and every
- *      docs/*.md and docs/*.mdx on disk.
- *
- * docs/superpowers/plans/ was removed from the repo on 2026-07-28 (archived
- * privately per the plan's own Step B); the directory is skipped in case a
- * stale checkout still carries it.
+ *      PLAN.md, ROADMAP.md, and every docs/*.md and docs/*.mdx on disk.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -56,13 +50,10 @@ const ALLOWED_LOCAL_MENTIONS = [
  *   archive operation itself, so it necessarily describes `.local/archive/`.
  * The 'Nitro' and 'reference-research' checks still apply to these files.
  */
-const LOCAL_EXEMPT_FILES = [
-  'AGENTS.md',
-  'docs/superpowers/specs/2026-05-20-public-repo-modernisation-design.md',
-] as const;
+const LOCAL_EXEMPT_FILES = [] as const;
 
-/** Directories under docs/ that are not scanned (removed from the repo). */
-const SKIPPED_DOC_DIRS = ['docs/superpowers/plans'] as const;
+/** Directories under docs/ that are not scanned. */
+const SKIPPED_DOC_DIRS = [] as const;
 
 function violationsIn(sourcePath: string, content: string): string[] {
   const violations: string[] = [];
@@ -109,7 +100,7 @@ describe('no private references on public surfaces', () => {
   });
 
   it('keeps repo-root markdown and docs/ free of private references', () => {
-    const rootFiles = ['readme.md', 'AGENTS.md', 'changelog.md', 'disclaimer.md', 'PLAN.md'];
+    const rootFiles = ['readme.md', 'AGENTS.md', 'changelog.md', 'disclaimer.md', 'PLAN.md', 'ROADMAP.md'];
     const files = [
       ...rootFiles.map((file) => resolve(REPO_ROOT, file)),
       ...listMarkdownFiles(resolve(REPO_ROOT, 'docs')),

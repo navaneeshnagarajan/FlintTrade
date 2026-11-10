@@ -3,7 +3,7 @@
  *
  * Token is held in memory and mirrored to tab-scoped sessionStorage so a
  * same-tab address-bar load, refresh, or bookmark of `/home` can restore the
- * session (FT-HOME-003). Never localStorage. Session expires at 08:00 IST
+ * session. Never localStorage. Session expires at 08:00 IST
  * daily (enforced via startExpiryTimer).
  */
 import { create } from "zustand";
@@ -12,6 +12,7 @@ import {
   clearPersistedAuthSession,
   writePersistedAuthSession,
 } from "@/lib/homeEntry";
+import { clearForeverPendingCancels } from "@/widgets/orders/foreverPendingCancel";
 import { purgeAuthenticatedQueryCache } from "@/lib/authenticatedQueryCache";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -172,6 +173,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
       };
     });
     if (installed) {
+      const nextPrincipal = normalisePrincipal(username);
+      if (previousPrincipal && nextPrincipal && previousPrincipal !== nextPrincipal) {
+        clearForeverPendingCancels();
+      }
       writePersistedAuthSession({ token, username, expiresAt });
       get().startExpiryTimer();
     }
@@ -215,6 +220,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (existing !== null) clearTimeout(existing);
       clearDemoSession();
       clearPersistedAuthSession();
+      clearForeverPendingCancels();
       set((state) => ({
         logoutResult: state.token || state.reauthToken ? { state: "local-only" as const } : state.logoutResult,
         status: "logged-out", token: null, reauthToken: null, username: null,
@@ -240,6 +246,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     setSetupRequired: () => {
       clearPersistedAuthSession();
+      clearForeverPendingCancels();
       set((state) => ({
         status: "setup-required",
         token: null,

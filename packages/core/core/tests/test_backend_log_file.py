@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 
@@ -104,6 +105,82 @@ def test_factory_twice_does_not_double_write(tmp_path: Path, monkeypatch: pytest
     assert second_log.read_text(encoding="utf-8").count(marker) == 1
     if first_log.exists():
         assert marker not in first_log.read_text(encoding="utf-8")
+
+
+def _seed_workspace(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    master_password = path / "master_password"
+    master_password.write_text("backend-log-file-test-password", encoding="utf-8")
+    master_password.chmod(0o600)
+
+
+def _open_log_handler(workspace: Path):
+    """Build an app and return the workspace log handler with its file open."""
+    from flinttrade_core.app import _LOG_FILE_SENTINEL, create_flask_app
+
+    create_flask_app()
+    logging.getLogger("flinttrade").info("open-workspace-log")
+    handler = next(
+        candidate
+        for candidate in logging.getLogger().handlers
+        if getattr(candidate, _LOG_FILE_SENTINEL, False)
+    )
+    assert handler.stream is not None
+    assert _log_file(workspace).exists()
+    return handler
+
+
+def test_next_factory_survives_a_log_descriptor_that_is_already_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A descriptor closed underneath the shared handler must not abort the next app."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _seed_workspace(first)
+    _seed_workspace(second)
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(first))
+    handler = _open_log_handler(first)
+    os.close(handler.stream.fileno())
+
+    from flinttrade_core.app import create_flask_app
+
+    # A second workspace avoids the first app's still-held store locks.
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(second))
+    create_flask_app()
+    marker = f"backend-log-file-reopened-{uuid.uuid4().hex}"
+    logging.getLogger("flinttrade").info(marker)
+    text = _log_file(second).read_text(encoding="utf-8")
+    assert text.count(marker) == 1
+
+
+def test_next_factory_does_not_close_a_reused_log_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kernel may reuse the closed number. Teardown must leave that owner open."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _seed_workspace(first)
+    _seed_workspace(second)
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(first))
+    handler = _open_log_handler(first)
+    descriptor = handler.stream.fileno()
+    os.close(descriptor)
+    held = os.open(os.devnull, os.O_RDONLY)
+    try:
+        if held != descriptor:
+            os.dup2(held, descriptor)
+            os.close(held)
+            held = -1
+        from flinttrade_core.app import create_flask_app
+
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(second))
+        create_flask_app()
+        os.fstat(descriptor)
+        assert os.read(descriptor, 1) == b""
+    finally:
+        if held >= 0 and held != descriptor:
+            os.close(held)
+        os.close(descriptor)
 
 
 def test_unwritable_log_dir_does_not_raise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

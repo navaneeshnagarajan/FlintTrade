@@ -1,5 +1,5 @@
 /**
- * Home entry policy (FT-HOME-003).
+ * Home entry policy.
  *
  * `/home` is the canonical Home / Welcome dashboard (sidebar, Alt+H, TopBar).
  * It is not a legacy alias and must not bounce a signed-in operator to the

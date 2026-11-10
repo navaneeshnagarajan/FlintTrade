@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FlintTrade bare-metal installer for Ubuntu/Debian
 #
-# Installs Python 3.12, Node.js, Nginx, builds the application,
+# Installs Python 3.14, Node.js, Nginx, builds the application,
 # and configures systemd services.
 # Idempotent — safe to run multiple times.
 #
@@ -57,15 +57,14 @@ log "Installing system dependencies..."
 
 apt-get update -qq
 
-# Python 3.12
-if ! command -v python3.12 >/dev/null 2>&1; then
-    log "Installing Python 3.12..."
-    apt-get install -y -qq software-properties-common
-    add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
-    apt-get update -qq
-    apt-get install -y -qq python3.12 python3.12-venv python3.12-dev
+# Python 3.14 is the system interpreter on Ubuntu 26.04.
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)'; then
+    log "Installing Python 3.14..."
+    apt-get install -y -qq python3 python3-venv python3-dev
 fi
-ok "Python 3.12: $(python3.12 --version)"
+python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)' \
+    || die "Python >= 3.14 is required (Ubuntu 26.04 LTS)."
+ok "Python: $(python3 --version)"
 
 # Node.js
 if ! command -v node >/dev/null 2>&1; then
@@ -116,7 +115,7 @@ log "Setting up Python virtual environment..."
 VENV_DIR="$INSTALL_DIR/.venv"
 
 if [ ! -d "$VENV_DIR" ]; then
-    python3.12 -m venv "$VENV_DIR"
+    python3 -m venv "$VENV_DIR"
 fi
 
 # Install dependencies — SC-07: hash-verified install only

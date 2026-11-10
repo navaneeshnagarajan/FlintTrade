@@ -252,34 +252,13 @@ def test_operator_data_inventory_tracks_current_storage_engines() -> None:
     assert "migrate legacy sandbox.duckdb" in rows["sandbox/state.sqlite"]["migration_rule"]
 
 
-def test_pre_restructure_baseline_tag_verifies_with_tracked_allowed_signers() -> None:
-    tag_exists = subprocess.run(
-        ["git", "tag", "--list", "pre-restructure-baseline"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.strip()
-    if not tag_exists:
-        pytest.skip("pre-restructure-baseline tag is not available in this clone")
-
-    result = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"gpg.ssh.allowedSignersFile={BASELINES / 'pre-restructure-baseline.allowed-signers'}",
-            "tag",
-            "-v",
-            "pre-restructure-baseline",
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-
-    assert 'Good "git" signature for navaneeshnagarajan@gmail.com' in result.stderr
-    assert "82c2b391c5dcd2677df9132891b25ee2d0dae981" in result.stdout
+def test_allowed_signers_baseline_publishes_no_personal_principal() -> None:
+    """The tracked allowed-signers file must not publish a personal email or key."""
+    text = (BASELINES / "pre-restructure-baseline.allowed-signers").read_text(encoding="utf-8")
+    lowered = text.lower()
+    assert "@" not in text
+    assert "ssh-" not in lowered
+    assert "gmail.com" not in lowered
 
 
 def test_visual_regression_baseline_inventory_matches_route_matrix() -> None:

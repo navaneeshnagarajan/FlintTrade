@@ -10,10 +10,14 @@ underlying may differ. The only rejected row is a real conflict: the same
 contract (same underlying, expiry month, and kind) carrying different sizes
 in the Dhan and Neo masters.
 
-There is no built-in NIFTY / BANKNIFTY / SENSEX table. A missing contract
-returns ``None``. A live session reads the disk cache written from the
-public masters; otherwise the shipped excerpt is used. Contracts whose
-expiry is before today (IST) are dropped.
+There is no built-in NIFTY / BANKNIFTY / SENSEX table on the order path.
+A missing contract returns ``None``. ``future_index_rows`` only builds
+dated rows for a caller that already knows the published multipliers;
+order lookup does not read it. A live session reads the disk cache written
+from the public masters; otherwise the shipped excerpt is used. Contracts whose
+expiry is before today (IST) are dropped. A month with no unexpired row
+stays unverified for orders. The index line may name the last listed size
+when every retained contract agrees, and stays ``—`` when they do not.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -129,6 +133,41 @@ def cache_path() -> Path:
 def today_ist() -> date:
     """Current calendar day in India Standard Time."""
     return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+
+# Published contract multipliers. A later exchange revision belongs in the
+# shipped excerpt, not in this generator.
+_FUTURE_INDEX_LOTS: tuple[tuple[str, str], ...] = (
+    ("NIFTY", "65"),
+    ("BANKNIFTY", "30"),
+    ("SENSEX", "20"),
+)
+
+
+def future_index_rows(as_of: date) -> tuple[dict[str, object], ...]:
+    """Near, next and far index futures measured from ``as_of``.
+
+    NIFTY, BANKNIFTY and SENSEX share each expiry, and every expiry is after
+    ``as_of``, so the near month stays one calendar month when the clock
+    moves. The multipliers are the published sizes (65, 30 and 20). These
+    rows are not the shipped excerpt, and they do not make an expired
+    security id placeable.
+    """
+    rows: list[dict[str, object]] = []
+    for month in range(3):
+        expiry = (as_of + timedelta(days=28 + month * 32)).isoformat()
+        for symbol, lot in _FUTURE_INDEX_LOTS:
+            rows.append(
+                {
+                    "SEM_SMST_SECURITY_ID": f"{symbol}-{month}",
+                    "SEM_CUSTOM_SYMBOL": symbol,
+                    "SEM_INSTRUMENT_NAME": "FUTIDX",
+                    "SEM_TRADING_SYMBOL": f"{symbol}-FUT",
+                    "SEM_EXPIRY_DATE": expiry,
+                    "SEM_LOT_UNITS": lot,
+                }
+            )
+    return tuple(rows)
 
 
 def _resolve_as_of(as_of: date | None) -> date:
@@ -428,6 +467,44 @@ def _underlying_contracts(underlying: str, contracts: tuple[ContractLot, ...]) -
     return chosen
 
 
+def _loaded_contracts(
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None,
+) -> tuple[ContractLot, ...]:
+    loaded = active_rows() if rows is None else rows
+    return contracts_from_rows(tuple(loaded))
+
+
+def last_listed_lot(
+    underlying: str,
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None = None,
+    *,
+    as_of: date | None = None,
+) -> tuple[int, str] | None:
+    """Last listed lot when the current month is absent and the old lots agree.
+
+    Returns ``(lot size, month label)`` for the latest expired contract when
+    every expired contract of this underlying carries that same size. A
+    revision inside the retained rows, or an underlying with no row, returns
+    ``None``. The size is not invented, and it does not make an expired
+    security id placeable: :func:`lot_size_for_contract` still refuses it.
+    """
+    day = _resolve_as_of(as_of)
+    expired = [
+        contract
+        for contract in _underlying_contracts(underlying, _loaded_contracts(rows))
+        if contract.expiry is not None and contract.expiry < day
+    ]
+    if not expired:
+        return None
+    sizes = {contract.lot_size for contract in expired}
+    if len(sizes) != 1:
+        return None
+    month = expired[-1].month_label
+    if month is None:
+        return None
+    return expired[-1].lot_size, month
+
+
 def lot_size_from_master(
     underlying: str,
     rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...] | None = None,
@@ -438,7 +515,8 @@ def lot_size_from_master(
 
     This is the front contract only. A later expiry can carry a different
     size; callers that price or validate one contract use
-    :func:`lot_size_for_contract`.
+    :func:`lot_size_for_contract`. An expired contract is not a current size:
+    :func:`last_listed_lot` is display-only.
     """
     contracts = _source(rows, as_of=as_of)
     dated = _underlying_contracts(underlying, contracts)
@@ -493,10 +571,12 @@ def index_lot_line(
 
     ``NIFTY 65 · BANKNIFTY 30 · SENSEX 20 (Sep/Oct expiry)``. Each name keeps
     its lot, so the line is never a bare list of numbers. An underlying with
-    no dated master row is ``—``. When the Scalper names a second month
-    because the size changes, that underlying keeps the Scalper's own
-    wording. The parenthetical lists the expiry months of the rows that
-    supplied a lot, in calendar order.
+    no dated master row is ``—``. A month the master does not list, when every
+    retained contract agrees, is ``65 (last listed Oct)``. Disagreeing old
+    sizes stay ``—``. When the Scalper names a second month because the size
+    changes, that underlying keeps the Scalper's own wording. The parenthetical
+    lists the expiry months of the unexpired rows that supplied a lot, in
+    calendar order.
     """
     parts: list[str] = []
     months: list[str] = []
@@ -504,7 +584,12 @@ def index_lot_line(
     for underlying in underlyings:
         label = scalper_lot_label(underlying, rows, as_of=as_of)
         if label is None:
-            parts.append(f"{underlying} {_MISSING_LOT}")
+            agreed = last_listed_lot(underlying, rows, as_of=as_of)
+            if agreed is None:
+                parts.append(f"{underlying} {_MISSING_LOT}")
+            else:
+                lot, month = agreed
+                parts.append(f"{underlying} {lot} (last listed {month})")
             continue
         segments = [segment.strip() for segment in label.split(",") if segment.strip()]
         lots: list[str] = []

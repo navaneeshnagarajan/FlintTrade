@@ -11,6 +11,19 @@
 #       package: "some-transitive-dep"
 #       affected_version: "1.2.3"
 #       reason: "vuln only triggers when feature X is enabled; flinttrade never enables it"
-#       accepted_by: "navaneesh"
+#       accepted_by: "maintainers"
 #       expires: "2026-08-23"
-allowlist: []
+allowlist:
+  - vuln_id: "PYSEC-2026-4320"
+    package: "certifi"
+    affected_version: "2025.11.12"
+    reason: >-
+      growwapi 1.5.0 is the newest PyPI release and requires certifi<2026.
+      certifi 2026.10.23 removes the compromised emSign roots in
+      PYSEC-2026-4320 (GHSA-6q48-6c7w-9gw2), but a uv override-dependencies
+      pin is ignored by `pip install --require-hashes -r requirements.lock`,
+      which then fails with ResolutionImpossible. 2025.11.12 is the newest
+      certifi growwapi accepts. Drop this waiver when growwapi allows
+      certifi>=2026.10.18.
+    accepted_by: "maintainers"
+    expires: "2027-02-02"

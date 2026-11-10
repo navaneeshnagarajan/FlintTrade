@@ -16,7 +16,7 @@
 
 import { useEffect, useRef } from "react";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { useModeStore, type AppMode, type SessionMode } from "@/stores/modeStore";
 import type { ConnectionStatus } from "@/types/stores";
 import {
   addNotification,
@@ -62,7 +62,7 @@ export function useNotificationFeed(): void {
   const mode = useModeStore((s) => s.mode);
 
   const prevStatus = useRef<ConnectionStatus | null>(null);
-  const prevMode = useRef<AppMode | null>(null);
+  const prevMode = useRef<SessionMode | null>(null);
 
   // 1. Connection transitions ------------------------------------------------
   useEffect(() => {
@@ -99,7 +99,7 @@ export function useNotificationFeed(): void {
   useEffect(() => {
     const prev = prevMode.current;
     prevMode.current = mode;
-    if (prev === null || prev === mode) return;
+    if (prev === null || prev === mode || mode === "unavailable") return;
 
     const meta = MODE_NOTIFICATIONS[mode];
     addNotification({ category: "system", title: meta.title, body: meta.body });

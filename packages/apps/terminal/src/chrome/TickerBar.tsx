@@ -36,7 +36,7 @@ export interface TickerBarProps {
 
 /**
  * TickerBar — the single dedicated scrolling ticker strip under TopBar
- * (FT-UX-002). Reads live prices from indicesSummaryAtom.
+ *. Reads live prices from indicesSummaryAtom.
  *
  * NSE/BSE indices and MCX commodities share one marquee. Pinned venue
  * badges are derived from the symbols on that tape (NSE, BSE, MCX, and NFO
