@@ -15,7 +15,7 @@ def test_log_ref_does_not_create_a_missing_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A cold salt cache must not mkdir the default workspace (FT-AUTO-004 CI)."""
+    """A cold salt cache must not mkdir the default workspace (CI)."""
     import flinttrade_core.workspace as ws
     import flinttrade_gateway.log_safety as log_safety
 

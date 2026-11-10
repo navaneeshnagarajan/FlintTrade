@@ -91,7 +91,7 @@ function holdRead(url: string) {
 
 function ReviewSurface() {
   const mode = useModeStore((state) => state.mode);
-  return <><ModeHonestyBar mode={mode} /><TradeJournalTool /></>;
+  return <>{mode === "unavailable" ? <p role="status">Unavailable</p> : <ModeHonestyBar mode={mode} />}<TradeJournalTool /></>;
 }
 
 async function openSession() {

@@ -21,6 +21,7 @@ import { LockScreen } from "@/components/LockScreen";
 import CommandPalette from "@/components/CommandPalette/CommandPalette";
 import DocsSearch, { type DocSearchResult } from "@/components/DocsSearch/DocsSearch";
 import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
+import { isAppMode } from "@/lib/modeClaim";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
@@ -88,7 +89,7 @@ export default function AppLayout() {
     && (!hideTickerByDefault || tickerForcedOnNarrow);
   const authStatus = useAuthStore((s) => s.status);
   const authenticated = authStatus === "logged-in";
-  const brokerConfigEnabled = authenticated && mode !== "explore";
+  const brokerConfigEnabled = authenticated && (mode === "practice" || mode === "live");
   const nativeBrokerConnected = useDirectBrokerConnected();
   const liveMarketDataEnabled = brokerConfigEnabled && nativeBrokerConnected;
 
@@ -262,7 +263,7 @@ export default function AppLayout() {
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
-        {!isPublicDemoBuild() && <ModeHonestyBar mode={mode} />}
+        {!isPublicDemoBuild() && isAppMode(mode) && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}

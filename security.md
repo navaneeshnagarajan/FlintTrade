@@ -4,17 +4,14 @@ Thank you for helping keep FlintTrade and its users safe.
 
 ## Supported versions
 
-FlintTrade is pre-1.0 (`v0.0.1` on `main`). Only the current `0.0.x` line
-receives patches. The earlier `v0.1.0`…`v0.6.0-beta.13` tags were deleted in
-the 2026-07-23 clean-slate reset and are not supported.
+FlintTrade is pre-release (`v0.0.1`). Only the latest release receives security fixes.
 
 Runtime support is the `flint.toml` `[requirements]` table: Python `>=3.14`
-(target 3.14), Node `>=22.22.2` (target 24), and Ubuntu 26.04 LTS (target 26.04).
+(target 3.14), Node `>=22.23.4` (target 24), and Ubuntu 26.04 LTS (target 26.04).
 
 | Version | Supported |
 |---------|-----------|
-| 0.0.x (latest on `main`) | Yes |
-| Retired `0.1.x`…`0.6.x` tags | No |
+| 0.0.x (latest) | Yes |
 
 When 1.0 ships, this policy will expand to cover the previous minor for a defined window.
 
@@ -31,7 +28,7 @@ Please report issues privately. Do **not** open a public GitHub issue with detai
 - A description of the issue and the affected component or endpoint.
 - Steps to reproduce, ideally with a minimal test case.
 - The version of FlintTrade and the operating system you tested on.
-- Whether the issue is reachable without authentication, or requires a logged-in session, or requires a specific mode (Explore / Practice / Live).
+- Whether the issue is reachable without authentication, or requires a logged-in session, or requires a specific Mode (Practice or Live). Connected (read) is a broker status, not a Mode. Example data uses the JWT claim `explore` and is not a menu Mode.
 - Any logs or screenshots — please redact broker credentials, account identifiers, and order identifiers before sharing.
 
 ## Response timeline
@@ -49,7 +46,7 @@ If a report stalls or you have not heard back within these windows, please open 
 
 Reports about the FlintTrade codebase itself are in scope. This includes everything under `packages/`, `scripts/`, the GitHub workflows under `.github/`, the build configuration (Docker, Makefile, `pyproject.toml`, `flint.toml`), and the documentation under `docs/` and the repo root.
 
-The mode system (Explore / Practice / Live), the authentication layer (JWT plus API key), the order-safety proxy, the strategy sandbox executor, and any code that touches broker credentials or trade-execution paths are all in scope.
+The mode system (Practice and Live; Connected (read) is a broker status, not a Mode; example data uses the JWT claim `explore`), the authentication layer (JWT plus API key), the order-safety proxy, the strategy sandbox executor, and any code that touches broker credentials or trade-execution paths are all in scope.
 
 ## Out of scope
 

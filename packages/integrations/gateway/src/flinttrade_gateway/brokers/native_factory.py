@@ -29,7 +29,7 @@ from typing import Any, Callable
 
 from flinttrade_gateway.adapter import BROKER_CATALOG
 from flinttrade_gateway.capabilities import Capabilities
-from flinttrade_gateway.monday_read_smoke import monday_read_connectable
+from flinttrade_gateway.connected_read_smoke import connected_read_connectable
 
 from ._base import BrokerAdapter
 from .delta import DELTA_CAPABILITIES, DeltaAdapter
@@ -127,7 +127,7 @@ def build_native_adapters(
             continue  # not a native broker (bridge / unknown)
         info = BROKER_CATALOG.get(broker_id)
         catalog_connectable = bool(info.connectable) if info is not None else False
-        if not monday_read_connectable(broker_id, catalog_connectable):
+        if not connected_read_connectable(broker_id, catalog_connectable):
             if on_skip is not None:
                 on_skip(broker_id, "coming-soon-activation-blocked")
             continue

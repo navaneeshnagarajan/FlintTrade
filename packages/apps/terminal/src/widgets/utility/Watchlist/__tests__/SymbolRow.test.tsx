@@ -53,7 +53,7 @@ describe("SymbolRow quick trade (W2)", () => {
   });
 });
 
-describe("SymbolRow LTP / % change columns (FT-TRADE-008)", () => {
+describe("SymbolRow LTP / % change columns", () => {
   it("paints LTP and % change from the ticker tick atom when REST has no quote", () => {
     const store = createStore();
     store.set(tickAtomFamily("NSE:RELIANCE"), {

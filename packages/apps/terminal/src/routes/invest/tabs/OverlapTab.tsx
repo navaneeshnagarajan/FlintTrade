@@ -82,7 +82,7 @@ export type OverlapPresentation =
  * fewer than two holdings stays on the empty state.
  */
 export function resolveOverlapPresentation(input: {
-  mode: AppMode;
+  mode: AppMode | "unavailable";
   isPublicDemo: boolean;
   isSampleData: boolean;
   hasAccountSnapshot: boolean;
@@ -90,6 +90,7 @@ export function resolveOverlapPresentation(input: {
 }): OverlapPresentation {
   const { mode, isPublicDemo, isSampleData, hasAccountSnapshot, holdings } = input;
 
+  if (mode === "unavailable") return { kind: "empty" };
   if (mode === "practice") {
     if (isSampleData || holdings.length < 2) return { kind: "empty" };
     return { kind: "book", holdings };

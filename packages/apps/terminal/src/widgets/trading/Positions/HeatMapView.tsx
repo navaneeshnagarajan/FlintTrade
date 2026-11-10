@@ -9,7 +9,7 @@
  *
  * Group by Exchange / Sector draws a labelled band per group (name chip plus
  * optional exposure) so grouping is visible at a glance — not a silent
- * re-sort of the same P&L-coloured tiles (FT-TRADE-005). Flat stays leaf-only.
+ * re-sort of the same P&L-coloured tiles. Flat stays leaf-only.
  *
  * Bands are stacked at full width. Each one is at least tall enough for its
  * header and one row of tiles, so a small group such as NFO always has a band.

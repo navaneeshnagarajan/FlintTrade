@@ -26,8 +26,8 @@ def _valid_brokers() -> dict:
     return {
         "registered": ["upstox:default", "dhan:personal", "upstox:personal"],
         "account_acls": {
-            "dhan": {"personal": ["nava@flinttrade.local"]},
-            "upstox": {"personal": ["nava@flinttrade.local"], "default": ["nava@flinttrade.local"]},
+            "dhan": {"personal": ["alice@example.invalid"]},
+            "upstox": {"personal": ["alice@example.invalid"], "default": ["alice@example.invalid"]},
         },
         "execution": {
             "default": "upstox:default",
@@ -61,7 +61,7 @@ def test_from_workspace_parses_canonical_shape() -> None:
     assert cfg.data.global_indices == "upstox:personal"
     assert cfg.failover.enabled is True
     assert cfg.failover.order == ("dhan:personal", "upstox:personal", "upstox:default")
-    assert cfg.account_acls["dhan"]["personal"] == ["nava@flinttrade.local"]
+    assert cfg.account_acls["dhan"]["personal"] == ["alice@example.invalid"]
 
 
 def test_quote_falls_back_to_option_chains_when_absent() -> None:

@@ -1,6 +1,6 @@
 # FlintTrade — desktop
 
-> Electron 44 shell with verified local-source bootstrap and guardian lifecycle
+> Electron 45 shell with verified local-source bootstrap and guardian lifecycle
 > Serves: selected loopback origin only | Branch: follow the current task context
 
 ## Quick commands

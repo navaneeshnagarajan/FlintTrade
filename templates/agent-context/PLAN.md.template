@@ -1,32 +1,3 @@
-# FlintTrade — Development Roadmap (TEMPLATE ONLY)
+# FlintTrade roadmap
 
-> **This file is a neutral scaffold / template only.**
-> Fill placeholders from live evidence: `packages/apps/terminal/src/layout/__tests__/widgetFactory.test.ts`, `PLAN.md`, `AGENTS.md`, test runs, and package catalogues.
-> Never treat dated snapshots (e.g. 2026-05-19 counts, Phase 1–10 checklists, 82 widgets, Claude-session-only instructions) as current product truth.
-
-## How to use this template
-- Replace `{{PLACEHOLDERS}}` with values from the authoritative live sources above.
-- Keep the public `PLAN.md` and `AGENTS.md` as the curated truth; this is only for agent context scaffolding.
-- Do not paste May-2026 sprint checklists or obsolete counts into the live template surface.
-
-## Current State (fill from live tests/PLAN.md)
-- **Version:** {{VERSION}} (e.g. v0.0.1)
-- **Widgets:** {{WIDGET_COUNT}} (verify the widgetCatalog length assertion in widgetFactory.test.ts)
-- **Brokers:** {{BROKER_COUNT}} (verify via BROKER_CATALOG / test_adapter.py)
-- **Packages:** {{PACKAGE_COUNT}} (verify via test_project_structure.py)
-- **Tests:** {{TEST_COUNTS}} (Python / terminal / etc.)
-- **Modes:** Explore / Practice / Live (enforced server-side)
-- **Desktop:** Electron {{ELECTRON_VERSION}} source-bootstrap shell
-- **Installed vs public demo:** keep the boundary explicit; public surfaces must not over-claim installer publication
-- **Home vs Trade:** Home = pulse/overview; Trade = execution
-- **Provenance:** honest labels on sample/fallback data; Explore/Practice/Live vocabulary in user-facing copy (sandbox remains internal engine name)
-
-## Phase tracker (fill from live)
-| Phase | Scope | Status |
-|-------|-------|--------|
-| ... | ... | {{STATUS}} |
-
-## Historical note
-The previous long May-2026 beta-sprint scaffold (Phase 1–10 checklists, 82-widget counts, dated test totals, Claude-only session instructions) is **not** included in this template. Recover it from **git history** or archived specs under `.local/specs/` if needed — do not treat those snapshots as current product truth.
-
-**End of template scaffold.** Always verify against git-tracked tests and live catalogues before editing public docs.
+The public roadmap for FlintTrade `v0.0.1` is [ROADMAP.md](../../ROADMAP.md).

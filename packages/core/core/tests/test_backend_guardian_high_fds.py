@@ -12,9 +12,33 @@ from pathlib import Path
 
 import pytest
 
+# select() rejects descriptor numbers at or above FD_SETSIZE. The live handoff
+# assertions require every product descriptor to stay above that ceiling.
+_SELECT_FD_CEILING = 1024
+
+
+def _descriptor_above_select_ceiling(descriptor: int) -> int:
+    """Return a descriptor at or above the select ceiling.
+
+    Filling free slots cannot reserve numbers another owner already holds.
+    When that owner closes one, the kernel reuses it for the next pipe or
+    open. Relocating the new descriptor keeps the high-fd precondition even
+    when that reuse happens before the handoff is created.
+    """
+    import fcntl
+
+    if descriptor >= _SELECT_FD_CEILING:
+        return descriptor
+    status = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+    relocated = fcntl.fcntl(descriptor, fcntl.F_DUPFD, _SELECT_FD_CEILING)
+    if status:
+        fcntl.fcntl(relocated, fcntl.F_SETFD, status)
+    os.close(descriptor)
+    return relocated
+
 
 @pytest.fixture
-def high_descriptor_owner():
+def high_descriptor_owner(monkeypatch):
     """Fill only unused FD slots with duplicates of our unrelated pipe."""
     import fcntl
     import resource
@@ -34,6 +58,24 @@ def high_descriptor_owner():
             descriptors.append(descriptor)
             if descriptor >= floor:
                 break
+        # A later close can free a number below the select ceiling. The next
+        # pipe or open would reuse it. Move those new descriptors up, the
+        # same way the live handoff test does, and keep the >= 1024 check.
+        real_open = os.open
+        real_pipe = os.pipe
+
+        def open_above(*args, **kwargs):
+            return _descriptor_above_select_ceiling(real_open(*args, **kwargs))
+
+        def pipe_above():
+            created_read, created_write = real_pipe()
+            return (
+                _descriptor_above_select_ceiling(created_read),
+                _descriptor_above_select_ceiling(created_write),
+            )
+
+        monkeypatch.setattr(os, "open", open_above)
+        monkeypatch.setattr(os, "pipe", pipe_above)
         identity = os.fstat(read_fd).st_dev, os.fstat(read_fd).st_ino
         yield descriptors
         # Guardian cleanup must not close another resource owner's descriptors.
@@ -142,6 +184,21 @@ def test_live_guardian_handoff_preserves_unrelated_high_descriptor_owner(
     """A genuine high pipe proves live admission, one-shot claim and EOF revoke."""
     from flinttrade_core import backend_instance as module
 
+    real_open = os.open
+    real_pipe = os.pipe
+
+    def open_above(*args, **kwargs):
+        return _descriptor_above_select_ceiling(real_open(*args, **kwargs))
+
+    def pipe_above():
+        read_fd, write_fd = real_pipe()
+        return (
+            _descriptor_above_select_ceiling(read_fd),
+            _descriptor_above_select_ceiling(write_fd),
+        )
+
+    monkeypatch.setattr(os, "open", open_above)
+    monkeypatch.setattr(os, "pipe", pipe_above)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     lease = module.acquire_backend_instance_lease()
     local_proof = lease.proof

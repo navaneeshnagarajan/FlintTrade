@@ -1,7 +1,7 @@
 /**
  * HoldingsTab.test.tsx — Render tests for the holdings table tab.
  *
- * FT-TRADE-010: the table must render the same rows the header badge
+ * the table must render the same rows the header badge
  * counts. A connected empty book stays empty — no sample fallback.
  */
 

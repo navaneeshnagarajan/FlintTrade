@@ -235,6 +235,8 @@ describe("authStore", () => {
       useAuthStore
         .getState()
         .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      sessionStorage.setItem("flinttrade:forever-pending-cancels:user:live%3Adhan%3AA", "[]");
+      sessionStorage.setItem("flinttrade:forever-pending-cancels:other:practice%3Aupstox%3AB", "[]");
 
       useAuthStore.getState().setLoggedOut();
 
@@ -245,6 +247,16 @@ describe("authStore", () => {
       expect(state.expiresAt).toBeNull();
       expect(state._expiryTimerId).toBeNull();
       expect(sessionStorage.getItem("flinttrade:auth-session")).toBeNull();
+      expect(Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"))).toEqual([]);
+    });
+
+    it("clears pending Forever cancels when the signed-in identity changes", () => {
+      useAuthStore.getState().setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      sessionStorage.setItem("flinttrade:forever-pending-cancels:user:live%3Adhan%3AA", "[{\"orderId\":\"TRIGGER-A\"}]");
+      useAuthStore.getState().setLoggedIn("tok-2", "user", "2026-04-09T02:30:00Z");
+      expect(sessionStorage.getItem("flinttrade:forever-pending-cancels:user:live%3Adhan%3AA")).toContain("TRIGGER-A");
+      useAuthStore.getState().setLoggedIn("tok-3", "other", "2026-04-09T02:30:00Z");
+      expect(Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"))).toEqual([]);
     });
 
     it("does not reset mode on logout (mode is managed separately)", () => {

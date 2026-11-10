@@ -358,6 +358,7 @@ class ExecutionSessions:
         except Exception:
             return {"state": "unavailable", "runs": None}
         result = []
+        resumed: list[Any] = []
         with self.lock:
             self._require()
             for scope in scopes:
@@ -388,6 +389,7 @@ class ExecutionSessions:
                         store.close()
                         raise
                     self.owners[scope.run_id] = owner
+                    resumed.append(owner)
                     with self.app.app_context():
                         active = owner.resume_protection(protection)
                         models = self.app.config.get("MODEL_RUN_SERVICES")
@@ -410,6 +412,12 @@ class ExecutionSessions:
                 finally:
                     self._reconciling_thread = None
                 result.append({"run_id": scope.run_id, "state": state})
+        # resume_protection persists while this registry lock is held. Signal
+        # only after that lock is released, including when recovery fails.
+        for owner in resumed:
+            if getattr(owner, "_progress_notify_pending", False):
+                owner._progress_notify_pending = False
+                owner._notify_progress()
         return {"state": "observed", "runs": result}
 
     def close_positions(self, scope: ExecutionSession, *, expected_generation: int) -> dict[str, Any]:
