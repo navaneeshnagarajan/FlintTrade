@@ -43,6 +43,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Workspace log teardown.** Building the backend again in the same process closes the previous workspace log only while that file is still the one the handler opened. A descriptor that is already gone does not abort startup. A descriptor number the kernel has given to another file stays open.
+
 - **Uncertain order outcomes.** A submit whose response was dropped, timed out, or came back without a definitive broker or engine result says "Order status unknown. Check Orders before trying again." The order pad, positions, and other submit surfaces do not show that as a rejection and do not offer a retry. A cancel that was only acknowledged says "Cancellation requested". "Order cancelled" appears only after the order status is confirmed cancelled. Practice and Live use the same sentences. The order API, the practice agent, and the MCP order-intent result add `order_outcome` and `reason` beside the existing status. A retry still cannot create a second order while the dispatch ledger holds an unknown write.
 
 - **Uncertain Forever orders.** A dropped or timed-out GTT place or modify says "Order status unknown. Check Forever Orders before trying again." It does not offer a retry and it is not sent again on its own. A lost GTT cancel says "Cancellation requested" and is remembered, so a later trigger read can settle it. "Order cancelled" appears only after that read says the trigger is cancelled. A later triggered or filled row does not keep the pending-cancel line and does not say the order was cancelled. The forever-order cancel and modify results carry the same `order_outcome` and `reason` values as the other order surfaces.

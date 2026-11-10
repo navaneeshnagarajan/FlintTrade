@@ -69,25 +69,40 @@ def offline_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
     port = reserved.getsockname()[1]
     handed_off = False
 
-    def bind(self: socket.socket, address: object) -> object:
-        nonlocal handed_off
-        if (
-            not handed_off
-            and isinstance(address, tuple)
+    def _is_reserved_port(address: object) -> bool:
+        return (
+            isinstance(address, tuple)
             and len(address) >= 2
             and str(address[0]) in {"127.0.0.1", "0.0.0.0", ""}
             and int(address[1]) == port
-        ):
-            target = self.fileno()
-            os.dup2(reserved.fileno(), target)
-            os.set_blocking(target, False)
-            reserved.close()
-            handed_off = True
-            return None
+        )
+
+    def bind(self: socket.socket, address: object) -> object:
+        # The listener already holds the reserved socket (or a duplicate of
+        # it). Binding again would fail. Do not dup2 onto this descriptor:
+        # that closes whatever now uses the number, including a log file
+        # that inherited it after the original socket was released.
+        if _is_reserved_port(address):
+            try:
+                existing = self.getsockname()
+            except OSError:
+                existing = None
+            if isinstance(existing, tuple) and len(existing) >= 2 and int(existing[1]) == port:
+                return None
         return socket_bind(self, address)
+
+    def create_socket(self: Any, family: int = socket.AF_INET, sock_type: int = socket.SOCK_STREAM) -> None:
+        nonlocal handed_off
+        self.family_and_type = family, sock_type
+        reserved.setblocking(False)
+        self.set_socket(reserved)
+        handed_off = True
+
+    from waitress.server import TcpWSGIServer
 
     socket_bind = socket.socket.bind
     monkeypatch.setattr(socket.socket, "bind", bind)
+    monkeypatch.setattr(TcpWSGIServer, "create_socket", create_socket)
     monkeypatch.setenv("FLINTTRADE_BACKEND_PORT", str(port))
     monkeypatch.setenv("FLINTTRADE_BACKEND_HOST", "127.0.0.1")
     ledger: dict[str, Any] = {
