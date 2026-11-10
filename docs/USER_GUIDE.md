@@ -242,25 +242,28 @@ Quick Unlock restores the existing session and keeps its Mode. Live is
 entered only through `POST /v1/auth/live`. `POST /v1/auth/mode` accepts
 only a switch to Practice.
 
-The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
-**Connected (read)**, and **Live**. Practice and Live are the session Modes.
-**Connected (read)** is a broker status on a Practice session, not a separate
-Mode. **Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
+The Mode chip in the TopBar shows the session claim: **Practice**, **Live**,
+**Example**, or **Unavailable**. The menu lists **Practice** and **Live**.
+**Unavailable** means the session mode could not be confirmed. The Scalper
+and the line above the widgets say so, and ask the operator to sign in again
+or reload. That copy never says Example or Sample. **Connected (read)** is a
+broker status on the Broker row, not a menu item and not a session claim.
+**Example** is sample data, not a Mode. The public web demo (`/demo-app`) is
 **Demo (example data)**. The public site paths `/demo` and `/explore` permanently
 redirect (HTTP 308) to `/demo-app/welcome`.
 
 | Label | What it means |
 |---|---|
 | **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
-| **Connected (read)** | Read-only posture on a Practice session after a broker is connected. Until then the menu item stays disabled and shows `Connect a broker first`. It is not a separate session claim. |
+| **Connected (read)** | Broker status for a native Dhan or Kotak Neo account after a read check succeeds. It is not a session claim and it is not in the Mode menu. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
-| **Example** | Sample data. The chip reads **Example**. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
+| **Example** | Sample data. The chip reads **Example** only when the session claim is example or demo. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
+| **Unavailable** | The session mode could not be confirmed. The chip reads **Unavailable**. Orders stay blocked. Sign in again or reload. |
 
 **Switching Mode.** Open the Mode chip. Its accessible name is the current
 label plus `mode. Open the mode menu.` Choose **Practice** for simulated
 fills. A sample-data session, signed in as **Guest**, is sent to Setup instead of
-switching in place. Choose **Connected (read)** only when a broker is
-connected. Choose **Live** only when the item is enabled. Opening the menu
+switching in place. Choose **Live** only when the item is enabled. Opening the menu
 does not open the Live dialog. An eligible Live choice opens **Switch to Live
 Trading?** with the line `You are about to switch to Live mode. All orders will be executed with real money through your broker.` Enter
 the 6-digit PIN (`Enter your PIN to confirm`) and choose **Switch to Live**.

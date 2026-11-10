@@ -19,7 +19,7 @@
  * inline field error, status line).
  */
 
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 // ---------------------------------------------------------------------------
 // Exchange classification
@@ -66,7 +66,8 @@ export function isDerivativeExchange(exchange: string): boolean {
  * broker. The backend still 403s Explore JWT writes (`mode_blocked`); this
  * guard exists so Live-intent surfaces tell the operator before a round trip.
  */
-export function checkOrderEntryMode(mode: AppMode): string | null {
+export function checkOrderEntryMode(mode: SessionMode): string | null {
+  if (mode === "unavailable") return "Unavailable. No order was sent.";
   if (mode === "explore") return "Connect a broker to place orders";
   return null;
 }

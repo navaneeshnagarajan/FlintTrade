@@ -7,12 +7,13 @@
  * `market.ts` and must not be reused here.
  */
 
-import type { AppMode } from "@/stores/modeStore";
+import type { AppMode, SessionMode } from "@/lib/modeClaim";
 
 export type OrderSide = "BUY" | "SELL";
 
 /** Order Pad submit label. Explore never says Practice or Live. */
-export function orderPadCtaLabel(mode: AppMode, action: OrderSide): string {
+export function orderPadCtaLabel(mode: SessionMode, action: OrderSide): string {
+  if (mode === "unavailable") return "Unavailable";
   if (mode === "explore") {
     return action === "BUY" ? "Example Buy" : "Example Sell";
   }
@@ -68,7 +69,8 @@ export function orderSuccessNotificationBody(mode: AppMode, orderId?: string): s
 export const SESSION_OPEN_LABEL = "Session open";
 
 /** Options premium hint. Explore never says Live. */
-export function optionPremiumHint(mode: AppMode, ltp: number): string {
+export function optionPremiumHint(mode: SessionMode, ltp: number): string {
+  if (mode === "unavailable") return "Unavailable";
   const amount = ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 });
   if (mode === "explore") {
     return ltp > 0

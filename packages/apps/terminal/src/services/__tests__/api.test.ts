@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { useModeStore, type AppMode, type SessionMode } from "@/stores/modeStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import type { ConnectionStatus } from "@/types/stores";
@@ -20,7 +20,7 @@ const mockConnectionState = {
   set status(status: ConnectionStatus) { useConnectionStore.getState().setStatus(status); },
 };
 const mockModeState = {
-  get mode() { return useModeStore.getState().mode; },
+  get mode(): SessionMode { return useModeStore.getState().mode; },
   set mode(mode: AppMode) { useModeStore.getState().setMode(mode); },
 };
 const mockBrokerState = {
@@ -3021,6 +3021,52 @@ describe("Native FlintTrade API client (api.ts)", () => {
   });
 
   // ---- postOrder — mode header ----
+
+  it("places with the Practice claim when the mode cache says live", async () => {
+    const payload = btoa(JSON.stringify({ mode: "practice", typ: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    const token = `header.${payload}.sig`;
+    sessionStorage.setItem(
+      "flinttrade:auth-session",
+      JSON.stringify({ token, username: "operator", expiresAt: "" }),
+    );
+    useModeStore.persist.getOptions().storage?.setItem("flinttrade:mode", {
+      state: { mode: "live" },
+      version: 2,
+    });
+    await useModeStore.persist.rehydrate();
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { orderId: "ORD-1" } }));
+
+    await placeOrder({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      price_type: "MARKET",
+      product: "MIS",
+      orderType: "MARKET",
+    } as unknown as Parameters<typeof placeOrder>[0]);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-FlintTrade-Mode"]).toBe("practice");
+  });
+
+  it("does not post an order when the session mode is unavailable", async () => {
+    useModeStore.setState({ mode: "unavailable" });
+
+    await expect(placeOrder({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      price_type: "MARKET",
+      product: "MIS",
+      orderType: "MARKET",
+    } as unknown as Parameters<typeof placeOrder>[0])).rejects.toThrow(/Unavailable/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 
   it("postOrder attaches X-FlintTrade-Mode header from modeStore", async () => {
     mockBrokerState.activeAccountId = "native:upstox:U1";

@@ -22,7 +22,7 @@ const featureCards = [
   {
     icon: ShieldCheck,
     title: 'Safety before automation',
-    copy: 'Practice, Connected (read), and Live keep simulated fills, broker reads, and live orders apart. Example data is not a Mode.',
+    copy: 'Practice and Live are session modes. Connected (read) is a broker status. Example data is not a Mode.',
   },
   {
     icon: Bot,
@@ -55,7 +55,7 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
   'Six native adapters with evidence-gated availability',
-  'Practice, Connected (read), and Live',
+  'Example, Practice, and Live',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
 ] as const;
