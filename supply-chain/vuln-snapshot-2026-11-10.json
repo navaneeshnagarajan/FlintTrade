@@ -22,7 +22,7 @@
     },
     {
       "name": "anyio",
-      "version": "4.15.1",
+      "version": "4.16.0",
       "vulns": []
     },
     {
@@ -158,7 +158,7 @@
     },
     {
       "name": "dhanhq",
-      "version": "2.3.0rc1",
+      "version": "2.3.0",
       "vulns": []
     },
     {
@@ -168,7 +168,7 @@
     },
     {
       "name": "filelock",
-      "version": "4.2.1",
+      "version": "4.2.6",
       "vulns": []
     },
     {
@@ -263,7 +263,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.10",
+      "version": "0.37.0",
       "vulns": []
     },
     {
@@ -558,7 +558,7 @@
     },
     {
       "name": "websockets",
-      "version": "17.2",
+      "version": "17.4",
       "vulns": []
     },
     {
@@ -596,9 +596,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-11-04T03:46:08.736328Z",
-    "audited_at": "2026-11-04T03:46:08.736328Z",
-    "requirements_lock_sha256": "3b643f15cd7c9ccc0d9282cd15180df3b05ee41aaf1309108de74e4c3c51bd73",
+    "generated_at": "2026-11-10T19:22:31.695113Z",
+    "audited_at": "2026-11-10T19:22:31.695113Z",
+    "requirements_lock_sha256": "2e7c4e73d6e563dd7a14efc806d7b2da62af23bf587234670b9ddea64534303e",
     "pip_audit_exit_code": 1
   }
 }

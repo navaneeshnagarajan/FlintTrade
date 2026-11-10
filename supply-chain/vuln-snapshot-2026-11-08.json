@@ -7,7 +7,7 @@
     },
     {
       "name": "aiohttp",
-      "version": "3.14.4",
+      "version": "3.14.5",
       "vulns": []
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "name": "brotli",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "vulns": []
     },
     {
@@ -78,7 +78,28 @@
     {
       "name": "certifi",
       "version": "2025.11.12",
-      "vulns": []
+      "vulns": [
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        },
+        {
+          "id": "PYSEC-2026-4320",
+          "fix_versions": [
+            "2026.10.18"
+          ],
+          "aliases": [
+            "GHSA-6q48-6c7w-9gw2"
+          ],
+          "description": "certifi bundles emSign root CAs with compromised intermediate CA keys"
+        }
+      ]
     },
     {
       "name": "cffi",
@@ -137,7 +158,7 @@
     },
     {
       "name": "dhanhq",
-      "version": "2.2.0",
+      "version": "2.3.0rc1",
       "vulns": []
     },
     {
@@ -147,7 +168,7 @@
     },
     {
       "name": "filelock",
-      "version": "4.0.12",
+      "version": "4.2.1",
       "vulns": []
     },
     {
@@ -242,7 +263,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.9",
+      "version": "0.35.10",
       "vulns": []
     },
     {
@@ -277,7 +298,7 @@
     },
     {
       "name": "multidict",
-      "version": "6.9.1",
+      "version": "7.1.0",
       "vulns": []
     },
     {
@@ -287,7 +308,7 @@
     },
     {
       "name": "narwhals",
-      "version": "2.26.0",
+      "version": "2.27.1",
       "vulns": []
     },
     {
@@ -302,7 +323,7 @@
     },
     {
       "name": "numpy",
-      "version": "2.5.3",
+      "version": "2.5.4",
       "vulns": []
     },
     {
@@ -327,22 +348,22 @@
     },
     {
       "name": "peewee",
-      "version": "4.5.2",
+      "version": "4.5.3",
       "vulns": []
     },
     {
       "name": "pillow",
-      "version": "12.3.0",
+      "version": "13.0.0",
       "vulns": []
     },
     {
       "name": "platformdirs",
-      "version": "4.12.3",
+      "version": "4.13.0",
       "vulns": []
     },
     {
       "name": "plotly",
-      "version": "7.1.0",
+      "version": "6.9.0",
       "vulns": []
     },
     {
@@ -362,17 +383,17 @@
     },
     {
       "name": "pycparser",
-      "version": "3.0",
+      "version": "3.11",
       "vulns": []
     },
     {
       "name": "pydantic",
-      "version": "2.13.5",
+      "version": "2.14.1",
       "vulns": []
     },
     {
       "name": "pydantic-core",
-      "version": "2.46.5",
+      "version": "2.50.1",
       "vulns": []
     },
     {
@@ -398,6 +419,11 @@
     {
       "name": "pyparsing",
       "version": "3.3.3",
+      "vulns": []
+    },
+    {
+      "name": "pyrage",
+      "version": "1.4.0",
       "vulns": []
     },
     {
@@ -457,7 +483,7 @@
     },
     {
       "name": "setuptools",
-      "version": "84.0.0",
+      "version": "84.1.0",
       "vulns": []
     },
     {
@@ -467,7 +493,7 @@
     },
     {
       "name": "soupsieve",
-      "version": "2.10",
+      "version": "3.0.1",
       "vulns": []
     },
     {
@@ -482,7 +508,7 @@
     },
     {
       "name": "tenacity",
-      "version": "9.1.4",
+      "version": "9.2.1",
       "vulns": []
     },
     {
@@ -503,11 +529,6 @@
     {
       "name": "tzlocal",
       "version": "5.4.4",
-      "vulns": []
-    },
-    {
-      "name": "upstox-python-sdk",
-      "version": "2.30.0",
       "vulns": []
     },
     {
@@ -575,9 +596,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-10-18T08:33:22.239559Z",
-    "audited_at": "2026-10-18T08:33:22.239559Z",
-    "requirements_lock_sha256": "1647020558203e25fcb917f909fbd93ebd69e4c81471b7f306a1d6226753cfbf",
-    "pip_audit_exit_code": 0
+    "generated_at": "2026-11-08T11:02:25.715752Z",
+    "audited_at": "2026-11-08T11:02:25.715752Z",
+    "requirements_lock_sha256": "cfbec0bd7fb648ca56b2c59dfc69bb4984fe401beb3c6b0cea4e23121265a8b7",
+    "pip_audit_exit_code": 1
   }
 }
