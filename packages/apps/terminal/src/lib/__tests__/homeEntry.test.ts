@@ -1,5 +1,5 @@
 /**
- * homeEntry.test.ts — FT-HOME-003
+ * homeEntry.test.ts —
  *
  * Authed `/home` stays on the Home dashboard. Unauthenticated `/home`
  * is the password Welcome Back gate only.
@@ -16,7 +16,7 @@ import {
   writePersistedAuthSession,
 } from "../homeEntry";
 
-describe("decideHomeEntry (FT-HOME-003)", () => {
+describe("decideHomeEntry", () => {
   it("sends a signed-in operator to the canonical Home, not the Welcome Back gate", () => {
     expect(decideHomeEntry("logged-in")).toEqual({
       kind: "home",
@@ -44,7 +44,7 @@ describe("decideHomeEntry (FT-HOME-003)", () => {
   });
 });
 
-describe("tab-scoped auth session (FT-HOME-003 refresh / address bar)", () => {
+describe("tab-scoped auth session (refresh / address bar)", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();

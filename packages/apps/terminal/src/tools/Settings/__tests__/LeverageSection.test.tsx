@@ -1,5 +1,5 @@
 /**
- * LeverageSection.test — FT-SET-004 blank-pane lock.
+ * LeverageSection.test — blank-pane lock.
  *
  * Settings `#leverage` must show real snapshot tiles or the honest empty
  * `Leverage settings unavailable.` plus Retry. Returning null (unsupported
@@ -79,7 +79,7 @@ function expectHonestEmpty() {
   expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
 }
 
-describe("LeverageSection blank-pane lock (FT-SET-004)", () => {
+describe("LeverageSection blank-pane lock", () => {
   beforeEach(() => {
     caps.data = undefined;
     caps.isLoading = false;

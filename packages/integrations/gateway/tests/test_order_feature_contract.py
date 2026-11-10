@@ -12,7 +12,7 @@ import pytest
 from flinttrade_gateway.order_feature_contract import OrderFeatureRecord, validate_feature_records
 
 ROOT = Path(__file__).resolve().parents[4]
-INVENTORY = ROOT / "docs/acceptance/FT-GTT-001-capabilities.json"
+INVENTORY = Path(__file__).resolve().parent / "fixtures" / "order_feature_inventory.json"
 BROKERS = {"dhan", "upstox", "kotakneo", "indmoney", "groww", "delta"}
 
 

@@ -110,7 +110,7 @@ class _TestStrategy(BaseStrategy):
 
 def _open_time_scheduler() -> TimeScheduler:
     scheduler = TimeScheduler()
-    scheduler.is_market_open = MagicMock(return_value=True)
+    scheduler.session_active = MagicMock(return_value=True)
     scheduler.should_square_off = MagicMock(return_value=False)
     return scheduler
 

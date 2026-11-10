@@ -146,6 +146,8 @@ class WebhookOrderDispatcher:
                     reservations=lease.reservations,
                 )
                 lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+                from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
                 admission = portfolio_state.admission_for(0)
                 safety_results = safety.check_order(
                     typed_order,
@@ -158,6 +160,7 @@ class WebhookOrderDispatcher:
                     ltp=portfolio_state.ltp_for(typed_order),
                     net_delta=admission.net_delta,
                     net_vega=admission.net_vega,
+                    expiry_calendar=symbol_expiry_context(typed_order.symbol),
                 )
                 blocked = next((check for check in safety_results if not check.passed), None)
                 if blocked is not None:

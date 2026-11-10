@@ -1,5 +1,9 @@
 """Strategy instance lifecycle manager.
 
+No production caller constructs this machine for a live runner. Do not wire
+it through the live strategy runner. Live runners keep BaseStrategy lifecycle
+and process ownership on their own.
+
 Manages the full create → deploy → monitor → stop lifecycle of strategy
 instances in a production trading environment.
 
@@ -21,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+
+from .strategy import StrategyState
 
 logger = logging.getLogger("flinttrade.engine.strategy_lifecycle")
 
@@ -405,7 +411,7 @@ class StrategyLifecycleManager:
         if self._registry is not None:
             try:
                 registry_inst = self._registry.get(inst.strategy_class_name)
-                if registry_inst is not None:
+                if registry_inst is not None and registry_inst.state is not StrategyState.STOPPED:
                     registry_inst.stop()
             except Exception as exc:
                 logger.warning("Registry stop failed for '%s': %s", inst.strategy_class_name, exc)

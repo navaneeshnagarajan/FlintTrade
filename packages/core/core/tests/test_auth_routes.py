@@ -255,7 +255,7 @@ class TestLoginEndpoint:
         assert decode_token(data["data"]["token"])["mode"] == "practice"
 
     def test_login_password_only_when_authenticator_deferred(self, client):
-        """FT-SETUP-002: Explore/Practice daily login is password-only
+        """Explore/Practice daily login is password-only
         until the operator enrols TOTP."""
         c, svc = client
         c.post(
@@ -836,7 +836,7 @@ class TestPinSetEndpoint:
         ],
     )
     def test_set_pin_rejects_non_six_digit_pin(self, client, pin):
-        """FT-SET-003: /v1/auth/pin/set stays fail-closed on anything but ^\\d{6}$."""
+        """/v1/auth/pin/set stays fail-closed on anything but ^\\d{6}$."""
         c, _ = client
         self._setup_without_pin(c)
         resp = c.post("/v1/auth/pin/set", json={"password": "StrongP@ss123!", "pin": pin}, headers=_session_headers())
@@ -1415,7 +1415,7 @@ class TestGuardsRejectResetTokens:
 
 
 class TestSetupSessionReset:
-    """FT-SETUP-001: Start over / Reset wipes an unfinished account.
+    """Start over / Reset wipes an unfinished account.
 
     A valid setup session JWT is enough (lost QR seed). A password-reset
     token is never enough. Daily password+TOTP login and Live PIN are unchanged.

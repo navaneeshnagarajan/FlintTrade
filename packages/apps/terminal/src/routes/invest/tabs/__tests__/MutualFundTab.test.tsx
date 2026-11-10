@@ -1,5 +1,5 @@
 /**
- * MutualFundTab.test.tsx — Explore sample-copy honesty (FT-INVEST-001).
+ * MutualFundTab.test.tsx — Explore sample-copy honesty.
  *
  * Explore must not claim daily AMFI updates while showing a static fixture.
  * Practice / Live keep the live-feed freshness sentence.
@@ -110,7 +110,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
+describe("MutualFundTab Explore sample copy", () => {
   it("titles the view Browse Mutual Funds", () => {
     renderTab();
 

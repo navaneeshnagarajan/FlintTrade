@@ -41,8 +41,8 @@ class AuthenticatingSessionProvider:
 
         {
           "dhan": {
-            "personal": ["nava@flinttrade.local"],
-            "spouse":   ["nava@flinttrade.local", "spouse@flinttrade.local"]
+            "primary": ["alice@example.invalid"],
+            "secondary": ["alice@example.invalid", "bob@example.invalid"]
           },
           ...
         }

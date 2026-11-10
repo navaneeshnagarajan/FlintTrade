@@ -1,8 +1,9 @@
 /**
  * ModeIndicator — TopBar mode menu.
  *
- * The chip opens a menu of Practice, Connected (read), and Live.
- * Connected (read) stays disabled until a broker is connected.
+ * The chip shows the session claim: Practice, Live, Example, or Unavailable.
+ * The menu lists Practice and Live. Connected (read) is a broker status,
+ * shown with the broker row, and is not a mode.
  * Live stays disabled while any lock reason applies: missing 2FA or broker,
  * no quick-unlock PIN, and, when the place gate reports it, Laya qualification.
  * A deferred authenticator or a skipped PIN links to Settings → Security,
@@ -11,9 +12,9 @@
  * after the operator chooses an eligible Live item.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router";
-import { Compass, Eye, FlaskConical, Zap } from "lucide-react";
+import { Compass, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,15 +37,14 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useLiveArmFactors } from "@/hooks/useTotpEnrolled";
+import { sessionModeFromToken } from "@/lib/modeClaim";
+import { operatorModeName } from "@/lib/operatorModeLabel";
 import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
 import {
   CREATE_A_PIN,
   ENROL_2FA_AND_CONNECT_BROKER,
   liveMenuLockReasons,
 } from "@/chrome/liveLockReasons";
-import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
-
-export const CONNECT_BROKER_FIRST = "Connect a broker first";
 export const LIVE_LOCKED_REASON = ENROL_2FA_AND_CONNECT_BROKER;
 export const ENROL_AUTHENTICATOR_HREF = "/settings#security";
 export const ENROL_AUTHENTICATOR_LINK = "Enrol authenticator in Settings";
@@ -63,8 +63,6 @@ const CHIP_CLASS = {
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/25 hover:bg-text-muted/25 hover:text-text-secondary",
   practice:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-[var(--color-practice-chip)] border border-amber-500/30 hover:bg-amber-500/25 hover:text-[var(--color-practice-chip)]",
-  connectedRead:
-    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 hover:text-sky-300",
   live:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-[var(--color-live-chip)] border border-profit/40 hover:bg-profit/30 hover:text-[var(--color-live-chip)]",
 } as const;
@@ -84,29 +82,17 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
   });
   const liveEligible = liveReasons.length === 0;
 
-  const [readPosture, setReadPosture] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
 
-  const showConnectedRead = readPosture && brokerConnected && mode === "practice";
-  const chipLabel = mode === "live"
-    ? "Live"
-    : showConnectedRead
-      ? "Connected (read)"
-      : mode === "practice"
-        ? "Practice"
-        : "Example";
-
-  useEffect(() => {
-    setConnectedReadPosture(showConnectedRead);
-    return () => setConnectedReadPosture(false);
-  }, [showConnectedRead]);
-  const chipClass = mode === "live"
-    ? CHIP_CLASS.live
-    : showConnectedRead
-      ? CHIP_CLASS.connectedRead
+  const unavailable = mode === "unavailable";
+  const chipLabel = operatorModeName(mode);
+  const chipClass = unavailable
+    ? CHIP_CLASS.example
+    : mode === "live"
+      ? CHIP_CLASS.live
       : mode === "practice"
         ? CHIP_CLASS.practice
         : CHIP_CLASS.example;
@@ -124,6 +110,13 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       const authState = useAuthStore.getState();
       const newToken = await downgradeMode("practice", authState.token);
       if (!updateToken(newToken, authState.sessionGeneration)) return false;
+      // The new token's claim is the desk mode. An opaque test token has
+      // no claim, so the explicit Practice assignment still applies.
+      if (sessionModeFromToken(newToken)) {
+        useModeStore.getState().adoptSessionToken(newToken);
+      } else {
+        setMode("practice");
+      }
     } catch {
       setToggleError(
         mode === "live"
@@ -132,20 +125,12 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       );
       return false;
     }
-    setMode("practice");
     return true;
   }, [mode, setMode, token, updateToken]);
 
   const selectPractice = useCallback(async () => {
-    setReadPosture(false);
     await switchToPractice();
   }, [switchToPractice]);
-
-  const selectConnectedRead = useCallback(async () => {
-    if (!brokerConnected) return;
-    const switched = mode === "practice" ? true : await switchToPractice();
-    if (switched) setReadPosture(true);
-  }, [brokerConnected, mode, switchToPractice]);
 
   const selectLive = useCallback(() => {
     if (!liveEligible || mode === "live") return;
@@ -165,6 +150,11 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       // does, and only after the server accepts the PIN and enrolment check.
       const { token: newToken } = await confirmLiveMode(pin);
       if (!updateToken(newToken, expectedGeneration)) return;
+      if (sessionModeFromToken(newToken)) {
+        useModeStore.getState().adoptSessionToken(newToken);
+      } else {
+        setMode("live");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message.trim() : "";
       setPinError(message || "Incorrect PIN. Try again.");
@@ -172,8 +162,6 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     }
     setPinError("");
     setConfirmOpen(false);
-    setReadPosture(false);
-    setMode("live");
   }, [pin, setMode, updateToken]);
 
   const handleCancel = useCallback(() => {
@@ -182,7 +170,7 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     setPinError("");
   }, []);
 
-  const ChipIcon = mode === "live" ? Zap : showConnectedRead ? Eye : mode === "practice" ? FlaskConical : Compass;
+  const ChipIcon = unavailable ? Compass : mode === "live" ? Zap : mode === "practice" ? FlaskConical : Compass;
 
   return (
     <div className="flex items-center gap-2">
@@ -202,17 +190,6 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
         <DropdownMenuContent align="end" aria-label="Mode" className="w-64">
           <DropdownMenuItem onSelect={() => { void selectPractice(); }}>
             Practice
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!brokerConnected}
-            onSelect={() => { void selectConnectedRead(); }}
-          >
-            <span className="flex flex-col items-start gap-0.5">
-              <span>Connected (read)</span>
-              {!brokerConnected ? (
-                <span className="text-xxs text-text-muted">{CONNECT_BROKER_FIRST}</span>
-              ) : null}
-            </span>
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!liveEligible}

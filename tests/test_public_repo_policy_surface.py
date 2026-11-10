@@ -14,7 +14,6 @@ CURRENT_ELECTRON_GUIDANCE = (
     Path("readme.md"),
     Path("docs/ARCHITECTURE.md"),
     Path("docs/DEVELOPER_GUIDE.md"),
-    Path("CLAUDE.md"),
     Path("templates/agent-context/CLAUDE.md.template"),
     Path("templates/agent-context/packages/apps/desktop/CLAUDE.md.template"),
 )
@@ -131,54 +130,40 @@ def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
     assert stale_indstocks_phrase not in guide
 
 
-def test_monday_003_ai_live_read_acceptance_lock() -> None:
-    """FT-MONDAY-003 / #254: Chat live-read acceptance is locked in public docs."""
+def test_chat_live_read_behaviour_is_stated_in_product_language() -> None:
+    """Chat may analyse Practice fills without treating suggestions as live orders."""
     guide = _read(ROOT / "docs/USER_GUIDE.md")
     changelog = _read(ROOT / "changelog.md")
-    plan = _read(ROOT / "PLAN.md")
+    roadmap = _read(ROOT / "ROADMAP.md")
 
-    for text in (guide, changelog, plan):
+    for text in (guide, changelog, roadmap):
         assert "native live-read feeds" in text
         assert "Suggest stays labelled illustrative" in text
         assert "profitable alphas are not a release criterion" in text
-
-    # Operator-facing docs use product language. Tracking IDs stay in maintainer docs.
-    operator_docs = (
-        ROOT / "docs" / "USER_GUIDE.md",
-        ROOT / "readme.md",
-        ROOT / "docs" / "product-modes.mdx",
-        ROOT / "docs" / "COMPATIBILITY.md",
-        ROOT / "docs" / "setup" / "QUICKSTART.md",
-        ROOT / "docs" / "setup" / "static-ip-setup.md",
-    )
-    for path in operator_docs:
-        assert "FT-MONDAY-" not in _read(path), path
-    assert "FT-MONDAY-003" in changelog
-    assert "FT-MONDAY-003" in plan
+        assert "FT-" not in text
 
     assert "never shows green **Connected** without a real LLM" in guide
     assert "never shows green **Connected** without a real LLM" in changelog
-    assert "never shows green Connected without a real LLM" in plan
-    assert "Live place stays fail-closed" in changelog
-    assert "Live place stays fail-closed" in plan
-    assert "Tracking / docs lock only — no product in this change" not in changelog
-    assert "tracking lock only — no product in this change" not in plan
+    assert "never shows green Connected without a real LLM" in roadmap
+    assert "Live order placement stays disabled unless it is explicitly unlocked" in roadmap
 
 
 def test_operator_docs_state_native_broker_http_freeze() -> None:
-    """Operator docs must state the 503/409 freeze, not a working native path."""
+    """Operator docs must state the 503/409 responses, not a working native path."""
     guide = _read(ROOT / "docs/USER_GUIDE.md")
     changelog = _read(ROOT / "changelog.md")
-    plan = _read(ROOT / "PLAN.md")
+    roadmap = _read(ROOT / "ROADMAP.md")
 
-    assert "not usable on this unreleased line" in guide
     assert "broker_account_cutover_unavailable" in guide
-    assert "native broker UX stays down on `main`" in guide
     assert "Do not treat" in guide and "as a working operator path" in guide
-    assert "Native broker HTTP freeze (accepted product decision)" in changelog
-    assert "leaves native broker UX down until Task 9D and Task 7C.2" in changelog
-    assert "native broker HTTP UX is frozen on `main` until Task 9D and Task 7C.2" in plan
-    assert "accepted product decision" in plan
+    assert "return `503`" in guide
+    assert "return `409`" in guide
+    assert "Broker sessions are not available in the terminal" in changelog
+    assert "broker_account_cutover_unavailable" in changelog
+    assert "Broker writes return 503 and broker reads return 409" in roadmap
+    assert "Task 9D" not in guide
+    assert "Task 9D" not in changelog
+    assert "Task 9D" not in roadmap
 
 
 def test_public_site_labels_demo_as_exploration_not_live() -> None:

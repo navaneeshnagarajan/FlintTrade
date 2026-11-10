@@ -5,7 +5,7 @@ description: Local order-safety controls, audit trails, and operator checks
 ---
 # Order Safety
 
-FlintTrade is personal-use, self-hosted software. It is not a broker, adviser,
+FlintTrade is single-operator, self-hosted software. It is not a broker, adviser,
 managed strategy, or compliance service. Use this skill for local safety
 diagnostics only.
 

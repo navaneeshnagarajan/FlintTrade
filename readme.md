@@ -1,21 +1,19 @@
 # FlintTrade
 
-FlintTrade is an AGPL-3.0, self-hosted trading software project for local
-manual, automated, algorithmic, and AI-assisted workflows. It is a **web app
-first**: the FlintTrade backend serves the full terminal UI and API from a
-single origin (port 5100), usable from any browser, with optional native
-desktop apps as convenience wrappers around the same backend. The repository
-is a Python, React, TypeScript, and Rust monorepo with a Flask backend,
-FlexLayout terminal, broker-gateway integration layer, sandbox mode, data
-services, and developer documentation.
+FlintTrade is self-hosted trading software for Indian markets. It supports
+manual, automated, algorithmic, and AI-assisted workflows from a browser, with
+an optional desktop shell around the same backend. The FlintTrade backend
+serves the terminal and API from a single origin (port 5100).
 
-## Beta disclaimer
+Practice mode and example data work without a broker. The public roadmap is
+[ROADMAP.md](ROADMAP.md).
 
-FlintTrade `v0.0.1` is **not production ready**. It is educational,
-self-hosted software for research, sandbox workflows, and contributor
-development first. Nothing in this repository is financial, investment, tax,
-legal, or regulatory advice. Read [disclaimer.md](disclaimer.md) before
-connecting a broker or enabling Live mode.
+## Pre-release
+
+FlintTrade `v0.0.1` is pre-release software and is **not production ready**.
+Trading involves the risk of loss. Nothing in this repository is financial,
+investment, tax, legal, or regulatory advice. Read [disclaimer.md](disclaimer.md)
+before enabling Live mode.
 
 ## Project scope
 
@@ -25,7 +23,7 @@ connecting a broker or enabling Live mode.
 - **Backend services** — Python 3.14 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 
-- **Safety model** — Practice, Connected (read), and Live, with Example for sample data, server-side checks,
+- **Safety model** — Practice and Live are session modes. Connected (read) is a broker status. Example is sample data. Server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
@@ -38,10 +36,7 @@ connecting a broker or enabling Live mode.
 ## Supported brokers
 
 Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. Availability remains evidence-gated. Native broker HTTP
-mutations and reads remain frozen until Task 9D and Task 7C.2; a broker session
-cannot currently be established through the terminal. Practice uses the local
-sandbox. Funded Live placement remains unproven and fail-closed.
+INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 ## Supported versions
 
@@ -54,15 +49,22 @@ disagrees with that table.
 | | Floor | Target |
 |---|---|---|
 | Python | `>=3.14` | 3.14 |
-| Node | `>=22.22.2` | 24 |
-| OS | Ubuntu 26.04 LTS | 26.04 |
+| Node | `>=22.23.4` | 24 |
+| Linux | Ubuntu 26.04 LTS | 26.04 |
+| macOS | macOS 13+ | universal `.dmg` |
+| Windows | Windows 10/11 x64 | `.exe` and PowerShell installers |
 
-Python's floor and target are the same 3.14 series. The OS floor follows from
-that: Ubuntu 26.04 LTS is the release that ships Python 3.14. Node's floor
-comes from jsdom 30, and its target stays ahead at 24.
+Python's floor and target are the same 3.14 series. Node's floor is 22.23.4,
+and its target stays ahead at 24. Electron 45.2.3 bundles Node 24.22.2.
+
+Ubuntu 26.04 LTS is the Linux floor because that release ships Python 3.14.
+The Ubuntu floor applies only to Linux source installs. macOS 13+ ships as a
+universal `.dmg`. Windows 10/11 x64 ships as an `.exe` and through the
+PowerShell installer, with ARM supported through emulation.
 
 The one-line installer provisions its own Python, Node and pnpm under
-`~/.flinttrade/tools`. The floors apply to source installs and contributors.
+`~/.flinttrade/tools`. The Python and Node floors apply to source installs
+and contributors on every platform.
 
 ## Quickstart
 
@@ -224,7 +226,7 @@ update, install and uninstall contracts.
 
 Use this when you are developing FlintTrade itself. Unlike the one-line
 installer it expects you to supply the toolchain: git, Python 3.14+, Node
-22.22.2+, `uv` and `pnpm`.
+22.23.4+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -287,34 +289,9 @@ in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
 
 ## For developers
 
-### Architecture
-
-### Package map
-
-18 package surfaces — 13 Python packages, 3 applications (React terminal,
-Electron desktop shell, Next.js site), 1 shared TypeScript design-system package,
-and 1 Rust/PyO3 tick engine.
-
-| Package | Language | Purpose |
-|---|---|---|
-| `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
-| `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and FlexLayout terminal |
-| `packages/apps/desktop` | Electron 44 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
-| `packages/core/core` | Python | Flask backend, auth, workspace, native broker reads, route registration |
-| `packages/core/data` | Python | Local tick storage, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
-| `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |
-| `packages/core/historical` | Python | OHLCV downloader, free-data sources, DuckDB/Parquet pipeline, expiry manager |
-| `packages/core/indicators` | Python | Pure-NumPy batch indicators (110 exports), streaming classes, Pine conversion |
-| `packages/core/ticks` | Rust + PyO3 | High-performance tick processing for tick-level backtests |
-| `packages/integrations/gateway` | Python | Six native broker adapters, safety-gated router, credential vault and local TickDispatcher; native HTTP and network capture unavailable |
-| `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks |
-| `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
-| `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis |
-| `packages/services/backtest` | Python | Event-driven simulator, 94 strategy template modules, walk-forward optimiser |
-| `packages/services/ditto` | Python | Native account metadata, margin/risk analytics and position/stop monitors; broker execution unavailable under the native runtime freeze |
-| `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
-| `packages/services/journal` | Python | Trade journal, execution-quality analytics, realised P&L tracking |
-| `packages/services/screener` | Python | Option chain, OI analysis, PCR, max-pain, portfolio Greeks, IV smile |
+Architecture, the package map, and how to extend FlintTrade are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md).
 
 ### Tech stack
 
@@ -325,7 +302,7 @@ each dependency does, exact-version sources, and the terminal's About screen.
 |---|---|
 | Frontend | React 19, TypeScript 7 (strict), Tailwind CSS v4, FlexLayout (with FDC3 interop), shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.14, Flask, httpx (async), pydantic, DuckDB, structlog |
-| Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), QuestDB (future) |
+| Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), DuckDB |
 | AI | Managed Ollama sidecar, local SQLite/NumPy vector store, LightGBM (signals), MCP bridge |
 
 ### Three ways in
@@ -340,7 +317,8 @@ each dependency does, exact-version sources, and the terminal's About screen.
 
 | Guide | What's inside |
 |---|---|
-| [User Guide](docs/USER_GUIDE.md) | Install, first connection, paper trade, workspace tour |
+| [Roadmap](ROADMAP.md) | What works today, what is in progress, and what comes next |
+| [User Guide](docs/USER_GUIDE.md) | Install, first connection, first Practice order, workspace tour |
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
 | [Technology stack](docs/TECH_STACK.md) | Dependency purposes, version sources, and app build information |

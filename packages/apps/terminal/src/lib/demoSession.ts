@@ -98,7 +98,9 @@ export function isDemoSessionActive(): boolean {
   try {
     const parsed = JSON.parse(rawMode) as { state?: { mode?: unknown } };
     const mode = parsed?.state?.mode;
-    return mode !== "practice" && mode !== "live";
+    // Example is only the example or demo claim. An unconfirmed session,
+    // and a connected broker status, are not sample data.
+    return mode == null || mode === "explore" || mode === "demo" || mode === "example";
   } catch {
     return true;
   }

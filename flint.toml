@@ -48,16 +48,22 @@ site_url = "https://flinttrade.vercel.app"
 # Every pyproject.toml declares this floor.
 python_requires = ">=3.14"
 python_target = "3.14"
-# jsdom 30 declares Node 22 support from 22.22.2 and is the binding constraint
-# for the checked-in terminal test environment. Node 22 is in maintenance, so
-# the target runs ahead of the floor rather than dragging it up.
-node_requires = ">=22.22.2"
+# The supported Node floor is 22.23.4. jsdom 30 accepts Node from 22.22.2;
+# source installs and per-push lanes stay on 22.23.4 or newer. Node 22 is in
+# maintenance, so the target stays on the 24 line. Electron 45.2.3 bundles
+# Node 24.22.2.
+node_requires = ">=22.23.4"
 node_target = "24"
-# Derived from the Python floor: Ubuntu 26.04 LTS is the release that ships
-# Python 3.14. The one-line installer still provisions its own interpreter, so
-# this constrains source installs only.
+# Ubuntu 26.04 LTS ships Python 3.14. os_requires is the Linux source-install
+# floor only. The one-line installer still provisions its own interpreter.
+# os_macos and os_windows are the other platforms this repo ships. Nightly
+# cross-platform runs macOS, Windows, and Ubuntu 26.04. Desktop release builds
+# a universal macOS dmg, a Windows x64 exe, and Linux AppImages. Windows on
+# ARM uses the x64 build through emulation.
 os_requires = "Ubuntu 26.04 LTS"
 os_target = "26.04"
+os_macos = "macOS 13+"
+os_windows = "Windows 10/11 x64"
 
 [packages]
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, native broker boundary, config, models, logging" }
@@ -77,7 +83,7 @@ gateway = { path = "packages/integrations/gateway", lang = "python", description
 webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "Generic HMAC-signed custom webhooks" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
-desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 44 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
+desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 45 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
 
 [groups]
 core = ["core", "data", "historical", "indicators", "ticks", "design-system"]

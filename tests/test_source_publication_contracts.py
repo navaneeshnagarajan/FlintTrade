@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_desktop_uses_the_approved_public_attribution() -> None:
     package = json.loads((ROOT / "packages/apps/desktop/package.json").read_text())
-    approved = "navaneeshnagarajan <259833042+navaneeshnagarajan@users.noreply.github.com>"
+    approved = "FlintTrade"
     matches = package.get("author") == approved
     # Do not print an offending personal attribution through assertion rewriting.
     assert matches, "Desktop attribution must use the approved public identity"

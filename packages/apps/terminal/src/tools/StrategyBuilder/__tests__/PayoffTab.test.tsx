@@ -33,7 +33,7 @@ function callLeg(premium: number | null, extra: Partial<Leg> = {}): Leg {
 }
 
 describe("PayoffTab", () => {
-  it("shows em-dash cards and does not model payoff when premium is unset (FT-LAB-003)", () => {
+  it("shows em-dash cards and does not model payoff when premium is unset", () => {
     render(<PayoffTab legs={[callLeg(null)]} atm={22500} underlying={nifty} />);
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("—");
@@ -56,7 +56,7 @@ describe("PayoffTab", () => {
     expect(screen.queryByText("None")).not.toBeInTheDocument();
   });
 
-  it("labels a sample-chain premium and still uses FT-LAB-001 max-loss maths", () => {
+  it("labels a sample-chain premium and still uses max-loss maths", () => {
     render(
       <PayoffTab
         legs={[callLeg(45, { premiumSource: "sample" })]}
@@ -80,7 +80,7 @@ describe("PayoffTab", () => {
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22680");
   });
 
-  it("shows Long Call Net Debit and Max Loss on the same position basis (FT-LAB-005)", () => {
+  it("shows Long Call Net Debit and Max Loss on the same position basis", () => {
     render(<PayoffTab legs={[callLeg(45)]} atm={22500} underlying={nifty} />);
 
     const maxLoss = screen.getByText("Max Loss").nextElementSibling;

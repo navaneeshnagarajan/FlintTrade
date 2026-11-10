@@ -10,7 +10,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NumberInput, Stepper, StatusPill, ToggleGroup } from "./ScalperPrimitives";
-import { EXPLORE_ONE_CLICK_TITLE, EXPLORE_SCALPER_ORDER_HELPER } from "./exploreGate";
 import type { IntervalValue, OrderTypeValue, ProductType, StatusState } from "./types";
 import { LOT_SIZE_MASTER_HINT, SYMBOLS } from "./types";
 
@@ -69,6 +68,10 @@ export interface ScalperControlsProps {
   onOneClickToggle: () => void;
   /** Explore: 1-CLICK stays OFF / disabled with the locked title + helper. */
   ordersArmed: boolean;
+  /** Why orders stay blocked. Null when Practice or Live may place. */
+  orderBlockCopy: string | null;
+  /** Title while one-click stays locked. */
+  oneClickLockedTitle: string;
   /** Explore: orders stay disarmed. Sample disclosure is the Mode honesty bar. */
   isExplore: boolean;
 }
@@ -109,6 +112,8 @@ export function ScalperControls({
   oneClick,
   onOneClickToggle,
   ordersArmed,
+  orderBlockCopy,
+  oneClickLockedTitle,
 }: ScalperControlsProps) {
   return (
     <div className="shrink-0 bg-surface-card border-b border-border-default">
@@ -283,7 +288,7 @@ export function ScalperControls({
                 ? oneClick
                   ? "One-click ON — click to disable"
                   : "One-click OFF — click to enable"
-                : EXPLORE_ONE_CLICK_TITLE
+                : oneClickLockedTitle
             }
             className={`flex items-center gap-1.5 px-4 h-8 font-semibold text-sm transition-colors ${
               oneClick
@@ -298,7 +303,7 @@ export function ScalperControls({
       </div>
 
       {!ordersArmed && (
-        <p className="px-3 pb-2 text-xs text-text-disabled">{EXPLORE_SCALPER_ORDER_HELPER}</p>
+        <p className="px-3 pb-2 text-xs text-text-disabled">{orderBlockCopy}</p>
       )}
     </div>
   );

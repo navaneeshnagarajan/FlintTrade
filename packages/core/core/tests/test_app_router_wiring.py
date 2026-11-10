@@ -1575,7 +1575,7 @@ def test_build_broker_router_invalid_config_raises(*, backend_lease_factory) -> 
 def test_build_broker_router_threads_account_acls(*, backend_lease_factory) -> None:
     brokers = {
         "registered": ["dhan:personal"],
-        "account_acls": {"dhan": {"personal": ["nava@flinttrade.local"]}},
+        "account_acls": {"dhan": {"personal": ["alice@example.invalid"]}},
         "execution": {"default": "dhan:personal"},
         "data": {
             "ticks": "dhan:personal",
@@ -1587,7 +1587,7 @@ def test_build_broker_router_threads_account_acls(*, backend_lease_factory) -> N
         "cost_aware": {"enabled": False, "tasks": []},
     }
     router = build_broker_router(BrokerRegistry(), brokers, backend_lease_proof=backend_lease_factory())
-    assert router._session_provider._acls == {"dhan": {"personal": ["nava@flinttrade.local"]}}
+    assert router._session_provider._acls == {"dhan": {"personal": ["alice@example.invalid"]}}
 
 
 def test_safety_gate_is_one_shot() -> None:
@@ -1896,7 +1896,7 @@ def test_on_native_activated_sink_empty_when_dormant(*, backend_lease_factory) -
 
 @pytest.mark.unit
 def test_reconcile_targets_provider_refuses_unversioned_native_read(tmp_path) -> None:
-    """Real registry refuses until the verified read-port cutover (7C.2)."""
+    """Real registry refuses broker reads until they are available in the terminal."""
     from flinttrade_core.app import _build_reconcile_targets_provider
 
     fixture = RegistryFixture(tmp_path)

@@ -380,6 +380,29 @@ class _DrainRouter:
         return self.result
 
 
+class _ObservedGenerationLock:
+    """Re-entrant generation lock that records each acquire deadline."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self.requested_timeouts: list[float] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self.requested_timeouts.append(float(timeout))
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def __enter__(self) -> _ObservedGenerationLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        self.release()
+        return False
+
+
 def _wait_for_candidate_attempt_to_finish() -> None:
     import flinttrade_core.native_account_routes as routes
 
@@ -397,8 +420,10 @@ def test_disable_broker_routing_times_out_before_mutating_under_generation_conte
     import flinttrade_core.native_account_routes as routes
 
     router = _DrainRouter(True)
-    rebuild_lock = threading.RLock()
+    rebuild_lock = _ObservedGenerationLock()
     holder_ready = threading.Event()
+    release_holder = threading.Event()
+    holder_released = threading.Event()
     app.config.update(
         BROKER_ROUTER=router,
         BROKER_ROUTER_REBUILD_LOCK=rebuild_lock,
@@ -411,24 +436,32 @@ def test_disable_broker_routing_times_out_before_mutating_under_generation_conte
     def hold_generation() -> None:
         with rebuild_lock:
             holder_ready.set()
-            time.sleep(0.25)
+            # The 15s wait is only a hang bound. The disable call has to
+            # return while this owner still holds the generation.
+            release_holder.wait(timeout=15.0)
+        holder_released.set()
 
     holder = threading.Thread(target=hold_generation, daemon=True)
     holder.start()
-    assert holder_ready.wait(timeout=1.0)
-    with app.app_context():
-        started = time.monotonic()
-        result = routes._disable_broker_routing()
-        elapsed = time.monotonic() - started
-    holder.join(timeout=1.0)
-
-    assert elapsed < 0.1
-    assert result is False
-    assert app.config["BROKER_ROUTER"] is router
-    assert app.config["SMART_ROUTING"] == {"enabled": True}
-    assert "upstox" in app.config["NATIVE_ADAPTERS"]
-    assert app.config["RECONCILE_TARGETS"] is not None
-    assert router.calls == 0
+    assert holder_ready.wait(timeout=5.0)
+    try:
+        with app.app_context():
+            result = routes._disable_broker_routing()
+        # Wall-clock around a 0.01s lease wait includes GIL and scheduler
+        # delay (0.17s and 0.29s observed). The lease refusal itself is the
+        # condition: the call returned before this owner released, asked for
+        # the configured 0.01s deadline, and did not mutate.
+        assert not holder_released.is_set()
+        assert result is False
+        assert rebuild_lock.requested_timeouts == [-1.0, 0.01]
+        assert app.config["BROKER_ROUTER"] is router
+        assert app.config["SMART_ROUTING"] == {"enabled": True}
+        assert "upstox" in app.config["NATIVE_ADAPTERS"]
+        assert app.config["RECONCILE_TARGETS"] is not None
+        assert router.calls == 0
+    finally:
+        release_holder.set()
+        holder.join(timeout=5.0)
 
 
 def test_restore_router_preserves_new_reads_when_only_write_publication_fails(
@@ -3568,7 +3601,7 @@ def test_neo_connect_is_not_rejected_as_coming_soon(client, monkeypatch):
         return {}
 
     # Neo login authenticates immediately, then activation probes liveness and
-    # Monday read-smoke. Stub every provider boundary; the synthetic session has
+    # Connected-read smoke. Stub every provider boundary; the synthetic session has
     # no SDK client, so an unmocked provider read also fails closed locally.
     monkeypatch.setattr(KotakNeoAdapter, "login", _login)
     monkeypatch.setattr(KotakNeoAdapter, "liveness", _liveness)

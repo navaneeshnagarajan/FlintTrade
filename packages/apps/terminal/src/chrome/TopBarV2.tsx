@@ -14,7 +14,7 @@
  * one label from one source (useOperatorMarketSession). The Workspace
  * switcher lives on the Trade desk toolbar, where workspaces apply.
  *
- * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
+ * TopBar is not a quote rail. The dedicated scrolling ticker
  * lives under this bar (TickerBar / TickerStrip). There is no Settings gear.
  * Tools → Quick Settings opens density, theme, and similar controls in
  * place. Tools → Settings opens the full Settings route. Compact Trade
@@ -23,7 +23,7 @@
  * Click on Search fires flinttrade:open-command-palette; keyboard handling is
  * owned by the active route's global shortcut layer.
  *
- * Skinny windows (FT-MOBILE-002): ticker hides under ~480px; at ~390px
+ * Skinny windows: ticker hides under ~480px; at ~390px
  * Workspace and secondary chrome move into a More sheet so Mode stays
  * reachable and the bar does not scroll sideways.
  */
@@ -409,7 +409,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   useEffect(() => {
     if (mode === "explore" || moneyPathClosed) {
       // Explore is broker-free. A leftover native session must not paint
-      // Connected/green — same honesty as FT-AI-002 / FT-AUTO-002.
+      // Connected/green. An unconfigured model and Example automation stay honest the same way.
       // A money-path incident stays dark even when a broker session remains.
       setStatus("disconnected");
       return;
