@@ -122,13 +122,13 @@ function ContrastBadge({ fg, bg, label }: ContrastBadgeProps) {
 
   return (
     <div className="flex items-center gap-1" title={`${label}: ${result.ratio}:1 — ${result.label}`}>
-      <span className="text-[9px] text-text-muted">{label}</span>
+      <span className="text-[12px] text-text-muted">{label}</span>
       {result.passes ? (
         <ShieldCheck size={10} className="text-profit shrink-0" aria-label={`${label} passes WCAG AA`} />
       ) : (
         <ShieldX size={10} className="text-loss shrink-0" aria-label={`${label} fails WCAG AA`} />
       )}
-      <span className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
+      <span className={`text-[12px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
         {result.ratio}
       </span>
     </div>
@@ -158,7 +158,7 @@ function VariantPreviewCard({ variant, mode }: VariantPreviewCardProps) {
       aria-label={`${mode} variant preview`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[9px] uppercase tracking-widest font-medium" style={{ color: colors.textMuted }}>
+        <span className="text-[12px] uppercase tracking-widest font-medium" style={{ color: colors.textMuted }}>
           {mode}
         </span>
         <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.accent }} />
@@ -168,21 +168,21 @@ function VariantPreviewCard({ variant, mode }: VariantPreviewCardProps) {
         className="rounded p-2 space-y-1.5"
         style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}
       >
-        <div className="text-[10px] font-semibold leading-none" style={{ color: colors.text }}>
+        <div className="text-[12px] font-semibold leading-none" style={{ color: colors.text }}>
           NIFTY 25,150.00
         </div>
-        <div className="text-[9px] leading-none" style={{ color: colors.textMuted }}>
+        <div className="text-[12px] leading-none" style={{ color: colors.textMuted }}>
           09:30 IST
         </div>
         <div
-          className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-mono"
+          className="inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-mono"
           style={{ backgroundColor: `${colors.accent}22`, color: colors.accent, border: `1px solid ${colors.accent}44` }}
         >
           +1.42%
         </div>
       </div>
 
-      <div className="rounded px-2 py-1 text-[9px]" style={{ ...glassStyle, color: colors.textSecondary }}>
+      <div className="rounded px-2 py-1 text-[12px]" style={{ ...glassStyle, color: colors.textSecondary }}>
         Glass surface
       </div>
 
@@ -262,7 +262,7 @@ function ThemeCard({ theme, isActive, onSelect }: ThemeCardProps) {
       {/* Name + description */}
       <div>
         <div className="text-xs font-heading font-semibold text-text-primary leading-tight">{theme.name}</div>
-        <div className="text-[10px] text-text-muted mt-0.5 leading-snug line-clamp-2">{theme.description}</div>
+        <div className="text-[12px] text-text-muted mt-0.5 leading-snug line-clamp-2">{theme.description}</div>
       </div>
 
       {isActive && (
@@ -328,7 +328,7 @@ function ColorField({ label, value, onChange }: ColorFieldProps) {
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-text-muted uppercase tracking-wide">{label}</span>
+      <span className="text-[12px] text-text-muted uppercase tracking-wide">{label}</span>
       <div className="flex items-center gap-1.5">
         <input
           type="color"
@@ -481,7 +481,7 @@ export function ThemePicker() {
 
       {/* ---- Theme cards (3 built-in + any custom) ---- */}
       <div>
-        <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Theme</p>
+        <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Theme</p>
         <div className="grid grid-cols-3 gap-2">
           {allThemes.map((theme) => (
             <ThemeCard
@@ -496,10 +496,10 @@ export function ThemePicker() {
 
       {/* ---- Dark / Light / System toggle ---- */}
       <div>
-        <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Colour mode</p>
+        <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Colour mode</p>
         <ModeToggle mode={mode} onChange={setMode} />
         {mode === "system" && (
-          <p className="text-[10px] text-text-muted mt-1.5">
+          <p className="text-[12px] text-text-muted mt-1.5">
             Automatically follows your OS dark/light preference in real time.
           </p>
         )}
@@ -515,7 +515,7 @@ export function ThemePicker() {
         />
         <Label htmlFor="glass-toggle" className="text-xs text-text-primary cursor-pointer select-none">
           Glass effects
-          <span className="block text-[10px] text-text-muted font-normal">
+          <span className="block text-[12px] text-text-muted font-normal">
             Backdrop blur on cards, panels, and overlays. Disable for better performance.
           </span>
         </Label>
@@ -544,7 +544,7 @@ export function ThemePicker() {
 
             {/* Theme name */}
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">Theme name</span>
+              <span className="text-[12px] text-text-muted uppercase tracking-wide">Theme name</span>
               <input
                 type="text"
                 value={customName}
@@ -556,7 +556,7 @@ export function ThemePicker() {
 
             {/* Base theme selector */}
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">Start from</span>
+              <span className="text-[12px] text-text-muted uppercase tracking-wide">Start from</span>
               <div className="flex items-center gap-2">
                 {(["graphite", "midnight", "ember"] as const).map((id) => (
                   <button
@@ -577,7 +577,7 @@ export function ThemePicker() {
 
             {/* Dark variant color editor */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Dark variant colours</p>
+              <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Dark variant colours</p>
               <div className="grid grid-cols-2 gap-3">
                 <ColorField label="Base"           value={darkVariant.colors.base}          onChange={(v) => updateDarkColor("base",          v)} />
                 <ColorField label="Card"           value={darkVariant.colors.card}          onChange={(v) => updateDarkColor("card",          v)} />
@@ -592,7 +592,7 @@ export function ThemePicker() {
 
             {/* Light variant color editor */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Light variant colours</p>
+              <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Light variant colours</p>
               <div className="grid grid-cols-2 gap-3">
                 <ColorField label="Base"           value={lightVariant.colors.base}          onChange={(v) => updateLightColor("base",          v)} />
                 <ColorField label="Card"           value={lightVariant.colors.card}          onChange={(v) => updateLightColor("card",          v)} />
@@ -607,23 +607,23 @@ export function ThemePicker() {
 
             {/* WCAG AA contrast checker */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">WCAG AA contrast</p>
+              <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">WCAG AA contrast</p>
               <div className="rounded-lg border border-border-default bg-surface-base p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
                 {contrastPairs.map((pair) => {
                   const result = evaluateContrast(pair.fg, pair.bg);
                   return (
                     <div key={`${pair.variant}-${pair.label}`} className="flex items-center justify-between gap-2">
-                      <span className="text-[9px] text-text-muted capitalize">{pair.variant} {pair.label}</span>
+                      <span className="text-[12px] text-text-muted capitalize">{pair.variant} {pair.label}</span>
                       <div className="flex items-center gap-1">
                         {result.passes ? (
                           <ShieldCheck size={10} className="text-profit shrink-0" aria-label="passes AA" />
                         ) : (
                           <ShieldX size={10} className="text-loss shrink-0" aria-label="fails AA" />
                         )}
-                        <span className={`text-[9px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
+                        <span className={`text-[12px] font-mono ${result.passes ? "text-profit" : "text-loss"}`}>
                           {result.ratio}:1
                         </span>
-                        <span className={`text-[9px] ${result.passes ? "text-profit" : "text-loss"}`}>
+                        <span className={`text-[12px] ${result.passes ? "text-profit" : "text-loss"}`}>
                           {result.label}
                         </span>
                       </div>
@@ -635,7 +635,7 @@ export function ThemePicker() {
 
             {/* Dark / Light split preview */}
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-text-muted mb-2">Live preview</p>
+              <p className="text-[12px] uppercase tracking-wide text-text-muted mb-2">Live preview</p>
               <div className="flex gap-2">
                 <VariantPreviewCard variant={darkVariant}  mode="dark"  />
                 <VariantPreviewCard variant={lightVariant} mode="light" />
@@ -680,7 +680,7 @@ export function ThemePicker() {
               className="w-full px-3 py-2 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 resize-none"
             />
             {importError && (
-              <p className="text-[11px] text-loss">{importError}</p>
+              <p className="text-[12px] text-loss">{importError}</p>
             )}
             <button
               type="button"

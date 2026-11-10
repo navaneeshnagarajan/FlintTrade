@@ -251,7 +251,7 @@ const graphite: CinematicTheme = {
       textMuted:     "#6b6b74",
       textSecondary: "#52525b",
       textDisabled:  "#a1a1aa",
-      accent:        "#15803d",   // green-700 — WCAG AA on #ffffff
+      accent:        "#166534",   // green-800 — readable on a 20% accent tint
       accentText:    "#ffffff",
     },
     trading:      TRADING_LIGHT,
@@ -340,7 +340,7 @@ const midnight: CinematicTheme = {
       textMuted:     "#4a7090",
       textSecondary: "#2a5070",
       textDisabled:  "#8ab0c8",
-      accent:        "#0369a1",   // sky-700 — WCAG AA on #f0f7ff (5.2:1)
+      accent:        "#075985",   // sky-800 — readable on a 20% accent tint
       accentText:    "#ffffff",
     },
     trading:      TRADING_LIGHT,
@@ -429,7 +429,7 @@ const ember: CinematicTheme = {
       textMuted:     "#8a6030",
       textSecondary: "#604010",
       textDisabled:  "#c0a060",
-      accent:        "#c2410c",   // orange-700 — WCAG AA on #ffffff
+      accent:        "#9a3412",   // orange-800 — readable on a 20% accent tint
       accentText:    "#ffffff",
     },
     trading:      TRADING_LIGHT,
