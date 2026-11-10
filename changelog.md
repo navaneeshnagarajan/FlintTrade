@@ -53,6 +53,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 - **Strategy Monitor unknown process.** When an uploaded strategy's process tree cannot be read, the monitor shows Unknown and keeps the runner's ownership flag on the row itself. A missing or unrecognised state is not shown as Stopped. Confirmed running and stopped reports stay on those labels. A strategy list that fails to load says so, and an empty list still says no strategies are configured. Start, pause, and stop controls stay unavailable on this preview.
 
+- **Strategy status reasons.** Uploaded strategy status adds a stable reason: idle, running, leader_exited, tree_unreadable, exit_nonzero, exit_clean, exit_missing, or cleanup_unproven. When the runner holds a strategy, the status also includes that lifecycle: ACTIVE, PAUSED, STOPPED, or ERROR. The Strategy Monitor shows Paused for a paused lifecycle. Unknown stays Unknown. A runner whose process tree cannot be read, or that still holds ownership, is not shown as stopped and is not treated as free.
+
+- **Illegal strategy lifecycle moves.** Starting, pausing, resuming, or stopping a strategy from a state that does not allow that move raises an error. A second start of a runner that is already running still returns without raising.
+
 - **NSE F&O Muhurat session.** Sunday 8 Nov 2026 opens for F&O 14:20–15:40 IST. Equity and indexes use the normal-day close: non-CAS cash to 15:30, CAS names 14:20–15:15, closing auction 15:20–15:35. Currency and commodity run 14:20–15:30. Equity after-market orders are collected until 14:03 IST. A missing special-session record stays closed.
 
 - **Broker sessions are not available in the terminal.** Broker-account

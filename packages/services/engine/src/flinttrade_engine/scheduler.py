@@ -26,7 +26,14 @@ from typing import Annotated, Any, Callable, TypeAliasType, Union, get_args, get
 from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import Quote
 
+from .state_manager import InvalidTransitionError
 from .strategy import BaseStrategy, StrategyState
+from .strategy_status import (
+    REASON_CLEANUP_UNPROVEN,
+    REASON_IDLE,
+    REASON_RUNNING,
+    annotate_status,
+)
 
 logger = logging.getLogger("flinttrade.engine.scheduler")
 
@@ -871,6 +878,9 @@ class StrategyRunner:
             return self._has_live_owner_unlocked()
 
     def _has_live_owner_unlocked(self) -> bool:
+        # An unknown or ownership-retained projection is not a free stop.
+        # project_status() reports that case as unknown, and this predicate
+        # stays true for the same unfinished ownership flags.
         return bool(
             self._running
             or self._cleanup_required
@@ -881,6 +891,48 @@ class StrategyRunner:
             or self._stop_request_count
             or self._stop_failed
             or self.strategy.state != StrategyState.STOPPED
+        )
+
+    def project_status(self) -> dict[str, Any]:
+        """Project this runner onto the uploaded-strategy status contract.
+
+        ``state`` is the process fact (running, stopped, or unknown).
+        ``lifecycle`` is the held ``BaseStrategy`` state. A quarantined or
+        otherwise unfinished owner is ``unknown`` with ownership retained,
+        never a free stop.
+        """
+        with self._ownership_lock:
+            return self._project_status_unlocked()
+
+    def _project_status_unlocked(self) -> dict[str, Any]:
+        lifecycle = self.strategy.state.value
+        running = self._running
+        task_live = self._task is not None and not self._task.done()
+        hooks = self._start_hook_task is not None or self._stop_hook_task is not None
+        uncertain = bool(
+            self._quarantined
+            or self._stop_failed
+            or hooks
+            or self._stop_request_count
+            or (self._cleanup_required and not running and not task_live)
+            or (lifecycle == StrategyState.ERROR.value and not running and not task_live)
+        )
+        if uncertain:
+            return annotate_status(
+                {"state": "unknown", "ownership_retained": True},
+                reason=REASON_CLEANUP_UNPROVEN,
+                strategy=self.strategy,
+            )
+        if running or task_live or lifecycle in {StrategyState.ACTIVE.value, StrategyState.PAUSED.value}:
+            return annotate_status(
+                {"state": "running"},
+                reason=REASON_RUNNING,
+                strategy=self.strategy,
+            )
+        return annotate_status(
+            {"state": "stopped"},
+            reason=REASON_IDLE,
+            strategy=self.strategy,
         )
 
     def _retire(self) -> None:
@@ -996,6 +1048,8 @@ class StrategyRunner:
                     self._stop_failed = True
                 raise TimeoutError("Strategy lifecycle transition did not stop before the deadline") from exc
 
+            task: asyncio.Task[None] | None = None
+            caller_owns_tick = False
             try:
                 if not self._requires_stop():
                     return
@@ -1033,25 +1087,20 @@ class StrategyRunner:
                         worker_active=stop_hook_worker_active,
                         settlement=stop_settlement,
                     )
+            except InvalidTransitionError:
+                # Rollback stops a strategy that never left STOPPED. The
+                # strategy method raises. Ownership release still completes.
+                if self.strategy.state is not StrategyState.STOPPED:
+                    with self._ownership_lock:
+                        self._stop_failed = True
+                    raise
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             except BaseException:
                 with self._ownership_lock:
                     self._stop_failed = True
                 raise
             else:
-                with self._ownership_lock:
-                    self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
-                    if not self_stop_handoff:
-                        self._stop_hook_task = None
-                        self._stop_hook_worker_active = None
-                        self._stop_hook_settlement = None
-                    self._cleanup_required = self_stop_handoff
-                    self._quarantined = False
-                    self._stop_failed = False
-                logger.info(
-                    "StrategyRunner stopped: %s (ticks=%d)",
-                    self.strategy.name,
-                    self._tick_count,
-                )
+                self._release_stop_ownership(caller_owns_tick=caller_owns_tick, task=task)
             finally:
                 self._transition_lock.release()
         finally:
@@ -1059,6 +1108,28 @@ class StrategyRunner:
                 self._stop_request_count -= 1
                 if self._stop_request_count < 0:
                     raise RuntimeError("Strategy stop request ownership underflow")
+
+    def _release_stop_ownership(
+        self,
+        *,
+        caller_owns_tick: bool,
+        task: asyncio.Task[None] | None,
+    ) -> None:
+        """Clear stop ownership after the strategy hook has settled."""
+        with self._ownership_lock:
+            self_stop_handoff = bool(caller_owns_tick and task is not None and not task.done())
+            if not self_stop_handoff:
+                self._stop_hook_task = None
+                self._stop_hook_worker_active = None
+                self._stop_hook_settlement = None
+            self._cleanup_required = self_stop_handoff
+            self._quarantined = False
+            self._stop_failed = False
+        logger.info(
+            "StrategyRunner stopped: %s (ticks=%d)",
+            self.strategy.name,
+            self._tick_count,
+        )
 
     def _create_lifecycle_hook_task(
         self,
@@ -1414,20 +1485,8 @@ class StrategyRunner:
             self._running = False
             self._cleanup_required = True
         stop_hook, worker_active, settlement = self._get_or_create_stop_hook()
-        try:
-            if not stop_hook.done():
-                await self._wait_for_task(
-                    stop_hook,
-                    label="stop hook",
-                    cancel_on_timeout=True,
-                    worker_active=worker_active,
-                    settlement=settlement,
-                )
-        except Exception:
-            with self._ownership_lock:
-                self._stop_failed = True
-            raise
-        else:
+
+        def finish_square_off_stop() -> None:
             with self._ownership_lock:
                 task = self._task
                 self_stop_handoff = bool(task is asyncio.current_task() and task is not None and not task.done())
@@ -1438,6 +1497,28 @@ class StrategyRunner:
                 self._cleanup_required = self_stop_handoff
                 self._quarantined = False
                 self._stop_failed = False
+
+        try:
+            if not stop_hook.done():
+                await self._wait_for_task(
+                    stop_hook,
+                    label="stop hook",
+                    cancel_on_timeout=True,
+                    worker_active=worker_active,
+                    settlement=settlement,
+                )
+        except InvalidTransitionError:
+            if self.strategy.state is not StrategyState.STOPPED:
+                with self._ownership_lock:
+                    self._stop_failed = True
+                raise
+            finish_square_off_stop()
+        except Exception:
+            with self._ownership_lock:
+                self._stop_failed = True
+            raise
+        else:
+            finish_square_off_stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1841,13 +1922,20 @@ class StrategyScheduler:
         """Return status of all registered runners."""
         result: dict[str, dict[str, Any]] = {}
         for name, runner in self._runners.items():
-            result[name] = {
+            projection = runner.project_status()
+            row = {
                 "state": runner.strategy.state.value,
                 "is_running": runner.is_running,
                 "exchange": runner.strategy.exchange,
                 "tick_count": runner.tick_count,
                 "quarantined": runner.is_quarantined,
+                "reason": projection["reason"],
+                "lifecycle": projection["lifecycle"],
+                "process_state": projection["state"],
             }
+            if projection.get("ownership_retained") is True:
+                row["ownership_retained"] = True
+            result[name] = row
         return result
 
 
