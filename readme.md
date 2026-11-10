@@ -318,7 +318,7 @@ each dependency does, exact-version sources, and the terminal's About screen.
 | Guide | What's inside |
 |---|---|
 | [Roadmap](ROADMAP.md) | What works today, what is in progress, and what comes next |
-| [User Guide](docs/USER_GUIDE.md) | Install, first connection, paper trade, workspace tour |
+| [User Guide](docs/USER_GUIDE.md) | Install, first connection, first Practice order, workspace tour |
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
 | [Technology stack](docs/TECH_STACK.md) | Dependency purposes, version sources, and app build information |

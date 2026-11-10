@@ -8,6 +8,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Mode, broker, and decision-model docs.** The Mode chip is taken from the JWT session claim (`explore`, `practice`, or `live`) and shows **Example**, **Practice**, **Live**, or **Unavailable**. An unconfirmed claim shows Unavailable, never Example. Connected (read) is a broker status, not a Mode and not a menu item. Choosing Practice as Guest opens Setup and does not call `POST /v1/auth/mode`. The Status row is labelled Laya. Its value can be Downloading. `GET /api/v1/operator/status` reports that check as the decision model, under `laya`. The market chip reads Transition only from 7 December 2026. The Practice sandbox is no longer described as paper trading. A broker session still cannot be started from the terminal. Bug reports and the security policy list Practice and Live as Modes. The product modes page is published at `/docs/product-modes`, and `/product-modes` opens that same page.
+
 - **Entry admission and the runner session are separate answers.** `accepts_new_entries` is true only when a new risk-increasing order would be admitted, and it matches order admission and market timings. `session_active` stays true through the runner's exit window, including MCX until 23:55 and NCDEX at the 17:00 gate. The practice strategy tick and the autonomous trader keep running through the exit window. A new risk-increasing order needs both the runner session and admission. An exit or square-off needs only the runner session, so cash auction entry does not open a new order after 15:30. Square-off times, NCDEX standard hours, and the timings payload are unchanged. The old scheduler open check remains as a deprecated alias of the runner session.
 
 - **One session answer.** Order admission, the scheduler, the strategy runner, and market timings read one session decision. Timings publish that live decision, including weekends, exchange holidays, and special sessions. A closed day does not advertise the ordinary close. NCDEX timings use the 17:00 gate close. MCX timings use the 23:30 gate close on an ordinary day, and the Muhurat window on that session. The MCX runner still treats 23:55 as the session end. Cash phase helpers take the session date. The Order Pad session badge follows the dated cash phase, or the selected exchange.
@@ -15,6 +17,48 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **NSE session clock from 7 December 2026.** Cash continuous trading runs until 15:30. The closing auction is 15:30–15:40. Order matching is 15:40–15:45, then a transition until 15:50, and the post-close session stays 15:50–16:00. Cash auction order entry stops from 15:38, when that entry can already have closed at random. Equity derivatives are not in the auction. NSE and BSE equity derivatives run until 15:45. An index contract stops at 15:30 on the expiry written on its symbol. A supplied expiry calendar confirms that date. A new order stays closed when the expiry cannot be read, or when a supplied calendar does not list it. Stock derivatives stay open until 15:45, including on expiry day. Order admission, including a live order and a modify, reads the expiry on the contract symbol and confirms it with the expiry calendar when one is supplied. A new order is refused after that expiry date, and on a Saturday, Sunday, or exchange holiday. A reduce-only exit is not blocked by a missing calendar on a day that symbol is not expiring, and it stays closed when the exchange itself is closed. NSE and BSE index names, including BANKEX, use the index close. The safety check uses the Muhurat session hours and stays closed outside them. The scheduler and the timings API use this same close. Dates before 7 December 2026 keep the current clock, and the Muhurat session still overrides it. Follows SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 October 2026), sections 4.2.4 and 4.2.5, and NSE circulars NSE/CMTR/77355 and NSE/FAOP/77356 (6 November 2026).
 
 - **Electron 45.2.3 desktop shell.** The shell bundles Node 24.22.2. The supported Node floor is `>=22.23.4`; the development target remains Node 24.
+
+- **Unified application shell.** The app bar lists Terminal, Testing,
+  Portfolio, Automation, Reports, Learn, Brokers, Settings, and System.
+  Older addresses open the matching app and keep the query string, hash,
+  and navigation state: `/home` and `/trade` open Terminal, `/invest`
+  opens Portfolio, `/lab` opens Testing, `/automate` and `/ai` open
+  Automation, `/ditto` opens Brokers, `/admin` opens System, and `/login`
+  opens `/welcome`. The public site permanently redirects `/explore`
+  (HTTP 308) to the Demo at `/demo-app/welcome`.
+  The public demo bundle replaces `/explore` with Terminal. An installed
+  build replaces `/explore` with `/welcome`; a signed-in Welcome then
+  continues through `/trade` to Terminal. A signed-out installed visit
+  stays on `/welcome`.
+
+- **Execution sessions, protection grants, diagnostics, incidents,
+  datasets, and knowledge.** Loopback session routes now cover
+  `/api/v1/execution-sessions` (a Testing run keeps the Practice account
+  for that run), `/api/v1/protection/grants`,
+  `GET /api/v1/system/diagnostics`, `/api/v1/system/incidents`,
+  `GET /api/v1/data/datasets`, and `/v1/knowledge` with `/v1/learning`.
+
+- **Mode header check.** When `X-FlintTrade-Mode` is present and differs
+  from the JWT `mode` claim, order routes return HTTP 403
+  `{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}`
+  with no `code` field.
+
+- **Quantity admission.** Before Laya, a lot multiple or a freeze breach
+  is HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
+  once, inline: `Quantity must be a multiple of the lot size (N).` An
+  unverified lot is `Not placed. The lot size for <name> isn't verified.`
+  An order over the per-order freeze limit is refused with HTTP 400 and
+  code `quantity_admission`. The message gives the limit, names the
+  instrument, and asks for smaller orders. The order is not split. The
+  figures are the contract's lot and the broker or exchange freeze limit,
+  not published constants. The Practice sandbox returns an unverified lot as HTTP 400
+  with that message and no `code` field.
+
+- **Exit-all fails closed.** Unavailable position evidence is HTTP 503
+  `Position evidence unavailable; no square-off was sent.` Ambiguous
+  evidence is HTTP 409 `Position evidence is ambiguous; no square-off was sent.`
+  When broker orders cannot be read, a further exit is HTTP 409
+  `exit_orders_unreadable`: `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.`
 
 ### Added
 
@@ -129,10 +173,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
   `python -m flinttrade_core.laya_runtime install` or `start`.
   The CPU install pins `torch==2.14.0+cpu`, `laya==0.3.21`,
   `huggingface_hub==1.33.0`, and `tqdm==4.70.1`
-  in `laya_sidecar_constraints.txt` (no extras; the install requirement
+  in the Laya install constraints file (no extras; the install requirement
   is still `laya[serve]==0.3.21`). The download progress class subclasses
   that pinned `tqdm.auto.tqdm`. Torch is installed first from the CPU
-  index, and the sidecar can share the base interpreter with FlintTrade.
+  index, and the managed Laya process can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
   It is not Ready by default. A first start with the checkpoint missing
   or incomplete downloads the commit named by `[checkpoint] revision`
@@ -148,7 +192,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   `checkpoint.old-<random>` in the same runtime directory, staging is
   renamed onto `checkpoint`, and the old copy is deleted. If that second
   rename fails, the old checkpoint is renamed back, the chip is
-  `download_failed`, and the sidecar does not start. While the download
+  `download_failed`, and the managed Laya process does not start. While the download
   runs, including a pin change, the status word is Downloading (neutral
   colour), not Still loading or Down, and the chip reads "Downloading the model · 1.2 of 3.4 GB".
   The model is about 2.37 GB, and that size is reported once.
@@ -162,14 +206,14 @@ Versioning: [Semantic Versioning](https://semver.org/).
   `unverified` stays when this start did not download. `wrong_revision`
   is only a complete download whose files
   do not match the pin, a snapshot already on disk that this start is not
-  replacing, or a running sidecar that reports another revision or digest.
+  replacing, or a running managed Laya process that reports another revision or digest.
   Leftover staging directories and `checkpoint.old-*` copies are removed
   at the start of `start` once a checkpoint is in place, with no chip change and
   no message. If `checkpoint` is missing after a crash between the two
   renames, the last `checkpoint.old-*` name is restored and checked
   against the pin.
-  The sidecar does not start on files that do not match the pin, including
-  that restored copy. The sidecar always runs offline. When its health
+  The managed Laya process does not start on files that do not match the pin, including
+  that restored copy. The managed Laya process always runs offline. When its health
   document leaves the revision empty, FlintTrade fills the pinned
   revision from the verified manifest, so the chip leaves Still loading.
 
@@ -281,11 +325,11 @@ Versioning: [Semantic Versioning](https://semver.org/).
   replaces that file and does not treat it as missing. A different path
   that is not there still refuses with that same sentence.
   `downloading` has no Next line. The `download_failed` tooltip is
-  "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
+  "Check your connection, then Start Laya again." A signed-in operator can start the managed Laya process from the popover
   (`POST /api/v1/laya/start`); the chip then says Checking in the
   neutral colour, and the popover says Checking Laya…, until the ping
   confirms Ready, Degraded, or a reason other than `not_started`. A
-  confirmed first load still says Still loading. A dead sidecar is reaped
+  confirmed first load still says Still loading. A dead managed Laya process is reaped
   and reported Stopped. A clamp says "Not placed. Laya allows
   up to N." with Place N and Cancel, and never auto-places. Place N
   sends that quantity, and the Practice review panel shows it. A Down
@@ -320,7 +364,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
   The row keeps **Exit pending**. The Live hold is
   for that broker account. When the broker
   order book cannot be read, that refusal is HTTP 409
-  `exit_orders_unreadable`: `Not placed. One exit at a time for <symbol> until your broker's orders load.`
+  `exit_orders_unreadable`: `Not placed. Broker orders for <symbol> are unavailable. Reconcile them before another exit.`
   A signed-out reset with no
   authenticator enrolled reads `Sign in to reset this account. You'll
   need your password.` With an authenticator enrolled it reads `Sign in
