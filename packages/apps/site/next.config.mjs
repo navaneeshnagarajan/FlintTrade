@@ -32,6 +32,9 @@ const nextConfig = {
       afterFiles: [
         { source: '/demo-app', destination: '/demo-app/index.html' },
         { source: '/demo-app/:path*', destination: '/demo-app/index.html' },
+        // Same docs page as /docs/product-modes. A rewrite keeps this address
+        // on the site and returns the generated page.
+        { source: '/product-modes', destination: '/docs/product-modes' },
       ],
     };
   },

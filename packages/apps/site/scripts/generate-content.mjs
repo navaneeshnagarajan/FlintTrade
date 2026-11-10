@@ -66,6 +66,7 @@ const rootDocs = [
   ['disclaimer.md', 'disclaimer', 'Safety', 'Pre-release, no-advice, trading-risk, and user-responsibility notice'],
   ['docs/DESKTOP.md', 'desktop', 'Setup', 'End-user desktop app install, uninstall, configuration, and local build guide'],
   ['docs/USER_GUIDE.md', 'user-guide', 'Docs', 'User guide for local setup and FlintTrade workspaces'],
+  ['docs/product-modes.mdx', 'product-modes', 'Docs', 'Practice and Live are Modes. Connected (read) is a broker status. Example is sample data.'],
   ['docs/DEVELOPER_GUIDE.md', 'developer-guide', 'Contributing', 'Contributor setup and extension guide'],
   ['docs/ARCHITECTURE.md', 'architecture', 'Architecture', 'System architecture and package flow'],
   ['docs/TECH_STACK.md', 'tech-stack', 'Architecture', 'Dependency purposes, version sources, and app build information'],
@@ -211,6 +212,10 @@ async function writeBinaryFileAtomic(destination, content) {
 
 function removeFirstH1(markdown) {
   return markdown.replace(/^#\s+.+\n+/, '').trimStart();
+}
+
+function stripYamlFrontmatter(markdown) {
+  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, '');
 }
 
 function sleep(ms) {
@@ -542,7 +547,7 @@ async function main() {
   const docs = [];
 
   for (const [sourcePath, slug, area, fallbackDescription] of docsToGenerate) {
-    const markdown = await readMarkdown(sourcePath);
+    const markdown = stripYamlFrontmatter(await readMarkdown(sourcePath));
     const title = titleFromMarkdown(markdown, path.basename(slug));
     const description = descriptionFromMarkdown(markdown, fallbackDescription);
     const body = removeFirstH1(normaliseMarkdown(markdown, sourcePath));
@@ -593,6 +598,7 @@ async function main() {
         'index',
         'disclaimer',
         'user-guide',
+        'product-modes',
         'developer-guide',
         'architecture',
         'tech-stack',
