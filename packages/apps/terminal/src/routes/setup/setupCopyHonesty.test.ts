@@ -1,6 +1,7 @@
 /**
  * Setup / Mode Select / Broker Connect must not name a calendar day as a
- * product path. Mode chrome stays Practice, Connected (read), and Live.
+ * product path. Mode chrome stays Example, Practice, and Live.
+ * Connected (read) is a broker status, not a Mode.
  * API smoke is not a Mode label.
  */
 import { readdirSync, readFileSync } from "node:fs";

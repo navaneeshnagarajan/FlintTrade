@@ -38,8 +38,8 @@ runtime proof exist. India and Global keys are not interchangeable.
 
 ### Sandbox terminology
 
-FlintTrade Modes are Practice, Connected (read), and Live.
-Example is sample data, not a Mode. Simulated fills stay named Practice.
+FlintTrade session modes are Practice and Live. Connected (read) is a broker status, not a Mode.
+Example is sample data, not a Mode. An unconfirmed session shows Unavailable. Simulated fills stay named Practice.
 
 ### Deployment security — `TRUST_PROXY_HEADERS`
 

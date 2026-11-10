@@ -217,6 +217,7 @@ export function StatusPill({ message, type = "idle" }: StatusPillProps) {
   };
   return (
     <span
+      role={type === "unknown" ? "status" : undefined}
       className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-mono ${colors[type]}`}
     >
       {type === "pending" && <RefreshCw size={10} className="animate-spin" />}

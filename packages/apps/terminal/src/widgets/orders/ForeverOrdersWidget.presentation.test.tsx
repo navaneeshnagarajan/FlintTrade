@@ -120,9 +120,26 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     it.each([
       { data: [] },
       { data: [{ ...ROW, order_id: "UNRELATED", status: "CANCELLED" }] },
+    ])("a complete list that no longer contains the trigger drops the pending cancel: %j", (query) => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      acknowledge();
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
+      state.list = { ...state.list, dataUpdatedAt: 2000, isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle", ...query };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+      expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
+        .toBeInTheDocument();
+      expect(state.cancelRequest).not.toHaveBeenCalled();
+    });
+
+    it.each([
       { data: undefined, isSuccess: false, isError: true, error: new Error("Listing unavailable") },
       { data: undefined, isSuccess: false, isLoading: true },
       { data: undefined, fetchStatus: "paused" },
+      { data: [], isFetching: true, fetchStatus: "fetching" },
+      { data: [], dataUpdatedAt: 100 },
     ])("retains a visible scoped cancellation warning when the row is absent: %j", (query) => {
       const { rerender } = render(<ForeverOrdersWidget />);
       acknowledge();
@@ -135,7 +152,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
         .toBeInTheDocument();
       expect(state.cancelRequest).not.toHaveBeenCalled();
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED", child_status: "UNKNOWN" }],
-        isSuccess: true, isError: false, isLoading: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
+        isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle", dataUpdatedAt: 3000 };
       rerender(<ForeverOrdersWidget />);
       expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(screen.queryByText(/child closed|child filled|child cancelled/i)).not.toBeInTheDocument();
@@ -147,9 +164,11 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       acknowledge();
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
       state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 2000 };
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByText("CANCELLED")).toBeInTheDocument();
+      expect(screen.getByText("Order cancelled")).toBeInTheDocument();
       expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
       expect(state.cancelRequest).not.toHaveBeenCalled();
     });
@@ -160,14 +179,21 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       rerender(<ForeverOrdersWidget />);
       state.cancel = { ...state.cancel, submittedAt: 600,
         variables: { broker: "dhan", account_id: "A", order_id: "TRIGGER-2" } };
-      state.list = { ...state.list, data: [], dataUpdatedAt: 2000 };
+      state.list = { ...state.list, data: [], dataUpdatedAt: 2000, fetchStatus: "paused", isSuccess: false };
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).toHaveTextContent("Cancellation requested");
       expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toHaveTextContent("Cancellation requested");
-      state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 3000 };
+      state.list = {
+        ...state.list,
+        data: [{ ...ROW, status: "CANCELLED" }, { ...ROW, order_id: "TRIGGER-2", status: "ACTIVE" }],
+        dataUpdatedAt: 3000,
+        isSuccess: true, isError: false, isLoading: false, isFetching: false, fetchStatus: "idle",
+      };
       rerender(<ForeverOrdersWidget />);
       expect(screen.queryByRole("alert", { name: `Cancellation for ${ROW.order_id}` })).not.toBeInTheDocument();
-      expect(screen.getByRole("alert", { name: "Cancellation for TRIGGER-2" })).toBeInTheDocument();
+      expect(screen.getByText("Order cancelled")).toBeInTheDocument();
+      expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("alert", { name: "Cancellation for TRIGGER-2" })).not.toBeInTheDocument();
     });
 
     it("contradictory trigger identities cannot reconcile a matching cancellation ACK", () => {
@@ -361,9 +387,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
   });
 
   describe.each(["place", "modify"] as const)("%s write outcomes", (operation) => {
-    const warning = operation === "place"
-      ? "GTT placement status unknown. A trigger or order may still execute."
-      : "GTT modification status unknown. The trigger or order may still execute.";
+    const warning = "Order status unknown. Check Forever Orders before trying again.";
 
     it.each([
       new TypeError("Failed to fetch"),
@@ -378,6 +402,7 @@ describe("ForeverOrdersWidget truthful presentation", () => {
       const { rerender } = render(<ForeverOrdersWidget />);
       expect(screen.getByText(warning)).toBeInTheDocument();
       expect(screen.getByText(error.message)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       expect(screen.getByText(ROW.symbol)).toBeInTheDocument();
       rerender(<ForeverOrdersWidget />);
       expect(screen.getByText(warning)).toBeInTheDocument();
@@ -410,12 +435,76 @@ describe("ForeverOrdersWidget truthful presentation", () => {
     });
   });
 
-  it("keeps a lost cancellation response uncertain and retains its details", () => {
+  it("keeps a lost cancellation response as a request and retains its details", () => {
     state.cancel = { ...state.cancel, isError: true, variables: { broker: "dhan", account_id: "A", order_id: ROW.order_id }, error: new TypeError("Connection lost") };
     render(<ForeverOrdersWidget />);
-    expect(screen.getByText("Cancel status unknown. This order may still fill.")).toBeInTheDocument();
+    expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancel status unknown. This order may still fill.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(screen.getByText("Connection lost")).toBeInTheDocument();
     expect(screen.getByText(ROW.symbol)).toBeInTheDocument();
+    expect(state.cancel.mutate).not.toHaveBeenCalled();
+  });
+
+  it("a dropped cancel becomes Order cancelled when the trigger row is later CANCELLED", () => {
+    const { rerender } = render(<ForeverOrdersWidget />);
+    state.cancel = {
+      ...state.cancel, isError: true, submittedAt: 500,
+      variables: { broker: "dhan", account_id: "A", order_id: ROW.order_id },
+      error: new TypeError("Failed to fetch"),
+    };
+    rerender(<ForeverOrdersWidget />);
+    expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(state.cancel.mutate).not.toHaveBeenCalled();
+    state.list = { ...state.list, data: [{ ...ROW, status: "CANCELLED" }], dataUpdatedAt: 2000 };
+    rerender(<ForeverOrdersWidget />);
+    expect(screen.getByText("Order cancelled")).toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(state.cancel.mutate).not.toHaveBeenCalled();
+  });
+
+  it.each(["TRIGGERED", "FILLED"])(
+    "a dropped cancel followed by %s does not claim the cancel is still pending", (status) => {
+      const { rerender } = render(<ForeverOrdersWidget />);
+      state.cancel = {
+        ...state.cancel, isError: true, submittedAt: 500,
+        variables: { broker: "dhan", account_id: "A", order_id: ROW.order_id },
+        error: new TypeError("Failed to fetch"),
+      };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getAllByText("Cancellation requested").length).toBeGreaterThan(0);
+      state.list = { ...state.list, data: [{ ...ROW, status }], dataUpdatedAt: 2000 };
+      rerender(<ForeverOrdersWidget />);
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+      expect(screen.getByText("Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders."))
+        .toBeInTheDocument();
+      expect(state.cancel.mutate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows a broker rejection instead of an unknown Forever order", () => {
+    const error = Object.assign(new Error("GTT rejected by broker"), {
+      status: 500,
+      body: {
+        status: "error",
+        message: "GTT rejected by broker",
+        order_outcome: "rejected",
+        reason: "broker_rejected",
+      },
+    });
+    state.place = {
+      ...state.place, isError: true,
+      variables: { broker: "dhan", account_id: "A" }, error,
+    };
+    render(<ForeverOrdersWidget />);
+    expect(screen.getByText("GTT rejected by broker")).toBeInTheDocument();
+    expect(screen.queryByText("Order status unknown. Check Forever Orders before trying again.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(state.place.mutate).not.toHaveBeenCalled();
   });
 
   it("shows a verified empty book only after successful evidence", () => {

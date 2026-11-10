@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from flinttrade_core.models import OHLCV, Order, Quote
 
+from .state_manager import InvalidTransitionError
 from .strategy_execution import StrategyExecutionContract, StrategyExecutionMode
 
 logger = logging.getLogger("flinttrade.engine.strategy")
@@ -109,11 +110,15 @@ class BaseStrategy(ABC):
 
     def _apply_lifecycle_transition(self, event: str) -> None:
         permitted, destination = self._TRANSITIONS[event]
-        if self.state in permitted:
-            self._state = destination
-            if event == "start":
-                self._error_message = ""
-            logger.info("Strategy %s: %s -> %s", self.name, event, destination)
+        if self.state not in permitted:
+            allowed = ", ".join(sorted(state.value for state in permitted))
+            raise InvalidTransitionError(
+                f"Strategy {self.name!r} cannot {event} from {self.state.value}. Permitted: {allowed}"
+            )
+        self._state = destination
+        if event == "start":
+            self._error_message = ""
+        logger.info("Strategy %s: %s -> %s", self.name, event, destination)
 
     def start(self) -> None:
         self._apply_lifecycle_transition("start")
@@ -211,7 +216,7 @@ class StrategyRegistry:
     def unregister(self, name: str) -> None:
         self._classes.pop(name, None)
         instance = self._instances.pop(name, None)
-        if instance is not None:
+        if instance is not None and instance.state is not StrategyState.STOPPED:
             instance.stop()
 
     def list_registered(self) -> list[str]:
@@ -241,11 +246,18 @@ class StrategyRegistry:
 
     def enable(self, name: str) -> None:
         strategy = self._instance(name)
-        (strategy.resume if strategy.state is StrategyState.PAUSED else strategy.start)()
+        if strategy.state is StrategyState.PAUSED:
+            strategy.resume()
+        elif strategy.state is not StrategyState.ACTIVE:
+            strategy.start()
 
     def disable(self, name: str) -> None:
-        self._instance(name).pause()
+        strategy = self._instance(name)
+        if strategy.state is StrategyState.ACTIVE:
+            strategy.pause()
 
     def stop_all(self) -> None:
         for name in tuple(self._instances):
-            self._instances[name].stop()
+            strategy = self._instances[name]
+            if strategy.state is not StrategyState.STOPPED:
+                strategy.stop()

@@ -3,7 +3,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { captureOperatorIncidentScope, type OperatorIncidentScope } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
-import type { AppMode } from "@/stores/modeStore";
+import type { AppMode, SessionMode } from "@/stores/modeStore";
+import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 
 export class FtApiError<T = unknown> extends Error {
   readonly status: number;
@@ -189,9 +190,12 @@ export async function accountMutation<T>(
 export async function postWithMode<T>(
   endpoint: string,
   body: object,
-  mode: AppMode,
+  mode: SessionMode,
   signal?: AbortSignal,
 ): Promise<T> {
+  if (mode === "unavailable") {
+    throw new OrderPreflightRefusal("Unavailable. No order was sent.");
+  }
   const incidentScope = captureOperatorIncidentScope();
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",

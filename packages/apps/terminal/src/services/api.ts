@@ -2301,16 +2301,22 @@ async function postOrder<T>(
   authority?: PostOrderAuthorityPin,
   options?: PlaceOrderOptions,
 ): Promise<T> {
+  // A session with no usable mode claim must not place, including the
+  // Explore sample fill. Never treat that claim as Live.
+  const sessionMode = useModeStore.getState().mode;
+  if (sessionMode === "unavailable") {
+    throw new OrderPreflightRefusal("Unavailable. No order was sent.");
+  }
+  const currentModeForExplore = sessionMode;
   // Explore paper fill for place only. Checked before the generic mode-pin
   // mismatch so Order Pad can confirm with a Practice pin while the store is
   // still Explore. Live pins are still refused. The `placeOrder` export must
   // stay a brace-depth-0 `postOrder("place", …)` call so the orders-contract
   // lexer keeps seeing the Live frontend caller.
-  const currentModeForExplore = useModeStore.getState().mode;
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new OrderPreflightRefusal(
-        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentModeForExplore)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2321,10 +2327,10 @@ async function postOrder<T>(
   }
 
   // Read the current operating mode and auth state to assemble headers.
-  const currentMode = useModeStore.getState().mode;
+  const currentMode = sessionMode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new OrderPreflightRefusal(
-      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentMode)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
