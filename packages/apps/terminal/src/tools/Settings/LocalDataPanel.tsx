@@ -171,7 +171,7 @@ export function LocalDataPanel() {
       <div className="p-3 rounded bg-surface-card border border-border-default space-y-2">
         <div className="flex items-center gap-2 text-xs font-semibold text-text-primary">
           <Activity size={13} /> Tick capture
-          <span className={`text-[10px] px-1.5 py-0.5 rounded ${tickState.className}`}>{tickState.label}</span>
+          <span className={`text-[12px] px-1.5 py-0.5 rounded ${tickState.className}`}>{tickState.label}</span>
         </div>
         {tickQuery.isPending ? (
           <div className="text-xs text-text-muted flex items-center gap-1">
@@ -226,7 +226,7 @@ export function LocalDataPanel() {
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wide text-text-muted">
+              <tr className="text-[12px] uppercase tracking-wide text-text-muted">
                 <th className="text-left font-medium py-0.5">Table</th>
                 <th className="text-right font-medium py-0.5">Rows</th>
                 <th className="text-right font-medium py-0.5">Symbols</th>

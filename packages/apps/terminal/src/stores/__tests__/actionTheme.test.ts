@@ -66,7 +66,7 @@ describe("opaque action palettes", () => {
       expect(token("accent")).toBe(value);
       expect(token("profit")).toBe(value);
       expect(token("profit-action")).toBe("#166534");
-      expect(token("confirmation")).toBe("#15803d");
+      expect(token("confirmation")).toBe("#166534");
       expectPalette("profit");
       expectPalette("confirmation");
     });

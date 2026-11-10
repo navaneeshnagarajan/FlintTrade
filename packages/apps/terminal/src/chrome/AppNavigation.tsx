@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useDeveloperEnabled } from "./DeveloperPreference";
 import { HelpFooterSlot } from "@/components/help/HelpFooter";
+import { formatExchangeClock } from "./exchangeClock";
 
 export function AppNavigation() {
   const developer = useDeveloperEnabled();
@@ -29,7 +30,7 @@ export function SystemStatusBar() {
     <span>RAM: {percent(metric(data?.memory).used_pct, metric(data?.memory).scope)}</span>
     <span>GPU: {percent(metric(data?.gpu).used_pct, metric(data?.gpu).scope)}</span>
     <span title="No measured browser-to-core timing source is connected to this bar">Browser RTT: Unmeasured</span>
-    <span className="ml-auto">{data && health.dataUpdatedAt ? `Received ${new Date(health.dataUpdatedAt).toLocaleTimeString()}` : "No host measurement"}</span>
+    <span className="ml-auto">{data && health.dataUpdatedAt ? `Received ${formatExchangeClock(new Date(health.dataUpdatedAt))}` : "No host measurement"}</span>
     <HelpFooterSlot />
   </footer>;
 }

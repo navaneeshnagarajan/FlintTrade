@@ -157,7 +157,7 @@ export function AuthenticatorEnrolment() {
               <QRCodeSVG value={material.totpUri} size={148} aria-label="Authenticator QR code" />
             </div>
             {secret && (
-              <p className="text-[11px] text-text-muted text-center">
+              <p className="text-[12px] text-text-muted text-center">
                 Or enter the key manually:
                 <br />
                 <span className="font-mono text-text-secondary break-all" aria-label="Manual authenticator key">
