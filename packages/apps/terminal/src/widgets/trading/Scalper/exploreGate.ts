@@ -5,7 +5,7 @@
  * Confirm Order and never places. Practice / Live keep the Confirm path.
  */
 
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 export const EXPLORE_SCALPER_ORDER_HELPER =
   "Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.";
@@ -13,6 +13,6 @@ export const EXPLORE_SCALPER_ORDER_HELPER =
 export const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for Example";
 
 /** True when Scalper may open Confirm or accept a one-click place. */
-export function scalperOrdersArmed(mode: AppMode): boolean {
-  return mode !== "explore";
+export function scalperOrdersArmed(mode: SessionMode): boolean {
+  return mode === "practice" || mode === "live";
 }

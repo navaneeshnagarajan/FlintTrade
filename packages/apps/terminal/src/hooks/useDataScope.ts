@@ -4,20 +4,21 @@ import {
   brokerAccountKey,
   useBrokerStore,
 } from "@/stores/brokerStore";
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
+import { useModeStore } from "@/stores/modeStore";
 import type { BrokerAccount } from "@/types/broker";
 import { resolveMarketDataScope, resolveNativeDataAccount } from "@/lib/marketDataScope";
 export { resolveMarketDataScope, resolveNativeDataAccount } from "@/lib/marketDataScope";
 
 export interface DataScopeInput {
-  mode: AppMode;
+  mode: SessionMode;
   accounts: BrokerAccount[];
   activeAccountId: string | null;
 }
 
 /** Immutable authority identity shared by query keys, transports, and actions. */
 export interface AccountAuthorityIdentity {
-  readonly mode: AppMode;
+  readonly mode: SessionMode;
   readonly scopeKey: string;
   readonly brokerType: string;
   readonly accountId: string;
@@ -43,6 +44,14 @@ export function resolveAccountAuthorityIdentity({
       scopeKey: "practice:sandbox:default",
       brokerType: "sandbox",
       accountId: "default",
+    });
+  }
+  if (mode === "unavailable") {
+    return Object.freeze({
+      mode,
+      scopeKey: "unavailable",
+      brokerType: "unavailable",
+      accountId: "none",
     });
   }
 

@@ -63,6 +63,14 @@ function connectBroker() {
   });
 }
 
+function sessionJwt(mode?: string): string {
+  const payload = btoa(JSON.stringify(mode === undefined ? { typ: "session" } : { mode, typ: "session" }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  return `header.${payload}.sig`;
+}
+
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -109,6 +117,37 @@ describe("ModeIndicator", () => {
       expect(chip).not.toHaveTextContent(/Paper|Sandbox/);
       expect(chip).not.toHaveTextContent(/explore/i);
       expect(screen.queryByText("EXPLORE")).not.toBeInTheDocument();
+    });
+
+    it("paints Practice when the cache says live and the session token is Practice", async () => {
+      const token = sessionJwt("practice");
+      localStorage.setItem(
+        "flinttrade:mode",
+        JSON.stringify({ state: { mode: "live" }, version: 2 }),
+      );
+      sessionStorage.setItem(
+        "flinttrade:auth-session",
+        JSON.stringify({ token, username: "operator", expiresAt: "" }),
+      );
+      vi.resetModules();
+      const freshMode = await import("@/stores/modeStore");
+      const { default: FreshIndicator } = await import("../ModeIndicator");
+      render(<FreshIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent(/^Practice$/);
+      expect(chip).not.toHaveTextContent(/Live/);
+      expect(freshMode.useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("names Unavailable when the session claim is missing and does not fall through to Live", () => {
+      useModeStore.setState({ mode: "unavailable" });
+      render(<ModeIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent(/^Unavailable$/);
+      expect(chip).not.toHaveTextContent(/Live|Practice|Example|Connected/);
+      expect(useModeStore.getState().mode).not.toBe("live");
     });
 
     it("opens Practice, Connected (read), and Live without the Live dialog", async () => {

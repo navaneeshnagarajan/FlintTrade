@@ -972,6 +972,10 @@ function OrderPadWidget(props: WidgetProps) {
   ): Promise<boolean> => {
     const incidentScope = captureOperatorIncidentScope();
     const submissionMode = useModeStore.getState().mode;
+    if (submissionMode === "unavailable") {
+      showToast("error", "Unavailable. No order was sent.", 6000);
+      return false;
+    }
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
     setNativeDisclosure(null);
@@ -1292,6 +1296,7 @@ function OrderPadWidget(props: WidgetProps) {
       setValue("qty", quantity, { shouldValidate: true });
     }
     const modeAtClick = useModeStore.getState().mode;
+    if (modeAtClick === "unavailable") return;
     const mode = review
       ? "practice"
       : modeAtClick === "live"
@@ -2022,7 +2027,7 @@ function OrderPadWidget(props: WidgetProps) {
       {/* Toast */}
       <Toast msg={toast?.scopeKey === dataScope ? toast : null} />
 
-      {practiceReview ? (
+      {practiceReview && appMode !== "unavailable" ? (
         <PracticeOrderReviewStage
           mode={appMode === "live" ? "practice" : appMode}
           review={practiceReview}

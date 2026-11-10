@@ -43,6 +43,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.
+
 - **Workspace log teardown.** Building the backend again in the same process closes the previous workspace log only while that file is still the one the handler opened. A descriptor that is already gone does not abort startup. A descriptor number the kernel has given to another file stays open.
 
 - **Uncertain order outcomes.** A submit whose response was dropped, timed out, or came back without a definitive broker or engine result says "Order status unknown. Check Orders before trying again." The order pad, positions, and other submit surfaces do not show that as a rejection and do not offer a retry. A cancel that was only acknowledged says "Cancellation requested". "Order cancelled" appears only after the order status is confirmed cancelled. Practice and Live use the same sentences. The order API, the practice agent, and the MCP order-intent result add `order_outcome` and `reason` beside the existing status. A retry still cannot create a second order while the dispatch ledger holds an unknown write.

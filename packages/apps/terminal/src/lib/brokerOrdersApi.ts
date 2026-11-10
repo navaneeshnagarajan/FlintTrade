@@ -143,6 +143,7 @@ export interface CancelAllParams {
 // ---------------------------------------------------------------------------
 
 import { captureOperatorIncidentScope } from "./operatorIncidentScope";
+import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 function withNativeBrokerTarget<T extends BrokerTarget>(target: T): T {
@@ -181,8 +182,12 @@ async function request<T>(
   const incidentScope = captureOperatorIncidentScope();
   const mode = useModeStore.getState().mode;
   // Every non-GET here is a live broker-management WRITE (forever/GTT, super,
-  // conditional-trigger, multi, cancel-all, cancel-smart). Fail closed on the
-  // An exact, confirmed native selection is required for every broker write.
+  // conditional-trigger, multi, cancel-all, cancel-smart). A missing mode
+  // claim does not send that write. An exact, confirmed native selection is
+  // required for every broker write.
+  if (method !== "GET" && mode === "unavailable") {
+    throw new OrderPreflightRefusal("Unavailable. No order was sent.");
+  }
   if (method !== "GET") {
     assertNativeWriteTargetReadyOrThrow(
       mode,
@@ -201,7 +206,10 @@ async function request<T>(
   try {
     resp = await fetch(url, {
       method,
-      headers: buildHeaders(hasBody, method !== "GET" ? mode : undefined),
+      headers: buildHeaders(
+        hasBody,
+        method !== "GET" && mode !== "unavailable" ? mode : undefined,
+      ),
       body: hasBody ? JSON.stringify(options.body) : undefined,
     });
   } catch {

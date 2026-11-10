@@ -36,6 +36,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useLiveArmFactors } from "@/hooks/useTotpEnrolled";
+import { sessionModeFromToken } from "@/lib/modeClaim";
 import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
 import {
   CREATE_A_PIN,
@@ -90,26 +91,31 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
 
-  const showConnectedRead = readPosture && brokerConnected && mode === "practice";
-  const chipLabel = mode === "live"
-    ? "Live"
-    : showConnectedRead
-      ? "Connected (read)"
-      : mode === "practice"
-        ? "Practice"
-        : "Example";
+  const unavailable = mode === "unavailable";
+  const showConnectedRead = !unavailable && readPosture && brokerConnected && mode === "practice";
+  const chipLabel = unavailable
+    ? "Unavailable"
+    : mode === "live"
+      ? "Live"
+      : showConnectedRead
+        ? "Connected (read)"
+        : mode === "practice"
+          ? "Practice"
+          : "Example";
 
   useEffect(() => {
     setConnectedReadPosture(showConnectedRead);
     return () => setConnectedReadPosture(false);
   }, [showConnectedRead]);
-  const chipClass = mode === "live"
-    ? CHIP_CLASS.live
-    : showConnectedRead
-      ? CHIP_CLASS.connectedRead
-      : mode === "practice"
-        ? CHIP_CLASS.practice
-        : CHIP_CLASS.example;
+  const chipClass = unavailable
+    ? CHIP_CLASS.example
+    : mode === "live"
+      ? CHIP_CLASS.live
+      : showConnectedRead
+        ? CHIP_CLASS.connectedRead
+        : mode === "practice"
+          ? CHIP_CLASS.practice
+          : CHIP_CLASS.example;
 
   const switchToPractice = useCallback(async () => {
     setToggleError("");
@@ -124,6 +130,13 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       const authState = useAuthStore.getState();
       const newToken = await downgradeMode("practice", authState.token);
       if (!updateToken(newToken, authState.sessionGeneration)) return false;
+      // The new token's claim is the desk mode. An opaque test token has
+      // no claim, so the explicit Practice assignment still applies.
+      if (sessionModeFromToken(newToken)) {
+        useModeStore.getState().adoptSessionToken(newToken);
+      } else {
+        setMode("practice");
+      }
     } catch {
       setToggleError(
         mode === "live"
@@ -132,7 +145,6 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       );
       return false;
     }
-    setMode("practice");
     return true;
   }, [mode, setMode, token, updateToken]);
 
@@ -165,6 +177,11 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       // does, and only after the server accepts the PIN and enrolment check.
       const { token: newToken } = await confirmLiveMode(pin);
       if (!updateToken(newToken, expectedGeneration)) return;
+      if (sessionModeFromToken(newToken)) {
+        useModeStore.getState().adoptSessionToken(newToken);
+      } else {
+        setMode("live");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message.trim() : "";
       setPinError(message || "Incorrect PIN. Try again.");
@@ -173,7 +190,6 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     setPinError("");
     setConfirmOpen(false);
     setReadPosture(false);
-    setMode("live");
   }, [pin, setMode, updateToken]);
 
   const handleCancel = useCallback(() => {
@@ -182,7 +198,7 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     setPinError("");
   }, []);
 
-  const ChipIcon = mode === "live" ? Zap : showConnectedRead ? Eye : mode === "practice" ? FlaskConical : Compass;
+  const ChipIcon = unavailable ? Compass : mode === "live" ? Zap : showConnectedRead ? Eye : mode === "practice" ? FlaskConical : Compass;
 
   return (
     <div className="flex items-center gap-2">

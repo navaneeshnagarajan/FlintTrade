@@ -96,12 +96,15 @@ export interface InvestContextValue {
  * stays at 0.
  */
 export function resolveInvestHoldings(
-  mode: AppMode,
+  mode: AppMode | "unavailable",
   liveHoldings: Holding[],
   brokerConnected = false,
   holdingsQuerySettled = true,
   hasAccountSnapshot = false,
 ): { holdings: Holding[]; isSampleData: boolean } {
+  if (mode === "unavailable") {
+    return { holdings: [], isSampleData: false };
+  }
   if (mode === "explore") {
     return { holdings: getDemoHoldings(), isSampleData: true };
   }

@@ -6,7 +6,8 @@
  * not a JWT mode. The public web demo is not a Mode.
  */
 
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
+import { useModeStore } from "@/stores/modeStore";
 
 export const EXAMPLE_LABEL = "Example";
 export const DEMO_EXAMPLE_LABEL = "Demo (example data)";
@@ -27,9 +28,10 @@ export function setConnectedReadPosture(active: boolean): void {
  * Connected (read) applies only while that posture is on a practice session.
  */
 export function operatorModeName(
-  mode: AppMode = useModeStore.getState().mode,
+  mode: SessionMode = useModeStore.getState().mode,
   connectedRead: boolean = connectedReadPosture,
-): OperatorFacingLabel {
+): OperatorFacingLabel | "Unavailable" {
+  if (mode === "unavailable") return "Unavailable";
   if (mode === "live") return "Live";
   if (mode === "practice" && connectedRead) return "Connected (read)";
   if (mode === "practice") return "Practice";
