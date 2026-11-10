@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 export = [
-    "reportlab==5.0.1",
+    "reportlab==5.1.0",
 ]
 
 [build-system]

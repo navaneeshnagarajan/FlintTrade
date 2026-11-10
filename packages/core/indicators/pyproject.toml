@@ -6,11 +6,11 @@ requires-python = ">=3.14"
 dependencies = [
     "numpy==2.5.4",
     "pydantic==2.14.1",
-    "numba==0.68.0; extra == 'numba'",
+    "numba==0.68.1; extra == 'numba'",
 ]
 
 [project.optional-dependencies]
-numba = ["numba==0.68.0"]
+numba = ["numba==0.68.1"]
 
 [build-system]
 requires = ["hatchling"]
