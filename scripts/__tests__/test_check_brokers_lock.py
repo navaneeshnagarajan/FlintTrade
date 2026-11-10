@@ -148,11 +148,12 @@ def test_repo_kotak_pin_is_the_reviewed_runtime_and_release() -> None:
     runtime = next(package for package in uv_lock["package"] if package["name"] == "kotakneoapi")
 
     assert neo["version"] == "3.0.9"
-    assert neo["release_version"] == "3.0.7"
+    assert neo["release_version"] == "3.0.9"
     assert neo["source_commit"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
     assert neo["source_tree"] == "b4a597ca4fb3a2c1a591907e00e80e35a7ee1533"
-    assert neo["release_tag"] == "v3.0.7"
-    assert neo["release_commit"] == "53cccc45fe56a193b30ffce3c03c71c5c0378538"
+    assert neo["release_tag"] == "v3.0.9"
+    assert neo["release_commit"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
+    assert neo["release_tree"] == "b4a597ca4fb3a2c1a591907e00e80e35a7ee1533"
     assert runtime["source"]["git"] == (
         "https://github.com/Kotak-Neo/kotak-neo-python.git?rev="
         "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3#0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"

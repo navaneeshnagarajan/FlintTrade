@@ -584,6 +584,10 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
     cancels the first when it triggers (forever.md "Create Forever Order"). The
     trio is all-or-nothing: a partial OCO leg raises rather than silently
     placing a SINGLE order without the protective leg.
+
+    ``dhanhq`` 2.3.0 ``place_forever`` identifies the scrip by ``security_id``
+    and does not accept ``symbol``. These kwargs are the whole call, so a
+    trading symbol never reaches the SDK.
     """
     core = _validated_core(order, security_id)
     # Forever creation has a narrower schema than ordinary/margin/modify/read.

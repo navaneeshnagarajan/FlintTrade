@@ -59,7 +59,7 @@ SDK_SOURCES: dict[str, BrokerSdkSource] = {
         repo_name="kotak-neo-python",
         git_url="https://github.com/Kotak-Neo/kotak-neo-python.git",
         pypi_name="kotakneoapi",
-        notes="Kotak Neo v3: immutable Git main runtime with separate PyPI release evidence.",
+        notes="Kotak Neo v3 freshness follows the pinned release tag and commit, not default-branch HEAD.",
     ),
     "growwapi": BrokerSdkSource(
         package="growwapi",
@@ -325,7 +325,10 @@ def build_readme(manifest: dict[str, Any]) -> str:
         if entry.get("git"):
             lines.append(f"  - git: {entry['git']['path']} @ {entry['git']['describe']}")
             if "git_current" in entry:
-                status = "current" if entry["git_current"] else "locked behind upstream HEAD"
+                if entry["package"] == "kotakneoapi":
+                    status = "current" if entry["git_current"] else "locked behind the pinned release"
+                else:
+                    status = "current" if entry["git_current"] else "locked behind upstream HEAD"
                 lines.append(f"  - git status: {status}")
         if entry.get("pypi"):
             lines.append(f"  - pypi: {entry['pypi']['path']}")
@@ -386,7 +389,27 @@ def sync(
         if source.git_url:
             git = sync_git_mirror(source, audit_root)
             sdk_record["git"] = git
-            if entry["source_commit"]:
+            if entry["name"] == "kotakneoapi":
+                # Default-branch HEAD is recorded on the audit mirror, but it is
+                # not the freshness gate. A move on upstream main must not fail
+                # the pin while the locked release tag still peels to the same
+                # commit and tree.
+                release_commit = entry.get("release_commit", "")
+                if release_commit:
+                    sdk_record["git_current"] = str(git.get("release_commit", "")) == release_commit
+                compared = (
+                    ("release_tag", "latest_stable_tag", "release-tag"),
+                    ("release_commit", "release_commit", "release-commit"),
+                    ("release_tree", "release_tree", "release-tree"),
+                )
+                for locked_field, observed_field, drift_source in compared:
+                    locked = entry.get(locked_field, "")
+                    observed = git.get(observed_field, "")
+                    if locked and observed != locked:
+                        manifest["drift"].append(
+                            {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
+                        )
+            elif entry["source_commit"]:
                 current = str(git.get("head", "")) == entry["source_commit"]
                 sdk_record["git_current"] = current
                 if not current:
@@ -398,19 +421,6 @@ def sync(
                             "upstream": str(git.get("head", "")),
                         }
                     )
-            if entry["name"] == "kotakneoapi":
-                for locked_field, observed_field, drift_source in (
-                    ("source_tree", "head_tree", "git-tree"),
-                    ("release_tag", "latest_stable_tag", "release-tag"),
-                    ("release_commit", "release_commit", "release-commit"),
-                    ("release_tree", "release_tree", "release-tree"),
-                ):
-                    locked = entry.get(locked_field, "")
-                    observed = git.get(observed_field, "")
-                    if locked and observed != locked:
-                        manifest["drift"].append(
-                            {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
-                        )
         if source.pypi_name:
             release_version = entry.get("release_version", entry["version"])
             latest = latest_pypi_version(source.pypi_name, opener)

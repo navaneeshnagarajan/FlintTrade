@@ -7,8 +7,8 @@ constraint-dependencies = ["plotly==6.9.0"]
 # `pip install --require-hashes -r requirements.lock`. The resulting advisory
 # is time-limited in supply-chain/pip-audit-allowlist.yml.
 
-# Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
-# retained as separate release-compatibility evidence in brokers.lock.
+# Kotak v3 runtime and release baseline both follow the pinned v3.0.9
+# commit in brokers.lock. Freshness compares that release, not default-branch HEAD.
 build-constraint-dependencies = [
     "packaging==26.3",
     "setuptools==84.1.0",
