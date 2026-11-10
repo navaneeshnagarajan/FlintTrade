@@ -13,7 +13,7 @@ export type OrderAction = "BUY" | "SELL";
 export type ProductType = "MIS" | "NRML";
 export type OrderTypeValue = "MARKET" | "LIMIT";
 export type IntervalValue = "1m" | "3m" | "5m" | "15m";
-export type StatusType = "idle" | "success" | "error" | "pending";
+export type StatusType = "idle" | "success" | "error" | "pending" | "unknown";
 
 export interface PendingOrder {
   sym: string;

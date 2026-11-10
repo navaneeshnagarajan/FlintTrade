@@ -219,7 +219,7 @@ def test_existing_error_policy_preserves_http_invocation_and_holds(policy_stack,
         "This operation (cancel) is not yet available for broker 'dhan'." if route == "cancel" else
         "This operation (modify_super_order) is not yet available for broker 'dhan'."
     )
-    expected_message = failure if after else {
+    expected_message = "Order status unknown. Check Orders before trying again." if after else {
         403: subject + " refused", 429: subject + " refused by rate guard",
         503: disconnected, 501: unavailable,
     }.get(status, failure)
@@ -234,6 +234,9 @@ def test_existing_error_policy_preserves_http_invocation_and_holds(policy_stack,
     expected_body = {"status": "error", "message": expected_message, "affected_item": affected,
                      "dispatch_outcome": "unknown_after_dispatch" if after else "refused_before_dispatch",
                      "retry_safe": False}
+    if after:
+        expected_body["order_outcome"] = "unknown"
+        expected_body["reason"] = "response_unconfirmed"
     if kind == "broker":
         expected_body["broker_code"] = "503"
     assert response.status_code == expected_status, body
@@ -281,7 +284,16 @@ def test_existing_success_is_ack_only_and_real_one_shot_replay_is_refused(policy
     assert response.status_code == 200, body
     assert stack["consumed"] == [True] and stack["invoked"] == [True] and len(stack["wire"]) == 1
     assert not {"filled", "filled_quantity", "closed", "dispatch_outcome", "retry_safe"}.intersection(body)
-    assert "data" in body if stack["route"] != "cancel" else body == {"status": "success", "orderid": "policy-order"}
+    if stack["route"] == "cancel":
+        assert body == {
+            "status": "success",
+            "orderid": "policy-order",
+            "order_outcome": "cancel_requested",
+            "reason": "awaiting_confirmation",
+            "message": "Cancellation requested",
+        }
+    else:
+        assert "data" in body
     captured = stack["minted"][0]
     context = captured["context"]
     assert context.adapter_id == "dhan" and context.account_id == "route-account"

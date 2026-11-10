@@ -32,9 +32,10 @@ describe('site marketing copy after the native HTTP freeze', () => {
     expect(marketing).not.toContain('currently verified native');
   });
 
-  it('presents only native adapters with evidence-gated availability', () => {
-    expect(homepage).toMatch(/Six native adapters with evidence-gated availability/);
+  it('presents native adapters as evidence-gated, with no working session', () => {
+    expect(homepage).toMatch(/Supported native brokers/);
     expect(homepage).toContain('Broker sessions are not available in the terminal yet.');
+    expect(homepage).toMatch(/evidence-gated/);
   });
 
   it('states that a broker session cannot be started from the terminal today', () => {

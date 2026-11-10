@@ -24,13 +24,15 @@ import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hook
 import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
+import { EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
 import { ScalperChartPanel } from "./ScalperChartPanel";
 import { CancelAllDialog, CloseAllDialog, OrderConfirmModal } from "./ScalperDialogs";
-import { EXPLORE_SCALPER_ORDER_HELPER, scalperOrdersArmed } from "./exploreGate";
+import { scalperOneClickTitle, scalperOrderBlockCopy, scalperOrdersArmed } from "./exploreGate";
 import { buildOptionSymbol, roundToStrike } from "./helpers";
 import {
   DEFAULT_SYMBOL,
@@ -96,6 +98,8 @@ function ScalperWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
   const ordersArmed = scalperOrdersArmed(mode);
+  const orderBlockCopy = scalperOrderBlockCopy(mode);
+  const oneClickLockedTitle = scalperOneClickTitle(mode);
   const pinnedSymbol = typeof props.params?.symbol === "string" ? props.params.symbol : undefined;
   const isPinned = typeof pinnedSymbol === "string" && pinnedSymbol in INDEX_CONFIG;
   const [symbol, setSymbol] = useState(isPinned ? pinnedSymbol : DEFAULT_SYMBOL);
@@ -333,7 +337,7 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       if (!ordersArmed) {
-        showStatus(EXPLORE_SCALPER_ORDER_HELPER, "error");
+        showStatus(orderBlockCopy ?? "", "error");
         return;
       }
       const modeRefusal = checkOrderEntryMode(mode);
@@ -471,7 +475,8 @@ function ScalperWidget(props: WidgetProps) {
         showStatus(`${action} ${sym} placed`, "success");
         announceOrder(action, sym, qty);
       } catch (err) {
-        showStatus(err instanceof Error ? err.message : "Order failed", "error");
+        const outcome = presentSubmitError(err);
+        showStatus(outcome.message, outcome.kind === "unknown" ? "unknown" : "error");
       }
     },
     // `mode` is load-bearing: `checkOrderEntryMode(mode)` above is this widget's
@@ -479,13 +484,13 @@ function ScalperWidget(props: WidgetProps) {
     // that used to sit in this array is not read by the callback and did not
     // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
     // callback kept checking against the mode it was created under.
-    [mode, ordersArmed, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
+    [mode, ordersArmed, orderBlockCopy, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
   );
 
   const handleOrder = useCallback(
     (sym: string | null, exch: string, action: OrderAction) => {
       if (!ordersArmed) {
-        showStatus(EXPLORE_SCALPER_ORDER_HELPER, "error");
+        showStatus(orderBlockCopy ?? "", "error");
         return;
       }
       if (oneClick) {
@@ -494,7 +499,7 @@ function ScalperWidget(props: WidgetProps) {
         if (sym) setPendingOrder({ sym, exch, action });
       }
     },
-    [ordersArmed, oneClick, executeOrder, showStatus],
+    [ordersArmed, orderBlockCopy, oneClick, executeOrder, showStatus],
   );
 
   const confirmOrder = useCallback(() => {
@@ -539,9 +544,10 @@ function ScalperWidget(props: WidgetProps) {
     showStatus("Closing all…", "pending", 0);
     try {
       await exitAllPositions();
-      showStatus("All positions closed", "success");
+      showStatus(EXIT_ALL_REQUESTED, "unknown");
     } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Close failed", "error");
+      const outcome = presentSubmitError(err);
+      showStatus(outcome.message, outcome.kind === "unknown" ? "unknown" : "error");
     }
   }, [showStatus, isExplore]);
 
@@ -553,10 +559,12 @@ function ScalperWidget(props: WidgetProps) {
     }
     showStatus("Cancelling…", "pending", 0);
     try {
-      await cancelAllOrders();
-      showStatus("All orders cancelled", "success");
+      const result = await cancelAllOrders();
+      const presented = presentCancelResult(result);
+      showStatus(presented.message, presented.kind === "cancelled" ? "success" : presented.kind === "rejected" ? "error" : "unknown");
     } catch (err) {
-      showStatus(err instanceof Error ? err.message : "Cancel failed", "error");
+      const presented = presentCancelResult(undefined, err);
+      showStatus(presented.message, presented.kind === "unknown" ? "unknown" : "error");
     }
   }, [showStatus, isExplore]);
 
@@ -682,6 +690,8 @@ function ScalperWidget(props: WidgetProps) {
           setOneClick((v) => !v);
         }}
         ordersArmed={ordersArmed}
+        orderBlockCopy={orderBlockCopy}
+        oneClickLockedTitle={oneClickLockedTitle}
         isExplore={isExplore}
       />
 
@@ -701,6 +711,7 @@ function ScalperWidget(props: WidgetProps) {
         onCloseAll={() => setCloseAllOpen(true)}
         onCancelAll={() => setCancelAllOpen(true)}
         ordersArmed={ordersArmed}
+        orderBlockCopy={orderBlockCopy}
       />
 
       <OrderConfirmModal

@@ -9,6 +9,8 @@ import type { Holiday, MarketTiming } from "@/types/api";
 import {
   NSE_FO_CLOSE_MIN,
   type NseCashSessionInfo,
+  derivativeContractCloseMin,
+  nseCashSchedule,
   resolveNseCashSession,
 } from "@/lib/nseSession";
 import {
@@ -32,6 +34,11 @@ export interface MarketHoursInstrument {
   exchange: string;
   /** Exchange symbol or dated contract symbol. */
   symbol: string;
+  /**
+   * Listed expiries for this underlying. From 7 Dec 2026 an NSE index
+   * contract needs this list; without it the contract stays closed.
+   */
+  expiryCalendar?: readonly string[];
 }
 
 export type MarketHoursTarget = string | MarketHoursInstrument;
@@ -78,7 +85,7 @@ export function isCrossCurrencyCdsSymbol(symbol: string): boolean {
   ));
 }
 
-function resolveMarketHours(target?: MarketHoursTarget): {
+function resolveMarketHours(target: MarketHoursTarget | undefined, now: Date): {
   exchange: string;
   hours: ExchangeHours | undefined;
 } {
@@ -87,9 +94,17 @@ function resolveMarketHours(target?: MarketHoursTarget): {
     : target?.exchange ?? "NSE";
   const exchange = rawExchange.trim().toUpperCase();
   const symbol = typeof target === "object" ? target.symbol : undefined;
+  const expiryCalendar = typeof target === "object" ? target.expiryCalendar : undefined;
 
   if (exchange === "CDS" && symbol && isCrossCurrencyCdsSymbol(symbol)) {
     return { exchange, hours: CDS_CROSS_CURRENCY_HOURS };
+  }
+  if (exchange === "NFO" || exchange === "BFO") {
+    const segmentClose = nseCashSchedule(now).foClose;
+    if (!symbol) return { exchange, hours: { open: 9 * 60 + 15, close: segmentClose } };
+    const contractClose = derivativeContractCloseMin(now, symbol, expiryCalendar, exchange);
+    if (contractClose === null) return { exchange, hours: undefined };
+    return { exchange, hours: { open: 9 * 60 + 15, close: contractClose } };
   }
   return { exchange, hours: EXCHANGE_HOURS[exchange] };
 }
@@ -170,14 +185,13 @@ function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date:
  *
  * DELTA (crypto) is always considered open (24/7).
  */
-export function isMarketHours(
+function evaluateMarketHours(
+  now: Date,
   target?: MarketHoursTarget,
   holidays: readonly Holiday[] = shippedMuhuratHolidays(),
 ): boolean {
-  const { exchange, hours } = resolveMarketHours(target);
+  const { exchange, hours } = resolveMarketHours(target, now);
   if (exchange === "DELTA") return true;
-
-  const now = new Date();
   const ist = new Date(
     now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
@@ -192,6 +206,43 @@ export function isMarketHours(
 
   const mins = ist.getHours() * 60 + ist.getMinutes();
   return mins >= hours.open && mins <= hours.close;
+}
+
+/**
+ * Check if a given exchange is currently within trading hours.
+ *
+ * When called without an exchange argument, defaults to NSE/BSE equity hours
+ * (9:15 AM – 3:30 PM IST, Mon–Fri) for backward compatibility.
+ *
+ * DELTA (crypto) is always considered open (24/7).
+ */
+export function isMarketHours(
+  target?: MarketHoursTarget,
+  holidays: readonly Holiday[] = shippedMuhuratHolidays(),
+): boolean {
+  return evaluateMarketHours(new Date(), target, holidays);
+}
+
+export interface OrderPadSessionBadge {
+  /** True only for the green continuous cash session, or an open selected venue. */
+  greenContinuous: boolean;
+  label: string;
+}
+
+/**
+ * Order Pad session badge.
+ *
+ * NSE and BSE follow the dated cash phase. Any other selected exchange uses
+ * that venue's own hours. The flat 09:15–15:30 window is not this badge.
+ */
+export function orderPadSessionBadge(now: Date, exchange = "NSE"): OrderPadSessionBadge {
+  const venue = exchange.trim().toUpperCase() || "NSE";
+  if (venue === "NSE" || venue === "BSE" || venue === "NSE_INDEX" || venue === "BSE_INDEX") {
+    const session = resolveNseCashSession(now);
+    return { greenContinuous: session.isGreenOpen, label: session.label };
+  }
+  const open = evaluateMarketHours(now, venue);
+  return { greenContinuous: open, label: open ? "Session open" : "Closed" };
 }
 
 export type MarketSessionStatus =
@@ -365,13 +416,14 @@ export function getMCXStatus(): MCXMarketStatusInfo {
  * Returns pre-market / open / closed / weekend.
  */
 export function getExchangeStatus(target: MarketHoursTarget): MCXMarketStatusInfo {
-  const { exchange, hours } = resolveMarketHours(target);
+  const now = new Date();
+  const { exchange, hours } = resolveMarketHours(target, now);
   if (exchange === "DELTA") {
     return { status: "open", label: "DELTA Open (24/7)" };
   }
 
   const ist = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
   const day = ist.getDay();
   if (day === 0 || day === 6) {

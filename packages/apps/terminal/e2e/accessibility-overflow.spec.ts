@@ -99,7 +99,13 @@ test('rename replaces its original slot and stays usable with overflowing tabs',
   await first.click({button:'right'});await w.getByRole('menuitem',{name:'Rename',exact:true}).click();
   const editor=w.getByRole('textbox',{name:'Rename Watchlist 1'});await expect(editor).toBeFocused();
   const value=await painted(editor);fs.writeFileSync(info.outputPath('editing.json'),JSON.stringify({before,value},null,2));
-  expect(value.box).toEqual({x:before.x,y:before.y+(before.height-16)/2,width:96,height:16});
+  const centredY=before.y+(before.height-16)/2;
+  expect(value.box.x).toBe(before.x);
+  expect(value.box.width).toBe(96);
+  expect(value.box.height).toBe(16);
+  // The 16px editor stays centred in the tab. Chromium's layout fraction can
+  // miss the arithmetic midpoint by a subpixel; a full pixel still fails.
+  expect(Math.abs(value.box.y-centredY)).toBeLessThan(0.1);
   expect(await editor.evaluate(el=>el.closest('[role="tablist"]'))).toBeNull();
   expect(value.viewport&&value.hits.every(Boolean)).toBe(true);
   await editor.fill('Cancelled');await page.keyboard.press('Escape');await expect(first).toBeFocused();await expect(first).toHaveText('Watchlist 1');

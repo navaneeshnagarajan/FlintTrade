@@ -902,7 +902,7 @@ describe("PositionsWidget", () => {
       render(<PositionsWidget {...defaultProps} />);
       expect(screen.getByText("RELIANCE")).toBeInTheDocument();
       expect(screen.getByText("Exit pending")).toBeInTheDocument();
-      expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeDisabled();
     });
 
@@ -913,7 +913,7 @@ describe("PositionsWidget", () => {
       }] }));
       withMeasuredContainer(() => render(<PositionsWidget {...defaultProps} />), { width: 390, height: 700 });
       expect(screen.getByText("RELIANCE")).toBeInTheDocument();
-      expect(screen.getByText(/Cancel pending\. This order may still fill\./)).toBeInTheDocument();
+      expect(screen.getByText(/Cancellation requested/)).toBeInTheDocument();
     });
 
     it("retains uncertain exit status and transport details", async () => {
@@ -922,7 +922,7 @@ describe("PositionsWidget", () => {
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
-      expect(await screen.findByText("Exit status unknown. An order may still execute. Failed to fetch"))
+      expect(await screen.findByText("Order status unknown. Check Orders before trying again."))
         .toBeInTheDocument();
     });
 

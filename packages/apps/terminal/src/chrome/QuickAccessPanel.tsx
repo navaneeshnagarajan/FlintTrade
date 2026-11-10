@@ -522,10 +522,13 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
             </p>
           </div>
           <span
-            className={cn("text-xs font-semibold font-heading", MODE_LABEL[appMode].className)}
-            aria-label={`Current trading mode: ${MODE_LABEL[appMode].text}`}
+            className={cn(
+              "text-xs font-semibold font-heading",
+              appMode === "unavailable" ? "text-text-muted" : MODE_LABEL[appMode].className,
+            )}
+            aria-label={`Current trading mode: ${appMode === "unavailable" ? "Unavailable" : MODE_LABEL[appMode].text}`}
           >
-            {MODE_LABEL[appMode].text}
+            {appMode === "unavailable" ? "Unavailable" : MODE_LABEL[appMode].text}
           </span>
         </div>
 

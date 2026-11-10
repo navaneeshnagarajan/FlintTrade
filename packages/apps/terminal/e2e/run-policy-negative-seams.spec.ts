@@ -26,6 +26,7 @@ for (const control of ["wrong-method", "wrong-path", "wrong-query", "wrong-statu
 
 test.describe("native decoded scheduling qualification", () => {
   let server: Server;
+  let origin: string;
   test.beforeEach(async () => {
     server = createServer((request, response) => {
       if (request.url === "/") { response.setHeader("Content-Type", "text/html"); response.end("<!doctype html><title>Native scheduling control</title>"); return; }
@@ -34,11 +35,16 @@ test.describe("native decoded scheduling qualification", () => {
       if (request.headers["x-refuse"]) response.statusCode = 503;
       response.end(original);
     });
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(5173, "127.0.0.1", resolve); });
+    // The default Playwright server already owns 5173. This control only needs
+    // its own loopback origin, so it takes a free port.
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Missing scheduling control address");
+    origin = `http://127.0.0.1:${address.port}`;
   });
   test.afterEach(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   test("unchanged native decoded body held after complete HTTP then delivered once", async ({page}) => {
-    await page.goto("http://127.0.0.1:5173");
+    await page.goto(origin);
     const hold = await installDecodedReadHold(page, path);
     let finished = false;
     page.on("requestfinished", request => { if (new URL(request.url()).pathname === path) finished = true; });
@@ -53,7 +59,7 @@ test.describe("native decoded scheduling qualification", () => {
     } finally { await hold.restore(); await pending; }
   });
   test("wrong URL stays native and duplicate installation refuses", async ({page}) => {
-    await page.goto("http://127.0.0.1:5173");
+    await page.goto(origin);
     const hold = await installDecodedReadHold(page, path);
     try {
       await expect(installDecodedReadHold(page,path)).rejects.toThrow("already installed");
@@ -62,7 +68,7 @@ test.describe("native decoded scheduling qualification", () => {
     } finally { await hold.restore(); }
   });
   test("second matching decode refuses and latches overuse", async ({page}) => {
-    await page.goto("http://127.0.0.1:5173");
+    await page.goto(origin);
     const hold = await installDecodedReadHold(page,path);
     const first = page.evaluate(async target => (await fetch(target)).json(),path);
     try {
@@ -72,7 +78,7 @@ test.describe("native decoded scheduling qualification", () => {
     } finally { await hold.restore(); await first; }
   });
   test("native cancelled body never counts as decoded delivery", async ({page}) => {
-    await page.goto("http://127.0.0.1:5173");
+    await page.goto(origin);
     const hold = await installDecodedReadHold(page,path);
     try {
       const result = await page.evaluate(async target => {
@@ -86,7 +92,7 @@ test.describe("native decoded scheduling qualification", () => {
     } finally { await hold.restore(); }
   });
   test("non-success body is not admitted by the decoded seam", async ({page}) => {
-    await page.goto("http://127.0.0.1:5173");
+    await page.goto(origin);
     const hold = await installDecodedReadHold(page,path);
     try {
       await expect(page.evaluate(async target=>(await fetch(target,{headers:{"x-refuse":"yes"}})).json(),path)).rejects.toThrow("scope/count refused");

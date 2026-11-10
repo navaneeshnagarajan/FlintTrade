@@ -1427,11 +1427,15 @@ def pytest_argv(extra_flags: Sequence[str], *, env: dict[str, str] | None = None
     autoload_disabled = bool(env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD")) or (
         "--disable-plugin-autoload" in plugin_args
     )
-    # CLI -p accepts entry-point aliases; PYTEST_PLUGINS imports module names
-    # directly. The top-level xdist module has no plugin hooks of its own.
-    environment_plugins = {name.strip() for name in env.get("PYTEST_PLUGINS", "").split(",")}
-    xdist_loaded = bool({"xdist", "xdist.plugin"} & plugins) or "xdist.plugin" in environment_plugins
-    timeout_loaded = bool({"timeout", "pytest_timeout"} & plugins) or "pytest_timeout" in environment_plugins
+    # CLI -p and, from pytest 9.2, PYTEST_PLUGINS both accept installed
+    # plugin entry-point names (xdist, timeout) as well as importable module
+    # names (xdist.plugin, pytest_timeout). The live plugin probe is the
+    # source of truth; this fallback must use the same aliases so a failed
+    # probe does not omit -n or re-inject pytest-timeout when the selected
+    # pytest would already load the plugin.
+    environment_plugins = {name.strip() for name in env.get("PYTEST_PLUGINS", "").split(",") if name.strip()}
+    xdist_loaded = bool({"xdist", "xdist.plugin"} & (plugins | environment_plugins))
+    timeout_loaded = bool({"timeout", "pytest_timeout"} & (plugins | environment_plugins))
     xdist_disabled = "no:xdist" in plugins or "no:xdist.plugin" in plugins or (autoload_disabled and not xdist_loaded)
     timeout_blocked = bool({"no:timeout", "no:pytest_timeout"} & plugins)
     if state is not None:

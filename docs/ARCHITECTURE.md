@@ -55,8 +55,7 @@ separate from shell-installer updates. A release is accepted only when it
 contains all four canonical installers plus `SHA256SUMS.txt`; retired Tauri and
 PyInstaller assets never satisfy this architecture.
 
-When the operator selects managed Ollama, the backend owns an on-demand sidecar
-process. FlintTrade selects an unpredictable free high loopback port, starts
+When the operator selects managed Ollama, the backend owns an on-demand managed install on a backend-only loopback port. FlintTrade selects an unpredictable free high loopback port, starts
 Ollama there, and accepts the endpoint only after proving process-tree listener
 ownership. A competing bind makes startup fail closed. FlintTrade downloads the pinned runtime only after explicit
 confirmation, verifies its SHA-256 digest before extraction, disables Ollama
@@ -160,7 +159,31 @@ The terminal is a single React 19 + TypeScript application built with
 Vite 8. Layout is managed by [FlexLayout 0.11](https://github.com/caplin/FlexLayout),
 which provides drag-and-drop panels, tabs, floating windows, and
 serialisable layouts. Users compose their workspace from 71 widgets
-(18 trading + 31 analysis + 22 utility) split across 12 routes.
+(18 trading + 31 analysis + 22 utility) across nine applications.
+
+### Application shell
+
+The app bar lists Terminal (`/terminal`), Testing (`/testing`), Portfolio
+(`/portfolio`), Automation (`/automation`), Reports (`/reports`), Learn
+(`/learn`), Brokers (`/brokers`), Settings (`/settings`), and System
+(`/system`). An older address opens the matching application and keeps the
+query string, the hash, and any navigation state. `/home` and `/trade`
+open Terminal. `/invest` opens Portfolio. `/lab` opens Testing. `/automate`
+and `/ai` open Automation; `/ai` opens the AI Centre panel. The page title
+is AI Centre, and the catalogue calls that surface an AI workspace.
+`/ditto` opens Brokers. `/admin` opens the system console on System, and
+`/admin/observability` opens operational observability there. `/login`
+opens `/welcome`.
+
+`/explore` depends on the build and the session. The public site redirects
+`/explore` to the Demo at `/demo-app/welcome`. The public demo bundle
+replaces `/explore` with `/terminal`. An installed build replaces
+`/explore` with `/welcome`. When that Welcome screen already has a
+signed-in session, it replaces the address with `/trade`, and the shell
+then opens Terminal. A signed-out installed visit stays on `/welcome`.
+**Try with example data** opens `/home`, which the shell replaces with
+Terminal. Alt+H is labelled Go to Home and Alt+T is labelled Go to Trade.
+Both finish on Terminal.
 
 ### State architecture
 
@@ -174,12 +197,22 @@ duplicated:
 
 ### Market session clock
 
-TopBar market status and the Market Clock widget are CAS-aware. Phases are Continuous, CAS, Matching, Post-close, and Closed
+TopBar market status and the Market Clock widget are CAS-aware. Phases are Continuous, CAS, Matching, Transition, Post-close, and Closed
 — one TopBar chip active; tooltip/title is the window (for example
-`CAS · 15:15–15:35`). Cash is never green "open" after
+`CAS · 15:15–15:35`). Through 6 December 2026, cash is never green "open" after
 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary `F&O open · till 15:40` chip appears.
-Non-CAS cash still trades continuous to 15:30. The clock helpers
+From 7 December 2026 (NSE/CMTR/77355 and NSE/FAOP/77356) cash continuous
+runs until 15:30, the auction is 15:30–15:40, and the secondary chip reads
+`F&O open · till 15:45`. An index contract stops at 15:30 on the expiry
+written on its symbol. A supplied expiry calendar confirms that date. A new
+order stays closed when the expiry cannot be read, or when a supplied
+calendar does not list it. The same derivative close
+applies to BSE. Matching ends at 15:45 and 15:45–15:50 is the transition.
+Non-CAS cash still trades continuous to 15:30. Cash auction order entry
+stops from 15:38, when that entry can already have closed at random.
+Equity derivatives are not in the auction. The Muhurat
+session still overrides the ordinary clock. The clock helpers
 (`packages/apps/terminal/src/lib/market.ts` and
 `packages/core/ticks/src/session.rs`) must not treat a flat NSE
 09:15–15:30 window as "open until 15:30". Closing-price copy is not
@@ -342,10 +375,10 @@ Laya admits operator and automate place before SafetySystem (Live) or the
 sandbox (Practice). It does not place an order and does not mint
 `gate_order`, and it does not replace L1–L5. A refusal or a quantity
 clamp stops before those next steps. Admit checks Down, then the hard
-rules, then typed free-text questions on the opt-in decision sidecar.
+rules, then typed free-text questions on the opt-in decision process.
 The model can deny or clamp only. Only Down mutes Live place. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
-smart, multi, forever modify and cancel, and the other non-place write verbs still reach SafetySystem without this place admission. `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.` and the route does not call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call. No submit route reaches a broker forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place. Laya starts Down; the three statuses are Ready, Degraded, and Down. `GET /health` records them from the sidecar when one is registered. The desk ping publishes the stored Live-facing status and does not invent Ready. A base checkpoint is not qualified for Live, so Live stays Down until a qualification record matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
+smart, multi, forever modify and cancel, and the other non-place write verbs still reach SafetySystem without this place admission. `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.` and the route does not call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call. No submit route reaches a broker forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place. Laya starts Down; the three statuses are Ready, Degraded, and Down. `GET /health` records them from the managed Laya process when one is registered. The desk ping publishes the stored Live-facing status and does not invent Ready. A base checkpoint is not qualified for Live, so Live stays Down until a qualification record matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
 
@@ -388,13 +421,13 @@ pending and retry the same event without repeating the account mutation.
 ```mermaid
 stateDiagram-v2
     [*] --> Practice
-    Practice --> Live: /auth/live +\n6-digit PIN
-    Live --> Practice: /auth/mode {mode:practice}
-    ExampleData --> Practice: /auth/mode {mode:practice}
+    Practice --> Live: POST /v1/auth/live\n+ 6-digit PIN
+    Live --> Practice: POST /v1/auth/mode\n{mode:practice}
+    Guest --> Setup: Mode menu Practice
 
-    state ExampleData {
-        [*] --> noLiveOrders
-        noLiveOrders: Example data. Not a menu Mode.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: /trade Order Pad\nExample Buy is a local\nexample fill
+    state Guest {
+        [*] --> exampleChip
+        exampleChip: Chip Example.\nClaim explore.\nNot a menu Mode.\nThis choice does not call\nPOST /v1/auth/mode.
     }
     state Practice {
         [*] --> practiceFills
@@ -414,14 +447,23 @@ keeps its Mode. `/v1/auth/mode` accepts only `{ "mode": "practice" }`. Any
 other value returns HTTP 400 with `Only a downgrade to practice is allowed
 here. Switch to Live via POST /v1/auth/live with PIN verification.` and
 leaves the current session in place. That call does not latch the kill
-switch. The Mode menu lists Practice, Connected (read), and Live. A fresh
+switch. The Mode menu lists Practice and Live. Connected (read) is a broker
+status, not a menu item. The visible chip is taken from the JWT `mode` claim
+when the session token has one: **Example**, **Practice**, **Live**, or
+**Unavailable**. The claim is `explore`, `practice`, or `live`. An opaque
+sample session has no claim to apply and stays **Example**. A JWT whose mode
+is missing, or is not one of those three, shows **Unavailable** and never
+Example. Connected (read),
+the idle lock, broker connectivity, and the decision model are not that
+claim. A fresh
 browser, account setup, and a finished password sign-in open in Practice.
-Example data is not a menu Mode. The guard lives at
+Example data is not a menu Mode. Choosing **Practice** while signed in as **Guest** (chip **Example**)
+opens Setup and does not call `POST /v1/auth/mode`. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 Example data has no Live broker order authority: backend and Live-intent
 order paths still refuse with `mode_blocked` and never call a broker.
-The exception is Order Pad Example Buy on `/trade`, which records a
+The exception is Order Pad Example Buy on Terminal, which records a
 local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no SafetySystem,
 no broker). Practice remains simulated fills; Live remains the
 gated broker path.
@@ -548,7 +590,7 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or
-  `live`), `jti` (unique ID), plus `oid` and `epoch`. Operators see Example, Practice, or Live. Connected (read) is a broker status on a Practice session, not a session Mode.
+  `live`), `jti` (unique ID), plus `oid` and `epoch`. The Mode chip is taken from that claim. Operators see Example, Practice, Live, or Unavailable. A missing or unusable claim shows Unavailable, never Example. Connected (read) is a broker status, not a session Mode.
 - PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
   returns a new token. The previous token stops working. The Live
   switch does the same rotation when it enters Live.
@@ -572,7 +614,11 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 
 ### Server-side mode enforcement
 
-The core `/api/v1/orders/*` proxy fans out by JWT mode: example data is
+When `X-FlintTrade-Mode` is present and differs from the JWT `mode` claim,
+order routes return HTTP 403
+`{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}`
+with no `code` field. A missing header, or a header equal to the claim, is
+not a mismatch. The core `/api/v1/orders/*` proxy fans out by JWT mode: example data is
 HTTP 403 `mode_blocked`
 (`Orders are not available for Example. Switch to Practice or Live to trade.`),
 Practice routes to the Practice fill path, and
@@ -582,7 +628,7 @@ use `mode_guard.require_live_unlocked`: example data is `mode_blocked`,
 Practice is `practice_unsupported` (no Practice parity yet), and Live
 without PIN unlock is `live_locked`. A Live bracket with exactly one
 stop-loss or one target places through that guard. Basket, split, and
-options-strategy place return HTTP 501 and do not place. Order Pad Example Buy on `/trade`
+options-strategy place return HTTP 501 and do not place. Order Pad Example Buy on Terminal
 with example data is a local example fill (`Example order placed`, id starting `SAMPLE-`) — no HTTP order route,
 SafetySystem, or broker.
 

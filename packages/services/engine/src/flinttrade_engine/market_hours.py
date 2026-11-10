@@ -26,8 +26,10 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.market_hours")
 
@@ -64,15 +66,35 @@ class SpecialTradingSession:
 # Standard exchange hours (IST)
 # ---------------------------------------------------------------------------
 
+#: First session date of the revised NSE closing auction and F&O close.
+#: NSE/CMTR/77355 and NSE/FAOP/77356, both 6 Nov 2026, effective 7 Dec 2026,
+#: following SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 Oct 2026).
+_CAS_REVISION = date(2026, 12, 7)
+_NFO_OPEN = time(9, 15)
+_NFO_CLOSE_BEFORE_REVISION = time(15, 40)
+_NFO_CLOSE_REVISED = time(15, 45)
+_NFO_EXPIRING_INDEX_CLOSE = time(15, 30)
+_DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO"})
+_CASH_EXCHANGES = frozenset({"NSE", "BSE"})
+# Auction order entry starts at 15:31. It can stop at random from 15:38.
+_AUCTION_ORDER_ENTRY_START = time(15, 31)
+_AUCTION_RANDOM_CLOSE = time(15, 38)
+
 #: Standard market hours per exchange segment. Tuple of (open_time, close_time).
+#: NFO and BFO 15:40 are the closes before 7 Dec 2026. ``get_market_hours``
+#: applies the later close from that date to both segments. SEBI circular
+#: HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 sections 4.2.4 and 4.2.5 bind
+#: every recognised exchange.
 STANDARD_HOURS: dict[str, tuple[time, time]] = {
     "NSE": (time(9, 15), time(15, 30)),
     "BSE": (time(9, 15), time(15, 30)),
-    "NFO": (time(9, 15), time(15, 40)),
+    "NFO": (_NFO_OPEN, _NFO_CLOSE_BEFORE_REVISION),
     "BFO": (time(9, 15), time(15, 40)),
     "CDS": (time(9, 0), time(17, 0)),
     "BCD": (time(9, 0), time(17, 0)),
     "MCX": (time(9, 0), time(23, 30)),
+    # NCDEX standard hours stay 23:30. The order gate and timings close at
+    # 17:00. Changing these standard hours is a separate policy change.
     "NCDEX": (time(10, 0), time(23, 30)),
     "NCO": (time(9, 0), time(17, 0)),
     "NSE_INDEX": (time(9, 15), time(15, 30)),
@@ -206,22 +228,211 @@ def muhurat_equity_phase(minutes_from_midnight: int) -> str:
     return "closed"
 
 
-def nse_cash_phase(minutes_from_midnight: int) -> str:
-    """Return the NSE cash session phase.
+def _revised_cas(on: date) -> bool:
+    """True on and after 7 Dec 2026. The session date is required."""
+    return on >= _CAS_REVISION
 
-    Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
-    Post-close 15:50–16:00. Cash is never Continuous after 15:15; CAS is
-    not Closed. The September 2026 consultation is not product UI.
+
+def nse_cash_phase(minutes_from_midnight: int, on: date) -> str:
+    """Return the NSE cash session phase for an explicit session date.
+
+    The date is required. This function does not assume the pre-7 Dec 2026
+    clock when a caller forgets it.
+
+    Before 7 Dec 2026: Continuous 09:15–15:15, CAS 15:15–15:35, Matching
+    15:35–15:50, Post-close 15:50–16:00. Cash is never Continuous after
+    15:15; CAS is not Closed.
+
+    From 7 Dec 2026 (NSE/CMTR/77355): Continuous until 15:30, CAS
+    15:30–15:40, order matching 15:40–15:45, transition 15:45–15:50,
+    post-close 15:50–16:00. Matching ends at 15:45 so the phase matches
+    that window. The September 2026 consultation is not product UI.
     """
-    if 9 * 60 + 15 <= minutes_from_midnight < 15 * 60 + 15:
+    if _revised_cas(on):
+        continuous_end = 15 * 60 + 30
+        cas_end = 15 * 60 + 40
+        matching_end = 15 * 60 + 45
+    else:
+        continuous_end = 15 * 60 + 15
+        cas_end = 15 * 60 + 35
+        matching_end = 15 * 60 + 50
+    if 9 * 60 + 15 <= minutes_from_midnight < continuous_end:
         return "continuous"
-    if 15 * 60 + 15 <= minutes_from_midnight < 15 * 60 + 35:
+    if continuous_end <= minutes_from_midnight < cas_end:
         return "cas"
-    if 15 * 60 + 35 <= minutes_from_midnight < 15 * 60 + 50:
+    if cas_end <= minutes_from_midnight < matching_end:
         return "matching"
+    if _revised_cas(on) and matching_end <= minutes_from_midnight < 15 * 60 + 50:
+        return "transition"
     if 15 * 60 + 50 <= minutes_from_midnight < 16 * 60:
         return "post-close"
     return "closed"
+
+
+def cash_auction_order_entry(at: datetime) -> bool | None:
+    """Whether a cash order may still enter the closing auction.
+
+    ``None`` means the instant is still in continuous trading, so the
+    ordinary cash close applies. ``True`` is auction order entry,
+    15:31–15:38. ``False`` is closed: the 15:30 reference minute, and
+    from 15:38 because order entry can already have stopped at random
+    (NSE/CMTR/77355). Equity derivatives are not in this auction.
+    """
+    current = at.time().replace(tzinfo=None)
+    if at.date() < _CAS_REVISION or current < time(15, 30):
+        return None
+    if _AUCTION_ORDER_ENTRY_START <= current < _AUCTION_RANDOM_CLOSE:
+        return True
+    return False
+
+
+def _nfo_segment_close(target_date: date) -> time:
+    if target_date >= _CAS_REVISION:
+        return _NFO_CLOSE_REVISED
+    return _NFO_CLOSE_BEFORE_REVISION
+
+
+def _contract_parts(symbol: str) -> tuple[str, str] | None:
+    """Underlying and expiry token for a compact option or future symbol."""
+    from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
+
+    parts = parse_option_symbol(symbol) or parse_future_symbol(symbol)
+    if parts is None or not parts.expiry:
+        return None
+    return parts.underlying, parts.expiry
+
+
+def _symbol_expiry(symbol: str) -> date | None:
+    """Expiry written on a compact contract symbol, when it can be read."""
+    parsed = _contract_parts(symbol)
+    if parsed is None:
+        return None
+    from flinttrade_core.symbol_utils import parse_expiry
+
+    try:
+        return parse_expiry(parsed[1])
+    except ValueError:
+        return None
+
+
+def _calendar_dates(expiry_calendar: Sequence[date | str]) -> set[date]:
+    from flinttrade_core.symbol_utils import parse_expiry
+
+    listed: set[date] = set()
+    for item in expiry_calendar:
+        if isinstance(item, datetime):
+            listed.add(item.date())
+            continue
+        if isinstance(item, date):
+            listed.add(item)
+            continue
+        try:
+            listed.add(parse_expiry(str(item)))
+        except ValueError:
+            continue
+    return listed
+
+
+def authoritative_expiry(
+    symbol: str | None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    *,
+    risk_increasing: bool = True,
+) -> date | None:
+    """Expiry used to decide an index contract's close.
+
+    The date on the symbol is the contract's own expiry. A supplied
+    calendar confirms that date. A new risk-increasing order stays closed
+    when the symbol has no expiry, or when a supplied calendar does not
+    list it. An exit may still use the symbol date when the calendar is
+    missing or does not list a non-expiry day.
+    """
+    symbol_expiry = _symbol_expiry(symbol or "")
+    if expiry_calendar is None:
+        return symbol_expiry
+    if symbol_expiry is None:
+        return None
+    if symbol_expiry in _calendar_dates(expiry_calendar):
+        return symbol_expiry
+    if risk_increasing:
+        return None
+    return symbol_expiry
+
+
+def symbol_expiry_context(symbol: str | None) -> tuple[str, ...] | None:
+    """Expiry calendar read from a contract symbol, when the date can be read."""
+    expiry = authoritative_expiry(symbol, None)
+    if expiry is None:
+        return None
+    return (expiry.isoformat(),)
+
+
+def derivative_contract_close(
+    exchange: str,
+    target_date: date,
+    *,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+    apply_special: bool = True,
+) -> time | None:
+    """Close for one derivatives contract, or None when that must stay shut.
+
+    A special session, including Muhurat, wins over the ordinary close.
+    From 7 Dec 2026, SEBI sections 4.2.4 and 4.2.5 keep stock derivatives
+    on NSE and BSE open until 15:45 every day, including expiry day. An
+    index contract stops at 15:30 on the expiry read from its symbol.
+    A supplied calendar confirms that date. A new risk-increasing order
+    stays closed when the expiry is unreadable or a supplied calendar
+    does not confirm it. An exit is not blocked by a missing calendar
+    on a day the symbol does not show as its expiry.
+    """
+    from flinttrade_core.symbol_utils import detect_instrument_type
+
+    venue = exchange.strip().upper()
+    # A contract is finished the day after the expiry written on its symbol.
+    # A new risk-increasing order stays closed. An exit is not blocked here.
+    if risk_increasing and symbol:
+        symbol_expiry = _symbol_expiry(symbol)
+        if symbol_expiry is not None and target_date > symbol_expiry:
+            return None
+    special = is_special_session(target_date, exchange=venue) if apply_special else None
+    if special is not None:
+        return special.close_time
+    if venue not in _DERIVATIVE_EXCHANGES:
+        try:
+            return get_standard_hours(venue)[1]
+        except ValueError:
+            return None
+    if target_date < _CAS_REVISION:
+        return _NFO_CLOSE_BEFORE_REVISION
+    if symbol is None or not symbol.strip():
+        return _NFO_CLOSE_REVISED
+    parsed = _contract_parts(symbol)
+    if parsed is None:
+        token = symbol.strip().upper()
+        if " " in token or not token.replace("&", "").isalpha():
+            return None
+        if detect_instrument_type(token) == "equity":
+            return _NFO_CLOSE_REVISED
+        return None
+    underlying_kind = detect_instrument_type(parsed[0])
+    if underlying_kind == "equity":
+        return _NFO_CLOSE_REVISED
+    if underlying_kind != "index":
+        return None
+    expiry = authoritative_expiry(
+        symbol,
+        expiry_calendar,
+        risk_increasing=risk_increasing,
+    )
+    if expiry is None:
+        if risk_increasing:
+            return None
+        return _NFO_CLOSE_REVISED
+    if expiry == target_date:
+        return _NFO_EXPIRING_INDEX_CLOSE
+    return _NFO_CLOSE_REVISED
 
 
 def get_standard_hours(exchange: str) -> tuple[time, time]:
@@ -276,6 +487,9 @@ def get_market_hours(
             special.close_time,
         )
         return (special.open_time, special.close_time)
+
+    if exchange in _DERIVATIVE_EXCHANGES:
+        return (_NFO_OPEN, _nfo_segment_close(target_date))
 
     return get_standard_hours(exchange)
 
@@ -347,6 +561,258 @@ def _as_ist(at: datetime) -> datetime:
 
 def _minutes(value: time) -> int:
     return value.hour * 60 + value.minute
+
+
+# Exclusive order-admission window. NCDEX closes at 17:00 here.
+# STANDARD_HOURS still lists NCDEX 23:30. The runner's MCX session end
+# stays 23:55 in the scheduler until that policy change.
+_GATE_HOURS: dict[str, tuple[time, time]] = {
+    "NSE": (time(9, 15), time(15, 30)),
+    "BSE": (time(9, 15), time(15, 30)),
+    "NFO": (_NFO_OPEN, _NFO_CLOSE_BEFORE_REVISION),
+    "BFO": (time(9, 15), time(15, 40)),
+    "CDS": (time(9, 0), time(17, 0)),
+    "BCD": (time(9, 0), time(17, 0)),
+    "MCX": (time(9, 0), time(23, 30)),
+    "NCDEX": (time(10, 0), time(17, 0)),
+    "NCO": (time(9, 0), time(17, 0)),
+}
+
+_QUOTE_ONLY_EXCHANGES = frozenset({"NSE_INDEX", "BSE_INDEX", "MCX_INDEX", "GLOBAL_INDEX"})
+
+
+@dataclass(frozen=True)
+class SessionDecision:
+    """Python's admission answer for one exchange at one instant.
+
+    ``order_close`` is the exclusive gate instant. ``square_off`` is the
+    absolute instant already used by the runner. ``phase`` is the cash
+    phase, or None for any other venue. ``reason`` is a stable token.
+    """
+
+    exchange: str
+    phase: str | None
+    order_entry: str
+    order_close: datetime | None
+    square_off: datetime | None
+    reason: str
+
+
+def _stamp(day: date, clock: time) -> datetime:
+    return datetime.combine(day, clock.replace(tzinfo=None), tzinfo=_IST)
+
+
+def _cash_phase(day: date, current: time, special: SpecialTradingSession | None) -> str:
+    if special is not None and day == _MUHURAT_2026:
+        return muhurat_equity_phase(_minutes(current))
+    return nse_cash_phase(_minutes(current), on=day)
+
+
+def _square_off_instant(
+    venue: str,
+    day: date,
+    *,
+    symbol: str | None,
+    expiry_calendar: Sequence[date | str] | None,
+    risk_increasing: bool,
+    apply_special: bool,
+    special: SpecialTradingSession | None,
+) -> datetime | None:
+    """Absolute square-off, using the runner close minus the catalog lead.
+
+    The lead stays the static catalog gap. A dated derivatives close moves
+    the instant with that close. MCX uses the runner close, 23:55, so the
+    square-off stays 23:30.
+    """
+    from flinttrade_engine.scheduler import EXCHANGE_SCHEDULES, TimeScheduler  # noqa: PLC0415
+
+    schedule = EXCHANGE_SCHEDULES.get(venue)
+    if schedule is None or schedule.is_24x7:
+        return None
+    if venue in _DERIVATIVE_EXCHANGES:
+        dynamic = derivative_contract_close(
+            venue,
+            day,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+            apply_special=apply_special,
+        )
+        if dynamic is None:
+            return None
+    elif special is not None:
+        dynamic = special.close_time
+    else:
+        dynamic = schedule.market_close
+    return _stamp(day, dynamic) - TimeScheduler._square_off_offset(schedule)
+
+
+def session_decision(
+    exchange: str,
+    at: datetime,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+    *,
+    apply_special: bool = True,
+) -> SessionDecision:
+    """Return the session answer Python uses for admission.
+
+    Callers pass the same instant. A loaded holiday calendar is still the
+    scheduler's: this function owns the clock, the cash phase, the gate
+    close, and the square-off instant.
+    """
+    venue = exchange.strip().upper()
+    instant = _as_ist(at)
+    day = instant.date()
+    current = instant.time().replace(tzinfo=None)
+    special = is_special_session(day, exchange=venue) if apply_special else None
+
+    if venue == "DELTA":
+        return SessionDecision(venue, None, "open", None, None, "always_open")
+    if venue in _QUOTE_ONLY_EXCHANGES:
+        return SessionDecision(venue, None, "closed", None, None, "quote_only")
+
+    phase = _cash_phase(day, current, special) if venue in _CASH_EXCHANGES else None
+    order_close: datetime | None
+    order_entry: str
+    reason: str
+
+    if special is not None and venue not in _DERIVATIVE_EXCHANGES:
+        order_close = _stamp(day, special.close_time)
+        if special.open_time <= current <= special.close_time:
+            order_entry, reason = "open", "special_session"
+        else:
+            order_entry, reason = "closed", "outside_hours"
+    elif venue in _CASH_EXCHANGES:
+        order_close = _stamp(day, time(15, 30))
+        auction = cash_auction_order_entry(instant)
+        if auction is True:
+            order_entry, reason = "auction_entry", "auction_entry"
+        elif auction is False:
+            order_entry, reason = "closed", "auction_closed"
+        elif time(9, 15) <= current < time(15, 30):
+            order_entry, reason = "open", "within_hours"
+        else:
+            order_entry, reason = "closed", "outside_hours"
+    elif venue in _DERIVATIVE_EXCHANGES:
+        close = derivative_contract_close(
+            venue,
+            day,
+            symbol=symbol,
+            expiry_calendar=expiry_calendar,
+            risk_increasing=risk_increasing,
+            apply_special=apply_special,
+        )
+        if close is None:
+            order_close = None
+            order_entry, reason = "closed", "unknown_expiry"
+        else:
+            order_close = _stamp(day, close)
+            if special is not None:
+                if special.open_time <= current <= special.close_time:
+                    order_entry, reason = "open", "special_session"
+                else:
+                    order_entry, reason = "closed", "outside_hours"
+            elif _NFO_OPEN <= current < close:
+                order_entry, reason = "open", "within_hours"
+            else:
+                order_entry, reason = "closed", "outside_hours"
+    elif venue in _GATE_HOURS:
+        open_t, close_t = _GATE_HOURS[venue]
+        order_close = _stamp(day, close_t)
+        if open_t <= current < close_t:
+            order_entry, reason = "open", "within_hours"
+        else:
+            order_entry, reason = "closed", "outside_hours"
+    else:
+        return SessionDecision(venue, None, "closed", None, None, "unknown_exchange")
+
+    square_off = _square_off_instant(
+        venue,
+        day,
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=risk_increasing,
+        apply_special=apply_special,
+        special=special,
+    )
+    return SessionDecision(venue, phase, order_entry, order_close, square_off, reason)
+
+
+def _admission_calendar(market_calendar: Any):
+    """Holiday calendar shared with ``safety.is_market_open``."""
+    if market_calendar is not None:
+        return market_calendar
+    try:
+        from flinttrade_engine.safety import _market_calendar  # noqa: PLC0415
+    except ImportError:
+        _market_calendar = None  # type: ignore[assignment]
+    if _market_calendar is not None:
+        found = _market_calendar(None)
+        if found is not None:
+            return found
+    from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
+
+    return TimeScheduler()
+
+
+def admit_session(
+    exchange: str,
+    at: datetime,
+    symbol: str | None = None,
+    expiry_calendar: Sequence[date | str] | None = None,
+    risk_increasing: bool = True,
+    *,
+    market_calendar: Any = None,
+) -> SessionDecision:
+    """Admission answer used by ``safety.is_market_open`` and market timings.
+
+    Special sessions stay on. A weekend or an exchange holiday closes the
+    day: order entry is closed, the phase is closed, and the close is not
+    the ordinary published close. A live session keeps that session's close.
+    """
+    decision = session_decision(
+        exchange,
+        at,
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=risk_increasing,
+    )
+    if decision.reason in {"quote_only", "always_open", "unknown_exchange"}:
+        return decision
+
+    instant = _as_ist(at)
+    calendar = _admission_calendar(market_calendar)
+    session = calendar.get_market_session(
+        decision.exchange,
+        on=instant.date(),
+        symbol=symbol,
+        expiry_calendar=expiry_calendar,
+        risk_increasing=False,
+    )
+    if session is None:
+        reason = "weekend" if instant.weekday() >= 5 else "holiday"
+        return replace(
+            decision,
+            phase="closed",
+            order_entry="closed",
+            order_close=None,
+            reason=reason,
+        )
+
+    reason = decision.reason
+    phase = decision.phase
+    current = instant.time().replace(tzinfo=None)
+    open_t, _close_t = session
+    if decision.order_entry == "closed" and reason in {"outside_hours", "auction_closed"}:
+        reason = "before_open" if current < open_t else "after_close"
+    special = is_special_session(instant.date(), exchange=decision.exchange)
+    if phase is None and special is not None:
+        phase = "continuous" if decision.order_entry in {"open", "auction_entry"} else "closed"
+    if phase == decision.phase and reason == decision.reason:
+        return decision
+    return replace(decision, phase=phase, reason=reason)
 
 
 def _hhmm(minutes: int) -> str:

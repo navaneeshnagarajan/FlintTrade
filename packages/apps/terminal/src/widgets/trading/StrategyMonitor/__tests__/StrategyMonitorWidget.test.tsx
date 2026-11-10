@@ -22,7 +22,7 @@ vi.mock("@/services/ftApi.backtest", () => ({
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import StrategyMonitorWidget, { SAMPLE_STRATEGIES } from "../StrategyMonitorWidget";
+import StrategyMonitorWidget, { SAMPLE_STRATEGIES, projectUploadedStrategy } from "../StrategyMonitorWidget";
 
 /** The widget now reads real uploaded strategies, so it needs a query client. */
 function renderMonitor() {
@@ -163,6 +163,53 @@ describe("StrategyMonitorWidget", () => {
 // Sample data tests
 // ---------------------------------------------------------------------------
 
+describe("projectUploadedStrategy", () => {
+  const base = {
+    strategy_id: "row",
+    name: "Row",
+    pid: null,
+    memory_mb: null,
+    uptime_seconds: null,
+  };
+
+  it("maps the shared projection for running, stopped, crashed, unknown, and paused", () => {
+    expect(projectUploadedStrategy({ ...base, state: "running", reason: "running" })).toBe("running");
+    expect(projectUploadedStrategy({ ...base, state: "stopped", reason: "idle" })).toBe("stopped");
+    expect(projectUploadedStrategy({ ...base, state: "crashed", reason: "exit_nonzero" })).toBe("error");
+    expect(projectUploadedStrategy({
+      ...base,
+      state: "unknown",
+      reason: "tree_unreadable",
+      ownership_retained: true,
+    })).toBe("unknown");
+    expect(projectUploadedStrategy({
+      ...base,
+      state: "running",
+      reason: "running",
+      lifecycle: "PAUSED",
+    })).toBe("paused");
+    expect(projectUploadedStrategy({
+      ...base,
+      state: "stopped",
+      reason: "idle",
+      lifecycle: "PAUSED",
+    })).toBe("paused");
+    expect(projectUploadedStrategy({
+      ...base,
+      state: "unknown",
+      reason: "tree_unreadable",
+      lifecycle: "PAUSED",
+      ownership_retained: true,
+    })).toBe("unknown");
+    expect(projectUploadedStrategy({
+      ...base,
+      state: "crashed",
+      reason: "exit_nonzero",
+      lifecycle: "PAUSED",
+    })).toBe("error");
+  });
+});
+
 describe("SAMPLE_STRATEGIES", () => {
   it("has 4 strategies", () => {
     expect(SAMPLE_STRATEGIES).toHaveLength(4);
@@ -217,5 +264,145 @@ describe("StrategyMonitorWidget — real uploaded strategies", () => {
     mockListStrategies.mockClear();
     renderMonitor();
     expect(mockListStrategies).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unread process unknown and does not call it stopped", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      {
+        strategy_id: "unread",
+        name: "Unread Tree",
+        state: "unknown",
+        ownership_retained: true,
+        pid: 808,
+        memory_mb: null,
+        uptime_seconds: null,
+      },
+    ]);
+
+    renderMonitor();
+
+    const row = await screen.findByRole("listitem", { name: "Strategy Unread Tree: Unknown" });
+    expect(row).toHaveTextContent("Unknown");
+    expect(row).not.toHaveTextContent("Stopped");
+    expect(row).toHaveAttribute(
+      "title",
+      "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.",
+    );
+    const ownership = screen.getByText(
+      "Process state could not be read. Ownership stays with this runner, so the strategy is not stopped.",
+    );
+    expect(row).toHaveAttribute("aria-describedby", ownership.id);
+    expect(ownership.closest("[role='listitem']")).toBe(row);
+    expect(screen.getByText("Degraded")).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: /^Start / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Pause / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Stop / })).toHaveLength(0);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["blank", ""],
+    ["unrecognized", "pending"],
+  ])("shows %s runner state as unknown", async (_label, state) => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      { strategy_id: "opaque", name: "Opaque Runner", state, pid: 1, memory_mb: null, uptime_seconds: null },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByRole("listitem", { name: "Strategy Opaque Runner: Unknown" })).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "Strategy Opaque Runner: Stopped" })).toBeNull();
+  });
+
+  it("keeps a confirmed running or stopped process on that label", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      { strategy_id: "live", name: "Live Runner", state: "running", pid: 1, memory_mb: 1, uptime_seconds: 1 },
+      { strategy_id: "idle", name: "Idle Runner", state: "stopped", pid: null, memory_mb: null, uptime_seconds: null },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByRole("listitem", { name: "Strategy Live Runner: Running" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "Strategy Idle Runner: Stopped" })).toBeTruthy();
+    expect(screen.queryByText("Unknown")).toBeNull();
+  });
+
+  it("shows a load error when the strategy list fails", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockRejectedValue(new Error("offline"));
+
+    renderMonitor();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load strategies.");
+    expect(screen.queryByText("No strategies configured")).toBeNull();
+  });
+
+  it("shows Paused when the runner lifecycle is paused", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      {
+        strategy_id: "paused",
+        name: "Paused Runner",
+        state: "running",
+        lifecycle: "PAUSED",
+        reason: "running",
+        pid: 7,
+        memory_mb: 1,
+        uptime_seconds: 1,
+      },
+      {
+        strategy_id: "paused-idle",
+        name: "Paused Idle",
+        state: "stopped",
+        lifecycle: "PAUSED",
+        reason: "idle",
+        pid: null,
+        memory_mb: null,
+        uptime_seconds: null,
+      },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByRole("listitem", { name: "Strategy Paused Runner: Paused" })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "Strategy Paused Idle: Paused" })).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "Strategy Paused Runner: Running" })).toBeNull();
+    expect(screen.queryByRole("listitem", { name: "Strategy Paused Idle: Stopped" })).toBeNull();
+  });
+
+  it("keeps an unknown state unknown when a lifecycle is also present", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      {
+        strategy_id: "unread",
+        name: "Unread Tree",
+        state: "unknown",
+        lifecycle: "STOPPED",
+        reason: "tree_unreadable",
+        ownership_retained: true,
+        pid: 808,
+        memory_mb: null,
+        uptime_seconds: null,
+      },
+    ]);
+
+    renderMonitor();
+
+    const row = await screen.findByRole("listitem", { name: "Strategy Unread Tree: Unknown" });
+    expect(row).not.toHaveTextContent("Stopped");
+    expect(row).not.toHaveTextContent("Paused");
+  });
+
+  it("keeps the empty state when the strategy list is empty", async () => {
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([]);
+
+    renderMonitor();
+
+    expect(await screen.findByText("No strategies configured")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

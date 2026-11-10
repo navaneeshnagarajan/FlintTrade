@@ -30,7 +30,18 @@ vi.mock("@/routes/TerminalRoute", () => ({ KillSwitchPill: () => null }));
 vi.mock("@/chrome/InstrumentLinks", () => ({ InstrumentLinks: () => null }));
 vi.mock("@/routes/SetupAccountRoute", () => ({ PracticeLaterSetup: () => null }));
 
+// A lazy route can finish after the last assertion and log React's act()
+// notice. The worker then closes its console channel while that call is still
+// open, and Vitest reports the shutdown as an unhandled rejection even though
+// every assertion passed. The listener is removed before the next test. It
+// ignores only that shutdown and rethrows any other rejection.
+function noteLateConsole(reason: unknown) {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (message.includes('Closing rpc while "onUserConsoleLog" was pending')) return;
+  throw reason;
+}
 beforeEach(() => {
+  process.off("unhandledRejection", noteLateConsole);
   events.length = 0;
   localStorage.clear();
   window.history.replaceState(null, "", "/settings");
@@ -43,7 +54,13 @@ beforeEach(() => {
     disconnect() {}
   });
 });
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  process.on("unhandledRejection", noteLateConsole);
+});
 
 it("persists a restored model before any subsequent docking action or unmount", async () => {
   const named = buildAppPreset("settings", "default");

@@ -38,7 +38,7 @@ pub struct SessionConfig {
     /// Market open in minutes from midnight (IST). NSE = 9*60+15 = 555.
     pub market_open_minutes: u32,
     /// Market close in minutes from midnight (IST). NSE cash book / non-CAS
-    /// CTS = 15:30; green "open" UI must use [`nse_cash_phase`], not this flat close.
+    /// CTS = 15:30; green "open" UI must use [`nse_cash_phase_on`], not this flat close.
     pub market_close_minutes: u32,
     /// Pre-market start in minutes from midnight. NSE = 9*60 = 540.
     pub pre_market_start_minutes: u32,
@@ -429,17 +429,41 @@ impl SessionTracker {
     }
 }
 
-/// NSE cash session phase (as of Aug 2026).
+/// FROZEN NSE cash phase for 3 Aug 2026, before the 7 Dec 2026 revision.
 ///
+/// This is not the live session clock. It always answers as 3 Aug 2026:
 /// Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
 /// Post-close 15:50–16:00. Never treat 15:20 as Closed or as green Continuous.
+/// Production code must call [`nse_cash_phase_on`] with the session date.
+/// No production path imports this function.
 pub fn nse_cash_phase(minutes_from_midnight: u32) -> &'static str {
-    if (9 * 60 + 15..15 * 60 + 15).contains(&minutes_from_midnight) {
+    nse_cash_phase_on(minutes_from_midnight, 2026, 8, 3)
+}
+
+/// NSE cash phase for a calendar date.
+///
+/// Dates before 7 Dec 2026 keep the August 2026 windows. From 7 Dec 2026
+/// (NSE/CMTR/77355) continuous trading runs until 15:30, the closing
+/// auction is 15:30–15:40, and order matching is 15:40–15:45. The
+/// 15:45–15:50 interval is the transition, not matching.
+pub fn nse_cash_phase_on(
+    minutes_from_midnight: u32,
+    year: i32,
+    month: u32,
+    day: u32,
+) -> &'static str {
+    let revised = year > 2026 || (year == 2026 && (month > 12 || (month == 12 && day >= 7)));
+    let continuous_end = if revised { 15 * 60 + 30 } else { 15 * 60 + 15 };
+    let cas_end = if revised { 15 * 60 + 40 } else { 15 * 60 + 35 };
+    let matching_end = if revised { 15 * 60 + 45 } else { 15 * 60 + 50 };
+    if (9 * 60 + 15..continuous_end).contains(&minutes_from_midnight) {
         "continuous"
-    } else if (15 * 60 + 15..15 * 60 + 35).contains(&minutes_from_midnight) {
+    } else if (continuous_end..cas_end).contains(&minutes_from_midnight) {
         "cas"
-    } else if (15 * 60 + 35..15 * 60 + 50).contains(&minutes_from_midnight) {
+    } else if (cas_end..matching_end).contains(&minutes_from_midnight) {
         "matching"
+    } else if revised && (matching_end..15 * 60 + 50).contains(&minutes_from_midnight) {
+        "transition"
     } else if (15 * 60 + 50..16 * 60).contains(&minutes_from_midnight) {
         "post-close"
     } else {
@@ -578,5 +602,16 @@ mod tests {
         assert_eq!(nse_cash_phase(16 * 60), "closed");
         assert_ne!(nse_cash_phase(15 * 60 + 20), "closed");
         assert_ne!(nse_cash_phase(15 * 60 + 20), "continuous");
+    }
+
+    #[test]
+    fn test_nse_cash_phase_revision_boundary() {
+        assert_eq!(nse_cash_phase_on(15 * 60 + 20, 2026, 12, 6), "cas");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 20, 2026, 12, 7), "continuous");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 30, 2026, 12, 7), "cas");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 40, 2026, 12, 7), "matching");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 44, 2026, 12, 7), "matching");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 45, 2026, 12, 7), "transition");
+        assert_eq!(nse_cash_phase_on(15 * 60 + 50, 2026, 12, 7), "post-close");
     }
 }
