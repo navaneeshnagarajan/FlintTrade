@@ -783,6 +783,107 @@ def test_model_construction_failure_is_visible_without_persisting_provider_detai
     assert desk.sandbox.get_orders() == []
 
 
+def test_stop_releases_the_supervisor_lock_before_waking_a_contending_waiter(desk):
+    """A waiter that owns the progress condition must take the supervisor lock before the quote allowance.
+
+    stop() used to signal progress while it still held the supervisor lock. The
+    waiter then blocked on that lock until the condition wait — the same budget
+    _wait_for gives a quote read — ran out. Publication and database close
+    already signal only after the lock is released.
+    """
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    allowance = PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+    stop_thread: list[threading.Thread] = []
+    stop_reached_signal = threading.Event()
+
+    class _SignalLock:
+        """Record the stop caller entering the condition, then take the real lock."""
+
+        def __init__(self) -> None:
+            self._inner = threading.RLock()
+
+        def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+            return self._inner.acquire(blocking, timeout)
+
+        def release(self) -> None:
+            self._inner.release()
+
+        def locked(self) -> bool:
+            return self._inner.locked()
+
+        def __enter__(self) -> threading.RLock:
+            if stop_thread and threading.current_thread() is stop_thread[0]:
+                stop_reached_signal.set()
+            return self._inner.__enter__()
+
+        def __exit__(self, exc_type, exc, tb) -> bool | None:
+            return self._inner.__exit__(exc_type, exc, tb)
+
+        def _release_save(self):
+            return self._inner._release_save()
+
+        def _acquire_restore(self, state) -> None:
+            self._inner._acquire_restore(state)
+
+        def _is_owned(self) -> bool:
+            return self._inner._is_owned()
+
+    progress = threading.Condition(_SignalLock())
+    original = runtime.PracticeAgentSupervisor.progress
+    runtime.PracticeAgentSupervisor.progress = progress
+    waiter: threading.Thread | None = None
+    stopper: threading.Thread | None = None
+    try:
+        assert _start(desk, cycle_interval_sec=3600).status_code == 202
+        _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
+        supervisor = _supervisor(desk)
+        holding_condition = threading.Event()
+        outcome: dict[str, object] = {}
+
+        def wait_for_stop() -> None:
+            with progress:
+                holding_condition.set()
+                assert stop_reached_signal.wait(allowance), "stop() never reached the progress signal"
+                started = time.monotonic()
+                acquired = supervisor.lock.acquire(timeout=allowance)
+                elapsed = time.monotonic() - started
+                stop_requested = False
+                if acquired:
+                    stop_requested = supervisor.run.stop.is_set()
+                    supervisor.lock.release()
+                outcome["acquired"] = acquired
+                outcome["elapsed"] = elapsed
+                outcome["stop_requested"] = stop_requested
+
+        waiter = threading.Thread(target=wait_for_stop, name="practice-stop-waiter")
+        waiter.start()
+        assert holding_condition.wait(allowance), "waiter did not take the progress condition"
+
+        def request_stop() -> None:
+            stop_thread.append(threading.current_thread())
+            outcome["snapshot"] = supervisor.stop(desk.owner)
+
+        stopper = threading.Thread(target=request_stop, name="practice-stop-requester")
+        stopper.start()
+        waiter.join(allowance + 5)
+        stopper.join(allowance + 5)
+        assert not waiter.is_alive(), "lock contender was not released"
+        assert not stopper.is_alive(), "stop() did not return after the waiter continued"
+        assert outcome["acquired"] is True, outcome
+        assert outcome["stop_requested"] is True
+        assert outcome["elapsed"] < allowance / 10, outcome
+        snapshot = outcome["snapshot"]
+        assert isinstance(snapshot, dict)
+        assert snapshot["status"] == "stopping"
+    finally:
+        runtime.PracticeAgentSupervisor.progress = original
+        if stopper is not None and stopper.is_alive():
+            stopper.join(1)
+        if waiter is not None and waiter.is_alive():
+            waiter.join(1)
+
+
 def test_stop_publishes_last_worker_snapshot_without_reading_mutable_state(desk):
     desk.signal = "BUY"
     assert _start(desk, cycle_interval_sec=1).status_code == 202

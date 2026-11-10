@@ -363,6 +363,8 @@ class PracticeAgentSupervisor:
             self._persist_locked(run, status, error=error)
         finally:
             # Notify after the supervisor and evidence locks are released.
+            # Callers that already hold the supervisor lock must persist with
+            # _persist_locked and signal only after they drop that lock.
             self._notify_progress()
 
     def _persist_locked(self, run: _Run, status: str, *, error: str = "") -> None:
@@ -548,6 +550,7 @@ class PracticeAgentSupervisor:
             )
             run.llm = llm
             self.run = run
+            startup_error: BaseException | None = None
             try:
                 run.adapter = PracticeAgentAdapter(
                     self.app,
@@ -570,18 +573,27 @@ class PracticeAgentSupervisor:
                 self._event(run, "run_started", {"mode": "practice"})
                 run.snapshot = self._snapshot(run)
                 run.thread.start()
-            except Exception:
+            except Exception as exc:
                 if run.adapter is not None:
                     run.adapter.close()
                 self._close_llm(run)
                 run.cleanup_complete = True
-                self._persist(
-                    run,
-                    "reconciliation_required" if run.evidence_failed else "failed",
-                    error="Practice worker could not start",
-                )
-                raise
-            return dict(run.snapshot)
+                try:
+                    self._persist_locked(
+                        run,
+                        "reconciliation_required" if run.evidence_failed else "failed",
+                        error="Practice worker could not start",
+                    )
+                except Exception as persist_error:
+                    startup_error = persist_error
+                else:
+                    startup_error = exc
+            else:
+                return dict(run.snapshot)
+        self._notify_progress()
+        if startup_error is None:
+            raise RuntimeError("Practice worker could not start")
+        raise startup_error
 
     def resume_protection(self, protection: Any) -> bool:
         """Reconstruct only a pinned fixed rule after canonical reconciliation.
@@ -606,7 +618,12 @@ class PracticeAgentSupervisor:
         if remaining == 0:
             run.adapter.close()
             run.cleanup_complete = True
-            self._persist(run, "stopped")
+            # The recovery caller still holds this supervisor lock. Persist now
+            # and let that caller signal after it releases the lock.
+            try:
+                self._persist_locked(run, "stopped")
+            finally:
+                self._progress_notify_pending = True
             protection.reconcile(scope)
             return False
         _, grant = protection.validate(scope)
@@ -625,17 +642,30 @@ class PracticeAgentSupervisor:
 
     def stop(self, owner: str) -> dict[str, Any] | None:
         """Brake entries immediately, retaining ownership throughout cleanup."""
-        with self.lock:
-            run = self.run
-            if run is None or run.owner != owner or run.thread is None or not run.thread.is_alive():
-                return None
-            run.stop.set()
-            if self.execution_binding is None:
-                run.close_requested.set()
-            if run.trader is not None:
-                run.trader.request_stop(square_off=self.execution_binding is None)
-            self._persist(run, "stopping")
-            return dict(run.snapshot)
+        notify = False
+        try:
+            with self.lock:
+                run = self.run
+                if run is None or run.owner != owner or run.thread is None or not run.thread.is_alive():
+                    return None
+                run.stop.set()
+                if self.execution_binding is None:
+                    run.close_requested.set()
+                if run.trader is not None:
+                    run.trader.request_stop(square_off=self.execution_binding is None)
+                try:
+                    self._persist_locked(run, "stopping")
+                finally:
+                    notify = True
+                snapshot = dict(run.snapshot)
+            return snapshot
+        finally:
+            # The condition is signaled only after this lock is gone. A waiter
+            # that already holds the condition and then needs the lock would
+            # otherwise sit until its quote-read allowance expired. Publication
+            # and database close already signal from outside the lock.
+            if notify:
+                self._notify_progress()
 
     def snapshot(self, owner: str) -> dict[str, Any]:
         """Return only this operator's immutable last worker snapshot."""
