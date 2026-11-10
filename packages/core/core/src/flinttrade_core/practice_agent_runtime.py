@@ -268,6 +268,10 @@ class _ObservedLLM:
 class PracticeAgentSupervisor:
     """Own one worker and its durable evidence for the complete app lifetime."""
 
+    # Published cycle state is observable only after the worker records it.
+    # Waiters block here instead of guessing how long a quote read takes.
+    progress = threading.Condition()
+
     def __init__(self, app: Any, store: Any, *, execution_binding: Any = None) -> None:
         from .backend_instance import require_backend_lease_proof  # noqa: PLC0415
         from .owner_file_lock import OwnerSafeFileLock  # noqa: PLC0415
@@ -350,7 +354,18 @@ class PracticeAgentSupervisor:
             )
         return snapshot
 
+    def _notify_progress(self) -> None:
+        with PracticeAgentSupervisor.progress:
+            PracticeAgentSupervisor.progress.notify_all()
+
     def _persist(self, run: _Run, status: str, *, error: str = "") -> None:
+        try:
+            self._persist_locked(run, status, error=error)
+        finally:
+            # Notify after the supervisor and evidence locks are released.
+            self._notify_progress()
+
+    def _persist_locked(self, run: _Run, status: str, *, error: str = "") -> None:
         with self.lock:
             if run.stop.is_set() and status in {"waiting", "running"}:
                 status = "stopping"
@@ -1056,6 +1071,7 @@ class PracticeAgentSupervisor:
                     run.status = "reconciliation_required"
                     run.error = "Practice evidence storage failed; reconciliation is required"
                     run.snapshot = self._snapshot(run)
+                self._notify_progress()
 
     @staticmethod
     def _close_llm(run: _Run) -> None:
