@@ -23,7 +23,7 @@
  *     same way until the operator changes the symbol or closes the pad.
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo, type KeyboardEvent } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
 import { useAtomValue } from "jotai";
 import { useModeStore } from "@/stores/modeStore";
@@ -62,12 +62,14 @@ import {
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import { resolveAccountAuthorityIdentity, resolveDataScope, useDataScope } from "@/hooks/useDataScope";
 import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErrorPresentation";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
-  checkFreezeQuantity,
   checkOrderQuantityLimit,
-  lotMultipleRefusal,
+  maxPlaceableQuantity,
+  quantityAdmissionRefusal,
+  quantityCapLabel,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -79,7 +81,8 @@ import {
   deskContractName,
   missingLotRefusal,
 } from "@/lib/instrumentLots";
-import { isMarketHours, tickKeyFor } from "@/lib/market";
+import { orderPadSessionBadge, tickKeyFor } from "@/lib/market";
+import { muhuratAmoNote } from "@/lib/muhuratSession";
 import {
   SESSION_OPEN_LABEL,
   optionPremiumHint,
@@ -92,7 +95,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, ORDER_STATUS_UNKNOWN, liveWritesMuted } from "@/lib/operatorIncident";
 import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -228,6 +231,31 @@ interface StepInputProps {
   invalid?: boolean;
 }
 
+/**
+ * Next quantity on the lot grid.
+ *
+ * Up is the next whole lot strictly above the value. Down is the next whole
+ * lot strictly below it, which for an off-grid value is the nearest lot
+ * below. The result is clamped to `[minimum, maximum]`.
+ */
+export function stepQuantityOnLotGrid(
+  value: number,
+  direction: "up" | "down",
+  lot: number,
+  minimum: number,
+  maximum?: number,
+): number {
+  const step = Number.isFinite(lot) && lot > 0 ? Math.trunc(lot) : 1;
+  const current = Number.isFinite(value) ? value : 0;
+  const lotsBelow = Math.floor(current / step);
+  const onGrid = current % step === 0;
+  const raw = direction === "up"
+    ? (lotsBelow + 1) * step
+    : (onGrid ? lotsBelow - 1 : lotsBelow) * step;
+  const bounded = Math.max(minimum, raw);
+  return maximum != null ? Math.min(maximum, bounded) : bounded;
+}
+
 function StepInput({
   label,
   value,
@@ -241,17 +269,17 @@ function StepInput({
   errorId,
   invalid = false,
 }: StepInputProps) {
-  function dec() {
+  function move(direction: "up" | "down") {
     const n = parseFloat(String(value)) || 0;
-    onChange(String(Math.max(min, n - step)));
+    onChange(String(stepQuantityOnLotGrid(n, direction, step, min, max)));
   }
-  function inc() {
-    const n = parseFloat(String(value)) || 0;
-    const next = n + step;
-    onChange(String(max != null ? Math.min(max, next) : next));
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    move(event.key === "ArrowUp" ? "up" : "down");
   }
   const numeric = parseFloat(String(value)) || 0;
-  const atMax = max != null && numeric >= max;
+  const atMax = stepQuantityOnLotGrid(numeric, "up", step, min, max) === numeric;
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -261,7 +289,7 @@ function StepInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={dec}
+          onClick={() => move("down")}
           disabled={disabled}
           aria-label={`Decrease ${label}`}
           className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-r-0 border-border-default rounded-l rounded-r-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -273,6 +301,7 @@ function StepInput({
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
           disabled={disabled}
           min={min}
           max={max}
@@ -286,7 +315,7 @@ function StepInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={inc}
+          onClick={() => move("up")}
           disabled={disabled || atMax}
           aria-label={`Increase ${label}`}
           className="w-8 h-8 flex items-center justify-center bg-surface-hover border border-l-0 border-border-default rounded-r rounded-l-none text-text-muted hover:text-text-primary hover:bg-surface-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -337,7 +366,7 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
 }
 
 interface ToastMsg {
-  type: "success" | "error";
+  type: "success" | "error" | "unknown";
   text: string;
   scopeKey: string;
   retryable?: boolean;
@@ -345,39 +374,25 @@ interface ToastMsg {
   kind?: typeof QUANTITY_CHECK_ERROR;
 }
 
-interface ToastProps {
-  msg: ToastMsg | null;
-  onRetry?: () => void;
-}
-
-function Toast({ msg, onRetry }: ToastProps) {
+function Toast({ msg }: { msg: ToastMsg | null }) {
   if (!msg) return null;
   const ok = msg.type === "success";
-  // Transient errors (network, server 500) are retryable; auth/validation errors are not
-  const showRetry = !ok && msg.retryable && !!onRetry;
+  const unknown = msg.type === "unknown";
   return (
     <div
-      role="alert"
-      aria-live="assertive"
+      role={unknown ? "status" : "alert"}
+      aria-live={unknown ? "polite" : "assertive"}
+      data-testid="order-pad-outcome"
       className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
-        ok
-          ? "bg-profit/10 border-profit/20 text-profit"
-          : "bg-loss/10 border-loss/20 text-loss"
+        unknown
+          ? "bg-warning/10 border-warning/20 text-warning"
+          : ok
+            ? "bg-profit/10 border-profit/20 text-profit"
+            : "bg-loss/10 border-loss/20 text-loss"
       }`}
     >
-      {ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
+      {unknown ? <AlertCircle size={13} aria-hidden="true" /> : ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
       <span className="flex-1 min-w-0 leading-tight [overflow-wrap:anywhere]">{msg.text}</span>
-      {showRetry && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onRetry}
-          className="shrink-0 h-auto px-2 py-0.5 rounded border border-loss/30 text-loss hover:bg-loss/10 transition-colors text-xxs font-medium"
-        >
-          Retry
-        </Button>
-      )}
     </div>
   );
 }
@@ -767,12 +782,15 @@ function OrderPadWidget(props: WidgetProps) {
           calculated = Math.floor(amount / ltp);
         }
         if (calculated >= 1) {
-          const capped = closeCap != null ? Math.min(calculated, closeCap) : calculated;
+          const placeable = lotSize > 0 ? maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty) : null;
+          const caps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
+            .filter((value): value is number => value != null);
+          const capped = caps.length > 0 ? Math.min(calculated, ...caps) : calculated;
           if (capped >= 1) setValue("qty", capped);
         }
       }
     },
-    [closeCap, ltp, lotSize, setValue],
+    [brokerFreezeQty, closeCap, ltp, lotSize, setValue, symbol],
   );
 
   const handleQtyChange = useCallback(
@@ -923,14 +941,14 @@ function OrderPadWidget(props: WidgetProps) {
   }, [handleSelect, query, suggestions, symbol]);
 
   const showToast = useCallback((
-    type: "success" | "error",
+    type: "success" | "error" | "unknown",
     text: string,
     ms = 4000,
-    retryable = false,
+    _retryable = false,
     kind?: typeof QUANTITY_CHECK_ERROR,
   ) => {
     clearTimeout(toastTimerRef.current);
-    setToast({ type, text, retryable, kind, scopeKey: resolveDataScope({
+    setToast({ type, text, retryable: false, kind, scopeKey: resolveDataScope({
       ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
     }) });
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
@@ -947,15 +965,6 @@ function OrderPadWidget(props: WidgetProps) {
     return () => clearTimeout(toastTimerRef.current);
   }, []);
 
-  // Determine whether an error message warrants a retry button
-  function isRetryableError(msg: string): boolean {
-    return (
-      msg.includes("Connection failed") ||
-      msg.includes("server error") ||
-      msg.includes("Rate limit")
-    );
-  }
-
   const submitOrder = useCallback(async (
     params: Readonly<PlaceOrderParams>,
     authority?: { mode: "practice" | "live" },
@@ -963,6 +972,10 @@ function OrderPadWidget(props: WidgetProps) {
   ): Promise<boolean> => {
     const incidentScope = captureOperatorIncidentScope();
     const submissionMode = useModeStore.getState().mode;
+    if (submissionMode === "unavailable") {
+      showToast("error", "Unavailable. No order was sent.", 6000);
+      return false;
+    }
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
     setNativeDisclosure(null);
@@ -1045,7 +1058,9 @@ function OrderPadWidget(props: WidgetProps) {
         // Reconciliation guidance and native reason observations are not
         // broker-health evidence. Do not classify generated "check broker"
         // copy as a broker outage or change readiness from its wording.
-        showToast("error", presentation.body, 6000, false);
+        const unknown = presentation.body === ORDER_STATUS_UNKNOWN;
+        if (unknown) setPracticeReview(null);
+        showToast(unknown ? "unknown" : "error", presentation.body, 6000, false);
         emitNotification({ category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true, ...presentation });
         return false;
       }
@@ -1071,6 +1086,19 @@ function OrderPadWidget(props: WidgetProps) {
         return false;
       }
       setAdmission(null);
+      const outcome = presentSubmitError(err);
+      if (outcome.kind === "unknown") {
+        setPracticeReview(null);
+        showToast("unknown", outcome.message, 6000);
+        emitNotification({
+          category: "order",
+          ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+          ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
+          title: capturedOrderTitle("Order status unknown", params),
+          body: outcome.message,
+        });
+        return false;
+      }
       const code = err instanceof OrderApiError && err.body && typeof err.body === "object" && "code" in err.body
         && typeof (err.body as { code?: unknown }).code === "string"
         ? (err.body as { code: string }).code
@@ -1087,19 +1115,19 @@ function OrderPadWidget(props: WidgetProps) {
         }
       }
       noteObservedFailure({ message: msg, httpStatus, provenance: "order", scope: incidentScope });
-      const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
-      if (code !== "quantity_admission") {
-        showToast("error", msg, 6000, retryable);
-      }
+      showToast(
+        "error",
+        msg,
+        6000,
+        false,
+        code === "quantity_admission" ? QUANTITY_CHECK_ERROR : undefined,
+      );
       emitNotification({
         category: "order",
         ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
         ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
         title: capturedOrderTitle("Order failed", params),
         body: msg,
-        // A retryable failure (timeout, transient connection) sends the operator
-        // back to the trade terminal to re-place; a hard rejection does not.
-        ...(retryable ? { action: { label: "Back to terminal", href: "/trade" } } : {}),
       });
       return false;
     } finally {
@@ -1151,8 +1179,10 @@ function OrderPadWidget(props: WidgetProps) {
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
-    const qtyRefusal = checkFreezeQuantity(values.symbol, values.qty, brokerFreezeQty)
-      ?? checkOrderQuantityLimit(values.exchange, values.qty);
+    const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
+      ?? (lotSizeKnown
+        ? quantityAdmissionRefusal(values.symbol, values.qty, lotSize, brokerFreezeQty)
+        : null);
     if (qtyRefusal) {
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
       return;
@@ -1190,7 +1220,7 @@ function OrderPadWidget(props: WidgetProps) {
     if (lotRefusal) {
       const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
         ? missingLotRefusal(deskContractName(values.symbol))
-        : lotMultipleRefusal(lotSize);
+        : lotRefusal;
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
       return;
     }
@@ -1266,6 +1296,7 @@ function OrderPadWidget(props: WidgetProps) {
       setValue("qty", quantity, { shouldValidate: true });
     }
     const modeAtClick = useModeStore.getState().mode;
+    if (modeAtClick === "unavailable") return;
     const mode = review
       ? "practice"
       : modeAtClick === "live"
@@ -1363,26 +1394,7 @@ function OrderPadWidget(props: WidgetProps) {
     await submitOrder(params, { mode: authorityMode }, { exit: true });
   }, [appMode, exitAlreadyPending, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
 
-  function handleRetry() {
-    const mode = useModeStore.getState().mode;
-    setToast(null);
-    if (mode === "practice" || mode === "explore") {
-      // A paper retry must be reviewed again; it can never call placement
-      // directly from a stale toast action.
-      void handleSubmit(onSubmit)();
-      return;
-    }
-    if (mode === "live" && lastSubmissionModeRef.current === "live" && lastParamsRef.current) {
-      void submitOrder(
-        lastParamsRef.current,
-        { mode: "live" },
-        lastExitRef.current ? { exit: true } : undefined,
-      );
-      return;
-    }
-    showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);
-  }
-
+  const amoNote = muhuratAmoNote();
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const btnColor = isBuy
@@ -1397,7 +1409,7 @@ function OrderPadWidget(props: WidgetProps) {
         <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
           Order Pad
         </span>
-        {isMarketHours() && (
+        {orderPadSessionBadge(new Date(), exchange).greenContinuous && (
           <span
             className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium"
             aria-label="Market session open"
@@ -1406,6 +1418,14 @@ function OrderPadWidget(props: WidgetProps) {
           </span>
         )}
       </div>
+      {amoNote ? (
+        <p
+          className="px-3 py-2 text-xxs text-text-muted border-b border-border-default"
+          data-testid="muhurat-amo-note"
+        >
+          {amoNote}
+        </p>
+      ) : null}
 
       {/* Form body */}
       {/* noValidate: validation is owned by zod + the custom F&O lot check in
@@ -1672,45 +1692,56 @@ function OrderPadWidget(props: WidgetProps) {
               Fund
             </button>
           </div>
-          {lotSize > 0 && (
-            <span className="ml-auto text-xxs text-text-muted font-mono tabular-nums">
-              Lot: {lotSize}
-            </span>
-          )}
         </div>
 
         {/* Qty mode: manual quantity + price row */}
         {inputMode === "qty" && (
-          <div className="grid grid-cols-2 gap-3 items-start">
+          <div className="grid grid-cols-2 gap-3">
             <Controller
               control={control}
               name="qty"
-              render={({ field }) => (
-                <div className="flex flex-col">
-                  <StepInput
-                    id="orderpad-qty"
-                    label="Quantity"
-                    value={field.value}
-                    onChange={(v) => handleQtyChange(v, field.onChange)}
-                    // One lot is the floor when the lot size is known, keeping the
-                    // stepper (and the native spinner's step base) lot-aligned.
-                    min={closeCap != null ? 1 : (lotSize > 0 ? lotSize : 1)}
-                    max={closeCap ?? undefined}
-                    step={closeCap != null && lotSize > closeCap ? 1 : (lotSize > 0 ? lotSize : 1)}
-                    invalid={!!errors.qty}
-                    errorId={errors.qty ? "orderpad-qty-error" : undefined}
-                  />
-                  {/* Reserved height: the refusal appears and clears without moving Price. */}
-                  <p
-                    id="orderpad-qty-error"
-                    data-testid="orderpad-qty-message"
-                    role={errors.qty ? "alert" : undefined}
-                    className="h-12 overflow-hidden text-xs leading-4 text-loss"
-                  >
-                    {errors.qty?.message ?? ""}
-                  </p>
-                </div>
-              )}
+              render={({ field }) => {
+                const placeable = lotSizeKnown && lotSize > 0
+                  ? maxPlaceableQuantity(symbol, lotSize, brokerFreezeQty)
+                  : null;
+                const quantityHint = placeable != null && placeable > 0
+                  ? quantityCapLabel(lotSize, placeable)
+                  : lotSize > 0
+                    ? `Lot: ${lotSize}`
+                    : "";
+                const stepperCaps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
+                  .filter((value): value is number => value != null);
+                const stepperMax = stepperCaps.length > 0 ? Math.min(...stepperCaps) : undefined;
+                return (
+                  <div className="flex flex-col gap-1">
+                    <StepInput
+                      id="orderpad-qty"
+                      label="Quantity"
+                      value={field.value}
+                      onChange={(v) => handleQtyChange(v, field.onChange)}
+                      // One lot is the floor when the lot size is known, keeping the
+                      // stepper (and the native spinner's step base) lot-aligned.
+                      // The max stops the stepper at the lot-aligned cap. A typed
+                      // or pasted value above that cap is left as entered and refused.
+                      min={closeCap != null ? 1 : (lotSize > 0 ? lotSize : 1)}
+                      max={stepperMax}
+                      step={closeCap != null && lotSize > closeCap ? 1 : (lotSize > 0 ? lotSize : 1)}
+                      invalid={!!errors.qty}
+                      errorId={errors.qty ? "orderpad-qty-error" : "orderpad-qty-hint"}
+                    />
+                    <p id="orderpad-qty-hint" className="min-h-4 text-xs leading-4 text-text-muted">
+                      {quantityHint || "\u00a0"}
+                    </p>
+                    <p
+                      id="orderpad-qty-error"
+                      role={errors.qty ? "alert" : undefined}
+                      className="min-h-4 text-xs leading-4 text-loss"
+                    >
+                      {errors.qty?.message || "\u00a0"}
+                    </p>
+                  </div>
+                );
+              }}
             />
             <Controller
               control={control}
@@ -1994,9 +2025,9 @@ function OrderPadWidget(props: WidgetProps) {
       </form>
 
       {/* Toast */}
-      <Toast msg={toast?.scopeKey === dataScope ? toast : null} onRetry={handleRetry} />
+      <Toast msg={toast?.scopeKey === dataScope ? toast : null} />
 
-      {practiceReview ? (
+      {practiceReview && appMode !== "unavailable" ? (
         <PracticeOrderReviewStage
           mode={appMode === "live" ? "practice" : appMode}
           review={practiceReview}

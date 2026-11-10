@@ -44,7 +44,7 @@ def _make_crawl4ai_modules() -> dict[str, MagicMock]:
 @contextmanager
 def _fake_crawl4ai(
     mock_crawler: MagicMock,
-) -> Generator[dict[str, MagicMock], None, None]:
+) -> Generator[dict[str, MagicMock]]:
     """Context manager that injects a fake crawl4ai tree and wires AsyncWebCrawler.
 
     Args:
@@ -362,7 +362,7 @@ class TestCrawl4AIClientLLM:
         admitted_models: list[str] = []
 
         @contextmanager
-        def admitted(model: str) -> Generator[MagicMock, None, None]:
+        def admitted(model: str) -> Generator[MagicMock]:
             admitted_models.append(model)
             yield MagicMock(base_url="http://127.0.0.1:49152")
 
@@ -437,7 +437,7 @@ class TestCrawl4AIClientLLM:
         mock_crawler = _make_mock_crawler(mock_result)
 
         @contextmanager
-        def changed(_model: str) -> Generator[MagicMock, None, None]:
+        def changed(_model: str) -> Generator[MagicMock]:
             yield MagicMock(base_url="http://127.0.0.1:49152")
             raise ollama_runtime.OllamaRuntimeError("loaded model digest changed")
 

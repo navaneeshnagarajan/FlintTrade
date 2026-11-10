@@ -94,7 +94,7 @@ function FoundationLifecycle() {
         }}>Mark account books stale</Button>
       </div>
     </header>
-    <ModeHonestyBar mode={mode} />
+    {mode !== "unavailable" ? <ModeHonestyBar mode={mode} /> : <p role="status">Unavailable</p>}
     <main className="p-3">
       {view === "wired-risk" ? <WiredRiskConsumers /> : view === "dormant-recovery" ? <DormantRecoveryConsumer />
         : view === "session" ? <div style={{ height: 660 }}><TradeJournalTool onClose={() => undefined} /></div>

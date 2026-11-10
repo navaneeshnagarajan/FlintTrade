@@ -579,8 +579,24 @@ export const runPermutationTest = (returns: number[], config?: PermutationConfig
 export interface UploadedStrategyStatus {
   strategy_id: string;
   name: string;
-  /** running | stopped | crashed */
+  /**
+   * running, stopped, crashed, or unknown.
+   * A missing or unrecognised value is not a confirmed stop.
+   */
   state: string;
+  /**
+   * Why the runner reported ``state``. Stable tokens:
+   * idle, running, leader_exited, tree_unreadable, exit_nonzero,
+   * exit_clean, exit_missing, cleanup_unproven.
+   */
+  reason?: string;
+  /**
+   * BaseStrategy lifecycle when this runner holds one:
+   * ACTIVE, PAUSED, STOPPED, or ERROR.
+   */
+  lifecycle?: string;
+  /** Present when the runner still owns a process whose tree could not be read. */
+  ownership_retained?: boolean;
   pid: number | null;
   memory_mb: number | null;
   uptime_seconds: number | null;

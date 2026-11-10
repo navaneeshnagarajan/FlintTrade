@@ -138,15 +138,22 @@ overrides:
   # Stay on the latest 0.35.x.
   sharp: 0.35.5
   # GHSA-rfgv-xxqx-mfg5 (unrequested WebSocket subprotocol DoS) and
-  # GHSA-w293-vg96-wgc3 (BalancedPool TLS validation bypass) are patched in
-  # 7.29.1. Pin the current 7.30.0 line (dist-tag seven) so a transitive
-  # 7.29.0 cannot remain. 8.x is patched in 8.10.2; this tree is forced onto 7.x.
-  # Supersedes the historical global 7.x coercion above: current jsdom requires
-  # ^8.11.2, @electron/get requests ^7.24.4, node-gyp requests ^6.25.0.
-  # Retain exact newest maintenance pins per compatible consumer line;
-  # 8.x is resolved normally from its actual parent range.
-  'undici@>=6.0.0 <7.0.0': 6.29.0
-  'undici@>=7.0.0 <8.0.0': 7.30.0
+  # GHSA-w293-vg96-wgc3 (BalancedPool TLS validation bypass) were patched in
+  # 7.29.1. GHSA-xjj6-f33q-929c, GHSA-4w7w-5xrc-9h26, GHSA-2m5v-pch6-74hx and
+  # GHSA-qrxm-fqhp-jwvm are patched in 6.29.1 and 7.30.1. @electron/get
+  # requests ^7.24.4; node-gyp (via electron-builder) requests ^6.25.0.
+  # 8.x is resolved from its parent range. jsdom requires ^8.11.2.
+  'undici@>=6.0.0 <7.0.0': 6.29.1
+  'undici@>=7.0.0 <8.0.0': 7.30.1
+  # GHSA-mrwp-f3q8-3g9p: cross-realm sensitiveHeaders dropped on redirect,
+  # patched in 1.16.2. http-proxy (via Perspective's http-server) still
+  # resolves 1.16.1.
+  'follow-redirects@<1.16.2': 1.16.2
+  # GHSA-mrhx-c7xc-m3w5: oversized collection validation can exhaust memory,
+  # patched in zod >=4.6.6. There is no patched 3.x release. Reticle's range
+  # is ^3.25.0 || ^4.0.0, so the 3.25.76 copy moves onto the 4.6.7 line the
+  # terminal and the site already depend on.
+  'zod@<4.6.6': 4.6.7
   # Eight HIGH name-injection / ReDoS advisories on the 0.8 line that
   # electron-builder's plist@3.1.0 still requests. 0.8.15 is the patched
   # release for that line (0.9.12 is the 0.9 equivalent).
@@ -176,3 +183,19 @@ overrides:
 # if this exact-version patch no longer applies. See patches/README.md.
 patchedDependencies:
   http-cache-semantics@4.3.0: patches/http-cache-semantics@4.3.0.patch
+
+# Next.js 16.4.5 is the November 2026 security release. It was published inside
+# pnpm's built-in 24-hour release-age window, so a non-strict install records
+# these exact versions here. Remove the list once the release is older than
+# that window.
+minimumReleaseAgeExclude:
+  - '@next/env@16.4.5'
+  - '@next/swc-darwin-arm64@16.4.5'
+  - '@next/swc-darwin-x64@16.4.5'
+  - '@next/swc-linux-arm64-gnu@16.4.5'
+  - '@next/swc-linux-arm64-musl@16.4.5'
+  - '@next/swc-linux-x64-gnu@16.4.5'
+  - '@next/swc-linux-x64-musl@16.4.5'
+  - '@next/swc-win32-arm64-msvc@16.4.5'
+  - '@next/swc-win32-x64-msvc@16.4.5'
+  - next@16.4.5

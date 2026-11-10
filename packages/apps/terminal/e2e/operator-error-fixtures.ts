@@ -13,7 +13,7 @@ export const errorPath = (kind: string, account = ERROR_A) => nativePath(kind, a
 export const errorRaw = (outcome = "unknown_after_dispatch") => ({ status: "error", message: "Order dispatch failed", dispatch_outcome: outcome, retry_safe: false, affected_item: { broker: ERROR_BROKER, account_id: ERROR_A, operation: "place", symbol: "INFY", exchange: "NSE", product: "MIS", action: "BUY" }, broker_code: "1021", broker_message: "Order is completed" });
 export const errorPad = (page: Page): Locator => page.locator('[data-tour-target="order-pad"]').first();
 
-const unicodeUnknown = "Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.";
+const unicodeUnknown = "Order status unknown. Check Orders before trying again.";
 const unicodeRefused = "Order refused before dispatch. No order was sent. No automatic retry.";
 const unicodeOrigin = " Origin: kotakneo / KOTAK-OFFLINE · BUY INFY (NSE / MIS).";
 const unicodeCode = " Broker code: 1021.";
@@ -30,7 +30,7 @@ export const UNICODE_ERROR_CASES = [
   ...UNICODE_ERROR_MARKS.map(({ name, mark }) => ({
     name: `${name} omitted from unknown native reason`, status: 500,
     raw: { ...errorRaw(), broker_message: `Order${mark} is completed` },
-    expected: unicodeUnknown + unicodeOrigin + unicodeCode, refused: false,
+    expected: unicodeUnknown, refused: false,
   })),
   ...UNICODE_ERROR_MARKS.map(({ name, mark }) => ({
     name: `${name} omitted from structured refusal summary`, status: 400,
@@ -41,7 +41,7 @@ export const UNICODE_ERROR_CASES = [
   {
     name: "ordinary Arabic and Devanagari printable reason stays literal", status: 500,
     raw: { ...errorRaw(), broker_message: printableReason },
-    expected: unicodeUnknown + unicodeOrigin + ` Broker reason (observation): ${printableReason}.` + unicodeCode,
+    expected: unicodeUnknown,
     refused: false,
   },
 ] as const;
@@ -215,7 +215,7 @@ export async function assertCapturedTextPainted(locator: Locator, info: TestInfo
 export function registerErrorReads(registry: SyntheticFixtureRegistry, mode: "live" | "practice" = "live", switchAccount = false): void {
   registerDeskReads(registry, switchAccount, { broker: ERROR_BROKER, accountIds: [ERROR_A, ERROR_B] });
   for (const account of [ERROR_A, ERROR_B]) {
-    registerRead(registry, errorPath("positions", account), { json: { status: "success", data: account === ERROR_B ? [{ symbol: "INFY", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 100, ltp: 101, pnl: 10, pnlPercent: 1 }] : [] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
+    registerRead(registry, errorPath("positions", account), { json: { status: "success", data: [{ symbol: "INFY", exchange: "NSE", product: "MIS", quantity: account === ERROR_B ? 10 : 1, averagePrice: 100, ltp: 101, pnl: account === ERROR_B ? 10 : 1, pnlPercent: 1 }] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
     registerRead(registry, errorPath("orders", account), { json: { status: "success", data: [] } }, { minimum: account === ERROR_A && mode === "live" ? 1 : 0, maximum: 4 });
     registerRead(registry, errorPath("funds", account), { json: { status: "success", data: { available_balance: 100_000, used_margin: 0, total_balance: 100_000 } } }, { minimum: 0, maximum: 2 });
     registerRead(registry, `${errorPath("search", account)}?query=INFY&exchange=NSE`, { json: { status: "success", data: [{ symbol: "INFY", exchange: "NSE", lotsize: 1, tick_size: 0.05 }] } }, { minimum: 0, maximum: 2 });

@@ -1,5 +1,5 @@
 /**
- * Compact OI profile + PCR strip for the Option Chain (FT-TRADE-012).
+ * Compact OI profile + PCR strip for the Option Chain.
  *
  * Shows the selected expiry/symbol's CE/PE OI profile and PCR. Explore
  * keeps a Sample badge and never invents live OI. An empty expiry is an

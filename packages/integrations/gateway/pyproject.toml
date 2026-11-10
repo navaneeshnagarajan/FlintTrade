@@ -2,13 +2,13 @@
 name = "flinttrade-gateway"
 version = "0.0.1"
 description = "Broker adapter interfaces, encrypted credential storage, routing metadata, and WebSocket bridge"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "flinttrade-core",
     "flinttrade-engine",
     "pydantic==2.14.1",
     "httpx==0.28.1",
-    "websockets==17.2",
+    "websockets==17.4",
     "cryptography==50.0.2",
     "dhanhq==2.3.0rc1",
     "upstox-python-sdk==2.30.0",
@@ -16,7 +16,7 @@ dependencies = [
     # uv installs this hash-locked backend before building the Git-pinned SDK
     # without isolation; pip-only paths consume the equivalent dedicated lock.
     "packaging==26.3",
-    "setuptools==84.0.0",
+    "setuptools==84.1.0",
     "wheel==0.48.0",
     "growwapi==1.5.0",
 ]

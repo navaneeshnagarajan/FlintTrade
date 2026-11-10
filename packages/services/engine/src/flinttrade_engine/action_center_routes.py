@@ -153,17 +153,19 @@ def approve_order(order_id: str) -> tuple[Any, int]:
             raise TypeError("Approval dispatcher returned an invalid result")
     except Exception:  # noqa: BLE001 - post-claim exceptions have uncertain outcome
         logger.exception("Action Centre dispatch failed for request %s", order_id)
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED
+
         failed = queue.mark_failed(
             order_id,
-            reason=(
-                "Approval dispatch did not complete cleanly. The broker outcome may be unknown; "
-                "inspect the live order book before creating another intent."
-            ),
+            reason=ORDER_STATUS_UNKNOWN,
             outcome_uncertain=True,
         )
         return jsonify({
             "status": "error",
-            "message": failed.failure_reason,
+            "order_outcome": "unknown",
+            "reason": REASON_RESPONSE_UNCONFIRMED,
+            "retry_safe": False,
+            "message": ORDER_STATUS_UNKNOWN,
             "data": {"request": failed.to_dict()},
         }), 503
 
@@ -181,16 +183,28 @@ def approve_order(order_id: str) -> tuple[Any, int]:
         }), 200
 
     detail = result.message or "Approval was refused"
-    message = f"Order was not dispatched: {detail}. This intent will not be replayed."
+    if result.outcome_uncertain:
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED
+
+        message = ORDER_STATUS_UNKNOWN
+        extra = {
+            "order_outcome": "unknown",
+            "reason": REASON_RESPONSE_UNCONFIRMED,
+            "retry_safe": False,
+        }
+    else:
+        message = f"Order was not dispatched: {detail}. This intent will not be replayed."
+        extra = {}
     failed = queue.mark_failed(
         order_id,
-        reason=detail,
+        reason=ORDER_STATUS_UNKNOWN if result.outcome_uncertain else detail,
         outcome_uncertain=result.outcome_uncertain,
     )
     status_code = result.status_code if 400 <= result.status_code <= 599 else 500
     return jsonify({
         "status": "error",
         "message": message,
+        **extra,
         "data": {"request": failed.to_dict()},
     }), status_code
 

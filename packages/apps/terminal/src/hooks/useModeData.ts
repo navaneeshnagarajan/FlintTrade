@@ -25,7 +25,6 @@ import {
   useAccountReadContext,
   type AccountReadContext,
 } from "@/hooks/useAccountReadsEnabled";
-import type { AppMode } from "@/stores/modeStore";
 import type { Position, Order, Holding, Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -232,7 +231,7 @@ function useApiModeData<T>(
  * @returns { data, isLoading, error, refetch } matching TanStack Query shape
  */
 export function useModeData<T = unknown>(key: ModeDataKey): ModeDataResult<T> {
-  const mode: AppMode = useModeStore((s) => s.mode);
+  const mode = useModeStore((s) => s.mode);
   const accountReadContext = useAccountReadContext();
 
   // We must call both branches unconditionally (rules of hooks).
@@ -240,7 +239,7 @@ export function useModeData<T = unknown>(key: ModeDataKey): ModeDataResult<T> {
   const exploreResult = useExploreModeData<T>(key);
   const apiResult = useApiModeData<T>(
     key,
-    mode !== "explore"
+    (mode === "practice" || mode === "live")
       && accountReadContext.identity.mode === mode
       && accountReadContext.enabled,
     accountReadContext,

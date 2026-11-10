@@ -1,5 +1,5 @@
 /**
- * Sample-chain LTP used by Explore Options Builder (FT-LAB-003).
+ * Sample-chain LTP used by Explore Options Builder.
  *
  * The formula is the same one Explore optionchain uses — do not invent a
  * second illustrative premium.

@@ -131,10 +131,27 @@ class MCPBridge:
             return intent
         return parse_with_llm(text, self._llm) if self._llm is not None else MCPToolCall("none", raw_text=text)
 
+    def describe_order_tool_outcome(self, payload: dict[str, Any] | None, *, dropped: bool = False) -> dict[str, Any]:
+        """Label an order tool result without submitting another order."""
+        from flinttrade_core.order_outcome import describe_tool_outcome
+
+        return describe_tool_outcome(payload, dropped=dropped)
+
     def execute(self, text: str) -> MCPResult:
         call = self.parse(text)
         if call.tool_name == "place_order":
-            return MCPResult(tool_name=call.tool_name, error="Order-capable tools are unavailable", raw_input=text)
+            return MCPResult(
+                tool_name=call.tool_name,
+                error="Order-capable tools are unavailable",
+                result={
+                    "status": "error",
+                    "order_outcome": "rejected",
+                    "reason": "tool_unavailable",
+                    "message": "Order-capable tools are unavailable",
+                    "retry_safe": False,
+                },
+                raw_input=text,
+            )
         if call.tool_name not in _READ_TOOLS:
             return MCPResult(tool_name="none", error="Could not understand command", raw_input=text)
         handler = self._handlers.get(call.tool_name)

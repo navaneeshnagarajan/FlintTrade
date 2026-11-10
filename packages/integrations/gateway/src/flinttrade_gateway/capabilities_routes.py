@@ -25,7 +25,7 @@ from flask import Blueprint, jsonify, request
 
 from .adapter import BROKER_CATALOG
 from .capabilities import REGISTRY, BrokerCapabilities
-from .monday_read_smoke import monday_read_connectable
+from .connected_read_smoke import connected_read_connectable
 from .recommendations import (
     NATIVE_BROKER_CAPABILITIES,
     BrokerUseCase,
@@ -98,9 +98,9 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     intervals.extend(native.historical_calendar_intervals)
     data = {
         "connectable": (
-            monday_read_connectable(broker_name, info.connectable)
+            connected_read_connectable(broker_name, info.connectable)
             if info is not None
-            else monday_read_connectable(broker_name, False)
+            else connected_read_connectable(broker_name, False)
         ),
         "requires_static_ip": info.requires_static_ip if info else False,
         "native_connect_blockers": list(info.native_connect_blockers) if info else [],
@@ -239,7 +239,7 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
     data = dataclasses.asdict(rec)
     info = BROKER_CATALOG.get(rec.broker_id)
     if info is not None:
-        data["connectable"] = monday_read_connectable(rec.broker_id, info.connectable)
+        data["connectable"] = connected_read_connectable(rec.broker_id, info.connectable)
         data["display_name"] = info.display_name
         data["requires_static_ip"] = info.requires_static_ip
         data["native_connect_blockers"] = list(info.native_connect_blockers)
@@ -252,7 +252,7 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
         "adapter_id": info.name,
         "display_name": info.display_name,
         "native": info.native,
-        "connectable": monday_read_connectable(info.name, info.connectable),
+        "connectable": connected_read_connectable(info.name, info.connectable),
         "requires_static_ip": info.requires_static_ip,
         "native_connect_blockers": list(info.native_connect_blockers),
         "mcp": info.mcp.model_dump(),
@@ -326,7 +326,7 @@ def _default_recommendation_capabilities(include_coming_soon: bool) -> dict[str,
         broker_id: caps
         for broker_id, caps in NATIVE_BROKER_CAPABILITIES.items()
         if BROKER_CATALOG.get(broker_id) is not None
-        and monday_read_connectable(broker_id, BROKER_CATALOG[broker_id].connectable)
+        and connected_read_connectable(broker_id, BROKER_CATALOG[broker_id].connectable)
     }
 
 

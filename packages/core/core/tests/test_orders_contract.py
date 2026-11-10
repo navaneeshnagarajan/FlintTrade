@@ -362,6 +362,11 @@ def _backend_order_route_leaves() -> set[str]:
     Boots the Flask app via ``create_flask_app()`` and walks ``url_map`` so
     the result reflects whichever blueprints are currently wired in
     ``app.py`` — exactly what a real request would hit.
+
+    The caller must point ``FLINTTRADE_WORKSPACE_DIR`` at a directory only this
+    call uses. App construction holds
+    ``operational/incidents.sqlite.owner.lock`` until the app object is
+    collected, and the module workspace is shared by every test on one worker.
     """
     from flinttrade_core.app import create_flask_app  # noqa: PLC0415
 
@@ -624,11 +629,19 @@ class TestOrderHelperExtraction:
         assert _frontend_order_leaves() == expected
 
 
+def _pin_private_app_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give this boot its own incident-owner lock file."""
+    workspace = tmp_path / "app-workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+
+
 class TestOrderContract:
     """Bidirectional parity between frontend order helpers and backend routes."""
 
-    def test_every_frontend_call_has_a_backend_route(self):
+    def test_every_frontend_call_has_a_backend_route(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A literal order-helper call without its backend route would 404."""
+        _pin_private_app_workspace(tmp_path, monkeypatch)
         frontend = _frontend_order_leaves()
         backend = _backend_order_route_leaves()
         missing = frontend - backend
@@ -644,10 +657,13 @@ class TestOrderContract:
             "or rename the frontend call to a leaf that exists."
         ).replace("{leaf}", next(iter(missing), ""))
 
-    def test_every_backend_route_has_a_frontend_caller(self):
+    def test_every_backend_route_has_a_frontend_caller(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A `/api/v1/orders/foo` handler with no frontend caller is either
         dead or undocumented — flag it. To intentionally keep a backend-only
         endpoint, add it to `_BACKEND_ONLY_LEAVES` below with a justification."""
+        _pin_private_app_workspace(tmp_path, monkeypatch)
         frontend = _frontend_order_leaves()
         backend = _backend_order_route_leaves()
         unused = backend - frontend - _BACKEND_ONLY_LEAVES

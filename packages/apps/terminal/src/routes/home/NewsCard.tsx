@@ -55,8 +55,8 @@ const PLACEHOLDER_NEWS: NewsItem[] = [
 
 export function NewsCard() {
   return (
-    <BentoCard size="wide" label="Top Stories (placeholder headlines)" data-testid="news-card">
-      <DemoBadge testId="news-demo-badge" title="Placeholder headlines — not live news" />
+    <BentoCard size="wide" label="Top Stories (sample headlines)" data-testid="news-card">
+      <DemoBadge testId="news-demo-badge" title="Sample headlines — not live news" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Newspaper size={13} className="text-text-muted" aria-hidden="true" />

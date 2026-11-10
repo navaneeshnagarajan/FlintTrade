@@ -1380,7 +1380,7 @@ main() {
     say "  node : will download $node_url"
   fi
   say "  pnpm : provided by Corepack from the verified Node install (no separate download)"
-  say "  python 3.12 : installed by uv into $TOOLS_ROOT/python"
+  say "  python 3.14 : installed by uv into $TOOLS_ROOT/python"
   # A dry run mutates nothing, so it never needs the download confirmation —
   # this keeps piped `... | bash -s -- --dry-run` usable without --yes.
   if [ "$DRY_RUN" != "1" ]; then

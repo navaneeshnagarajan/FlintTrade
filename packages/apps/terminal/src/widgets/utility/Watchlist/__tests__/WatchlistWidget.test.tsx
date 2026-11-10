@@ -565,7 +565,7 @@ describe("WatchlistWidget", () => {
     stop();
   });
 
-  // ── FT-TRADE-008: LTP / % change columns ────────────────────────────────
+  // ── LTP / % change columns ────────────────────────────────
 
   it("renders ticker-aligned sample LTP and % change in Explore when those columns are checked", async () => {
     useModeStore.setState({ mode: "explore" });

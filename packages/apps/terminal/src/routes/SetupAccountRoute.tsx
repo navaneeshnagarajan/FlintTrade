@@ -1787,7 +1787,7 @@ export default function SetupAccountRoute({
       return;
     }
     setMode("practice");
-    persistSetupChoices({
+    const landingRoute = persistSetupChoices({
       persona: persona ?? "trader",
       connection,
       tradingDefaults: trading,
@@ -1798,7 +1798,7 @@ export default function SetupAccountRoute({
     });
     markPracticeLaterPending();
     clearProgress();
-    navigate("/terminal", { replace: true });
+    navigate(landingRoute, { replace: true });
   }
 
   function handleBack() {
@@ -2022,7 +2022,7 @@ export default function SetupAccountRoute({
                 </p>
               )}
               <Button type="button" onClick={() => void handleOpenPractice()}>
-                Open Terminal
+                Open Practice desk
               </Button>
             </div>
           )}

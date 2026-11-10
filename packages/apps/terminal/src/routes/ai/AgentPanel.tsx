@@ -47,6 +47,9 @@ function snapshotState(snapshot?: AgentSnapshot): string {
 
 export default function AgentPanel() {
   const appMode = useModeStore((s) => s.mode);
+  if (appMode === "unavailable") {
+    return <p role="status">Unavailable</p>;
+  }
   // Mode changes discard local action/selection state, including late mutation results.
   return <AgentModePanel key={appMode} appMode={appMode} />;
 }

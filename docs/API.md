@@ -1,7 +1,6 @@
 # FlintTrade API Reference
 
-FlintTrade owns the terminal’s authenticated HTTP transport. Native broker
-reads and account mutations remain frozen; Practice uses the local sandbox.
+FlintTrade owns the terminal’s authenticated HTTP transport. A broker session cannot be started from the terminal today. Practice mode uses the local sandbox. Broker writes return 503 and broker reads return 409.
 
 | Surface | Base URL (production) | Base URL (Vite dev proxy) | Purpose |
 |---|---|---|---|
@@ -30,7 +29,7 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data that calls this route is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` The `/trade` Order Pad records `Example order placed` (id starting `SAMPLE-`) on the client for that click. |
+| `POST /api/v1/orders/place` | Practice and Live single-leg place. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Example data that calls this route is HTTP 403 `mode_blocked`: `Orders are not available for Example. Switch to Practice or Live to trade.` The Terminal Order Pad records `Example order placed` (id starting `SAMPLE-`) on the client for that click. |
 | `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before the live check, the reduce-only proof, and any broker call. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable broker order book cannot qualify a live reduce-only close, so open positions stop here and no square-off is sent. Unavailable position evidence is HTTP 503 `Position evidence unavailable; no square-off was sent.` Ambiguous position evidence is HTTP 409 `Position evidence is ambiguous; no square-off was sent.` Neither sends a square-off. Known empty or flat positions retain the gated, acknowledgement-only operation. |
 | `POST /api/v1/orders/bracket` | Live, PIN-unlocked. Entry plus exactly one of a stop-loss or a target. Each leg is admitted through Laya, then placed through SafetySystem, `gate_order`, and `BrokerRouter`. Success is HTTP 201. Practice is HTTP 403 `practice_unsupported`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. A broker-held variety is HTTP 422 `broker_held_unsupported` (`Not placed. Broker-held bracket legs aren't supported. Use one stop-loss or one target.`). A stop-loss and a target together are HTTP 422 `oco_unsupported`. A trailing stop is HTTP 422 `trailing_unsupported`. |
@@ -60,6 +59,27 @@ read, the code is `exit_orders_unreadable`, and
 `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.`
 The Positions row shows **Exit pending** for the unfilled exit. The
 label is the symbol, or `this contract` when the symbol is empty.
+
+Before Laya, place refuses a quantity that is not a positive multiple of
+the lot, or that is above the freeze limit, with HTTP 400 and
+`code: "quantity_admission"`. The Order Pad shows the lot sentence once,
+inline: `Quantity must be a multiple of the lot size (N).` `N` is that
+contract's lot. An unverified lot is
+`Not placed. The lot size for <name> isn't verified.`
+`<name>` is the contract's display name, shown once, inline. The Practice
+sandbox returns that sentence as HTTP 400 with `status: error` and no
+`code` field. An order over the per-order freeze limit is refused with
+HTTP 400 and code `quantity_admission`. The message gives the limit,
+names the instrument, and asks for smaller orders. The order is not split.
+The limit is the broker `freeze_qty` when the body carries one, otherwise
+the exchange figure.
+
+When the request sends `X-FlintTrade-Mode` and that value differs from the
+JWT `mode` claim, place, the broker place route, and the extended gated
+order routes return HTTP 403
+`{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}`.
+That body has no `code` field. A missing header, or a header equal to the
+claim, is not a mismatch.
 
 While Laya is Down, a new order is paused and a qualifying close is still
 admitted. Live still runs SafetySystem after that record. The desk line is
@@ -113,13 +133,13 @@ These endpoints are the first-party native broker HTTP surface the terminal
 still calls from Setup → Brokers and Settings → Brokers. **They are not a working operator path
 on this unreleased line.** Account-management writes
 (POST / DELETE / PUT / PATCH, plus the GET OAuth callback) return `503`
-`broker_account_cutover_unavailable` until Task 9D. Account and market-data reads
-return `409` with zero provider calls until the Task 7C.2 / 8B
-read-port cutover onto the in-process `BrokerReadPort`. Exact broker reads
+`broker_account_cutover_unavailable`. Account and market-data reads
+return `409` with zero provider calls. Broker writes and broker reads are not
+available in the terminal. Exact reads that already exist use the in-process `BrokerReadPort`. Exact broker reads
 that already exist are that in-process port, not this HTTP family and not
 terminal UX. Brokers that are built but not cleared for activation stay
 `connectable=false` while any declared `native_connect_blocker` remains.
-Legacy gateway `/v1` account/auth mutations are likewise frozen (`503`) and
+Legacy gateway `/v1` account/auth mutations are likewise unavailable (`503`) and
 still reject native broker ids with `data.native_connect_blockers` when a
 catalogued native broker is evidence-gated.
 
@@ -127,14 +147,14 @@ catalogued native broker is evidence-gated.
 |---|---|
 | `native/brokers` (**GET**) | Native broker catalogue with connectability, native-connect blocker reasons, static-outbound-IP requirement, login-method schemas, OAuth/postback URLs, and MCP metadata. |
 | `native/accounts` (**GET**) | Vault-backed native account list (metadata only). Not a live session refresh. |
-| `native/accounts` (**POST**) | Frozen connect. Returns `503` until Task 9D. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
-| `native/oauth/start` (**POST**) | Frozen. Returns `503` until Task 9D. |
-| `native/oauth/callback` (**GET**) | Frozen before state consumption. Returns `503` until Task 9D. |
+| `native/accounts` (**POST**) | Broker connect is unavailable. Returns `503`. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
+| `native/oauth/start` (**POST**) | Unavailable. Returns `503`. |
+| `native/oauth/callback` (**GET**) | Unavailable before state consumption. Returns `503`. |
 | `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. Not an account-mutation cutover route. |
-| `native/accounts/<adapter>/<account>/login` (**POST**) | Frozen re-authentication. Returns `503` until Task 9D. |
-| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Frozen native HTTP read. Returns `409` with zero provider calls until Task 7C.2. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended post-cutover surface, not a current live-session API. |
-| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Frozen. Returns `503` until Task 9D. After Task 9D this remains the write-default gate for a connected, non-read-only native session. |
-| `native/accounts/<adapter>/<account>` (**DELETE**) | Frozen removal. Returns `503` until Task 9D. |
+| `native/accounts/<adapter>/<account>/login` (**POST**) | Re-authentication is unavailable. Returns `503`. |
+| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Native HTTP read is unavailable. Returns `409` with zero provider calls. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended surface once broker sessions exist, not a current live-session API. |
+| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Unavailable. Returns `503`. When broker sessions exist, this remains the write-default gate for a connected, non-read-only native session. |
+| `native/accounts/<adapter>/<account>` (**DELETE**) | Removal is unavailable. Returns `503`. |
 
 Broker-hosted MCP setup catalogue: `broker/mcp` (**GET**). Metadata only; FlintTrade does not proxy MCP tool calls.
 
@@ -187,7 +207,7 @@ returns only `{"deleted": true}`. Every service-connection-family response is
 
 The in-process `BrokerReadPort` (quotes, depth, history, account books, and
 related exact reads) is not this HTTP surface and is not terminal UX. Native
-HTTP reads stay `409` until Task 7C.2 migrates callers onto that port. See
+HTTP reads stay `409`. Callers use the in-process port, not this HTTP family. See
 [ARCHITECTURE.md](ARCHITECTURE.md#broker-reads-versus-gated-writes).
 
 ### News (`/api/v1/news`)
@@ -256,9 +276,9 @@ that action.
 | `ai/local-runtime/models/digests/accept` (**POST**) | Confirm one exact live digest and create a digest-derived inference alias. |
 | `ai/local-runtime/models/digests/reset` (**POST**) | Remove invalid FlintTrade trust metadata without deleting Ollama model data. |
 
-### Sandbox / paper trading (`/ft-api/v1/sandbox/*`)
+### Practice sandbox (`/ft-api/v1/sandbox/*`)
 
-Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade_data/sandbox_routes.py`.
+Practice simulated fills. The session claim for this book is `practice`. Source: `packages/core/data/src/flinttrade_data/sandbox_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -372,6 +392,7 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | Endpoint | Purpose |
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. `data.migration_blocked` is `two_operators` when more than one operator account is present, and null otherwise. |
+| `GET /api/v1/operator/status` | Authenticated operator status document. Session required (or an API key, which does not select an operator). `GET auth/status` stays the public first-run probe. The field list is under Monitoring. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is a Practice session. It is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. A second create, including one that overlaps the first, raises `Account already set up` in the account service. The route answers HTTP 409 with `code: "operator_exists"` and message `Request conflicts with the current state`. The setup screen maps that code to **This machine already has an operator. Sign in to finish setup.** A 409 without `operator_exists` keeps the generic message. |
 | `POST auth/setup/resume` | Public. A reload mid-setup drops the setup-session JWT that lived only in the browser tab, so this proves the password and mints a setup-session JWT again. It mints a Practice setup session, the same as `POST /v1/auth/setup` (`setup_session` true, Live not unlocked). Body `{ "password", "totp_code"? }`. Once an authenticator is enrolled, that code is required as well. No operator yet is HTTP 409 `Create an operator before continuing setup.` A finished setup is HTTP 409 `Setup is already complete. Sign in.` A wrong password is HTTP 401 `Invalid credentials.` It does not require a session that is already in the browser. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
@@ -395,6 +416,76 @@ Welcome's **Forgot your password?** uses the OTP pair (`forgot-password-otp` /
 `reset-password`) is present in the handler but is not a working operator
 path until something injects Flask-Mail `MAIL`; SMTP/SES configure
 `EmailTransport` only.
+
+### Execution sessions (`/api/v1/execution-sessions`)
+
+Loopback only, with an origin check. Responses use `Cache-Control: no-store`.
+GET needs `admin.accounts.read`. Other methods need `admin.accounts.write`.
+
+| Route | What it does |
+|---|---|
+| `GET /api/v1/execution-sessions` | List runs for the caller. |
+| `POST /api/v1/execution-sessions` | Body is exactly `run_id`, `kind`, and `config`. Creates account `paper:run:<run_id>` with environment `paper` and returns HTTP 201. A Testing run uses that account id. It is an API identifier, not a Mode name. Any other set of fields is HTTP 400 `exact_session_fields_required`. |
+| `GET /api/v1/execution-sessions/<run_id>` | Read that run. |
+| `POST /api/v1/execution-sessions/<run_id>/start`, `…/rearm`, `…/close` | Body is exactly `account`, `environment`, and `expected_generation`. HTTP 202. |
+| `POST /api/v1/execution-sessions/<run_id>/stop` | Same body. HTTP 200. |
+
+An unknown operation is HTTP 404 `unknown_session_operation`. A control body
+with any other fields is HTTP 400 `exact_session_target_required`. A refused
+scope or generation is HTTP 409 `execution_scope_or_generation_refused`. If
+the owner cannot be read, the response is HTTP 503
+`execution_owner_unavailable` with message
+`Read the exact run; never replay an uncertain command.`
+
+### Protection grants (`/api/v1/protection`)
+
+Loopback operator session, with both `admin.accounts.read` and
+`admin.accounts.write`. Responses use `Cache-Control: no-store`.
+
+| Route | What it does |
+|---|---|
+| `POST /api/v1/protection/grants` | Body is exactly `run_id`, `expected_revision`, and `policy`. HTTP 201. |
+| `GET /api/v1/protection/grants/<run_id>` | Read that grant. |
+| `POST /api/v1/protection/grants/<run_id>/revoke` | Body is exactly `expected_revision`. HTTP 200. |
+
+An invalid body is HTTP 400 `protection_request_invalid`. An operator error
+is HTTP 403. Custody that cannot be read is HTTP 503
+`protection_custody_unavailable`.
+
+### Diagnostics, incidents, and datasets
+
+| Route | What it does |
+|---|---|
+| `GET /api/v1/system/diagnostics` | Scope `admin.health.read`. Body is `status: success` and `data` from the diagnostics snapshot. `Cache-Control: no-store`. |
+| `GET /api/v1/system/incidents` | Scope `admin.health.read`. Query `limit` (default 50) and optional `before`. |
+| `GET /api/v1/system/incidents/deliveries/<delivery>` | Scope `admin.health.read`. |
+| `GET /api/v1/system/incidents/channels/<channel>` | Scope `admin.services.read`. |
+| `PUT /api/v1/system/incidents/channels/<channel>` | Scope `admin.services.write`. Body has boolean `enabled`. When enabled, it also has `recipient` and `provider`. |
+| `POST /api/v1/system/incidents/deliveries/<delivery>/<action>` | Scope `admin.observability.run`. `claim`, `receipt` with body exactly `claim` and `state`, or another delivery action. |
+| `GET /api/v1/data/datasets` | Signed-in session. `Cache-Control: no-store`. HTTP 401 `operator_session_required`, HTTP 403 `data_scope_unavailable`, HTTP 503 `history_store_unavailable`. |
+
+An incident conflict is HTTP 409. Incident storage that cannot be read is
+HTTP 503 `incident_storage_unavailable`. A bad incident body is HTTP 400
+`invalid_incident_request`. An authority change uses
+`error: incident_authority_changed`.
+
+### Knowledge and learning (`/v1/knowledge`, `/v1/learning`)
+
+Loopback operator session. Responses use `Cache-Control: no-store`. From
+outside the process these are `/ft-api/v1/knowledge` and
+`/ft-api/v1/learning`.
+
+| Route | What it does |
+|---|---|
+| `GET /v1/knowledge/skills` and `GET /v1/knowledge/skills/<name>` | Catalogue, or one skill. |
+| `GET /v1/knowledge/versions/<identifier>` | One version. |
+| `POST /v1/knowledge/versions/<identifier>/retire` | Body is exactly `reason`. |
+| `POST /v1/learning/permissions/preview` | Body is exactly `scope`, `recipient`, `purpose`, `operations`, `valid_from`, `valid_until`, `limits`, `max_rows`, `max_trials`, `retention`, `derivatives`, `objective`, `rights`, and `supersedes`. Returns a confirmation token. `expires_in_seconds` is 300. |
+| `POST /v1/learning/permissions/grants` | The preview fields plus `confirmation`. The token is consumed once. |
+| `GET /v1/learning/permissions/grants/<id>` | Read a grant. |
+| `POST /v1/learning/permissions/grants/<id>/revoke` | Empty body. |
+| `GET /v1/learning/permissions/grants/<id>/manifests/<batch_id>` | Manifest for that grant. |
+| `GET /v1/learning/permissions/receipts/<attempt_id>` | Receipt. |
 
 ### Monitoring And Observability
 
@@ -421,6 +512,7 @@ The terminal has two development proxy namespaces:
 | `/health`, `/health/detail` | Process health. Not public: a session JWT or `FLINTTRADE_API_KEY` is required. `/health` returns `status` (`healthy`, `degraded`, or `unhealthy`) and `timestamp`. `/health/detail` includes per-check detail. |
 | `/healthz`, `/readyz` | Public process probes. The body is status only: `/healthz` is HTTP 200 `{"status": "ok"}`; `/readyz` is HTTP 200 `{"status": "ready"}` or HTTP 503 `{"status": "not_ready"}`. Signed-out probes use these, not `/health`. |
 | `GET /api/v1/ping` | Process liveness. The body includes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`. |
+| `GET /api/v1/operator/status` | Authenticated, read-only status for the signed-in operator. `Cache-Control: no-store`. Query `exchange` selects the session (NSE when omitted). Optional `symbol` is passed to that same session decision. Connected (read) is a broker status, not a mode. The document reports `mode` and `live_unlocked` from the session, `connected_read` from broker read status, the decision model (`laya.status`, `laya.reason_code`, `laya.live_qualified`), the kill switch (`active`, `reason`), the session (`exchange`, `phase`, `order_entry`, `order_close`, `square_off`, `reason`), broker account status per selector, dispatch counts (`outcome_unknown`, `non_terminal`), strategy rows (`kind`, `id`, `status`, `reason`, `lifecycle`, `ownership_retained`), and `migration_blocked`. A section whose source cannot be read is `unknown` with reason `unavailable` or `unscoped`. The other sections are still returned. Unknown is never filled in as Ready, unlocked, connected, or an empty healthy count. Account rows and dispatch counts include only that operator's selectors. An API key with no session does not receive account or dispatch detail. The route does not place or cancel an order, latch or reset the kill switch, start or stop a strategy, write the order ledger, or refresh a broker token. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
 | `/api/v1/admin/activity` | Operator activity feed. |
@@ -562,16 +654,26 @@ capabilities and workspace overrides. Every Live write still needs a one-shot
 
 ## 6. Mode system
 
-`explore | practice | live` — server-side JWT-claim enforcement. The claim `explore` is example data. Operators see **Example**, not a Mode in the menu. The
+`explore | practice | live` — server-side JWT-claim enforcement. These strings are the claim, not the visible labels. The Mode chip is taken from this claim when the session token has one. An opaque sample session has no claim to apply and stays **Example**.
+
+| Claim `mode` | Visible label |
+|---|---|
+| `explore` | **Example**. Sample data. Not a menu Mode. The signed-in name is **Guest**. |
+| `practice` | **Practice**. Simulated fills. |
+| `live` | **Live**. `live_mode_unlocked` is a separate claim, set only by `POST /v1/auth/live`. |
+
+A JWT whose `mode` is missing, or is not one of those three, shows **Unavailable** and never Example. **Connected (read)** is not a claim. A token that carries that string does not select a Mode. Idle lock, broker connectivity, and the decision model are not `mode`. Laya is the shipped name of the admission-readiness row. Operators see **Example**, not the claim `explore`. The
 guard lives at `packages/services/engine/src/flinttrade_engine/mode_guard.py`. Every order-path
 endpoint asks the guard whether the current JWT permits live orders;
 the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. The `/trade` Order Pad records a sample fill on the client for that click (`Example order placed`, id starting `SAMPLE-`). This HTTP refusal is what the route returns when a client calls it. |
+| `explore` | Example data. `POST /api/v1/orders/place` and the shared order dispatcher both reject the order with HTTP 403 and `code: "mode_blocked"`. The message on both is `Orders are not available for Example. Switch to Practice or Live to trade.` No broker is contacted. The Terminal Order Pad records a sample fill on the client for that click (`Example order placed`, id starting `SAMPLE-`). This HTTP refusal is what the route returns when a client calls it. |
 | `practice` | Admitted orders execute in the local sandbox. Practice never calls a broker adapter. |
 | `live` | Requires a PIN-unlocked Live session, an exact native account target, safety admission and `BrokerRouter`. Evidence-gated native availability still applies; choosing this mode does not activate a broker. |
+
+On the desk, choosing **Practice** while signed in as **Guest** opens Setup and does not call `POST /v1/auth/mode`. That route is the downgrade from a session that already has a full login token.
 
 `POST /v1/auth/mode` accepts **only** a downgrade to `practice`. That call
 issues a fresh JWT and revokes the previous `jti`. Any other value,
@@ -719,6 +821,8 @@ Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
+| `quantity_admission` | Place refused a lot multiple or a freeze breach before Laya — HTTP 400. For a lot multiple, `message` is `Quantity must be a multiple of the lot size (N).` The Order Pad shows that sentence once, inline. An order over the per-order freeze limit uses the same HTTP 400 and code `quantity_admission`. The message gives the limit, names the instrument, and asks for smaller orders. The order is not split. An unverified Practice lot is a separate HTTP 400 with the message `Not placed. The lot size for <name> isn't verified.` and no `code` field. |
+| Mode header mismatch | `X-FlintTrade-Mode` is present and differs from the JWT `mode` claim — HTTP 403. Body is `{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}` and has no `code` field. |
 | `mode_blocked` | A sample-data session (or another blocked session) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` sample-data refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` sample-data refusals (same header/claim gate). Example-data place stays on this code, with message `Orders are not available for Example. Switch to Practice or Live to trade.` |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial on a line named Laya decision, inside one alert (`role="alert"`), the only live region. That line is not its own status. Down is "Laya is Down. New orders are paused until it's Ready. You can still close positions." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_unverified` | One decision carried no proof. The chip can stay Ready. This is not a chip reason — HTTP 409. Body: `status: "error"`, `code: "laya_unverified"`, `message` and `reason` both "Not placed. Laya's decision couldn't be verified. Try again." The decision log records `identity_absent` and does not store `proof`. There is no `limits` field. |

@@ -47,6 +47,11 @@ vi.mock("@/lib/tourDefinitions", () => ({
 
 import LearnRoute from "../LearnRoute";
 import { indexLotLine, setInstrumentLotRows } from "@/lib/instrumentLots";
+import { futureIndexLotRows, lotTestClock } from "@/test-utils/futureIndexLotRows";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["initialEntries"] = ["/learn"]) {
   return render(
@@ -56,7 +61,7 @@ function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["in
   );
 }
 
-// Locked FT-LEARN-003 copy (USER_GUIDE Learn → Resource Hub).
+// Locked copy (USER_GUIDE Learn → Resource Hub).
 const DOC_LOADING = "Loading document…";
 const DOC_SOFT_FAIL = "Document isn’t ready yet.";
 const DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";
@@ -150,8 +155,8 @@ describe("LearnRoute", () => {
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
 
-    expect(screen.getByText("Practice is built in. Open Terminal and place a simulated order, no broker needed.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Terminal" })).toHaveAttribute("href", "/terminal");
+    expect(screen.getByText("Practice is built in. Open the Trade desk and place a simulated order, no broker needed.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Trade desk" })).toHaveAttribute("href", "/trade");
     expect(screen.getByText(/Choose Practice from the Mode menu/)).toBeInTheDocument();
     expect(screen.getByRole("tabpanel")).toHaveClass("min-w-0");
     expect(screen.getByRole("tabpanel")).not.toHaveTextContent(/sandbox|Kotak|funded unlock/i);
@@ -176,8 +181,8 @@ describe("LearnRoute", () => {
     const practice = screen.getByTestId("practice-trading");
     expect(practice).toHaveClass("min-w-0", "max-w-full");
 
-    const cta = screen.getByRole("link", { name: "Open Terminal" });
-    expect(cta).toHaveAttribute("href", "/terminal");
+    const cta = screen.getByRole("link", { name: "Open Trade desk" });
+    expect(cta).toHaveAttribute("href", "/trade");
     expect(cta).toHaveClass("whitespace-normal");
     expect(cta.className).not.toMatch(/(?:^|\s)whitespace-nowrap(?:\s|$)/);
 
@@ -190,6 +195,9 @@ describe("LearnRoute", () => {
   });
 
   it("teaches the master index lot line, with an em dash for a missing underlying", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(lotTestClock());
+    setInstrumentLotRows(futureIndexLotRows());
     renderLearnRoute();
     fireEvent.click(screen.getByRole("tab", { name: "Glossary" }));
 

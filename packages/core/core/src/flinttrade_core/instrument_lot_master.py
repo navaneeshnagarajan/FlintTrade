@@ -1,9 +1,11 @@
 """Download the public Dhan and Kotak Neo masters and keep a small excerpt.
 
-The excerpt covers NIFTY, BANKNIFTY and SENSEX futures for the near month
-and the next month. Security ids, expiries and lot sizes are copied from
-those files. When a download fails the excerpt keeps an empty ``rows`` list
-and the source metadata; nothing is invented.
+The excerpt covers NIFTY, BANKNIFTY and SENSEX futures for the three
+monthly expiries the exchange lists (near, next and far). Security ids,
+expiries and lot sizes are copied from those files. Keeping the far month
+means one rollover still has a listed contract. When a download fails the
+excerpt keeps an empty ``rows`` list and the source metadata; nothing is
+invented.
 """
 
 from __future__ import annotations
@@ -194,8 +196,15 @@ def _row_expiry(row: dict[str, str]) -> date | None:
     return _iso_day(row.get("SEM_EXPIRY_DATE") or row.get("pExpiryDate") or "")
 
 
-def _near_and_next(rows: list[dict[str, str]], *, as_of: date) -> list[dict[str, str]]:
-    """Keep the first two unexpired expiries of each underlying."""
+# NSE index futures trade on a three-month cycle: near, next and far.
+# Two months is not enough. A snapshot taken while the near month is still
+# alive stores that month and the next one, and drops the far month. After
+# the near month expires, the underlying disappears until the next download.
+_LISTED_MONTHS = 3
+
+
+def _listed_cycle(rows: list[dict[str, str]], *, as_of: date) -> list[dict[str, str]]:
+    """Keep the first three unexpired expiries of each underlying."""
     by_underlying: dict[str, dict[date, list[dict[str, str]]]] = {}
     for row in rows:
         underlying = _row_underlying(row)
@@ -206,7 +215,7 @@ def _near_and_next(rows: list[dict[str, str]], *, as_of: date) -> list[dict[str,
     chosen: list[dict[str, str]] = []
     for underlying in _UNDERLYINGS:
         expiries = sorted(by_underlying.get(underlying, {}))
-        for expiry in expiries[:2]:
+        for expiry in expiries[:_LISTED_MONTHS]:
             chosen.extend(by_underlying[underlying][expiry])
     return chosen
 
@@ -231,7 +240,7 @@ def build_excerpt(
     downloader: Downloader | None = None,
     as_of: date | None = None,
 ) -> dict[str, object]:
-    """Download both masters and return the near/next-month excerpt.
+    """Download both masters and return the three-month excerpt.
 
     A master that cannot be fetched contributes no rows. The returned
     document still names the source URLs and the fetch time.
@@ -269,21 +278,21 @@ def build_excerpt(
     for text in neo_texts:
         rows.extend(_neo_rows(text))
 
-    chosen = _near_and_next(rows, as_of=day)
+    chosen = _listed_cycle(rows, as_of=day)
     if downloaded == 0:
         note = (
-            "Near and next month NIFTY, BANKNIFTY and SENSEX futures. "
+            "Near, next and far month NIFTY, BANKNIFTY and SENSEX futures. "
             "The public masters could not be downloaded, so rows are empty."
         )
     elif neo_texts:
         note = (
-            "Near and next month NIFTY, BANKNIFTY and SENSEX futures from the "
+            "Near, next and far month NIFTY, BANKNIFTY and SENSEX futures from the "
             f"public Dhan scrip master and the Kotak Neo F&O master dated {neo_day.isoformat()}. "
             "A contract is omitted once its expiry is before the current day in IST."
         )
     else:
         note = (
-            "Near and next month NIFTY, BANKNIFTY and SENSEX futures from the public "
+            "Near, next and far month NIFTY, BANKNIFTY and SENSEX futures from the public "
             "Dhan scrip master. The Kotak Neo F&O master could not be downloaded. "
             "A contract is omitted once its expiry is before the current day in IST."
         )

@@ -1,5 +1,5 @@
 /**
- * FT-DEMO-001 / FT-TRADE-010 — Investor Dashboard header holdings badge.
+ * Investor Dashboard header holdings badge.
  *
  * Practice/Explore with no broker must count the same sample book the
  * Holdings table lists, and disclose it with a Sample chip. A connected
@@ -122,7 +122,7 @@ function clickHoldingsGroup() {
   return within(groups).getByRole("tab", { name: "Holdings" });
 }
 
-describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () => {
+describe("InvestRoute header holdings badge", () => {
   it("shows the demo holdings count and a Sample chip in explore mode", () => {
     useModeStore.setState({ mode: "explore" });
     renderInvest();

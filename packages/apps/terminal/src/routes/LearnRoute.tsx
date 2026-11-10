@@ -132,7 +132,7 @@ const BASICS_SECTIONS: BasicsSection[] = [
     readingTime: 2,
     difficulty: "Beginner",
     content:
-      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is personal-use software and does not make a regulatory-compliance guarantee.",
+      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is self-hosted software and does not make a regulatory-compliance guarantee.",
   },
 ];
 
@@ -248,7 +248,7 @@ const RESOURCES: ResourceCard[] = [
   { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "DEVELOPER_GUIDE.md" },
 ];
 
-/** Locked Resource Hub local-doc load copy (FT-LEARN-003). */
+/** Locked Resource Hub local-doc load copy. */
 export const RESOURCE_HUB_DOC_LOADING = "Loading document…";
 export const RESOURCE_HUB_DOC_SOFT_FAIL = "Document isn’t ready yet.";
 export const RESOURCE_HUB_DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";
@@ -605,14 +605,14 @@ function PracticeTradingTab() {
           What is Practice Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
-          Practice is built in. Open Terminal and place a simulated order, no broker needed.
+          Practice is built in. Open the Trade desk and place a simulated order, no broker needed.
         </p>
         <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
           How to start Practice Trading:
         </h4>
         <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
           <li>Choose Practice from the Mode menu before placing an order.</li>
-          <li>Open Terminal and use the Order Pad to place a simulated order.</li>
+          <li>Open the Trade desk and use the Order Pad to place a simulated order.</li>
           <li>Review your simulated orders, positions and P&amp;L to learn from each trade.</li>
         </ol>
         <p className="mt-4 text-sm text-text-secondary break-words">
@@ -623,7 +623,7 @@ function PracticeTradingTab() {
             asChild
             className="h-auto w-full min-w-0 max-w-full shrink whitespace-normal break-words sm:w-auto"
           >
-            <Link to="/terminal">Open Terminal</Link>
+            <Link to="/trade">Open Trade desk</Link>
           </Button>
         </div>
       </GlassCard>

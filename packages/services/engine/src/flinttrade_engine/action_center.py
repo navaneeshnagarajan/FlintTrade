@@ -559,6 +559,33 @@ def _default_db_path() -> Path:
     return target
 
 
+# One live writer per database file in this process. A second connection that
+# checkpoints the same file can close the shared descriptor; the write then
+# fails with "Bad file descriptor" and DuckDB invalidates the database for
+# every later open of that path.
+_LIVE_QUEUES: dict[str, PendingOrderQueue] = {}
+_LIVE_GUARD = threading.Lock()
+
+
+def _queue_path_key(db_path: Path | str) -> str:
+    """Stable identity for one database file."""
+    return str(Path(db_path).resolve())
+
+
+def release_live_queue(db_path: Path | str) -> None:
+    """Close this process's live queue for ``db_path``, if one is open.
+
+    WAL recovery and a replacement queue must call this before they open the
+    file. Closing the current owner finishes its checkpoint and returns the
+    descriptor before any other connection writes the same path.
+    """
+    key = _queue_path_key(db_path)
+    with _LIVE_GUARD:
+        current = _LIVE_QUEUES.pop(key, None)
+    if current is not None:
+        current.close()
+
+
 class PendingOrderQueue:
     """Persistent approval-request queue backed by DuckDB.
 
@@ -640,7 +667,19 @@ class PendingOrderQueue:
         self._db_path = Path(db_path) if db_path is not None else _default_db_path()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._conn: Any = None
+        # Drop the previous writer before this connection takes the file.
+        # Two live writers on one path are what invalidate the database.
+        release_live_queue(self._db_path)
         self._conn = self._connect()
+        key = _queue_path_key(self._db_path)
+        with _LIVE_GUARD:
+            incumbent = _LIVE_QUEUES.get(key)
+            if incumbent is self:
+                incumbent = None
+            _LIVE_QUEUES[key] = self
+        if incumbent is not None:
+            incumbent.close()
         self._reconcile_interrupted_dispatches()
 
     # ------------------------------------------------------------------
@@ -664,7 +703,7 @@ class PendingOrderQueue:
         affordance.  Returns the number of rows reconciled.
         """
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 """
                 UPDATE approval_requests
                    SET status = 'failed', resolved_at = ?,
@@ -686,6 +725,13 @@ class PendingOrderQueue:
                 ", ".join(str(row[0]) for row in rows),
             )
         return reconciled
+
+    def _connection(self) -> Any:
+        """Return the open connection, or raise once :meth:`close` has run."""
+        conn = self._conn
+        if conn is None:
+            raise ActionCenterError("Action Centre queue is closed")
+        return conn
 
     def _connect(self):  # type: ignore[return]
         """Open DuckDB connection and ensure schema exists.
@@ -783,7 +829,7 @@ class PendingOrderQueue:
 
         with self._lock:
             try:
-                self._conn.execute(
+                self._connection().execute(
                     """
                     INSERT INTO approval_requests (
                         id, order_params, reason, created_at, expires_at, status,
@@ -833,7 +879,7 @@ class PendingOrderQueue:
         """
         with self._lock:
             self._expire_stale()
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 UPDATE approval_requests
                    SET status = 'dispatching'
@@ -858,7 +904,7 @@ class PendingOrderQueue:
         """Finalise a claimed request after confirmed BrokerRouter success."""
         resolved_at = _utc_now_iso()
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 UPDATE approval_requests
                    SET status = 'approved', resolved_at = ?, broker_order_id = ?,
@@ -885,7 +931,7 @@ class PendingOrderQueue:
         """Terminally close a claimed request after refusal or uncertain I/O."""
         resolved_at = _utc_now_iso()
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 UPDATE approval_requests
                    SET status = 'failed', resolved_at = ?, failure_reason = ?,
@@ -941,7 +987,7 @@ class PendingOrderQueue:
         resolved_at = _utc_now_iso()
         with self._lock:
             self._expire_stale()
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 UPDATE approval_requests
                    SET status = 'rejected', rejection_reason = ?, resolved_at = ?
@@ -965,7 +1011,7 @@ class PendingOrderQueue:
         if not producer_ref:
             return 0
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 UPDATE approval_requests
                    SET status = 'rejected', rejection_reason = ?, resolved_at = ?
@@ -987,7 +1033,7 @@ class PendingOrderQueue:
         """
         with self._lock:
             self._expire_stale()
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 SELECT {self._SELECT_COLUMNS}
                   FROM approval_requests
@@ -1001,7 +1047,7 @@ class PendingOrderQueue:
         """Return pending and resolved requests, newest first."""
         with self._lock:
             self._expire_stale()
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 SELECT {self._SELECT_COLUMNS}
                   FROM approval_requests
@@ -1031,7 +1077,7 @@ class PendingOrderQueue:
         placeholders = ", ".join("?" for _ in allowed)
         with self._lock:
             self._expire_stale()
-            rows = self._conn.execute(
+            rows = self._connection().execute(
                 f"""
                 SELECT {self._SELECT_COLUMNS} FROM approval_requests
                  WHERE status IN ({placeholders})
@@ -1079,14 +1125,14 @@ class PendingOrderQueue:
             cutoff = (
                 datetime.now(UTC) - timedelta(minutes=minutes)
             ).isoformat()
-            pre_count: int = self._conn.execute(
+            pre_count: int = self._connection().execute(
                 """
                 SELECT COUNT(*) FROM approval_requests
                  WHERE status = 'pending' AND created_at < ?
                 """,
                 [cutoff],
             ).fetchone()[0]  # type: ignore[index]
-            self._conn.execute(
+            self._connection().execute(
                 """
                 UPDATE approval_requests
                    SET status = 'expired', resolved_at = ?
@@ -1096,14 +1142,14 @@ class PendingOrderQueue:
                 [now_iso, cutoff],
             )
         else:
-            pre_count = self._conn.execute(
+            pre_count = self._connection().execute(
                 """
                 SELECT COUNT(*) FROM approval_requests
                  WHERE status = 'pending' AND expires_at < ?
                 """,
                 [now_iso],
             ).fetchone()[0]  # type: ignore[index]
-            self._conn.execute(
+            self._connection().execute(
                 """
                 UPDATE approval_requests
                    SET status = 'expired', resolved_at = ?
@@ -1132,7 +1178,7 @@ class PendingOrderQueue:
         Raises:
             ActionCenterError: If *request_id* is not found.
         """
-        row = self._conn.execute(
+        row = self._connection().execute(
             f"SELECT {self._SELECT_COLUMNS} FROM approval_requests WHERE id = ?",
             [request_id],
         ).fetchone()
@@ -1141,6 +1187,22 @@ class PendingOrderQueue:
         return ApprovalRequest.from_row(row)
 
     def close(self) -> None:
-        """Close the underlying DuckDB connection."""
+        """Close the underlying DuckDB connection.
+
+        Idempotent. The connection object is dropped before ``close`` so a
+        later garbage collection cannot close the same descriptor again after
+        the process has reused that number for another file.
+        """
         with self._lock:
-            self._conn.close()
+            conn = self._conn
+            self._conn = None
+        with _LIVE_GUARD:
+            key = _queue_path_key(self._db_path)
+            if _LIVE_QUEUES.get(key) is self:
+                _LIVE_QUEUES.pop(key, None)
+        if conn is None:
+            return
+        try:
+            conn.close()
+        except Exception:
+            logger.debug("Action Centre connection was already closed", exc_info=True)

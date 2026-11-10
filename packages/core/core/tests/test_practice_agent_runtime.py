@@ -61,12 +61,31 @@ def test_config_preserves_explicit_zero_rejection_and_normalises_symbols():
         validate_practice_config({"symbols": ["RELIANCE"], "max_position_size": 0})
 
 
-def _wait_for(predicate, timeout=5):
+def _wait_for(predicate, timeout=None):
+    """Wait until the practice worker publishes the observed state.
+
+    The worker publishes a cycle only after its quote read returns, and that
+    read is allowed to block for the quote-age allowance. Waiting on the
+    publication signal follows that read instead of a shorter wall-clock poll.
+    """
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    if timeout is None:
+        timeout = PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    progress = runtime.PracticeAgentSupervisor.progress
+    while True:
         if predicate():
             return
-        time.sleep(0.01)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        with progress:
+            if predicate():
+                return
+            # Publication wakes this wait immediately. The short bound only
+            # rechecks state a worker thread cannot signal after it returns.
+            progress.wait(min(0.05, remaining))
     assert predicate(), "Practice worker did not reach the expected state"
 
 
@@ -212,6 +231,45 @@ def _supervisor(desk):
 
 def _run_finished(desk):
     return _supervisor(desk).run.thread is not None and not _supervisor(desk).run.thread.is_alive()
+
+
+def test_cycle_publication_waits_for_a_quote_read_slower_than_the_old_poll(desk, monkeypatch):
+    """One quote read may block for its full allowance before the cycle is published."""
+    from flinttrade_core import ai_broker_context
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    entered = threading.Event()
+    release = threading.Event()
+    observed = ai_broker_context.collect_configured_broker_context
+
+    def slow_read(symbol, exchange):
+        entered.set()
+        assert release.wait(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS)
+        return observed(symbol, exchange)
+
+    monkeypatch.setattr(ai_broker_context, "collect_configured_broker_context", slow_read)
+    assert _start(desk, cycle_interval_sec=3600).status_code == 202
+    assert entered.wait(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS), "Practice worker did not start its quote read"
+    error = []
+
+    def observe():
+        try:
+            _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
+        except AssertionError as exc:
+            error.append(exc)
+
+    waiter = threading.Thread(target=observe, name="practice-publication-waiter")
+    waiter.start()
+    # Past the previous five-second poll, still inside the quote-read allowance.
+    held_seconds = 6
+    assert held_seconds < PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+    time.sleep(held_seconds)
+    still_waiting = waiter.is_alive()
+    release.set()
+    waiter.join(PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS)
+    assert still_waiting, error
+    assert error == []
+    assert _supervisor(desk).run.status == "running"
 
 
 @pytest.mark.parametrize(
@@ -723,6 +781,107 @@ def test_model_construction_failure_is_visible_without_persisting_provider_detai
     )
     assert "private-provider-detail" not in repr(row) + repr(events)
     assert desk.sandbox.get_orders() == []
+
+
+def test_stop_releases_the_supervisor_lock_before_waking_a_contending_waiter(desk):
+    """A waiter that owns the progress condition must take the supervisor lock before the quote allowance.
+
+    stop() used to signal progress while it still held the supervisor lock. The
+    waiter then blocked on that lock until the condition wait — the same budget
+    _wait_for gives a quote read — ran out. Publication and database close
+    already signal only after the lock is released.
+    """
+    from flinttrade_core.practice_agent_adapter import PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+
+    allowance = PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS
+    stop_thread: list[threading.Thread] = []
+    stop_reached_signal = threading.Event()
+
+    class _SignalLock:
+        """Record the stop caller entering the condition, then take the real lock."""
+
+        def __init__(self) -> None:
+            self._inner = threading.RLock()
+
+        def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+            return self._inner.acquire(blocking, timeout)
+
+        def release(self) -> None:
+            self._inner.release()
+
+        def locked(self) -> bool:
+            return self._inner.locked()
+
+        def __enter__(self) -> threading.RLock:
+            if stop_thread and threading.current_thread() is stop_thread[0]:
+                stop_reached_signal.set()
+            return self._inner.__enter__()
+
+        def __exit__(self, exc_type, exc, tb) -> bool | None:
+            return self._inner.__exit__(exc_type, exc, tb)
+
+        def _release_save(self):
+            return self._inner._release_save()
+
+        def _acquire_restore(self, state) -> None:
+            self._inner._acquire_restore(state)
+
+        def _is_owned(self) -> bool:
+            return self._inner._is_owned()
+
+    progress = threading.Condition(_SignalLock())
+    original = runtime.PracticeAgentSupervisor.progress
+    runtime.PracticeAgentSupervisor.progress = progress
+    waiter: threading.Thread | None = None
+    stopper: threading.Thread | None = None
+    try:
+        assert _start(desk, cycle_interval_sec=3600).status_code == 202
+        _wait_for(lambda: _supervisor(desk).run.snapshot.get("cycle_count") == 1)
+        supervisor = _supervisor(desk)
+        holding_condition = threading.Event()
+        outcome: dict[str, object] = {}
+
+        def wait_for_stop() -> None:
+            with progress:
+                holding_condition.set()
+                assert stop_reached_signal.wait(allowance), "stop() never reached the progress signal"
+                started = time.monotonic()
+                acquired = supervisor.lock.acquire(timeout=allowance)
+                elapsed = time.monotonic() - started
+                stop_requested = False
+                if acquired:
+                    stop_requested = supervisor.run.stop.is_set()
+                    supervisor.lock.release()
+                outcome["acquired"] = acquired
+                outcome["elapsed"] = elapsed
+                outcome["stop_requested"] = stop_requested
+
+        waiter = threading.Thread(target=wait_for_stop, name="practice-stop-waiter")
+        waiter.start()
+        assert holding_condition.wait(allowance), "waiter did not take the progress condition"
+
+        def request_stop() -> None:
+            stop_thread.append(threading.current_thread())
+            outcome["snapshot"] = supervisor.stop(desk.owner)
+
+        stopper = threading.Thread(target=request_stop, name="practice-stop-requester")
+        stopper.start()
+        waiter.join(allowance + 5)
+        stopper.join(allowance + 5)
+        assert not waiter.is_alive(), "lock contender was not released"
+        assert not stopper.is_alive(), "stop() did not return after the waiter continued"
+        assert outcome["acquired"] is True, outcome
+        assert outcome["stop_requested"] is True
+        assert outcome["elapsed"] < allowance / 10, outcome
+        snapshot = outcome["snapshot"]
+        assert isinstance(snapshot, dict)
+        assert snapshot["status"] == "stopping"
+    finally:
+        runtime.PracticeAgentSupervisor.progress = original
+        if stopper is not None and stopper.is_alive():
+            stopper.join(1)
+        if waiter is not None and waiter.is_alive():
+            waiter.join(1)
 
 
 def test_stop_publishes_last_worker_snapshot_without_reading_mutable_state(desk):

@@ -1,9 +1,9 @@
 /**
- * Risk Dashboard Kill All gate (FT-DITTO-003).
+ * Risk Dashboard Kill All gate.
  *
  * Whenever Ditto risk runtime is unavailable — including Explore — Kill All
  * stays muted and disabled. Never the armed red emergency CTA in that state.
- * Empty-account disarm on a successful snapshot remains FT-DITTO-001.
+ * Empty-account disarm on a successful snapshot remains.
  */
 
 import type { AppMode } from "@/stores/modeStore";

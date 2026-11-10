@@ -7,6 +7,11 @@ import {
   checkLotMultiple,
   resolveLotQuantity,
   checkFreezeQuantity,
+  maxPlaceableQuantity,
+  quantityAdmissionRefusal,
+  quantityCapLabel,
+  sliceOrderQuantities,
+  NSE_INDEX_FREEZE_QUANTITY,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -181,27 +186,71 @@ describe("checkOrderQuantityLimit", () => {
 });
 
 describe("checkFreezeQuantity", () => {
-  it("uses NSE/FAOP/76693 when the broker does not send a freeze quantity", () => {
-    expect(checkFreezeQuantity("NIFTY 24500 CE", 3510)).toBeNull();
-    expect(checkFreezeQuantity("NIFTY 24500 CE", 3575)).toBe(
-      "Max 3,510 per order for NIFTY. Place smaller orders.",
+  it("uses NSE/FAOP/77189 when the broker does not send a freeze quantity", () => {
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 1800)).toBeNull();
+    expect(checkFreezeQuantity("NIFTY 24500 CE", 1820)).toBe(
+      "Max 1,800 per order for NIFTY 24500 CE. Place smaller orders.",
     );
-    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 1126)).toBe(
-      "Max 1,125 per order for NIFTYNXT50. Place smaller orders.",
+    expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 601)).toBe(
+      "Max 600 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
     );
-    expect(checkFreezeQuantity("RELIANCE26APRFUT", 501, 250)).toBe(
-      "Max 250 per order for RELIANCE. Place smaller orders.",
-    );
-    expect(checkFreezeQuantity("SBIN", 100001, 100000)).toBe(
-      "Max 1,00,000 per order for SBIN. Place smaller orders.",
-    );
-    expect(checkFreezeQuantity("BANKNIFTY", 1440)).toBeNull();
+    expect(checkFreezeQuantity("BANKNIFTY", 900)).toBeNull();
     expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
+  });
+
+  it("rounds the NIFTY maximum placeable quantity down to 1755 at lot 65", () => {
+    expect(maxPlaceableQuantity("NIFTY", 65)).toBe(1755);
+    expect(maxPlaceableQuantity("NIFTY-OCT2026-FUT", 65)).toBe(1755);
+    expect(quantityCapLabel(65, 1755)).toBe("Lot 65 · Max 1,755 per order");
+    expect(checkFreezeQuantity("NIFTY", 1755, null, 65)).toBeNull();
+    expect(1755 % 65).toBe(0);
+  });
+
+  it("checks the lot-aligned cap before the lot multiple on both sides of the cap", () => {
+    const overMax = "Max 1,755 per order for NIFTY. Place smaller orders.";
+    expect(quantityAdmissionRefusal("NIFTY", 1801, 65)).toBe(overMax);
+    expect(quantityAdmissionRefusal("NIFTY", 1800, 65)).toBe(overMax);
+    expect(quantityAdmissionRefusal("NIFTY 24500 CE", 1800, 65)).toBe(
+      "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("BANKNIFTY", 901, 30)).toBe(
+      "Max 900 per order for BANKNIFTY. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 100, 65)).toBe(
+      "Quantity must be a multiple of the lot size (65).",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 1755, 65)).toBeNull();
+  });
+
+  it("slices each index at its NSE/FAOP/77189 freeze quantity", () => {
+    const published: Readonly<Record<string, number>> = {
+      NIFTY: 1800,
+      BANKNIFTY: 900,
+      FINNIFTY: 1800,
+      MIDCPNIFTY: 2800,
+      NIFTYNXT50: 600,
+      NIFTYFPI: 8500,
+    };
+    expect(NSE_INDEX_FREEZE_QUANTITY).toEqual(published);
+    const lot = 50;
+    for (const [symbol, freeze] of Object.entries(published)) {
+      expect(freeze % lot).toBe(0);
+      expect(sliceOrderQuantities(symbol, freeze * 2 + lot, lot)).toEqual([
+        freeze,
+        freeze,
+        lot,
+      ]);
+    }
+    expect(sliceOrderQuantities("NIFTY", 1755 * 2 + 65, 65)).toEqual([1755, 1755, 65]);
+    expect(sliceOrderQuantities("NIFTYNXT50-OCT2026-FUT", 1200, lot)).toEqual([600, 600]);
   });
 
   it("uses the broker freeze quantity ahead of the circular", () => {
     expect(checkFreezeQuantity("NIFTY", 130, 100)).toBe(
       "Max 100 per order for NIFTY. Place smaller orders.",
+    );
+    expect(quantityAdmissionRefusal("NIFTY", 130, 65, 100)).toBe(
+      "Max 65 per order for NIFTY. Place smaller orders.",
     );
   });
 });

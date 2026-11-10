@@ -1,9 +1,9 @@
 # Desktop
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** —
-the Electron 44 shell for the self-hosted terminal.
+the Electron 45 shell for the self-hosted terminal.
 
-**Language:** TypeScript (strict) · **Runtime:** Electron 44.9.3
+**Language:** TypeScript (strict) · **Runtime:** Electron 45.2.3 (Node 24.22.2)
 
 The package contains only the shell, local splash, bootstrap resources and
 licence notices. It does not bundle the Python backend or built terminal. On
@@ -97,5 +97,5 @@ contributor guidance.
 
 ## Licence
 
-AGPL-3.0, with retained third-party notices and the Hermes-derived MIT
+AGPL-3.0, with retained third-party notices and a retained MIT
 attribution under `resources/licenses/`.

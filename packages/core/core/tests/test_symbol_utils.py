@@ -205,6 +205,24 @@ def test_detect_future() -> None:
 
 def test_detect_index() -> None:
     assert detect_instrument_type("NIFTY") == "index"
+    assert detect_instrument_type("BANKEX") == "index"
+    assert detect_instrument_type("SENSEX50") == "index"
+    assert detect_instrument_type("NIFTYNXT50") == "index"
+
+
+def test_terminal_index_list_matches_the_symbol_catalogue() -> None:
+    import re
+    from pathlib import Path
+
+    from flinttrade_core.symbol_utils import INDEX_UNDERLYINGS
+
+    source = (
+        Path(__file__).resolve().parents[4] / "packages/apps/terminal/src/lib/nseSession.ts"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"export const INDEX_UNDERLYINGS = new Set\(\[(.*?)\]\);", source, re.S)
+    assert block is not None
+    listed = set(re.findall(r'"([A-Z0-9&]+)"', block.group(1)))
+    assert listed == set(INDEX_UNDERLYINGS)
 
 
 def test_detect_equity() -> None:

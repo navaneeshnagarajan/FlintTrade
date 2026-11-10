@@ -907,6 +907,8 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
                 logger.error("Bracket portfolio safety state is unavailable: %s", type(exc).__name__)
                 raise BracketOrderError("Order safety state unavailable; no order was sent") from exc
 
+            from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
             admission = portfolio_state.admission_for(0)
             results = safety.check_order(
                 order,
@@ -919,6 +921,7 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
                 ltp=portfolio_state.ltp_for(order),
                 net_delta=admission.net_delta,
                 net_vega=admission.net_vega,
+                expiry_calendar=symbol_expiry_context(order.symbol),
             )
             blocked = next((result for result in results if not result.passed), None)
             if blocked is not None:
