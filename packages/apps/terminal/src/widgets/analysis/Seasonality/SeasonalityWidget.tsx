@@ -6,8 +6,9 @@
  * the shared `/api/v1/history` path and runs them through the screener's
  * seasonality analyser (`/v1/analytics/seasonality`) — showing a "Live"
  * badge. Disconnected, it renders the deterministic SAMPLE statistics behind
- * an explicit guard with an amber "Sample data" badge; connected-but-failed
- * fetches show the error instead (fail closed — never sample rows as live).
+ * an explicit guard, labelled by the Explore Mode line or, outside Explore,
+ * the Example data badge; connected-but-failed fetches show the error instead
+ * (fail closed — never sample rows as live).
  *
  * Follows the instrument broadcast on its FDC3 user channel (red by
  * default) with a local selector fallback, like the other analysis widgets.
@@ -31,11 +32,13 @@ import {
   FlintWeightedHeatmap,
   type FlintWeightedHeatmapEntry,
 } from "@flinttrade/design-system";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import type { WidgetProps } from "@/types/widgets";
 import type { WsInstrument } from "@/types/api";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { heatColour, heatTextColour } from "./heatColours";
 import { fetchSeasonality, type SeasonalityData } from "./api";
 import { SAMPLE_SEASONALITY } from "./sampleData";
 
@@ -95,18 +98,10 @@ function formatPct(value: number, decimals = 2): string {
   return value > 0 ? `+${fixed}%` : `${fixed}%`;
 }
 
-/**
- * Return-heat tile colour: green for positive months/days, red for negative,
- * neutral grey near zero; opacity scales with magnitude within the view.
- */
-function heatColour(value: number, maxAbs: number): string {
-  if (!Number.isFinite(value) || maxAbs <= 0 || Math.abs(value) < 1e-9) {
-    return "rgba(113, 113, 122, 0.35)";
-  }
-  const alpha = 0.25 + 0.55 * Math.min(Math.abs(value) / maxAbs, 1);
-  return value > 0
-    ? `rgba(34, 197, 94, ${alpha.toFixed(2)})`
-    : `rgba(239, 68, 68, ${alpha.toFixed(2)})`;
+/** Tile fill plus the text colour that stays readable on it. */
+function heatTile(value: number, maxAbs: number): { color: string; textColor: string } {
+  const color = heatColour(value, maxAbs);
+  return { color, textColor: heatTextColour(color) };
 }
 
 function maxAbsReturn(values: number[]): number {
@@ -124,8 +119,7 @@ function monthlyEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     valueLabel: formatPct(row.avg_return_pct),
     detailLabel: `${Math.round(row.positive_rate * 100)}% +ve · ${row.years_count}y`,
     weight: Math.max(Math.abs(row.avg_return_pct), 0.15),
-    color: heatColour(row.avg_return_pct, maxAbs),
-    textColor: "#ffffff",
+    ...heatTile(row.avg_return_pct, maxAbs),
   }));
 }
 
@@ -137,8 +131,7 @@ function weekdayEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     valueLabel: formatPct(row.avg_return_pct, 3),
     detailLabel: `${Math.round(row.positive_rate * 100)}% +ve · ${row.sample_count}d`,
     weight: Math.max(Math.abs(row.avg_return_pct), 0.01),
-    color: heatColour(row.avg_return_pct, maxAbs),
-    textColor: "#ffffff",
+    ...heatTile(row.avg_return_pct, maxAbs),
   }));
 }
 
@@ -149,8 +142,7 @@ function dayOfMonthEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     label: `Day ${row.day}`,
     valueLabel: formatPct(row.avg_return_pct, 2),
     weight: 1, // equal-width grid: the colour carries the signal
-    color: heatColour(row.avg_return_pct, maxAbs),
-    textColor: "#ffffff",
+    ...heatTile(row.avg_return_pct, maxAbs),
   }));
 }
 
@@ -236,9 +228,11 @@ function SeasonalityWidget(props: WidgetProps) {
   const live = query.data;
   const isLive = isConnected && live !== undefined && !live.is_sample_data;
   // Fail closed: connected shows ONLY analyser output (or a loading/error
-  // state) — the sample statistics render exclusively behind this guard,
-  // beside the amber badge below.
+  // state) — the sample statistics render exclusively behind this guard.
   const data: SeasonalityData | null = isConnected ? live ?? null : SAMPLE_SEASONALITY;
+  // Covers the built-in statistics and a backend payload that flags itself
+  // as sample.
+  const showingExample = data !== null && !isLive;
 
   const entries = useMemo<FlintWeightedHeatmapEntry[]>(() => {
     if (!data) return [];
@@ -286,13 +280,15 @@ function SeasonalityWidget(props: WidgetProps) {
         <span className="text-xs font-semibold text-text-primary">Seasonality</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
             role="status"
             aria-label="Live: seasonality computed from real daily price history"
             title="Live — calendar-return statistics computed from the connected broker's daily bars."
           >
             Live
           </span>
+        ) : showingExample ? (
+          <ExampleDataBadge />
         ) : null}
         {isConnected && query.isLoading && (
           <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />
@@ -332,7 +328,7 @@ function SeasonalityWidget(props: WidgetProps) {
 
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-        <p className="text-[10px] text-text-muted">
+        <p className="text-[11px] text-text-muted">
           {instrument.symbol} · average {view === "monthly" ? "monthly" : "daily"} return by{" "}
           {view === "monthly" ? "calendar month" : view === "weekday" ? "trading weekday" : "day of month"}
           

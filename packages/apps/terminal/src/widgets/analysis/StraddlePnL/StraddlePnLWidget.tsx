@@ -18,6 +18,7 @@ import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { StraddleLeg } from "@/types/api";
 import type { Data, Layout } from "plotly.js";
@@ -68,6 +69,7 @@ function LegRow({ leg, index, onRemove, onChange, removable }: LegRowProps) {
         onChange={(e) => onChange(index, { ...leg, strike: Number(e.target.value) })}
         className="w-20 px-1.5 py-0.5 text-xs bg-surface-hover border border-border-default rounded font-mono text-text-primary focus:outline-none focus:border-accent/50"
         placeholder="Strike"
+        aria-label={`Adjustment leg ${index + 1} strike`}
         step={50}
       />
       <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
@@ -106,6 +108,7 @@ function LegRow({ leg, index, onRemove, onChange, removable }: LegRowProps) {
         onChange={(e) => onChange(index, { ...leg, premium: Number(e.target.value) })}
         className="w-16 px-1.5 py-0.5 text-xs bg-surface-hover border border-border-default rounded font-mono text-text-primary focus:outline-none focus:border-accent/50"
         placeholder="Prem"
+        aria-label={`Adjustment leg ${index + 1} premium`}
         min={0}
         step={1}
       />
@@ -138,6 +141,13 @@ function StraddlePnLWidget() {
     useStraddlePnL(symbol, exchange, expiry, adjustments, isConnected);
 
   const data = isConnected ? liveData : SAMPLE_STRADDLE_PNL_DATA;
+  // The backend serves flagged sample premiums when it has no live chain, even
+  // while a broker is connected. Fail closed: only an explicit `false` is live.
+  // Disconnected, the teaser's Preview label covers the local sample.
+  const showingExample =
+    isConnected &&
+    liveData != null &&
+    (liveData as { is_sample_data?: unknown }).is_sample_data !== false;
 
   // Build Plotly traces
   const { plotData, plotLayout } = useMemo<{
@@ -279,7 +289,7 @@ function StraddlePnLWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
-        
+        {showingExample && <ExampleDataBadge />}
         <Select value={symbol} onValueChange={(v) => { setSymbol(v); setAdjustments([]); }}>
           <SelectTrigger className="h-7 px-2 text-xs w-36">
             <SelectValue />
@@ -297,6 +307,7 @@ function StraddlePnLWidget() {
           value={expiry}
           onChange={(e) => setExpiry(e.target.value)}
           placeholder="Expiry (YYYY-MM-DD)"
+          aria-label="Expiry date"
           className="w-32 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
         />
         <div className="flex-1" />

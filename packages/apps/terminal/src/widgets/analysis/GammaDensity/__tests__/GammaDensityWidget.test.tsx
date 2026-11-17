@@ -1,10 +1,11 @@
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
-vi.mock("@flinttrade/design-system", () => ({
+vi.mock("@flinttrade/design-system", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@flinttrade/design-system")>()),
   FlintMultiLineChart: () => <div data-testid="density-chart" />,
 }));
 
@@ -45,6 +46,7 @@ vi.mock("@/components/teasers", () => ({
 import { useGammaDensity } from "../useGammaDensity";
 import { useGEX } from "../useGEX";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import GammaDensityWidget, { selectFutureExpiry } from "../GammaDensityWidget";
 
 const mockHook = useGammaDensity as ReturnType<typeof vi.fn>;
@@ -405,5 +407,67 @@ describe("Dealer Gamma widget — view mode", () => {
 
     expect(screen.getByRole("button", { name: "Gamma exposure view" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Gamma density view" })).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("Dealer Gamma widget — example-data badge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY });
+    mockGexHook.mockReturnValue({ ...IDLE_QUERY });
+    apiMocks.getExpiry.mockResolvedValue({ expiry: ["2099-07-30"] });
+  });
+
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("badges the built-in surface shown when a connected read fails", async () => {
+    mockHook.mockReturnValue({ ...IDLE_QUERY, isError: true, error: new Error("chain unavailable") });
+
+    render(<GammaDensityWidget {...densityProps()} />, { wrapper });
+
+    await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
+    expect(screen.getByText("chain unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("badges a connected payload that does not attest live provenance", async () => {
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { ...LIVE_GAMMA_DENSITY, is_sample_data: true } });
+
+    render(<GammaDensityWidget {...densityProps()} />, { wrapper });
+
+    await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("drops the badge for an explicitly live payload", async () => {
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { ...LIVE_GAMMA_DENSITY, is_sample_data: false } });
+
+    render(<GammaDensityWidget {...densityProps()} />, { wrapper });
+
+    await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
+    await waitFor(() => expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument());
+  });
+
+  it("leaves the disconnected preview to the teaser's own label", () => {
+    mockConnected.mockReturnValue(false);
+
+    render(<GammaDensityWidget {...densityProps()} />, { wrapper });
+
+    expect(screen.getByTestId("feature-teaser")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("stays hidden in Explore", async () => {
+    useModeStore.setState({ mode: "explore" });
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { ...LIVE_GAMMA_DENSITY, is_sample_data: true } });
+
+    render(<GammaDensityWidget {...densityProps()} />, { wrapper });
+
+    await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

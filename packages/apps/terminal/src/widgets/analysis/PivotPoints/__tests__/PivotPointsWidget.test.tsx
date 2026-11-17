@@ -247,3 +247,76 @@ describe("PivotPointsWidget", () => {
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 });
+
+describe("PivotPointsWidget — example-data badge", () => {
+  it("labels the built-in inputs in Practice when history and quote fail", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockRejectedValue(new Error("history unavailable"));
+    mockGetQuotes.mockRejectedValue(new Error("quote unavailable"));
+
+    render(<PivotPointsWidget />);
+
+    await waitFor(() => expect(mockGetQuotes).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    state.mode = "explore";
+    render(<PivotPointsWidget />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge once both history and quote load", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockResolvedValue([LIVE_PREVIOUS_DAY, LIVE_LATEST_DAY]);
+    mockGetQuotes.mockResolvedValue({ ltp: LIVE_LATEST_DAY.close });
+
+    render(<PivotPointsWidget />);
+
+    expect(await screen.findByText("Practice")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("does not call operator-typed inputs example data once a quote has loaded", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockResolvedValue([LIVE_PREVIOUS_DAY, LIVE_LATEST_DAY]);
+    mockGetQuotes.mockResolvedValue({ ltp: LIVE_LATEST_DAY.close });
+
+    render(<PivotPointsWidget />);
+
+    expect(await screen.findByText("Practice")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Previous day High"), {
+      target: { value: "23000" },
+    });
+
+    expect(screen.queryByText("Practice")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+});
+
+describe("PivotPointsWidget — broker-required notice", () => {
+  it("shows a neutral connect-a-broker notice instead of a red error", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockRejectedValue(
+      new Error("A connected native broker account is required for history."),
+    );
+
+    render(<PivotPointsWidget />);
+
+    expect(await screen.findByTestId("broker-required-notice")).toHaveTextContent(
+      "Connect a broker to load the previous day's prices.",
+    );
+    expect(screen.queryByText(/connected native broker account is required/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the red error text for every other failure", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockRejectedValue(new Error("history unavailable"));
+
+    render(<PivotPointsWidget />);
+
+    expect(await screen.findByText("history unavailable")).toHaveClass("text-loss");
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
+  });
+});

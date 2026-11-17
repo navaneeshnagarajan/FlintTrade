@@ -377,7 +377,10 @@ describe("ScalperWidget", () => {
   it("sends the admission note with the confirmed place", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
-    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+    // The note is collapsed behind a link until asked for, as on the Order Pad.
+    expect(screen.queryByRole("textbox", { name: "Add a reason (optional)" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Add a reason (optional)" }), {
       target: { value: "Scalp the open" },
     });
     await buyCeWithConfirm();
@@ -889,5 +892,43 @@ describe("ScalperWidget — shared symbol bus", () => {
     expect(screen.getByTitle(LOT_SIZE_MASTER_HINT)).toHaveTextContent("—");
     expect(screen.queryByText("×65")).not.toBeInTheDocument();
     expect(screen.queryByText("×75")).not.toBeInTheDocument();
+  });
+});
+
+describe("ScalperWidget — expiry picker failures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTicks.current = {};
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "live" }),
+    );
+    mockGetQuotes.mockResolvedValue({ ltp: 24000 });
+  });
+
+  it("shows a neutral connect-a-broker notice, with retry, when no broker is connected", async () => {
+    mockGetExpiry.mockRejectedValue(
+      new Error("A connected native broker account is required for expiry."),
+    );
+
+    render(<ScalperWidget {...defaultProps} />);
+
+    expect(await screen.findByTestId("broker-required-notice")).toHaveTextContent(
+      "Connect a broker to load expiries.",
+    );
+    expect(screen.queryByText("Failed to load")).not.toBeInTheDocument();
+
+    const callsBeforeRetry = mockGetExpiry.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading expiries" }));
+    await waitFor(() => expect(mockGetExpiry.mock.calls.length).toBe(callsBeforeRetry + 1));
+  });
+
+  it("keeps the red Failed to load retry for every other failure", async () => {
+    mockGetExpiry.mockRejectedValue(new Error("upstream timed out"));
+
+    render(<ScalperWidget {...defaultProps} />);
+
+    const retry = (await screen.findByText("Failed to load")).closest("button");
+    expect(retry).toHaveClass("text-loss");
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
   });
 });

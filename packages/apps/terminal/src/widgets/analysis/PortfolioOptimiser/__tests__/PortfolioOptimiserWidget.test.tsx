@@ -185,3 +185,43 @@ describe("PortfolioOptimiserWidget", () => {
 const SAMPLE_NOT_USED = {
   weights: {}, expected_return: 0, expected_volatility: 0, sharpe_ratio: 0, diversification_ratio: 0,
 };
+
+describe("PortfolioOptimiserWidget — example-data badge", () => {
+  it("labels the built-in allocation in Live when no broker is connected", () => {
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("labels the built-in allocation in Practice when the optimisation fails", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockRejectedValue(new Error("history unavailable"));
+
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText(/Practice optimisation unavailable/)).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    state.mode = "explore";
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge once Practice weights come from the API", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockResolvedValue(bars(100));
+    mockOptimise.mockResolvedValue({
+      weights: { RELIANCE: 0.5, TCS: 0.5 },
+      expected_return: 0.2,
+      expected_volatility: 0.15,
+      sharpe_ratio: 0.9,
+      diversification_ratio: 1.4,
+    });
+
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText("Practice")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+});

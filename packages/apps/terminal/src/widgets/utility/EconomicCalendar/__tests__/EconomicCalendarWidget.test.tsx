@@ -28,6 +28,7 @@ vi.mock("@/services/ftApi", () => ({
   getEconomicCalendar: (...a: unknown[]) => mockCalendar(...a),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import EconomicCalendarWidget from "../EconomicCalendarWidget";
 import { toIstIsoDate } from "@/lib/ist";
 
@@ -212,5 +213,59 @@ describe("EconomicCalendarWidget — IST trading day", () => {
 
     expect(await screen.findByText("Yesterday CPI")).toBeInTheDocument();
     expect(screen.queryByText("Today")).not.toBeInTheDocument();
+  });
+});
+
+describe("EconomicCalendarWidget — example-data badge", () => {
+  const backendEvent = () => ({
+    date: isoDaysAhead(2),
+    time: "14:00",
+    event: "Backend CPI YoY",
+    country: "IN",
+    impact: "high",
+    previous: "5.1%",
+    forecast: "5.0%",
+    actual: null,
+    category: "cpi",
+  });
+
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the bundled fallback schedule in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    renderWidget();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderWidget();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("keeps the badge for the backend's own sample schedule", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockCalendar.mockResolvedValue({ days: 30, is_sample_data: true, events: [backendEvent()] });
+    renderWidget();
+    expect(await screen.findByText("Backend CPI YoY")).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("keeps the badge when the backend omits the provenance flag", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockCalendar.mockResolvedValue({ days: 30, events: [backendEvent()] });
+    renderWidget();
+    expect(await screen.findByText("Backend CPI YoY")).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("drops the badge only for backend events explicitly flagged live", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockCalendar.mockResolvedValue({ days: 30, is_sample_data: false, events: [backendEvent()] });
+    renderWidget();
+    expect(await screen.findByText("Backend CPI YoY")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -30,6 +30,7 @@ vi.mock("@/services/ftApi.analysis", () => ({
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
 import { getPairCorrelation } from "@/services/ftApi.analysis";
+import { useModeStore } from "@/stores/modeStore";
 import CorrelationPairsWidget from "../CorrelationPairsWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -157,5 +158,35 @@ describe("CorrelationPairsWidget", () => {
     renderWidget();
     expect(screen.getAllByText(/Diverging/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Pearson correlation over ~120 trading days/i)).toBeTruthy();
+  });
+});
+
+describe("CorrelationPairsWidget — example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in pairs in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    renderWidget();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderWidget();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge once the engine returns live pairs", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue(
+      Array.from({ length: 30 }, (_, i) => ({ close: 100 + i })),
+    );
+    mockGetPairs.mockResolvedValue(liveSignals());
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

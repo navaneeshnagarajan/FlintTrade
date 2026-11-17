@@ -7,10 +7,11 @@
  * delivery route exists it must be unconditional.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
+import { useModeStore } from "@/stores/modeStore";
 import DeliveryDataWidget, {
   SAMPLE_DELIVERY_ROWS,
   deliveryBand,
@@ -105,5 +106,29 @@ describe("DeliveryDataWidget", () => {
     expect(screen.getByText("High ≥60%")).toBeInTheDocument();
     expect(screen.getByText("Medium 45–60%")).toBeInTheDocument();
     expect(screen.getByText(/Low <45%/)).toBeInTheDocument();
+  });
+});
+
+describe("DeliveryDataWidget — example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the illustrative rows in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<DeliveryDataWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("labels the illustrative rows in Live", () => {
+    useModeStore.setState({ mode: "live" });
+    render(<DeliveryDataWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<DeliveryDataWidget />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

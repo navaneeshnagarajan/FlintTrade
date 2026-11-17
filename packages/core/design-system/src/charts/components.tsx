@@ -2180,7 +2180,7 @@ export function FlintDonutBreakdown({
               </span>
             )}
             {centerLabel !== undefined && (
-              <span className="mt-0.5 max-w-full truncate text-[9px] leading-tight text-text-muted">
+              <span className="mt-0.5 max-w-full truncate text-[11px] leading-tight text-text-muted">
                 {centerLabel}
               </span>
             )}
@@ -2924,11 +2924,11 @@ export function FlintChartDrawingList<TTime = unknown>({
               >
                 {summary.label}
               </span>
-              <span className="truncate font-mono text-[10px] leading-tight text-text-muted">
+              <span className="truncate font-mono text-[11px] leading-tight text-text-muted">
                 {summary.detail}
               </span>
               {(summary.locked || summary.hidden) && (
-                <span className="mt-0.5 flex items-center gap-1 text-[9px] uppercase tracking-wide">
+                <span className="mt-0.5 flex items-center gap-1 text-[11px] uppercase tracking-wide">
                   {summary.locked && (
                     <span className="rounded bg-surface-hover px-1 text-text-muted">Locked</span>
                   )}
@@ -3007,7 +3007,7 @@ export function FlintChartDrawingStyleEditor<TTime = unknown>({
             disabled={disabled}
             onClick={() => !disabled && onChange({ lineStyle })}
             className={cn(
-              "flex h-5 w-7 items-center justify-center rounded border text-[10px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              "flex h-5 w-7 items-center justify-center rounded border text-[11px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               value.lineStyle === lineStyle
                 ? "border-accent/50 bg-accent/15 text-accent"
                 : "border-border-default text-text-muted hover:bg-surface-hover hover:text-text-primary",
@@ -3037,7 +3037,7 @@ export function FlintChartDrawingStyleEditor<TTime = unknown>({
             disabled={disabled}
             onClick={() => !disabled && onChange({ lineWidth })}
             className={cn(
-              "flex h-5 w-5 items-center justify-center rounded border font-mono text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              "flex h-5 w-5 items-center justify-center rounded border font-mono text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               value.lineWidth === lineWidth
                 ? "border-accent/50 bg-accent/15 text-accent"
                 : "border-border-default text-text-muted hover:bg-surface-hover hover:text-text-primary",
@@ -3079,11 +3079,11 @@ export function FlintChartDrawingInspector<TTime = unknown>({
       )}
     >
       <div className="flex min-w-32 shrink-0 flex-col px-1 leading-tight">
-        <span className="text-[9px] uppercase tracking-wide text-text-muted">Selected drawing</span>
+        <span className="text-[11px] uppercase tracking-wide text-text-muted">Selected drawing</span>
         <span className="max-w-44 truncate text-xxs font-medium text-accent">{label}</span>
-        <span className="max-w-44 truncate font-mono text-[10px] text-text-muted">{detail}</span>
+        <span className="max-w-44 truncate font-mono text-[11px] text-text-muted">{detail}</span>
         {(locked || hidden) && (
-          <span className="mt-0.5 flex items-center gap-1 text-[9px] uppercase tracking-wide">
+          <span className="mt-0.5 flex items-center gap-1 text-[11px] uppercase tracking-wide">
             {locked && <span className="rounded bg-surface-hover px-1 text-text-muted">Locked</span>}
             {hidden && <span className="rounded bg-surface-hover px-1 text-text-muted">Hidden</span>}
           </span>

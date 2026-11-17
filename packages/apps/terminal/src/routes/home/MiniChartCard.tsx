@@ -47,7 +47,7 @@ export function MiniChartCard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <TrendingUp size={13} className="text-text-muted" aria-hidden="true" />
-            <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+            <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
               NIFTY 50
             </p>
           </div>
@@ -92,7 +92,7 @@ export function MiniChartCard() {
               type="button"
               onClick={() => setTimeframe(tf)}
               aria-pressed={timeframe === tf}
-              className="px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors"
+              className="px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors"
               style={{
                 background: timeframe === tf
                   ? "var(--color-surface-active)"

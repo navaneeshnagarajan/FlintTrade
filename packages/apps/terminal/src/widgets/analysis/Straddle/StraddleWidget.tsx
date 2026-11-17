@@ -34,6 +34,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
 import type { WidgetProps } from "@/types/widgets";
 import type { ISeriesApi, LineData, Time } from "lightweight-charts";
 import { createFlintLineChart } from "@flinttrade/design-system";
@@ -1172,12 +1173,15 @@ function StraddleWidget(props: WidgetProps) {
       </div>
 
       {/* Error banner */}
-      {error && (
-        <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
-          <AlertCircle size={11} />
-          <span>{error}</span>
-        </div>
-      )}
+      {error &&
+        (isBrokerRequiredMessage(error) ? (
+          <BrokerRequiredNotice what="straddle prices" className="flex-none rounded-none border-x-0 border-t-0" />
+        ) : (
+          <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
+            <AlertCircle size={11} />
+            <span>{error}</span>
+          </div>
+        ))}
 
       {/* Headline prices */}
       <div className="flex-none">

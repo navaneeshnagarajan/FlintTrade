@@ -38,6 +38,7 @@ vi.mock("@/services/ftApi", async (importOriginal) => {
 });
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import { getActivityLog } from "@/services/ftApi";
 import AuditTrailWidget from "../AuditTrailWidget";
 
@@ -50,6 +51,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 beforeEach(() => {
+  useModeStore.setState({ mode: "explore" });
   mockConnected.mockReturnValue(false);
   mockActivityLog.mockReset();
   mockActivityLog.mockResolvedValue({ entries: [], total: 0 });
@@ -87,6 +89,19 @@ describe("AuditTrailWidget", () => {
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
+  it("leaves the example-data label to the Mode line in Explore", () => {
+    render(<AuditTrailWidget />, { wrapper });
+    expect(screen.getByText(/BUY NIFTY 22500 CE/)).toBeTruthy();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("labels the example rows in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<AuditTrailWidget />, { wrapper });
+    expect(screen.getByText(/BUY NIFTY 22500 CE/)).toBeTruthy();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
   it("shows entry count in filter bar", () => {
     mockConnected.mockReturnValue(false);
     render(<AuditTrailWidget />, { wrapper });
@@ -116,6 +131,7 @@ describe("AuditTrailWidget (connected)", () => {
     render(<AuditTrailWidget />, { wrapper });
     await screen.findByText("No audit entries available.");
     expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.queryByTestId("example-data-badge")).toBeNull();
   });
 
   it("renders the honest empty state — not sample rows — on an empty live response", async () => {

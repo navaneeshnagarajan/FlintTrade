@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -20,6 +20,7 @@ vi.mock("@/components/teasers", () => ({
 
 import { useArbitrageScanner } from "../useArbitrageScanner";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import ArbitrageScannerWidget from "../ArbitrageScannerWidget";
 import { SAMPLE_ARBITRAGE_SCAN } from "../sampleData";
 
@@ -142,5 +143,59 @@ describe("ArbitrageScannerWidget", () => {
       screen.queryByText(SAMPLE_ARBITRAGE_SCAN.cash_future[0].underlying),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ArbitrageScannerWidget — example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("badges a connected scan the backend flags as sample", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN } });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("fails closed when a connected scan omits the provenance flag", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { scan: SAMPLE_ARBITRAGE_SCAN } });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("drops the badge for an explicitly live scan", () => {
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { is_sample_data: false, scan: SAMPLE_ARBITRAGE_SCAN } });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("leaves the disconnected preview to the teaser's own label", () => {
+    mockConnected.mockReturnValue(false);
+    mockHook.mockReturnValue({ ...IDLE_QUERY });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.getByTestId("feature-teaser")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("stays hidden in Explore, where the Mode line already says Example data", () => {
+    useModeStore.setState({ mode: "explore" });
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({ ...IDLE_QUERY, data: { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN } });
+
+    render(<ArbitrageScannerWidget />, { wrapper });
+
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

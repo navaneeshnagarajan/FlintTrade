@@ -884,3 +884,41 @@ describe("OI Analytics data provenance", () => {
     await waitFor(() => expect(screen.getByTestId("refresh-btn")).not.toBeDisabled());
   });
 });
+
+describe("OI Analytics — broker-required notice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    plotlyMocks.reset();
+    useOptionExpiryStore.setState({ selectedByIdentity: {} });
+    mockMode.current = "live";
+    dataScopeState.current = "live:native:dhan:A1";
+    mockUseBrokerConnected.mockReturnValue(true);
+    apiMocks.getOptionChain.mockResolvedValue({ calls: [], puts: [] });
+    apiMocks.getQuotes.mockResolvedValue({ ltp: 0 });
+    apiMocks.getMaxPain.mockResolvedValue({});
+    apiMocks.getHistory.mockResolvedValue([]);
+  });
+
+  it("shows a neutral connect-a-broker notice instead of a red error", async () => {
+    apiMocks.getExpiry.mockRejectedValue(
+      new Error("A connected native broker account is required for expiry."),
+    );
+
+    renderWidget();
+
+    expect(await screen.findByTestId("broker-required-notice")).toHaveTextContent(
+      "Connect a broker to load open interest.",
+    );
+    expect(screen.queryByText(/connected native broker account is required/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the red error banner for every other failure", async () => {
+    apiMocks.getExpiry.mockRejectedValue(new Error("upstream timed out"));
+
+    renderWidget();
+
+    const message = await screen.findByText("Expiry load failed: upstream timed out");
+    expect(message.closest("div")).toHaveClass("text-loss");
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
+  });
+});

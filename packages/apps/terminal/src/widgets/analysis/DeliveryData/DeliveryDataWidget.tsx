@@ -19,7 +19,8 @@
  * route over it: `local_data_routes.py` registers `/v1/historify/bars`,
  * `/v1/historify/bars/summary` and `/v1/historify/bhavcopy/download`, and
  * none of them serves per-symbol delivery. So there is no live path to fail
- * closed on — the badge is unconditional, exactly as it is for the other
+ * closed on — the Example data badge is unconditional outside Explore (where
+ * the Mode line already says it), exactly as it is for the other
  * sample-only widgets in the catalogue (Heat Calendar, Gap Analysis, PCR
  * Trend), and the empty-source note names the missing route rather than
  * implying the data merely has not arrived today.
@@ -28,6 +29,7 @@
 import { useState, useMemo, memo } from "react";
 import { ArrowUpDown, Package } from "lucide-react";
 import { FlintLinearMeter } from "@flinttrade/design-system";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import {
   Table,
   TableBody,
@@ -54,8 +56,8 @@ export interface DeliveryRow {
 
 /**
  * Illustrative rows carried over from the Market Intelligence tab. Every
- * surface that renders them carries the unconditional "Sample data" badge
- * above; they are never presented as a settled session.
+ * surface that renders them carries the Example data badge; they are never
+ * presented as a settled session.
  */
 export const SAMPLE_DELIVERY_ROWS: DeliveryRow[] = [
   { symbol: "HDFCBANK", open: 1672.0, high: 1698.5, low: 1668.0, close: 1689.5, volume_lakh: 128.4, delivery_pct: 78.4, series: "EQ" },
@@ -133,7 +135,7 @@ function DeliveryDataWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Package size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Delivery Data</span>
-        
+        <ExampleDataBadge />
         <div className="flex-1" />
       </div>
 

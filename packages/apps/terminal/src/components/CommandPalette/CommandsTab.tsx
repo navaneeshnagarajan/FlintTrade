@@ -90,7 +90,7 @@ export function CommandsTab({
             )}
           </span>
           {cmd.shortcut && (
-            <kbd className="shrink-0 font-mono text-[10px] text-text-muted bg-glass-l1 border border-glass-l1 rounded px-1.5 py-0.5 leading-none">
+            <kbd className="shrink-0 font-mono text-[11px] text-text-muted bg-glass-l1 border border-glass-l1 rounded px-1.5 py-0.5 leading-none">
               {cmd.shortcut}
             </kbd>
           )}

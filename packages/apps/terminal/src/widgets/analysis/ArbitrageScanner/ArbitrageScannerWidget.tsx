@@ -16,6 +16,7 @@
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Loader2, ArrowLeftRight, TrendingUp, TrendingDown, Minus, AlertCircle, SearchX } from "lucide-react";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { Input } from "@/components/ui/input";
 import { useArbitrageScanner } from "./useArbitrageScanner";
 import { SAMPLE_ARBITRAGE_SCAN } from "./sampleData";
@@ -83,13 +84,13 @@ function ScanTables({ response }: { response: ArbitrageScanResponse }) {
   return (
     <div className="flex-1 overflow-auto space-y-4">
       <div>
-        <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1">Cash-future basis</div>
+        <div className="text-[11px] uppercase tracking-wide text-text-muted mb-1">Cash-future basis</div>
         {scan.cash_future.length === 0 ? (
           <div className="py-1.5 text-text-muted">No cash-future dislocations found.</div>
         ) : (
           <table className="w-full">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wide text-text-muted border-b border-border-default">
+              <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
                 <th className="py-1 pr-2 text-left font-medium">Scrip</th>
                 <th className="py-1 px-2 text-right font-medium">Spot</th>
                 <th className="py-1 px-2 text-right font-medium">Future</th>
@@ -108,13 +109,13 @@ function ScanTables({ response }: { response: ArbitrageScanResponse }) {
       </div>
 
       <div>
-        <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1">Cross-exchange gaps</div>
+        <div className="text-[11px] uppercase tracking-wide text-text-muted mb-1">Cross-exchange gaps</div>
         {scan.cross_exchange.length === 0 ? (
           <div className="py-1.5 text-text-muted">No cross-exchange gaps found.</div>
         ) : (
           <table className="w-full">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wide text-text-muted border-b border-border-default">
+              <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
                 <th className="py-1 pr-2 text-left font-medium">Scrip</th>
                 <th className="py-1 px-2 text-right font-medium">Venue A</th>
                 <th className="py-1 px-2 text-right font-medium">Venue B</th>
@@ -162,6 +163,10 @@ function ArbitrageScannerWidget() {
   const response: ArbitrageScanResponse | undefined = isConnected
     ? live
     : { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN };
+  // Disconnected, the teaser's Preview label covers the local sample. A
+  // connected payload fails closed: it is example data unless it says
+  // `is_sample_data: false`.
+  const showingExampleScan = isConnected && response !== undefined && response.is_sample_data !== false;
   const isRealEmptyScan =
     response !== undefined &&
     !response.is_sample_data &&
@@ -174,8 +179,9 @@ function ArbitrageScannerWidget() {
         <div>
           <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
             <ArrowLeftRight size={14} /> Arbitrage Scanner
+            {showingExampleScan && <ExampleDataBadge />}
           </h3>
-          <p className="text-[10px] text-text-muted">
+          <p className="text-[11px] text-text-muted">
             Cash-future basis &amp; cross-exchange
             {response !== undefined && ` · funding ${(response.scan.risk_free_rate * 100).toFixed(1)}%`}
             
@@ -204,7 +210,7 @@ function ArbitrageScannerWidget() {
           className="flex-1 min-w-40 h-7 text-xs"
           disabled={!isConnected}
         />
-        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-text-muted">
+        <label className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-text-muted">
           Edge %
           <Input
             type="number"
@@ -230,7 +236,7 @@ function ArbitrageScannerWidget() {
           <span className="text-loss">
             {error instanceof Error ? error.message : "Arbitrage scan failed"}
           </span>
-          <span className="text-[10px] text-text-muted">
+          <span className="text-[11px] text-text-muted">
             The scan needs live quotes for the universe — nothing fabricated is shown.
           </span>
         </div>

@@ -60,7 +60,7 @@ export function NewsCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Newspaper size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
             Top Stories
           </p>
           <ExampleLabel testId="news-example-label" />
@@ -80,7 +80,7 @@ export function NewsCard() {
                 <p className="text-xs text-text-primary leading-snug line-clamp-2">
                   {item.headline}
                 </p>
-                <p className="text-[10px] text-text-muted mt-0.5">
+                <p className="text-[11px] text-text-muted mt-0.5">
                   {item.source} · {item.timeAgo}
                 </p>
               </div>

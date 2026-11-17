@@ -73,7 +73,7 @@ function ConstituentRow({ c, maxAbs }: { c: IndexConstituent; maxAbs: number }) 
               <div className="absolute right-1/2 h-1.5 bg-red-500/70 rounded-l" style={{ width: `${widthPct / 2}%` }} />
             )}
           </div>
-          <span className={`font-mono tabular-nums text-[10px] w-12 text-right ${positive ? "text-green-500" : "text-red-500"}`}>
+          <span className={`font-mono tabular-nums text-[11px] w-12 text-right ${positive ? "text-green-500" : "text-red-500"}`}>
             {positive ? "+" : ""}{c.contribution_points.toFixed(1)}
           </span>
         </div>
@@ -103,7 +103,7 @@ function ContributionTab() {
         <div>
           <h3 className="text-sm font-semibold text-text-primary">Index Contribution</h3>
           {response.is_sample_data !== false && <span className="text-xxs text-warning" role="status">Sample data</span>}
-          <p className="text-[10px] text-text-muted">
+          <p className="text-[11px] text-text-muted">
             Weights as of {contribution.weights_as_of}
             
           </p>
@@ -126,7 +126,7 @@ function ContributionTab() {
       {/* Index headline */}
       <div className="rounded-md border border-border-default bg-surface-card p-2.5 flex items-center justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-text-muted">{contribution.index_name}</div>
+          <div className="text-[11px] uppercase tracking-wide text-text-muted">{contribution.index_name}</div>
           <div className="font-mono tabular-nums text-lg text-text-primary">
             {contribution.index_level > 0 ? contribution.index_level.toLocaleString("en-IN") : "—"}
           </div>
@@ -136,13 +136,13 @@ function ContributionTab() {
             {changePositive ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
             {changePositive ? "+" : ""}{contribution.index_change_pct.toFixed(2)}%
           </span>
-          <span className="text-[10px] font-mono tabular-nums">
+          <span className="text-[11px] font-mono tabular-nums">
             {changePositive ? "+" : ""}{contribution.index_change_points.toFixed(1)} pts
           </span>
         </div>
       </div>
 
-      <div className="flex gap-3 text-[10px] text-text-muted">
+      <div className="flex gap-3 text-[11px] text-text-muted">
         <span className="text-green-500">{contribution.advancers} advancing</span>
         <span className="text-red-500">{contribution.decliners} declining</span>
       </div>
@@ -155,7 +155,7 @@ function ContributionTab() {
         <div className="flex-1 overflow-auto">
           <table className="w-full">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wide text-text-muted border-b border-border-default">
+              <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
                 <th className="py-1 pr-2 text-left font-medium">Scrip</th>
                 <th className="py-1 px-2 text-right font-medium">Wt</th>
                 <th className="py-1 px-2 text-right font-medium">Chg</th>

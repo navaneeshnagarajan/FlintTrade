@@ -29,7 +29,7 @@ export function SectorCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Layers size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
             Sectors
           </p>
           <ExampleLabel testId="sector-example-label" />
@@ -52,9 +52,9 @@ export function SectorCard() {
                     : "rgba(239,68,68,0.12)",
                 }}
               >
-                <span className="text-[10px] font-medium text-text-secondary">{s.name}</span>
+                <span className="text-[11px] font-medium text-text-secondary">{s.name}</span>
                 <span
-                  className="font-mono text-[10px] font-semibold"
+                  className="font-mono text-[11px] font-semibold"
                   style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                 >
                   {positive ? "+" : ""}{s.change.toFixed(2)}%

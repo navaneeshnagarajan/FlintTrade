@@ -7,9 +7,10 @@
  *   - Filter by action type and date range
  *   - Export to CSV
  *   - retention is operator-controlled (kept on disk under ~/.flinttrade)
- *   - Sample data (clearly flagged) only in explore/disconnected mode; connected
- *     users see live ft-api data exclusively, with an honest empty state when the
- *     live response is empty — never fabricated rows.
+ *   - Example rows only while no broker is connected, labelled by the Explore
+ *     Mode line or, outside Explore, the Example data badge; connected users see
+ *     live ft-api data exclusively, with an honest empty state when the live
+ *     response is empty — never fabricated rows.
  */
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
@@ -30,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { cn } from "@/lib/utils";
 import { getActivityLog } from "@/services/ftApi";
 import type { ActivityEntry } from "@/services/ftApi";
@@ -172,7 +174,9 @@ function AuditTrailWidget() {
   // Connected users only ever see live rows. Never fall back to the SAMPLE
   // constant on an empty/undefined live response — that would render
   // fabricated audit rows to a real user. The SAMPLE constant is reserved for
-  // the explore (not-connected) branch. The Mode honesty bar discloses it.
+  // the not-connected branch, which the Mode line (Explore) or the Example
+  // data badge (Practice, Live) discloses.
+  const showingExampleRows = !isConnected;
   const liveEntries = liveData?.entries;
   // Memoised so the `?? []` fallback does not hand the filter memo below a new
   // array on every render.
@@ -207,7 +211,7 @@ function AuditTrailWidget() {
         <span className="text-xxs text-text-muted px-1.5 py-px rounded bg-surface-hover border border-border-subtle">
           Audit log
         </span>
-        
+        {showingExampleRows && <ExampleDataBadge />}
         <div className="flex-1" />
         <Button
           variant="outline"

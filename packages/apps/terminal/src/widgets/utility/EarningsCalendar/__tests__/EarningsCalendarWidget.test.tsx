@@ -34,6 +34,7 @@ vi.mock("@/services/ftApi", async (importOriginal) => {
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getEarningsCalendar } from "@/services/ftApi";
+import { useModeStore } from "@/stores/modeStore";
 import EarningsCalendarWidget from "../EarningsCalendarWidget";
 import { istParts } from "@/lib/ist";
 
@@ -271,5 +272,71 @@ describe("EarningsCalendarWidget — IST trading day", () => {
     const cell = chip.closest("td");
     expect(cell).not.toBeNull();
     expect(cellDay(cell as HTMLTableCellElement)).toBe("15");
+  });
+});
+
+describe("EarningsCalendarWidget — example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in entries in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<EarningsCalendarWidget />, { wrapper });
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<EarningsCalendarWidget />, { wrapper });
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("keeps the badge when the connected backend flags synthetic rows", async () => {
+    useModeStore.setState({ mode: "practice" });
+    const { year, month } = istParts();
+    const liveDate = `${year}-${String(month + 1).padStart(2, "0")}-15`;
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({
+      entries: [
+        { symbol: "PAYTM", company: "One97 Communications", date: liveDate, sector: "Fintech" },
+      ],
+      is_sample_data: true,
+    });
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    expect(await screen.findByText("PAYTM")).toBeTruthy();
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("drops the badge for rows from a genuinely live source", async () => {
+    useModeStore.setState({ mode: "practice" });
+    const { year, month } = istParts();
+    const liveDate = `${year}-${String(month + 1).padStart(2, "0")}-15`;
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({
+      is_sample_data: false,
+      entries: [
+        { symbol: "ZOMATO", company: "Zomato", date: liveDate, result: "beat", sector: "Consumer" },
+      ],
+    });
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    expect(await screen.findByText("ZOMATO")).toBeTruthy();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge beside the honest empty state", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({ entries: [] });
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    expect(
+      await screen.findByText("No earnings results available for this month."),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

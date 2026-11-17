@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -24,6 +24,7 @@ vi.mock("@/components/teasers", () => ({
 
 import { useVolSurface } from "../useVolSurface";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import VolSurfaceWidget from "../VolSurfaceWidget";
 
 const mockUseVolSurface = useVolSurface as ReturnType<typeof vi.fn>;
@@ -125,6 +126,23 @@ describe("VolSurfaceWidget", () => {
     expect(screen.getByTestId("feature-teaser")).toBeTruthy();
     expect(screen.getByTestId("plotly-chart")).toBeTruthy();
   });
+
+  it("gives the expiry and strike controls accessible names", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+    render(<VolSurfaceWidget />, { wrapper });
+    expect(screen.getByRole("textbox", { name: "Expiry dates, comma-separated" })).toBe(
+      screen.getByPlaceholderText("Expiries (comma-sep, YYYY-MM-DD)"),
+    );
+    expect(screen.getByRole("slider", { name: "Number of strikes" })).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -164,5 +182,65 @@ describe("VolSurfaceWidget provenance fails closed", () => {
     render(<VolSurfaceWidget />, { wrapper });
 
     expect(screen.queryByText(/sample data/i)).toBeNull();
+  });
+});
+
+describe("VolSurfaceWidget — example-data badge", () => {
+  const surface = {
+    symbol: "NIFTY",
+    expiries: ["24-APR-25"],
+    strikes: [24000, 24100],
+    iv_matrix: [[15.5, 16.1]],
+  };
+
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("badges a connected surface the backend flags as sample", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({ data: { ...surface, is_sample_data: true }, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example data");
+  });
+
+  it("fails closed when a connected surface omits the provenance flag", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({ data: surface, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.getByTestId("example-data-badge")).toBeTruthy();
+  });
+
+  it("drops the badge for an explicitly live surface", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({ data: { ...surface, is_sample_data: false }, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.queryByTestId("example-data-badge")).toBeNull();
+  });
+
+  it("leaves the disconnected preview to the teaser's own label", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseVolSurface.mockReturnValue({ data: undefined, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.queryByTestId("example-data-badge")).toBeNull();
+  });
+
+  it("stays hidden in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({ data: { ...surface, is_sample_data: true }, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.queryByTestId("example-data-badge")).toBeNull();
   });
 });

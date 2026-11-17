@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -26,6 +26,7 @@ vi.mock("@/services/ftApi.analysis", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getCorrelationMatrix } from "@/services/ftApi.analysis";
+import { useModeStore } from "@/stores/modeStore";
 import CorrelationMatrixWidget from "../CorrelationMatrixWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -171,5 +172,32 @@ describe("CorrelationMatrixWidget", () => {
     renderWidget();
     const ones = screen.getAllByText("1.00");
     expect(ones.length).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("CorrelationMatrixWidget — example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in matrix in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    renderWidget();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderWidget();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge once the backend returns a genuinely-live matrix", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockGetMatrix.mockResolvedValue(liveResponse());
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

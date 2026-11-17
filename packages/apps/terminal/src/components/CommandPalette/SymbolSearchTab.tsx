@@ -41,7 +41,7 @@ function SymbolPrice({
       <span className="block">
         {(tick.ltp ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
       </span>
-      <span className="block text-[10px]">
+      <span className="block text-[11px]">
         {isPositive ? "+" : ""}
         {pct.toFixed(2)}%
       </span>
@@ -137,7 +137,7 @@ export function SymbolSearchTab({
             <span className="block text-sm text-text-primary font-medium truncate">
               {r.symbol}
             </span>
-            <span className="block text-[10px] text-text-muted uppercase">
+            <span className="block text-[11px] text-text-muted uppercase">
               {r.exchange}
             </span>
           </span>

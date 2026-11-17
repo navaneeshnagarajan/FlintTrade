@@ -68,7 +68,7 @@ export function ContextTipCard({ trigger, className = "" }: ContextTipCardProps)
                 <span className="font-semibold text-text-primary truncate">
                   {tip.title}
                 </span>
-                <Badge className={`text-[10px] px-1.5 py-0 ${difficultyColor(tip.difficulty)}`}>
+                <Badge className={`text-[11px] px-1.5 py-0 ${difficultyColor(tip.difficulty)}`}>
                   {tip.difficulty}
                 </Badge>
               </div>

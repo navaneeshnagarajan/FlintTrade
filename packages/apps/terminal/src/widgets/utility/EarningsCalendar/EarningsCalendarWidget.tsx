@@ -10,11 +10,12 @@
  *     its IST ISO date (see ``@/lib/ist``) rather than a browser-local Date, so
  *     entries land on the right square and "today" highlights the right square
  *     wherever the operator is.
- *   - Local sample data (with a visible "Sample data" badge) in explore
- *     mode; ft-api data in connected mode. The backend earnings source is
- *     currently synthetic-only and flags itself via is_sample_data, so the
- *     badge derives from the RESPONSE flag as well as connection state — a
- *     connected user still sees the badge while the rows are fabricated.
+ *   - Local sample data while no broker is connected; ft-api data in
+ *     connected mode. The backend earnings source is currently synthetic-only
+ *     and flags itself via is_sample_data, so the Example data badge (shown
+ *     outside Explore, where the Mode line already says it) derives from the
+ *     RESPONSE flag as well as connection state — a connected user still sees
+ *     the badge while the rows are fabricated.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
@@ -26,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { cn } from "@/lib/utils";
 import { fromIstParts, istParts, istToday, toIstIsoDate } from "@/lib/ist";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -187,7 +189,7 @@ function EarningsCalendarWidget() {
   // branch only — when connected, the widget renders the backend rows (an
   // empty response shows an honest empty state, never the local constant).
   // BUT the backend earnings source is itself synthetic-only today and
-  // declares it via is_sample_data, so the "Sample data" badge must key off
+  // declares it via is_sample_data, so the Example data badge must key off
   // the response flag too: badging on `!isConnected` alone rendered
   // fabricated result dates and EPS estimates as live the moment a broker
   // connected.
@@ -195,6 +197,9 @@ function EarningsCalendarWidget() {
   const usingLocalSample = !isConnected;
   const allEntries: EarningsEntry[] = usingLocalSample ? SAMPLE_EARNINGS : liveEntries;
   const hasEntries = allEntries.length > 0;
+  // Fail closed: a present payload without an explicit `false` is sample.
+  const showingExampleEntries =
+    hasEntries && (usingLocalSample || liveData?.is_sample_data !== false);
 
   const sectors = useMemo(
     () => (usingLocalSample ? SAMPLE_SECTORS : [...new Set(allEntries.map((e) => e.sector))].sort()),
@@ -242,7 +247,7 @@ function EarningsCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarDays size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Earnings Calendar</span>
-        
+        {showingExampleEntries && <ExampleDataBadge />}
         <div className="flex-1" />
         <Select value={sectorFilter} onValueChange={setSectorFilter}>
           <SelectTrigger className="h-6 w-28 text-xxs" aria-label="Filter by sector">

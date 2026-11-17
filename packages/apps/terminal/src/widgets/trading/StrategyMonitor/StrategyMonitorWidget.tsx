@@ -367,7 +367,7 @@ function StrategyMonitorWidget() {
         <span className="text-xs font-semibold text-text-primary">Strategy Monitor</span>
 
         <span
-          className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+          className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[11px] font-medium text-text-secondary"
           role="status"
           aria-label="Read-only local preview; strategy lifecycle controls are unavailable"
           title="Read-only local preview. Start, pause and stop controls are unavailable until backend lifecycle mutations are wired."

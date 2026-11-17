@@ -11,6 +11,8 @@ import { GitFork, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { useModeStore } from "@/stores/modeStore";
 import { getHistory, getQuotes } from "@/services/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -187,6 +189,15 @@ function PivotPointsWidget() {
   const hasApiInputs = historyIsLive && quoteIsLive;
   const isLive = mode === "live" && isConnected && hasApiInputs;
   const isPractice = mode === "practice" && hasApiInputs;
+  // The built-in price stays until a quote loads; the built-in OHLC stays
+  // until history loads or the operator types their own values.
+  const ohlcIsBuiltIn =
+    !historyIsLive &&
+    high === String(SAMPLE_PREV_DAY.high) &&
+    low === String(SAMPLE_PREV_DAY.low) &&
+    close === String(SAMPLE_PREV_DAY.close) &&
+    open === String(SAMPLE_PREV_DAY.open ?? SAMPLE_PREV_DAY.close);
+  const showingExampleInputs = ohlcIsBuiltIn || !quoteIsLive;
 
   const h = parseFloat(high) || 0;
   const l = parseFloat(low) || 0;
@@ -218,6 +229,7 @@ function PivotPointsWidget() {
       >
         <GitFork size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Pivot Points</span>
+        {showingExampleInputs && <ExampleDataBadge />}
         <div className="flex-1" />
         {isLive ? (
           <span
@@ -252,11 +264,14 @@ function PivotPointsWidget() {
             {SYMBOLS.map((s) => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}
           </SelectContent>
         </Select>
-        {loadError && (
-          <span className="text-xxs text-loss ml-auto truncate max-w-40" title={loadError}>
-            {loadError}
-          </span>
-        )}
+        {loadError &&
+          (isBrokerRequiredMessage(loadError) ? (
+            <BrokerRequiredNotice what="the previous day's prices" className="ml-auto min-w-0 py-0.5" />
+          ) : (
+            <span className="text-xxs text-loss ml-auto truncate max-w-40" title={loadError}>
+              {loadError}
+            </span>
+          ))}
       </div>
 
       {/* OHLC inputs */}

@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { cn } from "@/lib/utils";
 import { istToday } from "@/lib/ist";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -246,10 +247,21 @@ function EconomicCalendarWidget() {
     queryKey: ["economicCalendar"],
     queryFn: () => getEconomicCalendar(30),
   });
-  const events = useMemo<EconomicEvent[]>(() => {
-    const mapped = calendarQuery.data ? mapBackendEvents(calendarQuery.data.events) : [];
-    return mapped.length > 0 ? mapped : SAMPLE_EVENTS;
-  }, [calendarQuery.data]);
+  const backendEvents = useMemo<EconomicEvent[]>(
+    () => (calendarQuery.data ? mapBackendEvents(calendarQuery.data.events) : []),
+    [calendarQuery.data],
+  );
+  const events = backendEvents.length > 0 ? backendEvents : SAMPLE_EVENTS;
+  // Fail closed: the schedule is example data unless backend events are on
+  // screen AND the payload explicitly says `is_sample_data: false`. The flag
+  // is not on the typed contract yet, so it is read defensively.
+  const payload: unknown = calendarQuery.data;
+  const showingExampleEvents = !(
+    backendEvents.length > 0 &&
+    typeof payload === "object" &&
+    payload !== null &&
+    (payload as { is_sample_data?: unknown }).is_sample_data === false
+  );
 
   const filtered = useMemo(() => {
     return events.filter((ev) => {
@@ -281,11 +293,7 @@ function EconomicCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarClock size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Economic Calendar</span>
-        {/* Honest disclosure — the backend calendar provider generates a
-            deterministic sample schedule (no live macro feed is integrated),
-            and the bundled events are the offline fallback. The badge stays
-            until the provider gains a real data source. */}
-        
+        {showingExampleEvents && <ExampleDataBadge />}
         <div className="flex-1" />
         <div className="flex items-center gap-1.5">
           {(["high", "medium", "low"] as Impact[]).map((i) => (
