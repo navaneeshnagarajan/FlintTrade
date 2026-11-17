@@ -745,7 +745,7 @@ export function FlintCategoricalBarChart({
               x={slotStart + slotWidth / 2}
               y={height - 4}
               textAnchor="middle"
-              fontSize={9}
+              fontSize={10}
               fill="var(--color-text-muted, #666)"
               aria-hidden="true"
             >
@@ -756,7 +756,7 @@ export function FlintCategoricalBarChart({
                 x={slotStart + slotWidth / 2}
                 y={Math.max(8, y - 3)}
                 textAnchor="middle"
-                fontSize={8}
+                fontSize={10}
                 fill="var(--color-text-secondary, #999)"
                 aria-hidden="true"
               >
@@ -843,7 +843,7 @@ export function FlintSignedCategoricalBarChart({
               x={slotStart + slotWidth / 2}
               y={labelY}
               textAnchor="middle"
-              fontSize={9}
+              fontSize={10}
               fill="var(--color-text-muted, #666)"
               aria-hidden="true"
             >
@@ -854,7 +854,7 @@ export function FlintSignedCategoricalBarChart({
                 x={slotStart + slotWidth / 2}
                 y={valueY}
                 textAnchor="middle"
-                fontSize={8}
+                fontSize={10}
                 fill="var(--color-text-secondary, #999)"
                 aria-hidden="true"
               >
@@ -1077,7 +1077,7 @@ export function FlintThresholdLineChart({
         {yTicks.filter((value) => value >= domainMin && value <= safeMax).map((value) => (
           <g key={value} aria-hidden="true">
             <line x1={-4} x2={0} y1={yFor(value)} y2={yFor(value)} stroke="var(--color-border-default, #2a2a3a)" />
-            <text x={-6} y={yFor(value) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted, #666)">
+            <text x={-6} y={yFor(value) + 3} textAnchor="end" fontSize={10} fill="var(--color-text-muted, #666)">
               {yFormatter(value)}
             </text>
           </g>
@@ -1089,7 +1089,7 @@ export function FlintThresholdLineChart({
             x={xFor(index)}
             y={chartHeight + 18}
             textAnchor="middle"
-            fontSize={8}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
             aria-hidden="true"
           >
@@ -1165,7 +1165,7 @@ export function FlintMultiLineChart({
         {yTicks.filter((tick) => tick >= yMin && tick <= yMax).map((tick) => (
           <g key={`y-${tick}`} aria-hidden="true">
             <line x1={0} y1={yFor(tick)} x2={chartWidth} y2={yFor(tick)} stroke="rgba(255,255,255,0.06)" />
-            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted, #666)">
+            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={10} fill="var(--color-text-muted, #666)">
               {yFormatter(tick)}
             </text>
           </g>
@@ -1177,7 +1177,7 @@ export function FlintMultiLineChart({
             x={xFor(tick)}
             y={chartHeight + 14}
             textAnchor="middle"
-            fontSize={8}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
             aria-hidden="true"
           >
@@ -1270,12 +1270,12 @@ export function FlintMultiLineChart({
         <line x1={0} y1={0} x2={0} y2={chartHeight} stroke="var(--color-border-default, #2a2a3a)" aria-hidden="true" />
 
         {xAxisLabel && (
-          <text x={chartWidth / 2} y={chartHeight + 24} textAnchor="middle" fontSize={8} fill="var(--color-text-muted, #666)">
+          <text x={chartWidth / 2} y={chartHeight + 24} textAnchor="middle" fontSize={10} fill="var(--color-text-muted, #666)">
             {xAxisLabel}
           </text>
         )}
         {yAxisLabel && (
-          <text x={-padding.left + 6} y={-4} fontSize={8} fill="var(--color-text-muted, #666)">
+          <text x={-padding.left + 6} y={-4} fontSize={10} fill="var(--color-text-muted, #666)">
             {yAxisLabel}
           </text>
         )}
@@ -1358,7 +1358,7 @@ export function FlintBandedLineChart({
         {yTicks.filter((tick) => tick >= yMin && tick <= yMax).map((tick) => (
           <g key={`y-${tick}`} aria-hidden="true">
             <line x1={0} y1={yFor(tick)} x2={chartWidth} y2={yFor(tick)} stroke="rgba(255,255,255,0.06)" />
-            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted, #666)">
+            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={10} fill="var(--color-text-muted, #666)">
               {yFormatter(tick)}
             </text>
           </g>
@@ -1472,7 +1472,7 @@ export function FlintBandedLineChart({
             x={xFor(tick)}
             y={chartHeight + 18}
             textAnchor="middle"
-            fontSize={9}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
             aria-hidden="true"
           >
@@ -1484,12 +1484,12 @@ export function FlintBandedLineChart({
         <line x1={0} y1={0} x2={0} y2={chartHeight} stroke="var(--color-border-default, #2a2a3a)" aria-hidden="true" />
 
         {xAxisLabel && (
-          <text x={chartWidth / 2} y={chartHeight + 29} textAnchor="middle" fontSize={8} fill="var(--color-text-muted, #666)">
+          <text x={chartWidth / 2} y={chartHeight + 29} textAnchor="middle" fontSize={10} fill="var(--color-text-muted, #666)">
             {xAxisLabel}
           </text>
         )}
         {yAxisLabel && (
-          <text x={-padding.left + 6} y={-5} fontSize={8} fill="var(--color-text-muted, #666)">
+          <text x={-padding.left + 6} y={-5} fontSize={10} fill="var(--color-text-muted, #666)">
             {yAxisLabel}
           </text>
         )}
@@ -1709,7 +1709,7 @@ export function FlintPayoffChart({
               vectorEffect="non-scaling-stroke"
               aria-hidden="true"
             />
-            <text x={chartWidth - 2} y={maxProfitY - 3} textAnchor="end" fontSize={8} fill="var(--color-profit, #22c55e)">
+            <text x={chartWidth - 2} y={maxProfitY - 3} textAnchor="end" fontSize={10} fill="var(--color-profit, #22c55e)">
               {yFormatter(maxProfit)}
             </text>
           </g>
@@ -1728,7 +1728,7 @@ export function FlintPayoffChart({
               vectorEffect="non-scaling-stroke"
               aria-hidden="true"
             />
-            <text x={chartWidth - 2} y={maxLossY + 9} textAnchor="end" fontSize={8} fill="var(--color-loss, #ef4444)">
+            <text x={chartWidth - 2} y={maxLossY + 9} textAnchor="end" fontSize={10} fill="var(--color-loss, #ef4444)">
               {yFormatter(maxLoss)}
             </text>
           </g>
@@ -1753,7 +1753,7 @@ export function FlintPayoffChart({
                 x={x}
                 y={-3}
                 textAnchor="middle"
-                fontSize={8}
+                fontSize={10}
                 fill="var(--color-text-muted, #666)"
                 aria-label={`Strike ${strike}`}
               >
@@ -1839,7 +1839,7 @@ export function FlintPayoffChart({
               <text
                 x={x + 2}
                 y={chartHeight / 2}
-                fontSize={8}
+                fontSize={10}
                 fill={breakevenColor}
                 aria-label={`Breakeven ${value}`}
               >
@@ -1861,7 +1861,7 @@ export function FlintPayoffChart({
               vectorEffect="non-scaling-stroke"
               aria-hidden="true"
             />
-            <text x={spotX + 2} y={10} fontSize={8} fill="var(--color-accent, #7c6af7)">
+            <text x={spotX + 2} y={10} fontSize={10} fill="var(--color-accent, #7c6af7)">
               {xFormatter(spotPrice)}
             </text>
           </g>
@@ -1902,13 +1902,13 @@ export function FlintPayoffChart({
               strokeWidth={0.75}
               aria-hidden="true"
             />
-            <text x={Math.min(chartWidth - 90, tooltip.x + 10)} y={Math.max(11, Math.min(chartHeight - 21, tooltip.y - 5))} fontSize={8} fill="var(--color-text-muted, #888)">
+            <text x={Math.min(chartWidth - 90, tooltip.x + 10)} y={Math.max(11, Math.min(chartHeight - 21, tooltip.y - 5))} fontSize={10} fill="var(--color-text-muted, #888)">
               {xFormatter(tooltip.xValue)}
             </text>
             <text
               x={Math.min(chartWidth - 90, tooltip.x + 10)}
               y={Math.max(23, Math.min(chartHeight - 9, tooltip.y + 7))}
-              fontSize={8}
+              fontSize={10}
               fontWeight={600}
               fill={tooltip.yValue >= 0 ? "var(--color-profit, #22c55e)" : "var(--color-loss, #ef4444)"}
             >
@@ -1921,7 +1921,7 @@ export function FlintPayoffChart({
         {yTicks.filter((tick) => tick >= yMin && tick <= yMax).map((tick) => (
           <g key={`y-${tick}`} aria-hidden="true">
             <line x1={-4} x2={0} y1={yFor(tick)} y2={yFor(tick)} stroke="var(--color-border-default, #2a2a3a)" />
-            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted, #666)">
+            <text x={-6} y={yFor(tick) + 3} textAnchor="end" fontSize={10} fill="var(--color-text-muted, #666)">
               {yFormatter(tick)}
             </text>
           </g>
@@ -1933,7 +1933,7 @@ export function FlintPayoffChart({
             x={xFor(tick)}
             y={chartHeight + 16}
             textAnchor={index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}
-            fontSize={8}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
             aria-hidden="true"
           >
@@ -1997,7 +1997,7 @@ export function FlintScatterChart({
         {yTicks.filter((tick) => tick >= yMin && tick <= yMax).map((tick) => (
           <g key={`y-${tick}`} aria-hidden="true">
             <line x1={0} y1={yFor(tick)} x2={chartWidth} y2={yFor(tick)} stroke="rgba(255,255,255,0.06)" />
-            <text x={-4} y={yFor(tick) + 3} textAnchor="end" fontSize={8} fill="var(--color-text-muted, #666)">
+            <text x={-4} y={yFor(tick) + 3} textAnchor="end" fontSize={10} fill="var(--color-text-muted, #666)">
               {yFormatter(tick)}
             </text>
           </g>
@@ -2009,7 +2009,7 @@ export function FlintScatterChart({
             x={xFor(tick)}
             y={chartHeight + 14}
             textAnchor="middle"
-            fontSize={8}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
             aria-hidden="true"
           >
@@ -2083,7 +2083,7 @@ export function FlintScatterChart({
         })}
 
         {xAxisLabel && (
-          <text x={chartWidth / 2} y={chartHeight + 24} textAnchor="middle" fontSize={8} fill="var(--color-text-muted, #666)">
+          <text x={chartWidth / 2} y={chartHeight + 24} textAnchor="middle" fontSize={10} fill="var(--color-text-muted, #666)">
             {xAxisLabel}
           </text>
         )}
@@ -2091,7 +2091,7 @@ export function FlintScatterChart({
           <text
             transform={`translate(${-26}, ${chartHeight / 2}) rotate(-90)`}
             textAnchor="middle"
-            fontSize={8}
+            fontSize={10}
             fill="var(--color-text-muted, #666)"
           >
             {yAxisLabel}
