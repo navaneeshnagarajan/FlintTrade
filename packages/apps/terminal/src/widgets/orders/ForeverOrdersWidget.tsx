@@ -685,7 +685,7 @@ export default function ForeverOrdersWidget() {
         </Button>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-3">
+      <div className="flex-1 overflow-auto scroll-py-3 p-3 space-y-3">
         {!isLive && <LiveModeNotice feature="Forever (GTT) orders" />}
         {isLive && target === null && (
           <p className="text-xs text-warning bg-warning/10 border border-warning/30 rounded px-2.5 py-1.5">
