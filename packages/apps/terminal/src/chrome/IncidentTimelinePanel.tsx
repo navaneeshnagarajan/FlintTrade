@@ -28,7 +28,7 @@ export function IncidentTimelinePanel({ value, current, refresh }: { value: unkn
     })();
     return () => controller.abort();
   }, [parsed, current, authenticated, mode]);
-  if (!parsed.success) return <section aria-label="Incident timeline"><h3>Incident timeline</h3><p>Durable timeline unavailable. No delivery success can be inferred.</p></section>;
+  if (!parsed.success) return <section aria-label="Incident timeline" className="space-y-2 rounded-lg border border-border-default bg-surface-card p-4"><h3 className="ft-text-card-title text-text-primary">Incident timeline</h3><p className="text-sm text-text-secondary">Durable timeline unavailable. No delivery success can be inferred.</p></section>;
   async function act(id:string, action:'retry'|'cancel') {
     setError(null);
     try { await incidentAction(id,action,new AbortController().signal); void refreshRef.current(); }
@@ -39,25 +39,25 @@ export function IncidentTimelinePanel({ value, current, refresh }: { value: unkn
     try { const result = await Notification.requestPermission(); setError(result==='granted' ? 'Permission granted. Explicitly retry any failed browser receipt.' : 'Desktop permission not granted.'); }
     catch { setError('Desktop permission unavailable.'); }
   }
-  return <section aria-label="Incident timeline" className="space-y-3 rounded border border-border-default p-3">
-    <h3 className="font-medium">Incident timeline</h3>
-    <p className="text-sm">Kept until manual deletion. Operational records only; trading journals and learning history are unchanged.</p>
-    <p className="text-sm">Submission is not proof that you saw an alert. Telegram and email require explicit configured opt-in. No automatic repair or restart.</p>
-    <Button type="button" onClick={()=>void permission()} disabled={!authenticated || mode==='explore'}>Allow browser desktop alerts</Button>
+  return <section aria-label="Incident timeline" className="min-w-0 space-y-3 rounded-lg border border-border-default bg-surface-card p-4">
+    <h3 className="ft-text-card-title text-text-primary">Incident timeline</h3>
+    <p className="text-sm text-text-secondary">Kept until manual deletion. Operational records only; trading journals and learning history are unchanged.</p>
+    <p className="text-sm text-text-secondary">Submission is not proof that you saw an alert. Telegram and email require explicit configured opt-in. No automatic repair or restart.</p>
+    <Button type="button" size="sm" variant="outline" onClick={()=>void permission()} disabled={!authenticated || mode==='explore'}>Allow browser desktop alerts</Button>
     {authenticated && mode!=='explore' ? <IncidentChannelSettings /> : null}
-    {error ? <p role="status">{error}</p> : null}
-    {!current ? <p role="status">Stale observation — desktop dispatch paused.</p> : null}
-    {parsed.data.incidents.length === 0 ? <p>No retained incidents in this page.</p> : parsed.data.incidents.map(incident=><article key={incident.id} className="space-y-2 border-t border-border-default pt-3" aria-label={`${incident.severity} incident`}>
-      <h4>{incident.severity === 'critical' ? 'Critical incident' : 'Warning incident'} · {incident.code.replaceAll('_',' ')}</h4>
+    {error ? <p role="status" className="text-xs text-text-secondary">{error}</p> : null}
+    {!current ? <p role="status" className="text-xs text-[var(--color-warning-text,var(--color-warning))]">Stale observation — desktop dispatch paused.</p> : null}
+    {parsed.data.incidents.length === 0 ? <p className="text-sm text-text-muted">No retained incidents in this page.</p> : parsed.data.incidents.map(incident=><article key={incident.id} className="space-y-1.5 border-t border-border-default pt-3 text-xs text-text-secondary" aria-label={`${incident.severity} incident`}>
+      <h4 className={`text-sm font-medium ${incident.severity === 'critical' ? 'text-[var(--color-bearish-text,var(--color-loss))]' : 'text-text-primary'}`}>{incident.severity === 'critical' ? 'Critical incident' : 'Warning incident'} · {incident.code.replaceAll('_',' ')}</h4>
       <p>Source: {incident.source} · <time>{incident.observed_at}</time> · {incident.freshness}</p>
       {incident.producer ? <p>Producer: {incident.producer.kind}</p> : null}
-      <p className="break-all">Correlation: {incident.correlation_id}</p>
+      <p className="break-all font-mono">Correlation: {incident.correlation_id}</p>
       <p>Root cause: {incident.root_cause.state}</p>
-      <ul>{incident.deliveries.map(receipt=><li key={receipt.id} className="flex flex-wrap gap-2"><span>{receipt.channel}:</span><span>{deliveryLabels[receipt.state]}</span>
-        {current && receipt.state==='failed' && receipt.attempts<3 ? <Button onClick={()=>void act(receipt.id,'retry')}>Retry {receipt.channel}</Button>:null}
-        {current && ['pending','browser_pending','failed','backpressure'].includes(receipt.state) ? <Button onClick={()=>void act(receipt.id,'cancel')}>Cancel {receipt.channel}</Button>:null}
+      <ul className="space-y-1">{incident.deliveries.map(receipt=><li key={receipt.id} className="flex flex-wrap items-center gap-2"><span className="font-medium text-text-primary">{receipt.channel}:</span><span>{deliveryLabels[receipt.state]}</span>
+        {current && receipt.state==='failed' && receipt.attempts<3 ? <Button size="xs" variant="outline" onClick={()=>void act(receipt.id,'retry')}>Retry {receipt.channel}</Button>:null}
+        {current && ['pending','browser_pending','failed','backpressure'].includes(receipt.state) ? <Button size="xs" variant="ghost" onClick={()=>void act(receipt.id,'cancel')}>Cancel {receipt.channel}</Button>:null}
       </li>)}</ul>
     </article>)}
-    {parsed.data.has_more ? <p>Older incidents are retained; use the bounded incident API cursor to read earlier pages.</p> : null}
+    {parsed.data.has_more ? <p className="text-xs text-text-muted">Older incidents are retained; use the bounded incident API cursor to read earlier pages.</p> : null}
   </section>;
 }

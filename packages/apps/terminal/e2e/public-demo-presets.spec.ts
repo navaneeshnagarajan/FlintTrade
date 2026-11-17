@@ -82,6 +82,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/terminal");
     await expect(app).toBeVisible();
     await anonymous();
+    // Layout management opens from the app toolbar and stays open until closed.
+    await app.getByRole("button", { name: "Layout", exact: true }).click();
     const frozenTime = await page.evaluate(() => Date.now());
     await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
     await app.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
@@ -114,7 +116,6 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await save("Charts and risk");
     expect(tabs((await layouts())["Charts and watchlist"].layout).some(tab => tab.component === "watchlist")).toBe(true);
     const edited = (await layouts())["Charts and risk"];
-    await app.getByText("Layout actions", { exact: true }).click();
     await expect(app.getByText("Presentation only. Saved named layouts and all non-layout records are retained.", { exact: true })).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
     await app.getByRole("button", { name: "Export layout", exact: true }).click();
@@ -165,6 +166,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await page.reload();
     await expect(app).toBeVisible();
     await anonymous();
+    // A fresh document starts with the Layout panel closed.
+    await app.getByRole("button", { name: "Layout", exact: true }).click();
     await expect.poll(layouts).toEqual(beforeReload);
     // FlexLayout lazily mounts an inactive tab after a cold document. Select
     // each persisted chart through its real tab before counting mounted charts.

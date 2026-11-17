@@ -491,6 +491,7 @@ test("manual and CSV Portfolio evidence roundtrips with incomplete provenance", 
   });
   await page.goto("/portfolio");
   const panel = page.getByRole("region", { name: "Canonical portfolio evidence", exact: true });
+  await panel.getByRole("button", { name: "Show evidence form", exact: true }).click();
   await expect(panel.getByText("No declared evidence available. This does not establish an empty or flat account.")).toBeVisible();
   await panel.getByLabel("Evidence source ID").fill("synthetic-notes");
   for (const [key, value] of Object.entries(record)) if (key !== "kind" && value !== null) await panel.getByLabel(key, { exact: true }).fill(value);
@@ -750,6 +751,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(firstClient).toBeDefined();
   expect(beforeLifetime.section).toBe("settings-tabpanel-dataPaths");
   expect(beforeLifetime.inputLineage.length).toBeGreaterThan(beforeLifetime.controlsLineage.length);
+  await settings.getByRole("button", { name: "Layout", exact: true }).click();
   await settings.getByLabel("Layout name", { exact: true }).fill("Activity retained Settings draft");
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
   await apps.getByRole("link", { name: "Learn", exact: true }).click();
@@ -854,18 +856,19 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Terminal", exact: true }).click();
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal).toBeVisible();
+  await terminal.getByRole("button", { name: "Layout", exact: true }).click();
   await terminal.getByLabel("Layout name", { exact: true }).fill("Synthetic retained layout");
   await terminal.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(terminal.getByRole("status").filter({ hasText: "Saved Synthetic retained layout" })).toBeVisible();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("flinttrade:app-layouts:v1:terminal")!)["Synthetic retained layout"]);
   await terminal.getByLabel("Layout name", { exact: true }).fill("Unsubmitted retained draft");
-  await terminal.getByTestId("instrument-links").locator("summary").click();
+  await terminal.getByTestId("instrument-links").getByRole("button", { name: /^Instrument links/ }).click();
   await terminal.getByLabel("Instrument link channel").selectOption("fdc3.channel.red");
   await terminal.getByLabel("Linked symbol").fill("SYNTHETIC");
   await terminal.getByLabel("Linked venue").fill("XNAS");
   await terminal.getByRole("button", { name: "Broadcast selection", exact: true }).click();
   await expect(terminal.getByTestId("instrument-links")).toContainText("Selection broadcast; execution unchanged");
-  await terminal.getByTestId("instrument-links").locator("summary").click();
+  await terminal.getByTestId("instrument-links").getByRole("button", { name: /^Instrument links/ }).click();
   const mode = await page.evaluate(() => localStorage.getItem("flinttrade:mode"));
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
   await core.retireNative(nativeTerminalReads);

@@ -22,7 +22,7 @@ it('uses the shared primitives for all seven incident input and button controls'
   const { container } = render(<IncidentTimelinePanel value={envelope([row])} current refresh={() => undefined} />);
   const controls = [...container.querySelectorAll('input,button')];
   expect(controls).toHaveLength(7);
-  expect(controls.map(control => control.getAttribute('data-slot'))).toEqual(['button', 'input', 'input', 'button', 'button', 'button', 'button']);
+  expect(controls.map(control => control.getAttribute('data-slot'))).toEqual(['button', 'input', 'checkbox', 'button', 'button', 'button', 'button']);
 });
 
 it.each(['history_job', 'model_task'])('renders retained %s failure provenance without manufacturing critical delivery', source => {

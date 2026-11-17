@@ -838,7 +838,7 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    call `POST /v1/auth/mode`. A Live session downgrades with that route and
    does not ask for a PIN on the downgrade. To look at sample data
    instead, use **Try with example data** from Welcome or sign-in.
-3. Open **+ Widget** (the dialog title is **Add Widget**) and choose
+3. Open **+ Widget** (the dialog title is **Terminal widgets**) and choose
    **Order Pad**, or pick a preset that contains it. If an Order Pad is
    already open, choosing it again focuses that pad. It does not add a
    second one.
@@ -1047,8 +1047,12 @@ See [Settings reference](#11-settings-reference) for what else lives there.
   Settings), full screen, notifications and your profile. The account
   switcher appears once a broker account is connected. Feed provenance is
   the chip at the start of the ticker.
-- **Terminal toolbar.** The active workspace, **+ Widget** (opens **Add
-  Widget**), **Layouts** and, on a Compact desk, **Watchlist & tools**.
+- **App toolbar.** Every app has one toolbar row: the app name, the
+  execution scope, **+ Widget** (opens that app's widget catalogue),
+  **Layout** (presets, saving and restoring named layouts, export, import
+  and reset) and **Links** (the instrument link channel). Layout and Links
+  open a panel under the toolbar and close again from the same button. On a
+  narrow window the app name gives way to a panel picker.
 - **Tips** appear under the page header and can be dismissed; Settings can
   bring them back.
 - **Shortcuts.** Alt+H is labelled **Go to Home** and Alt+T is labelled
@@ -1432,7 +1436,7 @@ from the widget registry
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
-**+ Widget** on the trade desk opens **Add Widget**. Choosing
+**+ Widget** on the trade desk opens **Terminal widgets**. Choosing
 **Order Pad** when one is already open focuses that pad. It does not
 add a second Order Pad. A watchlist **Buy** or **Sell** retargets that
 same open pad.

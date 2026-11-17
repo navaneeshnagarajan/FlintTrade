@@ -107,6 +107,20 @@ describe("ToolsDropdown", () => {
     expect(screen.getByTestId("location-probe").textContent).toBe("/settings");
   });
 
+  it("closes on Escape pressed anywhere, not only inside the menu", () => {
+    const { onClose } = renderDropdown("/terminal");
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes when another control takes a pointerdown and cancels the mouse event", () => {
+    const { onClose } = renderDropdown("/terminal");
+    fireEvent.pointerDown(screen.getByTestId("location-probe"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.pointerDown(screen.getByRole("menuitem", { name: /Quick Settings/ }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("renders nothing when closed", () => {
     render(
       <MemoryRouter initialEntries={["/trade"]}>
