@@ -10,6 +10,7 @@ import ServiceConnectionSetup from "./ServiceConnectionSetup";
 import { captureAuthSessionFence, isAuthSessionFenceCurrent, useAuthStore } from "@/stores/authStore";
 import { isDemoAuthSession } from "@/services/ftApi.helpers";
 
+import { NativeSelect } from "@/components/ui/native-select";
 /** Real R1 advisory-only interface. No secrets, inferred entitlements, invented
  * budgets, default model selection, training grants or trading actions. */
 export default function ModelRoutingPanel() {
@@ -114,13 +115,13 @@ function SessionModelRoutingPanel({ generation, scope }: { generation: number; s
     {connections.data?.connections.length === 0 && <p role="status">No model connections configured. Local help and manual controls remain usable.</p>}
     <ServiceConnectionSetup snapshot={connections.data} blocked={connectionBlocked} unavailable={connections.isError || connections.isFetching || busy} onBlocked={setConnectionBlocked} onChanged={snapshot => { queryClient.setQueryData(["service-connections", generation], snapshot); retireSelection(); }} onRefresh={async () => { const result = await connections.refetch({ throwOnError: true }); retireSelection(); return result; }} />
     <div className="grid gap-3 sm:grid-cols-2">
-      <label className="text-xs">Routing<select aria-label="Task routing mode" className="block w-full rounded border border-border-default bg-surface-card p-2" value={mode} onChange={e => setMode(e.target.value as typeof mode)}><option value="fixed">Explicit fixed selection</option><option value="automatic">Configured automatic pool</option></select></label>
-      <label className="text-xs">Connection<select aria-label="Task connection" className="block w-full rounded border border-border-default bg-surface-card p-2" value={connectionId} disabled={mode === "automatic"} onChange={e => { setConnectionId(e.target.value); setModel(connections.data?.connections.find(c => c.connection_id === e.target.value)?.model ?? ""); }}><option value="">Choose an existing connection</option>{connections.data?.connections.map(c => <option key={c.connection_id} value={c.connection_id}>{c.label} · {c.provider_id}</option>)}</select></label>
+      <label className="text-xs">Routing<NativeSelect aria-label="Task routing mode" wrapperClassName="mt-1 flex w-full" value={mode} onChange={e => setMode(e.target.value as typeof mode)}><option value="fixed">Explicit fixed selection</option><option value="automatic">Configured automatic pool</option></NativeSelect></label>
+      <label className="text-xs">Connection<NativeSelect aria-label="Task connection" wrapperClassName="mt-1 flex w-full" value={connectionId} disabled={mode === "automatic"} onChange={e => { setConnectionId(e.target.value); setModel(connections.data?.connections.find(c => c.connection_id === e.target.value)?.model ?? ""); }}><option value="">Choose an existing connection</option>{connections.data?.connections.map(c => <option key={c.connection_id} value={c.connection_id}>{c.label} · {c.provider_id}</option>)}</NativeSelect></label>
       <label className="text-xs">Exact model<Input aria-label="Task model" value={model} onChange={e => setModel(e.target.value)} disabled={mode === "automatic"} /></label>
       <label className="text-xs">Configured effort key<Input aria-label="Task effort" value={effort} onChange={e => setEffort(e.target.value)} disabled={mode === "automatic"} /></label>
       <label className="text-xs">Deadline (ms)<Input aria-label="Task deadline" type="number" min="1" value={deadline} onChange={e => setDeadline(e.target.value)} /></label>
       <label className="text-xs">Maximum output tokens<Input aria-label="Task output limit" type="number" min="1" value={outputLimit} onChange={e => setOutputLimit(e.target.value)} /></label>
-      <label className="text-xs">Classification<select aria-label="Task classification" value={classification} onChange={e => setClassification(e.target.value as typeof classification)} className="block w-full bg-surface-card p-2"><option value="public">Public context</option><option value="private">Private context (requires configured consent)</option></select></label>
+      <label className="text-xs">Classification<NativeSelect aria-label="Task classification" value={classification} onChange={e => setClassification(e.target.value as typeof classification)} wrapperClassName="mt-1 flex w-full"><option value="public">Public context</option><option value="private">Private context (requires configured consent)</option></NativeSelect></label>
       <label className="text-xs">Selected knowledge references<Input aria-label="Task knowledge references" value={refs} onChange={e => setRefs(e.target.value)} placeholder="skill:canonical_name, …" /></label>
     </div>
     <details><summary>Choose canonical knowledge</summary><KnowledgeSelector selected={selectedSkills} onSelection={setSelectedSkills} /></details>

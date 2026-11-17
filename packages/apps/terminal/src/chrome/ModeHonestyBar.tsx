@@ -62,7 +62,7 @@ export default function ModeHonestyBar({ mode }: { mode: AppMode }) {
       className={cn("flex shrink-0 items-center gap-2 border-b px-3 py-1", bar)}
     >
       <Icon className={cn("size-3.5 shrink-0", icon)} aria-hidden="true" />
-      <p className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs text-text-secondary [scrollbar-width:none]">
+      <p className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs text-text-secondary ft-scroll-quiet">
         {line}
       </p>
       {mode === "explore" && exampleSession ? <ExampleSessionAction /> : null}

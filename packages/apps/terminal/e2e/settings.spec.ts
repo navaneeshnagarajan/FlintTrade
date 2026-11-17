@@ -106,7 +106,7 @@ test.describe('Settings page', () => {
   test('settings uses the shared page header', async ({ page }) => {
     // Settings is reached from the sidebar like every page, so its header names
     // the page and holds its action instead of a Back button.
-    await expect(page.getByTestId('page-header').getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+    await expect(page.getByTestId('page-header').getByRole('heading', { level: 2, name: 'Settings' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Restart Services/i })).toBeVisible();
   });
 

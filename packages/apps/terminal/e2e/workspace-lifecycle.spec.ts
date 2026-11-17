@@ -50,6 +50,8 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   const preset = workspace.getByRole("combobox", { name: "Terminal preset", exact: true });
   const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
   await expect(workspace).toBeVisible();
+  // Layout management opens from the app toolbar and stays open until closed.
+  await workspace.getByRole("button", { name: "Layout", exact: true }).click();
   await expect(preset.locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
   await preset.selectOption("trader");
   await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
@@ -170,6 +172,7 @@ for (const draftMode of ["new", "edit"] as const) {
     await expect(page).toHaveURL("http://localhost:5173/terminal");
     const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
     await expect(workspace).toBeVisible();
+    await workspace.getByRole("button", { name: "Layout", exact: true }).click();
     const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
     await expect(restore.locator("option")).toHaveText(["Restore layout", "Synthetic saved layout"]);
     const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Synthetic saved layout"], LAYOUT_KEY);

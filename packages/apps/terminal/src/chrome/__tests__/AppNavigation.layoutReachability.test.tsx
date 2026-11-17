@@ -97,6 +97,12 @@ describe("compact app navigation and layout ownership", () => {
     renderShell();
     await screen.findByLabelText("Settings navigation canary");
     const app = within(screen.getByRole("region", { name: "Settings app" }));
+    // Layout management sits behind one toolbar toggle, closed until asked for.
+    const layoutToggle = app.getByRole("button", { name: "Layout" });
+    expect(layoutToggle).toHaveAttribute("aria-expanded", "false");
+    expect(app.queryByRole("combobox", { name: "Settings preset" })).not.toBeInTheDocument();
+    fireEvent.click(layoutToggle);
+    expect(layoutToggle).toHaveAttribute("aria-expanded", "true");
     expect(app.getByRole("combobox", { name: "Settings preset" })).toBeEnabled();
     expect(app.getByRole("combobox", { name: "Compact panel" })).toBeEnabled();
     fireEvent.click(app.getByRole("button", { name: "Add widget" }));
@@ -108,7 +114,6 @@ describe("compact app navigation and layout ownership", () => {
     expect(app.getByRole("status")).toHaveTextContent("Saved Compact saved");
     const saved = readAppLayouts("settings")["Compact saved"];
     expect(JSON.stringify(saved)).toContain('"component":"knowledge-library"');
-    fireEvent.click(app.getByText("Layout actions"));
     expect(app.getByRole("button", { name: "Export layout" })).toBeVisible();
     expect(app.getByLabelText("Import app layout")).toBeVisible();
     fireEvent.click(app.getByRole("button", { name: "Reset app layout" }));
@@ -120,6 +125,18 @@ describe("compact app navigation and layout ownership", () => {
     expect(useAuthStore.getState().status).toBe("logged-out");
     expect(useBrokerStore.getState().activeAccountId).toBeNull();
     expect(useModeStore.getState().mode).toBe("explore");
+  });
+
+  it("keeps one H1 in the page and says when a widget search matches nothing", async () => {
+    renderShell();
+    await screen.findByLabelText("Settings navigation canary");
+    const app = within(screen.getByRole("region", { name: "Settings app" }));
+    expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    fireEvent.click(app.getByRole("button", { name: "Add widget" }));
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByRole("textbox", { name: "Search widgets" }), { target: { value: "no such widget" } });
+    expect(dialog.getByText("No widgets match")).toBeVisible();
+    expect(dialog.queryByRole("button", { name: /^Add / })).not.toBeInTheDocument();
   });
 
   it("routes a public reset command only to the active toolbar owner", async () => {

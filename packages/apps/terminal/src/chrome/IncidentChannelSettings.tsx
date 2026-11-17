@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { configureIncidentChannel } from '@/services/systemIncidents';
 import { captureAuthSessionFence, isAuthSessionFenceCurrent, useAuthStore } from '@/stores/authStore';
 
@@ -33,13 +35,15 @@ export function IncidentChannelSettings() {
     } catch { if(generation===lifetime.current && isAuthSessionFenceCurrent(fence)) setMessage('Channel change refused or unverified. No automatic resend; recheck configuration before trying again.'); }
     finally { if(generation===lifetime.current && isAuthSessionFenceCurrent(fence)) setBusy(false); }
   }
-  return <fieldset className="space-y-2 border-t border-border-default pt-3" disabled={busy}>
-    <legend>Optional critical incident delivery</legend>
-    <p>Uses existing configured Telegram or SMTP service credentials. No provider fallback. Restart requires explicit rebinding; disabled receipts are not replayed.</p>
-    <label>Alert channel <select value={channel} onChange={event=>{setChannel(event.target.value as 'telegram'|'email');setMessage('');if(recipient.current)recipient.current.value='';if(confirmation.current)confirmation.current.checked=false;}}><option value="telegram">Telegram</option><option value="email">Email (SMTP)</option></select></label>
-    <label>Configured alert recipient <Input autoComplete="off" maxLength={254} ref={node=>{recipient.current=node;return()=>{if(node)node.value='';};}} /></label>
-    <label><Input type="checkbox" className="inline-block h-4 w-4" ref={confirmation} /> Allow this channel to receive critical incident notices</label>
-    <div className="flex flex-wrap gap-3"><Button type="button" onClick={()=>void change(true)}>Enable selected channel</Button><Button type="button" onClick={()=>void change(false)}>Disable selected channel</Button></div>
-    {message ? <p role="status">{message}</p>:null}
+  return <fieldset className="min-w-0 space-y-3 border-t border-border-default pt-3" disabled={busy}>
+    <legend className="float-left mb-1 w-full text-sm font-medium text-text-primary">Optional critical incident delivery</legend>
+    <p className="clear-both text-xs leading-relaxed text-text-secondary">Uses existing configured Telegram or SMTP service credentials. No provider fallback. Restart requires explicit rebinding; disabled receipts are not replayed.</p>
+    <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
+      <label className="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">Alert channel <NativeSelect value={channel} onChange={event=>{setChannel(event.target.value as 'telegram'|'email');setMessage('');if(recipient.current)recipient.current.value='';if(confirmation.current)confirmation.current.checked=false;}}><option value="telegram">Telegram</option><option value="email">Email (SMTP)</option></NativeSelect></label>
+      <label className="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">Configured alert recipient <Input autoComplete="off" maxLength={254} ref={node=>{recipient.current=node;return()=>{if(node)node.value='';};}} /></label>
+    </div>
+    <label className="flex items-start gap-2 text-sm text-text-primary"><Checkbox className="mt-0.5" ref={confirmation} /> Allow this channel to receive critical incident notices</label>
+    <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={()=>void change(true)}>Enable selected channel</Button><Button type="button" size="sm" variant="ghost" onClick={()=>void change(false)}>Disable selected channel</Button></div>
+    {message ? <p role="status" className="text-xs text-text-secondary">{message}</p>:null}
   </fieldset>;
 }

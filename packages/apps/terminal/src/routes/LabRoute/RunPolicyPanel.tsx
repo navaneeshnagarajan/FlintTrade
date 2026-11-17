@@ -4,6 +4,7 @@ import { RunPolicyFields, buildRunProposal, policyRevision, policyWorkflows, wor
 import { createRunPolicyClient, RunPolicyReadbackUnavailable, type RunConfiguration, type RunPolicyClient, type RunPreview } from "@/services/runPolicy";
 import { RunPolicyError, runPolicyAuthorityKey, subscribeRunPolicyAuthority, type RunScope } from "@/services/runPolicyTransport";
 
+import { NativeSelect } from "@/components/ui/native-select";
 export function RunPolicyPanel({ scope }: { scope: RunScope }) {
   const generation = useSyncExternalStore(subscribeRunPolicyAuthority, runPolicyAuthorityKey, runPolicyAuthorityKey);
   return <ScopedRunPolicyPanel key={JSON.stringify([generation, scope.run_id, scope.actor, scope.account, scope.environment])} scope={scope} />;
@@ -53,7 +54,7 @@ function ScopedRunPolicyPanel({ scope }: { scope: RunScope }) {
       <p className="text-xs break-all">Authoritative scope: {configuration.scope.actor} · {configuration.scope.account} · {configuration.scope.environment} · {configuration.scope.run_id}</p>
       <dl className="grid gap-2 sm:grid-cols-2 text-xs">{["access", "grant:reasoning", "learning-dataset", "learning-policy", "learning-binding"].map(key => <div key={key}><dt className="text-text-secondary">{key}</dt><dd>{configuration.controls[key] ? `Revision ${configuration.controls[key].revision} · ${configuration.controls[key].value ? "Configured policy (not activation)" : "Not configured"}` : "Unavailable"}</dd></div>)}</dl>
       <details><summary>Current policy values and limits</summary><PolicyEvidence value={configuration.controls} /></details>
-      <label className="block text-sm">Policy workflow<select aria-label="Policy workflow" className="mt-1 w-full rounded border border-border-default bg-surface-card p-2" disabled={busy} value={workflowId} onChange={event => { edit(); setDraft({}); setSelected([]); setWorkflowId(event.target.value); setConfiguration(current => current ? { ...current, exact_control: undefined } : null); setError(""); }}>{policyWorkflows.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      <label className="block text-sm">Policy workflow<NativeSelect aria-label="Policy workflow" wrapperClassName="mt-1 flex w-full" disabled={busy} value={workflowId} onChange={event => { edit(); setDraft({}); setSelected([]); setWorkflowId(event.target.value); setConfiguration(current => current ? { ...current, exact_control: undefined } : null); setError(""); }}>{policyWorkflows.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</NativeSelect></label>
       <fieldset disabled={busy} className="space-y-3"><legend className="font-medium">{workflow.label}</legend>
         <RunPolicyFields workflow={workflow} configuration={configuration} draft={draft} selected={selected} onChange={(name, value) => { edit(); if (["candidate", "trial", "suite", "connection_id"].includes(name)) setConfiguration(current => current ? { ...current, exact_control: undefined } : null); setDraft(values => ({ ...values, [name]: value })); }} onOperations={value => { edit(); setSelected(value); }} />
       </fieldset>
