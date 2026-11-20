@@ -587,6 +587,13 @@ describe("ChartWidget", () => {
     await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps a dash on the chart until a last price arrives", () => {
+    render(<ChartWidget />);
+    expect(screen.getByLabelText(/last price$/i)).toHaveTextContent("—");
+    expect(screen.getByLabelText(/change$/i)).toHaveTextContent("—");
+    expect(screen.getByRole("button", { name: "5m" })).toBeInTheDocument();
+  });
+
   it("refetches history and fits the new range when the timeframe changes from 5m to 1D", async () => {
     chartInitMocks.setReady(true);
     apiMocks.getIntervals.mockResolvedValue(["5m", "1D"]);

@@ -1462,7 +1462,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   return (
     <div
       ref={workspaceRef}
-      className="flex flex-col h-full w-full bg-surface-base overflow-hidden focus:outline-none focus:ring-1 focus:ring-accent/30"
+      className="flex flex-col h-full w-full overflow-hidden bg-[#071018] text-[#e8eef2] focus:outline-none focus:ring-1 focus:ring-[#7dffa1]/40"
       data-tour-target="chart"
       data-chart-layout={workspaceLayout.compact ? "compact" : "standard"}
       tabIndex={0}
@@ -1471,32 +1471,32 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     >
 
       {/* Header */}
-      <div className="flex flex-col gap-1 px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
-        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-          <SymbolSearch dataScope={dataScope} onSelect={handleSymbolSelect} />
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{displayedSymbol}</span>
-            <span className="text-xs text-text-muted whitespace-nowrap">{displayedExchange}</span>
-            {awaitingOptionLeg && !currentOptionLegError && (
-              <span className="text-xxs text-text-muted animate-pulse whitespace-nowrap" role="status">
-                Resolving {optionLegType} leg…
-              </span>
-            )}
-            {currentOptionLegError && (
-              <span className="rounded border border-loss/30 bg-loss/10 px-1.5 py-0.5 text-xxs text-loss" role="alert">
-                {currentOptionLegError}
-              </span>
-            )}
-            {ltp != null && <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">{formatPrice(ltp)}</span>}
-            {change != null && (
-              <span className={`flex items-center gap-0.5 text-xs font-mono whitespace-nowrap ${changeColor}`}>
-                {isPositive ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                {formatChange(change)} ({formatChangePct(changePct)})
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden pb-0.5">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#071018] px-2">
+        <SymbolSearch dataScope={dataScope} onSelect={handleSymbolSelect} />
+        <span className="shrink-0 font-heading text-sm font-semibold leading-none text-[#7dffa1]">{displayedSymbol}</span>
+        <span className="shrink-0 text-[11px] text-[#9fb0bc]">{displayedExchange}</span>
+        {awaitingOptionLeg && !currentOptionLegError && (
+          <span className="shrink-0 animate-pulse text-xxs text-[#9fb0bc]" role="status">
+            Resolving {optionLegType} leg…
+          </span>
+        )}
+        {currentOptionLegError && (
+          <span className="shrink-0 rounded border border-loss/30 bg-loss/10 px-1.5 py-0.5 text-xxs text-loss" role="alert">
+            {currentOptionLegError}
+          </span>
+        )}
+        <span className="shrink-0 font-mono text-sm font-semibold leading-none text-[#e8eef2]" aria-label={`${displayedSymbol} last price`}>
+          {ltp == null ? "—" : formatPrice(ltp)}
+        </span>
+        <span className={`flex shrink-0 items-center gap-0.5 font-mono text-xs ${change == null ? "text-[#9fb0bc]" : changeColor}`} aria-label={`${displayedSymbol} change`}>
+          {change == null ? "—" : (
+            <>
+              {isPositive ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+              {formatChange(change)} ({formatChangePct(changePct)})
+            </>
+          )}
+        </span>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto">
           {legend && <FlintChartLegend legend={legend} />}
           <FlintChartIntervalPills
             intervals={intervals}
@@ -1508,7 +1508,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-0.5 bg-surface-base border-b border-border-default shrink-0 flex-wrap min-h-7">
+      <div className="flex min-h-7 shrink-0 flex-wrap items-center gap-1 border-b border-white/10 bg-[#071018] px-2 py-0.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="h-6 px-2 text-xs font-sans gap-1 text-text-secondary hover:text-text-primary">
