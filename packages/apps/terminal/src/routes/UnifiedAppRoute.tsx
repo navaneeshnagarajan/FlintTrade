@@ -218,15 +218,16 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-[#7dffa1]", compact && "sr-only")}>{meta.name}</h1>
       {compact && <NativeSelect aria-label="Compact panel" controlSize="sm" wrapperClassName="min-w-0 flex-1" onChange={e => selectPanel(e.target.value)} value={selectedPanel}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</NativeSelect>}
       <p className="shrink-0 text-[11px] font-medium tracking-wide text-[#9fb0bc]" data-testid="desk-total-pnl">TOTAL P&amp;L <span className="text-[#e8eef2]">—</span></p>
-      <p className={cn("min-w-0 truncate text-xs text-[#9fb0bc]", compact ? "order-last basis-full" : "flex-1")} title={scope} data-testid="app-execution-scope">
+      <p className={cn("min-w-0 truncate text-xs text-[#9fb0bc]", compact ? "min-w-0 flex-1" : "flex-1")} title={scope} data-testid="app-execution-scope">
         {scope}
       </p>
       <Button variant="outline" size="sm" className="shrink-0" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" /><span className={cn(compact && "sr-only")}>Widget</span></Button>
-      <div className="contents">
-        <Button variant="ghost" size="sm" className="shrink-0" aria-expanded={layoutOpen} aria-controls={layoutPanelId} aria-label="Layout" onClick={() => setLayoutOpen(open => !open)}>
-          <LayoutGrid aria-hidden="true" /><span className={cn(compact && "sr-only")}>Layout</span><ChevronDown aria-hidden="true" className={cn("transition-transform", layoutOpen && "rotate-180")} />
-        </Button>
-        <div id={layoutPanelId} role="group" aria-label={`${meta.name} layout`} hidden={!layoutOpen} className="order-last flex basis-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border-default bg-surface-card px-3 py-2">
+      <Button variant="ghost" size="sm" className="shrink-0" aria-expanded={layoutOpen} aria-controls={layoutPanelId} aria-label="Layout" onClick={() => setLayoutOpen(open => !open)}>
+        <LayoutGrid aria-hidden="true" /><span className={cn(compact && "sr-only")}>Layout</span><ChevronDown aria-hidden="true" className={cn("transition-transform", layoutOpen && "rotate-180")} />
+      </Button>
+      <InstrumentLinks app={app} compact={compact} onOpenChange={setLinksOpen} />
+    </div>
+    <div id={layoutPanelId} role="group" aria-label={`${meta.name} layout`} hidden={!layoutOpen} className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-white/10 bg-[#071018] px-2 py-2 text-[#e8eef2]">
           <label className="flex min-w-0 items-center gap-1.5 text-xs text-text-secondary">Preset
             <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} defaultValue="" onChange={e => { if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
           </label>
@@ -241,11 +242,8 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
             <input ref={importInput} aria-label="Import app layout" type="file" accept="application/json,.json" className="sr-only" tabIndex={-1} onChange={event => { void importLayout(event.target.files?.[0]); event.target.value = ""; }} />
             <Button size="sm" variant="ghost" onClick={() => setModel(Model.fromJson(buildAppPreset(app, "default")))}><RotateCcw aria-hidden="true" />Reset app layout</Button>
           </span>
-          <p className="basis-full text-xs text-text-muted">Presentation only. Saved named layouts and all non-layout records are retained.</p>
+          <p className="basis-full text-xs text-[#9fb0bc]">Presentation only. Saved named layouts and all non-layout records are retained.</p>
         </div>
-      </div>
-      <InstrumentLinks app={app} compact={compact} onOpenChange={setLinksOpen} />
-    </div>
     {app === "terminal" && <PracticeLaterSetup />}
     {error && <p role="alert" className="flex shrink-0 items-start gap-2 border-b border-warning/30 bg-warning/[0.08] px-3 py-1.5 text-xs text-[var(--color-warning-text,var(--color-warning))]"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss message" onClick={() => setError("")}><X aria-hidden="true" /></Button></p>}
     {notice && <p role="status" className="flex shrink-0 items-center gap-2 border-b border-border-default bg-surface-card px-3 py-1 text-xs text-text-secondary"><span className="min-w-0 flex-1 truncate">{notice}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss notice" onClick={() => setNotice("")}><X aria-hidden="true" /></Button></p>}
