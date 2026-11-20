@@ -292,6 +292,7 @@ class Laya:
         self._decision_client: Any = None
         self._qualification: Any = None
         self._qualification_owner: Any = None
+        self._explicit_live = False
         self._gate_checking = False
         self._lock = threading.Lock()
         self._log: list[DecisionRecord] = []
@@ -319,6 +320,7 @@ class Laya:
         with self._lock:
             self._status = status
             self._live_qualified = status is not DecisionStatus.DOWN
+            self._explicit_live = status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
                 self._sticky_refusal = False
@@ -333,6 +335,7 @@ class Laya:
         with self._lock:
             self._status = status
             self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
+            self._explicit_live = False
             if status is not DecisionStatus.DOWN:
                 self._reason = None
                 self._sticky_refusal = False
@@ -435,6 +438,7 @@ class Laya:
         with self._lock:
             self._qualification_owner = owner
             self._live_qualified = False
+            self._explicit_live = False
 
     def qualification_owner_is(self, owner: object) -> bool:
         """Check exact producer custody without interpreting a returned report.
@@ -465,10 +469,14 @@ class Laya:
     def effective_status(self, mode: str) -> DecisionStatus:
         """Status that applies to ``mode``. Unqualified Live stays Down."""
         with self._lock:
-            status, qualified, owner = self._status, self._live_qualified, self._qualification_owner
+            status, qualified, explicit, owner = (
+                self._status, self._live_qualified, self._explicit_live, self._qualification_owner,
+            )
         if status is DecisionStatus.DOWN:
             return DecisionStatus.DOWN
-        if mode.strip().lower() == "live" and (not qualified or owner is not None and not owner.qualifies()):
+        if mode.strip().lower() == "live" and not (explicit and qualified) and (
+            not qualified or owner is not None and not owner.qualifies()
+        ):
             return DecisionStatus.DOWN
         return status
 
