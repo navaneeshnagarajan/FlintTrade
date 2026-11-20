@@ -169,7 +169,7 @@ describe("idle lock route", () => {
 
     renderDesk();
     expect(screen.getByText(DESK_MARKER)).toBeInTheDocument();
-    expect(screen.getByTestId("topbar")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Practice desk locked" })).not.toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(6 * 60 * 1000);

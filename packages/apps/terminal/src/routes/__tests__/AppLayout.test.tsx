@@ -219,7 +219,7 @@ describe("AppLayout", () => {
   it("renders the trade header without the generic app bar, with one ticker strip and a main landmark", () => {
     renderApp();
 
-    expect(screen.queryByTestId("topbar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar").parentElement).toHaveClass("hidden");
     expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
     expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
     // <main> landmark named after the route, matching its sidebar label
@@ -529,7 +529,7 @@ describe("AppLayout", () => {
     const header = document.querySelector("header");
     expect(header?.className).toMatch(/flex/);
     expect(header?.className).toMatch(/flex-col/);
-    expect(screen.queryByTestId("topbar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar").parentElement).toHaveClass("hidden");
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
 
     const body = screen.getByTestId("route-body");
