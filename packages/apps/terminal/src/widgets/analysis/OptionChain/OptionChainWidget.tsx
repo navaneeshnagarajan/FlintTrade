@@ -543,10 +543,10 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   }, [basket, exchange, glideColumns, isInBasket, legBuilderOpen, selectedExpiry, strikes, symDef.label]);
 
   return (
-    <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
+    <div className="h-full flex flex-col bg-[#071018] text-[#e8eef2] overflow-hidden select-none" aria-label="Option chain">
 
       {/* Top bar */}
-      <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
+      <div className="flex-none border-b border-white/10 bg-[#071018] px-2 py-1.5 space-y-1.5">
 
         {/* Row 1: Symbol + Exchange + Expiry + View + Basket + Refresh */}
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -581,7 +581,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           <div className="flex-1" />
 
           {/* View toggle */}
-          <div role="radiogroup" aria-label="Option chain view" className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+          <div role="radiogroup" aria-label="Option chain view" className="flex items-center overflow-hidden rounded border border-white/10 bg-transparent">
             {VIEWS.map((v) => (
               <button
                 key={v}
@@ -754,7 +754,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         </div>
       )}
 
-      <div className="flex-none px-2 py-1 border-b border-border-subtle">
+      <div className="flex-none border-b border-white/10 px-2 py-1">
         <AdmissionNoteField id="chain-admission-note" value={note} onChange={setNote} />
       </div>
 
