@@ -23,7 +23,7 @@ def test_peer_handle_observes_exact_owner_exit_without_pid_lookup(tmp_path):
     assert custody is not None, "maintenance lacks a retained native owner handle"
     endpoint = str(tmp_path / "owner.sock")
     if len(endpoint.encode()) >= 100:
-        endpoint = str(Path(os.environ.get("TMPDIR", "/tmp")) / f"ft-{os.getpid()}.sock")
+        endpoint = f"/tmp/ft-{os.getpid()}.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(endpoint)
     listener.listen(1)
