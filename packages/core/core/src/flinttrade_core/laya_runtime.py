@@ -21,7 +21,6 @@ import argparse
 import atexit
 import errno
 import hashlib
-import hmac
 import inspect
 import json
 import logging
@@ -45,6 +44,30 @@ from .owner_file_lock import OwnerSafeFileLock
 from .secure_file import harden, harden_directory
 
 _LOG = logging.getLogger("flinttrade.laya")
+
+# Memory-hard witness of the current API key. A fast hash is not a credential binding.
+_CREDENTIAL_KDF_N = 2**15
+_CREDENTIAL_KDF_R = 8
+_CREDENTIAL_KDF_P = 1
+_CREDENTIAL_KDF_DKLEN = 32
+_CREDENTIAL_KDF_MAXMEM = 64 * 1024 * 1024
+
+
+def credential_witness(witness_key: bytes, api_key: str) -> str:
+    """Bind a credential into a qualification witness.
+
+    The raw key never enters the identity digest. The witness key is the salt
+    and stays in the runtime object.
+    """
+    return hashlib.scrypt(
+        api_key.encode(),
+        salt=witness_key,
+        n=_CREDENTIAL_KDF_N,
+        r=_CREDENTIAL_KDF_R,
+        p=_CREDENTIAL_KDF_P,
+        dklen=_CREDENTIAL_KDF_DKLEN,
+        maxmem=_CREDENTIAL_KDF_MAXMEM,
+    ).hex()
 
 # laya-serve 0.3.21 only preloads a checkpoint name. A verified boot does not
 # pass a repo id or revision: the child reads LAYA_WEIGHTS_PATH and loads
@@ -1454,7 +1477,7 @@ class LayaRuntime:
             if not self._record_belongs_to_running_sidecar(check, policy):
                 raise LayaRuntimeError("Laya artifact belongs to a different runtime")
             value = [id(self), id(client), self._generation, asdict(check), self.base_url, self._device,
-                     hmac.new(self._credential_witness_key, self._api_key.encode(), hashlib.sha256).hexdigest(),
+                     credential_witness(self._credential_witness_key, self._api_key),
                      self._watched_signature()]
             return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 

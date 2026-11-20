@@ -6,7 +6,6 @@ These tests do not establish model quality or permission for funded Live use.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -52,12 +51,13 @@ def test_credential_witness_key_is_private_per_runtime_entropy(
 def test_qualification_identity_keys_even_a_short_credential(
     sidecar: tuple[Any, list[str]], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hold every other field fixed to distinguish HMAC from a raw key hash.
+    """Hold every other field fixed to distinguish a keyed KDF from a raw key hash.
 
     Args:
         sidecar: Real runtime lifecycle with synthetic bytes and inert transport.
         monkeypatch: Scoped deterministic private key used by the expected digest.
     """
+    from flinttrade_core.laya_runtime import credential_witness
     from flinttrade_engine.laya import process_laya
 
     runtime, _calls = sidecar
@@ -65,7 +65,7 @@ def test_qualification_identity_keys_even_a_short_credential(
     runtime._remember_key("short-test-key")
     monkeypatch.setattr(runtime, "_credential_witness_key", b"a" * 32)
     check = runtime.ensure_artifact_check()
-    credential = hmac.new(b"a" * 32, b"short-test-key", hashlib.sha256).hexdigest()
+    credential = credential_witness(b"a" * 32, "short-test-key")
     value = [id(runtime), id(gate._decision_client), runtime._generation, asdict(check),
              runtime.base_url, runtime._device, credential, runtime._watched_signature()]
     expected = hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
