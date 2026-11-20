@@ -600,7 +600,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           broker: broker.adapter_id,
           account_id: accountId.trim(),
         },
-        message: accountResultPresentation(result).message,
+        message: `${broker.display_name} account ${accountId.trim()} connected.`,
       };
     },
     onSuccess: (r, sessionFence) => {
@@ -691,10 +691,12 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           return reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key);
         }).then((result) => current() ? result : null);
     },
-    onSuccess: (r) => {
+    onSuccess: (r, sel) => {
       if (!r) return;
       setError("");
-      setNotice(accountResultPresentation(r).message);
+      setNotice("receipt" in r
+        ? accountResultPresentation(r).message
+        : `${sel.adapter} account ${sel.account} re-authenticated.`);
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {

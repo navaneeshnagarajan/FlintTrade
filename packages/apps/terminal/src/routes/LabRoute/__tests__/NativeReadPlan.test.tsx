@@ -47,7 +47,7 @@ const exact = "/api/v1/execution-sessions/mounted-native";
   fireEvent.change(studio.getByLabelText("Maximum inspection reads"), { target: { value: String(selected.read_plan.max_reads) } });
   fireEvent.change(studio.getByLabelText("Maximum inspection pages"), { target: { value: String(selected.read_plan.max_pages) } });
   fireEvent.change(studio.getByLabelText("Inspection deadline (local time)"), {
-    target: { value: new Date(selected.read_plan.deadline_ms).toISOString().slice(0, -1) },
+    target: { value: new Date(selected.read_plan.deadline_ms - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, -1) },
   });
   fireEvent.click(studio.getByRole("button", { name: "Inspect selected surfaces" }));
   await studio.findByText("Qualification: blocked. A report never grants entry authority.");

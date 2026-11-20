@@ -62,7 +62,7 @@ it("imports the same selected export again after a preset, and again after a ref
   await user.click(app.getByRole("button", { name: "Add widget" }));
   await user.click(screen.getByRole("button", { name: "Add Shared knowledge" }));
   await screen.findByText("Knowledge leaf");
-  fireEvent.click(app.getByText("Layout actions"));
+  fireEvent.click(app.getByRole("button", { name: "Layout" }));
   await user.click(app.getByRole("button", { name: "Export layout" }));
   expect(downloads).toEqual(["flinttrade-settings-layout.json"]);
   const exported = createObjectURL.mock.calls[0][0];

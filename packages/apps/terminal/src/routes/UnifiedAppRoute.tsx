@@ -66,6 +66,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const [notice, setNotice] = useState("");
   const [compact, setCompact] = useState(false);
   const [layoutOpen, setLayoutOpen] = useState(false);
+  const [presetValue, setPresetValue] = useState("");
   const [linksOpen, setLinksOpen] = useState(false);
   // An open toolbar panel borrows height from the desk. That must not flip a
   // wide desk into the one-panel compact view, so only width decides then.
@@ -168,8 +169,14 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       const document: unknown = JSON.parse(await file.text());
       const envelope = document as { version?: unknown; app?: unknown; layout?: unknown };
       if (envelope?.version !== 1 || envelope.app !== app || !validateAppLayout(app, envelope.layout)) throw new Error("Not a compatible fresh app layout. Authority and legacy layouts cannot be imported.");
-      setModel(Model.fromJson(envelope.layout)); setNotice("Imported presentation layout; execution unchanged.");
-    } catch (e) { setError(String(e)); }
+      setModel(Model.fromJson(envelope.layout));
+      setError("");
+      setNotice("Imported presentation layout; execution unchanged.");
+      setPresetValue("");
+    } catch (e) {
+      setNotice("");
+      setError(String(e));
+    }
   }
   // Activity belongs INSIDE the ref-dependent docking tree. Hiding Layout
   // itself detaches its ref and makes its next render unmount every widget.
@@ -227,7 +234,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
         </Button>
         <div id={layoutPanelId} role="group" aria-label={`${meta.name} layout`} hidden={!layoutOpen} className="order-last flex basis-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border-default bg-surface-card px-3 py-2">
           <label className="flex min-w-0 items-center gap-1.5 text-xs text-text-secondary">Preset
-            <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} defaultValue="" onChange={e => { if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
+            <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} value={presetValue} onChange={e => { setPresetValue(e.target.value); if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
           </label>
           <span className="flex min-w-0 items-center gap-1.5">
             <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 w-40 min-w-0 text-xs md:text-xs" />
