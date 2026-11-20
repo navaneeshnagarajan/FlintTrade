@@ -107,7 +107,7 @@ def _terminal_lifecycle_case(
         after_settlement: Optional test-owned callback for later bounded evidence.
     """
     import requests
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from flinttrade_engine import safety as safety_module
 
     class SessionClock(datetime):
@@ -115,8 +115,11 @@ def _terminal_lifecycle_case(
 
         @classmethod
         def now(cls, tz: Any = None) -> datetime:
-            """Supply a synthetic wall clock while retaining the real exchange-hours predicate."""
-            return datetime.now(tz).replace(hour=11, minute=0, second=0)
+            """Supply 11:00 on a weekday so the real session predicate can open."""
+            current = datetime.now(tz)
+            while current.weekday() >= 5:
+                current -= timedelta(days=1)
+            return current.replace(hour=11, minute=0, second=0, microsecond=0)
 
     monkeypatch.setattr(safety_module, "datetime", SessionClock)
     desk = mounted_desk
