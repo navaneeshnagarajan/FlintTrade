@@ -18,6 +18,12 @@ it("keeps presentation layouts per app, ignores old layouts and never deletes ot
   expect(APP_LAYOUT_NAMESPACE).not.toBe("flinttrade:layouts");
 });
 describe("purpose-safe presets", () => {
+  it("opens the trade desk on chart, books and the option chain", () => {
+    const model = Model.fromJson(buildAppPreset("terminal", "overview"));
+    const components: string[] = [];
+    model.visitNodes(n => { if (n.getType() === "tab") components.push((n as TabNode).getComponent()!); });
+    expect(components).toEqual(["chart", "positions", "orders", "watchlist", "optionchain"]);
+  });
   it("offers Trader and Option Scalper as layouts, never personas", () => {
     expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option Scalper"]));
     expect(validateAppLayout("terminal", buildAppPreset("terminal", "trader"))).toBe(true);

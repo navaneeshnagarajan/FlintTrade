@@ -216,10 +216,10 @@ describe("AppLayout", () => {
     expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
   });
 
-  it("renders header with TopBar and one ticker strip, and a main landmark", () => {
+  it("renders the trade header without the generic app bar, with one ticker strip and a main landmark", () => {
     renderApp();
 
-    expect(screen.getByTestId("topbar")).toBeInTheDocument();
+    expect(screen.getByTestId("topbar").parentElement).toHaveClass("hidden");
     expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
     expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
     // <main> landmark named after the route, matching its sidebar label
@@ -523,14 +523,14 @@ describe("AppLayout", () => {
     expect(mockNavigate).toHaveBeenCalledWith(detail.path);
   });
 
-  it("Trade route body is a flex-fill shell under TopBar and ticker strip", () => {
+  it("Trade route body is a flex-fill shell under the ticker strip", () => {
     renderApp();
 
     const header = document.querySelector("header");
     expect(header?.className).toMatch(/flex/);
     expect(header?.className).toMatch(/flex-col/);
-    expect(screen.getByTestId("topbar").compareDocumentPosition(screen.getByTestId("ticker-strip"))
-      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("topbar").parentElement).toHaveClass("hidden");
+    expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
 
     const body = screen.getByTestId("route-body");
     expect(body.className).toMatch(/flex-1/);

@@ -57,12 +57,12 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
   const save = async (name: string) => {
     await app.getByRole("textbox", { name: "Layout name", exact: true }).fill(name);
     await app.getByRole("button", { name: "Save layout", exact: true }).click();
-    await expect(app.getByRole("status")).toHaveText(`Saved ${name}`);
+    await expect(app.getByRole("status").filter({ hasText: `Saved ${name}` })).toHaveText(`Saved ${name}`);
     expect((await layouts())[name]).toEqual((await layouts())["Current"]);
   };
   const restore = async (name: string) => {
     await app.getByRole("combobox", { name: "Restore saved layout", exact: true }).selectOption({ label: name });
-    await expect(app.getByRole("status")).toHaveText(`Restored ${name}`);
+    await expect(app.getByRole("status").filter({ hasText: `Restored ${name}` })).toHaveText(`Restored ${name}`);
     await expect.poll(async () => (await layouts())["Current"]).toEqual((await layouts())[name]);
   };
   const anonymous = async () => {
@@ -129,7 +129,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     const nonLayouts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     const named = Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"));
     await app.getByRole("button", { name: "Reset app layout", exact: true }).click();
-    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["overview:WelcomeCard", "watchlist", "chart", "positions", "orders"]);
+    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["chart", "positions", "orders", "watchlist", "optionchain"]);
     expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
     const afterReset = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     // Newly mounted default charts may add presentation preferences; the real
@@ -144,7 +144,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     expect(nextSkill).toEqual(previousSkill);
     checkpoints.push({ name: "reset-retained-records", before: nonLayouts, after: afterReset });
     await app.getByLabel("Import app layout", { exact: true }).setInputFiles(exportPath);
-    await expect(app.getByRole("status")).toHaveText("Imported presentation layout; execution unchanged.");
+    await expect(app.getByRole("status").filter({ hasText: "Imported presentation layout; execution unchanged." })).toHaveText("Imported presentation layout; execution unchanged.");
     await expect.poll(async () => (await layouts())["Current"]).toEqual(edited);
     const rejected = [
       { ...exported, app: "testing" },

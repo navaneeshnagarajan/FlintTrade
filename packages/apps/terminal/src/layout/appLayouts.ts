@@ -36,9 +36,11 @@ export function buildAppPreset(app: AppId, preset: string): IJsonModel {
   // Wide overview separates account summary, market and books. All other tools
   // start in tabsets so a full-sized operational form is usable immediately.
   if (app === "terminal" && ids === DEFAULT_APP_WIDGETS.terminal) {
+    const tab = (id: string, name: string) => tabJson(id, name, { id: `${app}:${id}`, params: { channel: "none" } });
     return workspaceJson(rowJson(100, [
-      rowJson(32, [tabsetJson(45, [tabs[0]]), tabsetJson(55, [tabs[2]])]),
-      rowJson(68, [tabsetJson(65, [tabs[1]]), tabsetJson(35, [tabs[3], tabs[4]])]),
+      tabsetJson(58, [tab("chart", "Chart")]),
+      tabsetJson(20, [tab("positions", "Positions"), tab("orders", "Orders"), tab("watchlist", "Watchlists")]),
+      tabsetJson(22, [tab("optionchain", "Option Chain")]),
     ]));
   }
   return workspaceJson(rowJson(100, [tabsetJson(100, tabs)]));
