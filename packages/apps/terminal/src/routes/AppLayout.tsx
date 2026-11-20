@@ -256,7 +256,7 @@ export default function AppLayout() {
       </a>
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
-        {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
+        {isPublicDemoBuild() ? <PublicPreviewHeader /> : appForPath(location.pathname) === "terminal" ? null : <TopBarV2 />}
         <AppNavigation />
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />

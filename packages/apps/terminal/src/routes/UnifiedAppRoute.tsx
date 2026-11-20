@@ -214,10 +214,11 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
-    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border-default bg-surface-base px-3 py-1.5" data-testid="app-toolbar">
-      <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-text-primary", compact && "sr-only")}>{meta.name}</h1>
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#071018] px-2 text-[#e8eef2]" data-testid="app-toolbar">
+      <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-[#7dffa1]", compact && "sr-only")}>{meta.name}</h1>
       {compact && <NativeSelect aria-label="Compact panel" controlSize="sm" wrapperClassName="min-w-0 flex-1" onChange={e => selectPanel(e.target.value)} value={selectedPanel}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</NativeSelect>}
-      <p className={cn("min-w-0 truncate text-xs text-text-secondary", compact ? "order-last basis-full" : "flex-1 basis-40")} title={scope} data-testid="app-execution-scope">
+      <p className="shrink-0 text-[11px] font-medium tracking-wide text-[#9fb0bc]" data-testid="desk-total-pnl">TOTAL P&amp;L <span className="text-[#e8eef2]">—</span></p>
+      <p className={cn("min-w-0 truncate text-xs text-[#9fb0bc]", compact ? "order-last basis-full" : "flex-1")} title={scope} data-testid="app-execution-scope">
         {scope}
       </p>
       <Button variant="outline" size="sm" className="shrink-0" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" /><span className={cn(compact && "sr-only")}>Widget</span></Button>
