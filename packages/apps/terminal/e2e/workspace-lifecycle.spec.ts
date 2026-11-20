@@ -60,7 +60,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
   await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
   await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
-  await expect(workspace.getByRole("status")).toHaveText("Saved Trading Desk");
+  await expect(workspace.getByRole("status").filter({ hasText: "Saved Trading Desk" })).toHaveText("Saved Trading Desk");
   const original = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk"], LAYOUT_KEY);
 
   // Save-as is the clone owner. Prove identity first, then edit only the copy.
