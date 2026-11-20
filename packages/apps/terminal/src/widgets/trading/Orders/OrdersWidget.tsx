@@ -770,7 +770,7 @@ function OrdersWidget(_props: WidgetProps) {
   });
 
   return (
-    <div className="relative h-full flex flex-col overflow-hidden text-xs bg-surface-base">
+    <div className="relative flex h-full flex-col overflow-hidden bg-[#071018] text-xs text-[#e8eef2]" aria-label="Order book">
       {/* Cancel confirmation */}
       {cancelIntent && (
         <CancelConfirmOverlay
@@ -796,7 +796,7 @@ function OrdersWidget(_props: WidgetProps) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0">
+      <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#071018] px-3 py-1.5">
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
           Orders{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>

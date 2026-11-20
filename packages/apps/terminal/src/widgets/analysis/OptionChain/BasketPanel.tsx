@@ -21,7 +21,7 @@ export default function BasketPanel({
   onOrder,
 }: BasketPanelProps) {
   return (
-    <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
+    <div className="flex-none border-b border-white/10 bg-[#071018] px-2 py-1.5 text-[#e8eef2]">
       <div className="flex items-center gap-2 mb-1">
         <ShoppingBasket size={11} className="text-accent" />
         <span className="text-xs font-semibold text-text-primary uppercase tracking-wide">
