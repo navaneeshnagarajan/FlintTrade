@@ -167,9 +167,9 @@ function HoldingsWidget(_props: WidgetProps) {
   });
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
+    <div className="flex h-full flex-col overflow-hidden bg-[#071018] text-xs text-[#e8eef2]" aria-label="Holdings book">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default shrink-0 gap-2 flex-wrap">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#071018] px-3 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Holdings</span>
           <span className="text-xxs text-text-secondary font-mono tabular-nums">({rows.length})</span>
@@ -185,17 +185,17 @@ function HoldingsWidget(_props: WidgetProps) {
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="font-mono tabular-nums text-xs text-text-secondary">
-            Inv: ₹{INR.format(totals.invested)}
+            Inv: {rows.length === 0 ? "—" : `₹${INR.format(totals.invested)}`}
           </span>
           <span className="font-mono tabular-nums text-xs text-text-secondary">
-            Val: ₹{INR.format(totals.currentVal)}
+            Val: {rows.length === 0 ? "—" : `₹${INR.format(totals.currentVal)}`}
           </span>
           <span
             className={`font-mono tabular-nums text-xs font-medium ${
-              totals.pnl >= 0 ? "text-profit" : "text-loss"
+              rows.length === 0 ? "text-text-muted" : totals.pnl >= 0 ? "text-profit" : "text-loss"
             }`}
           >
-            P&L: {formatPnl(totals.pnl)}
+            P&L: {rows.length === 0 ? "—" : formatPnl(totals.pnl)}
           </span>
           {lastFetch && (
             <span className="text-xxs text-text-muted flex items-center gap-0.5">

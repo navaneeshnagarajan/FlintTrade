@@ -997,7 +997,7 @@ function PositionsWidget(props: WidgetProps) {
   const estimatedCharges = appMode === "practice" ? (fundsQuery.data?.estimatedCharges ?? 0) : 0;
   const totalPnl = grossPnl - estimatedCharges;
   const showPnl =
-    isExplore || rows.length > 0 || (accountReadsEnabled && !queryUi.isPaused && isSuccess);
+    rows.length > 0 && (isExplore || (accountReadsEnabled && !queryUi.isPaused && isSuccess));
   const netExposure = useMemo(
     () => netRows.reduce((sum, row) => sum + row.exposure, 0),
     [netRows],
@@ -1343,7 +1343,7 @@ function PositionsWidget(props: WidgetProps) {
     <div
       ref={containerRef}
       className={cn(
-        "h-full flex flex-col text-xs bg-surface-base",
+        "h-full flex flex-col bg-[#071018] text-xs text-[#e8eef2]",
         // Leave a pixel beyond the last row: fractional splitter heights and
         // integer scroll extents otherwise crop its cell border at scroll end.
         view === "table" ? "overflow-y-auto pb-px" : "overflow-hidden",
@@ -1354,7 +1354,7 @@ function PositionsWidget(props: WidgetProps) {
       data-tour-target="positions"
     >
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-default shrink-0 flex-wrap">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#071018] px-3 py-1.5">
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
           Positions{visibleCount > 0 ? ` (${visibleCount})` : ""}
         </span>
