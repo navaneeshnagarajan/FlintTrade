@@ -307,9 +307,9 @@ function PnLMonitorWidget(props: WidgetProps) {
   }, [state.netPnL, riskLimits]);
 
   return (
-    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-[#071018] text-[#e8eef2]">
       {/* Header */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-white/10 bg-[#071018] px-2 py-1">
         <TrendingUp size={11} className="text-text-muted" />
         <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider whitespace-nowrap">
           P&amp;L Monitor

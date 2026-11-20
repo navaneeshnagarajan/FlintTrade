@@ -338,7 +338,7 @@ describe("PositionsWidget", () => {
 
   it("renders without crashing", () => {
     const { container } = render(<PositionsWidget {...defaultProps} />);
-    expect(container.querySelector("[data-tour-target='positions']")).toBeInTheDocument();
+    expect(container.querySelector("[data-tour-target='positions']")).toHaveClass("bg-[#071018]");
   });
 
   it("shows 'No open positions' when data is empty", () => {
@@ -346,6 +346,7 @@ describe("PositionsWidget", () => {
     render(<PositionsWidget {...defaultProps} />);
 
     expect(screen.getByText("No open positions")).toBeInTheDocument();
+    expect(screen.getByText("P&L: —")).toBeInTheDocument();
   });
 
   it("does not treat an unverified position book as empty", () => {
