@@ -314,12 +314,12 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
   return (
     <div
-      className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
+      className="h-full flex flex-col overflow-hidden relative bg-[#071018] text-[#e8eef2]"
       data-tour-target="watchlist"
     >
       {/* HEADER */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
-        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
+      <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-white/10 bg-[#071018] px-2">
+        <span className="font-heading text-sm font-semibold tracking-wide text-[#7dffa1]">
           Watchlist
         </span>
 
