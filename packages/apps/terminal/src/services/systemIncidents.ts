@@ -50,7 +50,7 @@ function createDeliveryQueue(client: QueryClient) {
   const fresh = () => {
     const query = client.getQueryCache().find({ queryKey: SYSTEM_DIAGNOSTICS_KEY, exact: true });
     return !!query && onlineManager.isOnline() && query.state.status === 'success'
-      && query.state.fetchStatus !== 'paused' && !query.isStaleByTime(SYSTEM_DIAGNOSTICS_STALE_MS)
+      && !query.state.isInvalidated && !query.isStaleByTime(SYSTEM_DIAGNOSTICS_STALE_MS)
       && z.object({ operational_events: Timeline }).safeParse(query.state.data).success;
   };
   return {
