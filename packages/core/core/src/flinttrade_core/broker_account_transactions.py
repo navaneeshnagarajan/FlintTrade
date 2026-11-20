@@ -38,7 +38,7 @@ from .account_lifecycle_contracts import (
 )
 from .account_mutation_contracts import RegistrySelectorVersion, RegistryVersionConflict, SessionVersion
 from .broker_account_audit import AccountMutationAudit
-from .broker_account_cutover import require_broker_account_mutations
+from .broker_account_cutover import BrokerAccountCutoverUnavailable, require_broker_account_mutations
 from .broker_account_lifecycle import AccountMutationLease, BrokerAccountLifecycleOwner, CleanupTicket
 from .broker_account_workspace import BrokerAccountPatch, BrokerAccountWorkspace, BrokerAccountWorkspaceUnavailable
 from .broker_identity import BrokerSelector, CredentialVersion
@@ -586,24 +586,38 @@ class BrokerAccountTransactionCoordinator:
                     return self._outcome(receipt, request)
                 if attempt.candidate.probe_error is not None:
                     raise ValueError("account_candidate_probe_unknown")
-            self._publish_native_fenced(attempt.lease, lambda: None, request=request)
-            read_only = None if request.kind is AccountMutationKind.REMOVE else attempt.candidate.is_read_only
-            patch = BrokerAccountPatch(request.kind, request.selector, request.data_roles, read_only)
-            self.store.stage_plan(
-                request.operation_id,
-                replay_credentials=None
-                if request.kind is AccountMutationKind.REMOVE
-                else attempt.candidate.replay_credentials,
-                read_only=read_only,
-                before_digest=broker_account_digest(snapshot),
-                after_digest=broker_account_digest(patch.apply(snapshot.config)),
-            )
-            receipt = self._publish_native_fenced(
-                attempt.lease, lambda: self._commit_and_publish(request, attempt, patch),
-                request=request, phase="publish"
-            )
-            await self._settle(receipt, attempt, deadline)
-            return self._outcome(receipt, request)
+            try:
+                self._publish_native_fenced(attempt.lease, lambda: None, request=request)
+                read_only = None if request.kind is AccountMutationKind.REMOVE else attempt.candidate.is_read_only
+                patch = BrokerAccountPatch(request.kind, request.selector, request.data_roles, read_only)
+                self.store.stage_plan(
+                    request.operation_id,
+                    replay_credentials=None
+                    if request.kind is AccountMutationKind.REMOVE
+                    else attempt.candidate.replay_credentials,
+                    read_only=read_only,
+                    before_digest=broker_account_digest(snapshot),
+                    after_digest=broker_account_digest(patch.apply(snapshot.config)),
+                )
+                receipt = self._publish_native_fenced(
+                    attempt.lease, lambda: self._commit_and_publish(request, attempt, patch),
+                    request=request, phase="publish"
+                )
+                await self._settle(receipt, attempt, deadline)
+                return self._outcome(receipt, request)
+            except BrokerAccountCutoverUnavailable:
+                if attempt.candidate is None:
+                    raise
+                receipt = self.lifecycle.with_disposition_fence(
+                    attempt.lease,
+                    lambda: self.store.settle(
+                        request.operation_id,
+                        state=AccountOperationStage.REJECTED,
+                        reason="post_authentication_owner_refused",
+                    ),
+                )
+                await self._settle(receipt, attempt, deadline)
+                return self._outcome(receipt, request)
         except asyncio.CancelledError:
             if not admitted:
                 admitted = self.store.existing_request(request) is not None
