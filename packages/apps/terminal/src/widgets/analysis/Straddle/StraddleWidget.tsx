@@ -1049,10 +1049,10 @@ function StraddleWidget(props: WidgetProps) {
   const hasChartData = chartStraddlePoints.length > 0;
 
   return (
-    <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
+    <div className="h-full flex flex-col bg-[#071018] text-[#e8eef2] overflow-hidden select-none" aria-label="Straddle chart">
 
       {/* Header */}
-      <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
+      <div className="flex-none border-b border-white/10 bg-[#071018] px-2 py-1.5 space-y-1.5">
 
         {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">

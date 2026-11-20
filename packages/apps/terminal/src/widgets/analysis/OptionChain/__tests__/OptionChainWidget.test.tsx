@@ -194,6 +194,12 @@ describe("OptionChainWidget", () => {
     expect(container.firstChild).toBeInTheDocument();
   });
 
+  it("keeps a dash for spot until a price arrives on the desk shell", () => {
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    expect(screen.getByText("Spot: —")).toBeVisible();
+    expect(screen.getByLabelText("Option chain")).toHaveClass("bg-[#071018]");
+  });
+
   it("honours a pinned symbol from panel params (options-scalper preset pins NIFTY)", async () => {
     // The widget must seed from props.params.symbol, not just SYMBOLS[0].
     render(<OptionChainWidget params={{ symbol: "BANKNIFTY" }} />, { wrapper: Wrapper });
