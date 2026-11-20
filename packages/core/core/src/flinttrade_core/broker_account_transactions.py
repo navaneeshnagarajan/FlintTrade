@@ -323,8 +323,13 @@ class BrokerAccountTransactionCoordinator:
         return AccountMutationOutcome(receipt, status, recovery)
 
     def _terminal_claim(self, operation_id: UUID) -> bool:
-        """Read the exact durable receipt; unknown authentication never releases custody."""
-        operation = self.store.operation(operation_id)
+        """Read the exact durable receipt; a missing row is not a proved disposition."""
+        from flinttrade_gateway.account_transaction_store import AccountOperationConflict
+
+        try:
+            operation = self.store.operation(operation_id)
+        except AccountOperationConflict:
+            return False
         return (operation.receipt is not None and operation.receipt.operation_id == operation_id
                 and operation.receipt.state in (AccountOperationStage.COMMITTED, AccountOperationStage.REJECTED))
 

@@ -313,7 +313,7 @@ jobs:
       - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
         run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/ src/generated/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check (strict TypeScript check already passed)

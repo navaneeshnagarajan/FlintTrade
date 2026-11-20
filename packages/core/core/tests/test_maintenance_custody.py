@@ -13,12 +13,17 @@ pytestmark = pytest.mark.integration
 
 def test_peer_handle_observes_exact_owner_exit_without_pid_lookup(tmp_path):
     """A connected owner is pinned by the kernel, not a reusable PID snapshot."""
+    import os
+    from pathlib import Path
+
     try:
         custody = importlib.import_module("flinttrade_core.maintenance_custody")
     except ModuleNotFoundError:
         custody = None
     assert custody is not None, "maintenance lacks a retained native owner handle"
     endpoint = str(tmp_path / "owner.sock")
+    if len(endpoint.encode()) >= 100:
+        endpoint = str(Path(os.environ.get("TMPDIR", "/tmp")) / f"ft-{os.getpid()}.sock")
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(endpoint)
     listener.listen(1)
@@ -43,6 +48,8 @@ s.recv(1)
         if child.poll() is None:
             child.kill()
         child.wait(timeout=5)
+        if endpoint.endswith(f"ft-{os.getpid()}.sock"):
+            Path(endpoint).unlink(missing_ok=True)
 
 
 def test_maintenance_handoff_keeps_the_normal_kernel_exclusion(tmp_path, monkeypatch):
