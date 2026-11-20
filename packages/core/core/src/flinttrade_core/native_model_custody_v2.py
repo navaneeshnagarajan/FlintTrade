@@ -9,7 +9,6 @@ from typing import Any
 
 from .native_autonomy_contracts_v2 import ModelDutyV2
 
-
 _TERMINAL = {"SETTLED", "CANCELLED"}
 
 
