@@ -148,7 +148,7 @@ describe("StrategyBuilderTool", () => {
   });
 
   it("seeds a labelled sample premium on Explore Long Call so payoff is not zero-risk", async () => {
-    // Tester FT-LAB-003: Explore → /lab → Options Builder → Long Call → Payoff
+    // Tester: Explore → /lab → Options Builder → Long Call → Payoff
     // must not read as Premium ₹0 / max loss ₹0. Sample-chain ATM CE LTP
     // (NIFTY 22500, gap 50) is 45 → max loss 45 × the instrument-master lot.
     render(<StrategyBuilderTool />);
@@ -168,7 +168,7 @@ describe("StrategyBuilderTool", () => {
     expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
   });
 
-  it("shows header and legs chips on the same position basis as Payoff (FT-LAB-005)", async () => {
+  it("shows header and legs chips on the same position basis as Payoff", async () => {
     render(<StrategyBuilderTool />);
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
 

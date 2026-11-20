@@ -5,7 +5,7 @@
  * share this hook. A blank stored provider is Not configured unless
  * ``advisor/status`` reports an explicit env-backed or stored provider
  * (``LLM_PROVIDER``). The empty→ollama default never paints Connected.
- * Managed Ollama ``Not installed`` never paints Connected (FT-AI-004).
+ * Managed Ollama ``Not installed`` never paints Connected.
  */
 
 import { useQuery } from "@tanstack/react-query";

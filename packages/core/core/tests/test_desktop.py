@@ -515,7 +515,10 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
     backend_lease_proof,
 ) -> None:
     events: list[str] = []
-    deadline = time.monotonic() + 1.0
+    # The one-second window is the shutdown budget. Arm it when cleanup starts.
+    # Starting it before serve lets parallel setup consume the deadline, and
+    # the dispatcher is then reported incomplete before it is asked to stop.
+    armed: dict[str, float] = {}
 
     class Dispatcher:
         def __init__(self) -> None:
@@ -527,6 +530,7 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
             events.append("dispatcher-start")
 
         def shutdown(self, *, timeout: float) -> bool:
+            deadline = armed["deadline"]
             assert 0.0 <= timeout <= max(0.0, deadline - time.monotonic()) + 0.01
             events.append("dispatcher-shutdown")
             self.threads.clear()
@@ -547,6 +551,14 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
         close=lambda: events.append("server-close"),
     )
     _stub_desktop_shutdown_dependencies(monkeypatch)
+    real_release = desktop._DesktopShutdownRecoveryOwner.release
+
+    def release(self: object, *, deadline: float) -> None:  # noqa: ARG002 - armed below, not the pre-serve clock
+        if "deadline" not in armed:
+            armed["deadline"] = time.monotonic() + 1.0
+        real_release(self, deadline=armed["deadline"])
+
+    monkeypatch.setattr(desktop._DesktopShutdownRecoveryOwner, "release", release)
     monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr(desktop, "_close_runtime_request_admission", lambda _app: tracker)
     monkeypatch.setattr("waitress.task.ThreadedTaskDispatcher", lambda: dispatcher)
@@ -568,7 +580,6 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
         5100,
         backend_lease_proof=backend_lease_proof,
         ready_writer=lambda _message: events.append("ready"),
-        shutdown_deadline=deadline,
     )
 
     assert dispatcher.threads == set()

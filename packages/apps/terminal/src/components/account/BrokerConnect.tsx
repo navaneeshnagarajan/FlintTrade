@@ -1,6 +1,4 @@
 import { BrokerSummary } from "@/tools/Settings/BrokerSummary";
-import { useAccountResultFence } from "@/hooks/useAccountResultFence";
-import { accountResultPresentation, NativeCredentialsRequired } from "@/services/nativeAccountResult";
 /**
  * BrokerConnect — shared native broker connect surface.
  *
@@ -12,7 +10,7 @@ import { accountResultPresentation, NativeCredentialsRequired } from "@/services
  * establishes the session.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
@@ -70,13 +68,13 @@ import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
-  isMondayReadBroker,
-  mondayReadChrome,
-  mondayReadConnectable,
+  isConnectedReadBroker,
+  connectedReadChrome,
+  connectedReadConnectable,
 } from "@/lib/connectedReadChrome";
 
 function brokerSelectable(broker: Pick<NativeBroker, "adapter_id" | "connectable">): boolean {
-  return mondayReadConnectable(broker.adapter_id, broker.connectable);
+  return connectedReadConnectable(broker.adapter_id, broker.connectable);
 }
 
 const BROKERS_KEY = ["native", "brokers"] as const;
@@ -217,8 +215,6 @@ export interface BrokerConnectProps {
 
 export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const qc = useQueryClient();
-  const captureResultFence = useAccountResultFence();
-  const resultOwner = useRef<(() => boolean) | null>(null);
   const mountedRef = useRef(false);
   const delayedRefreshesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const accountRefreshControllersRef = useRef<Set<AbortController>>(new Set());
@@ -255,8 +251,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
-  // Credentials are mounted-only, including React Activity hide/return.
-  useLayoutEffect(() => () => { setFields({}); }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -524,9 +518,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   }
 
   const connectMutation = useMutation({
-    retry: false,
-    mutationFn: async ({ sessionFence, current }: { sessionFence: ReturnType<typeof captureAuthSessionFence>; current: () => boolean }) => {
-      resultOwner.current = current;
+    mutationFn: async (sessionFence: ReturnType<typeof captureAuthSessionFence>) => {
       if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
       if (!broker || !method) throw new Error("Pick a broker and a login method.");
       if (!brokerSelectable(broker)) throw new Error(`${broker.display_name} native connect is coming soon.`);
@@ -569,22 +561,19 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         };
       }
       const result = await runAccountAction(`native:${broker.adapter_id}:${accountId.trim()}:connect`,
-        (key) => {
-          if (!current()) throw new Error("Account action retired before dispatch.");
-          return connectNativeAccount({
-            adapter_id: broker.adapter_id,
-            account_id: accountId.trim(),
-            ...(label ? { label } : {}),
-            credentials: {
-              ...(method.credential_defaults ?? {}),
-              ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
-            },
-          }, key);
-        });
+        (key) => connectNativeAccount({
+        adapter_id: broker.adapter_id,
+        account_id: accountId.trim(),
+        ...(label ? { label } : {}),
+        credentials: {
+          ...(method.credential_defaults ?? {}),
+          ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
+        },
+        }, key));
       if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
-      if (!current()) return null;
-      const presentation = accountResultPresentation(result);
-      if (!("receipt" in result) && !presentation.sessionPresent) throw new Error("Login did not establish a session.");
+      // A failed connect is a non-2xx that already threw the backend message
+      // inside connectNativeAccount; a 2xx always carries connected:true.
+      if (!result.connected) throw new Error("Login did not establish a session.");
       return {
         oauth: false as const,
         target: {
@@ -592,13 +581,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           broker: broker.adapter_id,
           account_id: accountId.trim(),
         },
-        sessionPresent: presentation.sessionPresent,
-        recoveryOnly: "recovery" in result,
-        message: "receipt" in result ? presentation.message : `${broker.display_name} account ${accountId.trim()} connected.`,
+        message: `${broker.display_name} account ${accountId.trim()} connected.`,
       };
     },
-    onSuccess: (r, { sessionFence, current }) => {
-      if (!r || !mountedRef.current || !isAuthSessionFenceCurrent(sessionFence) || !current()) return;
+    onSuccess: (r, sessionFence) => {
+      if (!r || !mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
       setError("");
       if (!r.oauth) {
         setFields({});
@@ -606,15 +593,15 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         setAccountLabel("");
       }
       setNotice(r.message);
-      if (!r.oauth && r.sessionPresent && !r.recoveryOnly) clearBrokerFault();
+      if (!r.oauth) clearBrokerFault();
       // OAuth completes out-of-band. Settings has no passive Explore poll, so
       // keep a bounded, user-triggered handshake alive until this exact account
       // appears; setup relies on its existing continuous observer.
       if (r.oauth) refreshUntilOAuthAccountAppears(r.target);
       else invalidateAccountQueries();
     },
-    onError: (e: unknown, { sessionFence, current }) => {
-      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence) || !current()) return;
+    onError: (e: unknown, sessionFence) => {
+      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
       setNotice("");
       setError(e instanceof Error ? e.message : "Connection failed.");
     },
@@ -675,39 +662,32 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   });
 
   const reloginMutation = useMutation({
-    retry: false,
-    mutationFn: async (sel: { adapter: string; account: string; current: () => boolean }) =>
+    // Replay the stored (replayable) material first — a one-click morning
+    // re-auth for accounts whose vault token is still valid (G5).
+    mutationFn: (sel: { adapter: string; account: string }) =>
       runAccountAction(`native:${sel.adapter}:${sel.account}:reconnect`,
-        (key) => {
-          if (!sel.current()) throw new Error("Account action retired before dispatch.");
-          return reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key);
-        }),
-    onSuccess: (result, sel) => {
-      if (!sel.current()) return;
-      resultOwner.current = sel.current;
-      const presentation = accountResultPresentation(result);
+        (key) => reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key)),
+    onSuccess: (_r, sel) => {
       setError("");
-      setNotice("receipt" in result ? presentation.message : `${sel.adapter} account ${sel.account} re-authenticated.`);
-      if (presentation.sessionPresent && !("recovery" in result)) clearBrokerFault();
+      setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
+      clearBrokerFault();
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {
-      if (!sel.current()) return;
-      resultOwner.current = sel.current;
-      // Only the explicit legacy stale-session result permits this prompt.
-      // Custody, unknown authentication, HTTP errors and future contracts do not.
-      if (e instanceof NativeCredentialsRequired) {
-        setSelectedBroker(sel.adapter);
-        const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
-        setSelectedMethodId(first);
-        setFields({});
-        setAccountId(sel.account);
-        setAccountLabel("");
-      }
+      // Stored material is stale (single-use TOTP/OAuth code, expired token) —
+      // prefill the connect form so the operator only enters what's missing.
+      setSelectedBroker(sel.adapter);
+      const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
+      setSelectedMethodId(first);
+      setFields({});
+      setAccountId(sel.account);
+      setAccountLabel("");
       setNotice("");
-      setError(e instanceof NativeCredentialsRequired
-        ? `${e.message} Enter fresh credentials below to re-authenticate.`
-        : e instanceof Error ? e.message : "Account outcome unavailable; refresh account status.");
+      setError(
+        e instanceof Error
+          ? `${e.message} Enter fresh credentials below to re-authenticate.`
+          : "Re-login failed — enter fresh credentials below.",
+      );
     },
   });
 
@@ -933,11 +913,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
               const canSetPrimary = canPromotePrimaryAccount(a);
-              const monday = isMondayReadBroker(a.broker);
+              const connectedReadBroker = isConnectedReadBroker(a.broker);
               const honest = honestBrokerStatus({
                 connected,
-                connectedRead: connected && mondayReadChrome(a) !== null,
-                nativeMonday: monday,
+                connectedRead: connected && connectedReadChrome(a) !== null,
+                nativeConnectedRead: connectedReadBroker,
                 incident: operatorIncident,
               });
               const moneyPathChrome = honest !== null
@@ -963,10 +943,14 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {a.read_only ? " · read-only" : ""}
+                      {connectedReadBroker
+                        ? ""
+                        : a.read_only
+                          ? " · read-only"
+                          : ""}
                       {moneyPathChrome
                         ? ` · ${honest}`
-                        : connected && mondayReadChrome(a)
+                        : connected && connectedReadChrome(a)
                         ? ` · ${CONNECTED_READ_LABEL}${
                             a.broker === "kotakneo" ? ` · ${NEO_OPERATOR_COPY}` : ""
                           }${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
@@ -1000,7 +984,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                       variant="ghost"
                       size="sm"
                       aria-label={`Re-authenticate ${a.broker} ${a.account_id}`}
-                      onClick={() => reloginMutation.mutate({ adapter: a.broker, account: a.account_id, current: captureResultFence() })}
+                      onClick={() => reloginMutation.mutate({ adapter: a.broker, account: a.account_id })}
                       disabled={reloginMutation.isPending}
                     >
                       <RefreshCw
@@ -1193,7 +1177,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             ))}
 
             <Button
-              onClick={() => connectMutation.mutate({ sessionFence: captureAuthSessionFence(), current: captureResultFence() })}
+              onClick={() => connectMutation.mutate(captureAuthSessionFence())}
               disabled={connectMutation.isPending || !brokerConnectable || !brokerSdkReady}
               className="w-full sm:w-auto"
             >
@@ -1205,12 +1189,12 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
         {/* Shared feedback — visible for connect AND re-authenticate actions,
             so a relogin result shows even before a broker is picked. */}
-        {error && (!resultOwner.current || resultOwner.current()) && (
+        {error && (
           <div role="alert" className="text-sm text-loss flex items-center gap-2">
             <XCircle className="size-4 shrink-0" aria-hidden="true" />{error}
           </div>
         )}
-        {notice && (!resultOwner.current || resultOwner.current()) && (
+        {notice && (
           <div role="status" className="text-sm text-profit flex items-center gap-2">
             {method?.kind === "oauth" ? <ExternalLink className="size-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />}
             {notice}

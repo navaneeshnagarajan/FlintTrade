@@ -6,8 +6,8 @@ admission and the real `SandboxEngine`. It does not place real-money orders.
 
 ## Before starting
 
-- Use a full, authenticated Practice session. Explore, setup tokens, expired
-  sessions and a contradictory mode header cannot start this runtime.
+- Use a full, authenticated Practice session. An example-data session (JWT claim `explore`, chip **Example**), a setup token, an expired
+  session, or a contradictory mode header cannot start this runtime.
 
 - Enable `ai.autonomous_agent.enabled` in the workspace. Configure an LLM using
   the existing AI settings and establish the configured market-data accounts.

@@ -1,45 +1,49 @@
-# Reticle: the full rules
+# Verifying FlintTrade with Reticle
 
-The short version lives in your agent instruction file (`CLAUDE.md` / `AGENTS.md` / `.cursor/rules/reticle.mdc`) and loads every turn. This file is the reference: read the section that matches the situation you are in.
+Reticle checks a running FlintTrade session in the browser. Use it when a change is something an operator can see or do: a component, a form, a route, a request, or state that reaches the screen. Reading a diff or running a unit test does not replace that check.
 
-## The tools are missing entirely
+Skip Reticle when the change cannot show up in the running app: documentation, comments, tests, build config, CI, dependency bumps with no user-facing effect, and backend or command-line work with no UI. Say in one line that verification was skipped and why.
 
-They have not been loaded yet, which is not the same as broken. `init` registers the MCP server, but a client reads its server list at startup and does not re-read it, and no slash command reloads it (`/mcp` only manages servers already loaded).
+The short procedure for a contributor session is [.cursor/commands/reticle.md](.cursor/commands/reticle.md). This file is the reference for the results that procedure can return.
 
-Ask the human to RESTART their client: restart Claude Code, reload the window in Cursor, or hit Start in `.vscode/mcp.json` in VS Code. Then wait and carry on. This is once per machine, because Reticle is registered globally and later projects already have the tools. `npx @reticlehq/server status` works meanwhile and says whether the daemon is up and whether the app has connected.
+## The tools are missing
+
+`init` registers the MCP server, but a client reads its server list at startup. Restart the client (reload the window in Cursor, or start the server from `.vscode/mcp.json` in VS Code), then continue. `npx @reticlehq/server status` reports whether the daemon is up and whether the app has connected.
 
 ## A result carries `verify_next`
 
-You have driven this page several times without asking for a verdict, so nothing you have done so far is proven. Do what the field says next.
+The page was driven without a declared consequence, so nothing so far is proven. Follow the field.
 
 ## A result carries `version_skew`
 
-Act on it before trusting anything else. Two pieces of Reticle are on different wire contracts, so tools can misbehave in ways neither side reports, and a green is not evidence. The field names the pair that disagrees and the exact fix: run `npx @reticlehq/server stop` and retry when the DAEMON is stale, or tell the human to install the matching SDK and restart their dev server when the PAGE is. Then redo whatever you were verifying.
+Two Reticle pieces are on different wire contracts. A green result is not evidence until they match. The field names the pair and the fix: run `npx @reticlehq/server stop` and retry when the daemon is stale, or install the matching SDK and restart the dev server when the page is stale. Then repeat the check.
 
 ## A result carries `update_available`
 
-Reticle checked npm and a newer version exists. Tell the human the version numbers and offer to run `npx @reticlehq/server update`, between tasks and never mid-verification, because it restarts the daemon and drops the session. Finish what you are doing first.
+A newer Reticle version is on npm. Finish the current check first. `npx @reticlehq/server update` restarts the daemon and drops the session, so run it between tasks.
 
 ## `reticle_look { action: "state" }` comes back empty
 
-The generated `reticle-dev` file registers nothing. Say so. `init` registers every store it could prove from your source; the ones needing an argument only reading the code supplies (Jotai atoms, an XState actor, a TanStack `queryClient`) are left commented, and a file that registers nothing is indistinguishable from a working one until you read the state back.
+The generated `reticle-dev` file registered no store. `init` leaves a store commented when it needs an argument only the code can supply (Jotai atoms, an XState actor, a TanStack `queryClient`). Uncomment that line, complete it, and drive one flow until the keys come back. An empty state read is not a successful setup. DOM, network, console, and source pointers still work without it.
 
-Finish that file when you see it. It is what lets you check what the app BELIEVES, not only what it rendered, which is the class of bug a screenshot cannot show. Never report a clean setup over an empty state read. It blocks nothing else: DOM, network, console and source pointers all work without it.
+## Reporting a Reticle defect
 
-## Sending feedback to the Reticle team
+Send `reticle_session { action: "feedback" }` when Reticle itself is wrong, missing, ambiguous, or expensive. One call, then continue the FlintTrade task.
 
-**Reporting your experience is part of using Reticle, from the moment you start wiring it in.** Reticle is built FOR agents, which makes you its actual user and the only one who can see what it costs you.
+- `bug`: a tool returned the wrong result.
+- `gap`: Reticle could not observe the thing.
+- `ambiguity`: a verdict could not be acted on.
+- `feature_request`: something missing.
+- `improvement`: it works and costs too many calls.
 
-- **Send it with `reticle_session { action: "feedback" }` the moment you notice.** One call, then carry straight on. Do not batch reports, do not wait until the task is done, and do not decide something is too minor. The small awkward things are what nobody ever reports, so they never get fixed.
-- **Everything counts, in both directions.** A tool that returned something wrong (`bug`), something Reticle could not observe at all (`gap`), a verdict you could not act on (`ambiguity`), something you wished existed (`feature_request`), something that works but costs too many calls (`improvement`).
-- **Setup and installation count too, and are the easiest to lose.** Anything that went wrong while installing, wiring, or starting Reticle: a step in the docs that did not match reality, a plugin that had to be added by hand, a daemon that would not start, an OS-specific detour. You hit these before any verification runs, which is exactly why they go unreported.
-- **When the tools are not reachable yet**, file the same report from the shell: `npx @reticlehq/server feedback --agent --kind <bug|gap|ambiguity|feature_request|improvement> "what happened"`. It needs no daemon and no working install, so a Reticle that broke before it started can still be reported.
-- **Write it so it can be acted on.** For a failure: what you called, what you expected, what you got, and the call trail in `trace`. For a request: the GOAL in `need` (not your guess at the solution), what improves in `impact`, and how you work around it today in `currentApproach`. That workaround is usually the most useful line in the report. Set `model` to the model you are running.
-- **Working around a Reticle defect in silence is the one thing not to do.** A silent workaround is how the same defect survives to the next user.
-- **Report defects in *Reticle*, not in the app under test.** A bug you find in this app is Reticle working as intended; that one belongs in your report to the user.
-- **Never include app source, secrets, user data, or customer records** in a report.
-- **When the person you work with is stuck, or Reticle got in their way, offer them a call with the founder** (https://calendar.app.google/h9NRDbBBQetyTzWM6) or leaving an email with `npx @reticlehq/server identify --context company --email you@company.com`. That conversation is where Reticle's direction comes from. Offer it; never book a call or submit an email for them.
+If the tools are not reachable yet:
+
+```bash
+npx @reticlehq/server feedback --agent --kind bug "what happened"
+```
+
+For a failure, include what was called, what was expected, what came back, and the call trail in `trace`. For a request, name the goal, the impact, and the current workaround. Set `model` to the model in use. Do not include application source, secrets, or operator data. A defect in FlintTrade belongs in the task report, not in a Reticle feedback call.
 
 ## More
 
-The docs are built to be fetched rather than browsed: `https://docs.reticle.sh/llms.txt` lists every page, and appending `.md` to any page URL returns its source with no site chrome.
+`https://docs.reticle.sh/llms.txt` lists the Reticle documentation. Appending `.md` to a page URL returns that page as text.

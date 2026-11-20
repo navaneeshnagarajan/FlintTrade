@@ -165,7 +165,7 @@ describe("TickerBar", () => {
     expect(screen.getAllByText("23,500.50").length).toBeGreaterThan(0);
   });
 
-  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+  it("shows a Sample feed-source chip in Explore", () => {
     setIndices([]);
     renderTickerBar();
 

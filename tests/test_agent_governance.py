@@ -1,4 +1,4 @@
-"""Regression checks for the repository's canonical agent governance."""
+"""Regression checks for the public contributor guide."""
 
 from __future__ import annotations
 
@@ -7,37 +7,39 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_PIPELINE = "build agents (codex or other supported agents) → independent multi-agent review panels → maintainer"
 RETIRED_CODEX = re.compile(r"\bcodex\s+(?:is|was)\s+retired\b")
+INTERNAL_PIPELINE = "build agents (codex or other supported agents)"
 
 
-def _normalised_guidance(path: str) -> str:
-    return " ".join((ROOT / path).read_text(encoding="utf-8").casefold().split())
+def _text(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_tracked_agent_guidance_uses_one_canonical_review_pipeline() -> None:
-    """Every tracked governance guide preserves build, independent review, then maintainer."""
-    violations: dict[str, list[str]] = {}
-    for path in ("AGENTS.md", "CLAUDE.md", "docs/CI.md"):
-        guidance = _normalised_guidance(path)
-        issues: list[str] = []
-        if CANONICAL_PIPELINE not in guidance:
-            issues.append("missing canonical build → review → maintainer pipeline")
-        if RETIRED_CODEX.search(guidance):
-            issues.append("contradicts canonical pipeline by retiring Codex")
-        if issues:
-            violations[path] = issues
-
-    assert violations == {}
+def _normalised(path: str) -> str:
+    return " ".join(_text(path).casefold().split())
 
 
-def test_agents_points_to_the_real_private_plan_structure() -> None:
-    """The tracked pointer must name the private plan structure that exists."""
-    guidance = _normalised_guidance("AGENTS.md")
-    violations: list[str] = []
-    if "ordered delivery/status/current work queue" not in guidance:
-        violations.append("missing real ordered delivery/status/current work queue pointer")
-    if "phase tracker" in guidance:
-        violations.append("points to nonexistent phase tracker")
+def test_contributor_guide_points_at_the_roadmap_and_reticle() -> None:
+    """AGENTS.md is the contributor guide. CLAUDE.md points at it."""
+    agents = _normalised("AGENTS.md")
+    claude = _normalised("CLAUDE.md")
+    ci = _normalised("docs/CI.md")
 
-    assert violations == []
+    assert "roadmap.md" in agents
+    assert "reticle.md" in agents
+    assert "agents.md" in claude
+    assert "roadmap.md" in claude
+    assert INTERNAL_PIPELINE not in agents
+    assert INTERNAL_PIPELINE not in claude
+    assert INTERNAL_PIPELINE not in ci
+    assert RETIRED_CODEX.search(agents) is None
+    assert RETIRED_CODEX.search(claude) is None
+
+
+def test_agents_points_at_the_public_roadmap() -> None:
+    """The contributor guide names the public roadmap and not a private queue."""
+    guidance = _normalised("AGENTS.md")
+    assert "roadmap.md" in guidance
+    assert ".local/" not in _text("AGENTS.md")
+    assert "phase tracker" not in guidance
+    assert "ordered delivery/status/current work queue" not in guidance

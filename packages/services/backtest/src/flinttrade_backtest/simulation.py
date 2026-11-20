@@ -20,7 +20,7 @@ Design constraints:
 - Never modifies ``BacktestEngine`` — wraps it.
 - All monetary values use ``Decimal``.
 - Pydantic v2 models for all data transfer objects.
-- Python 3.12+, PEP 8, type hints, Google-style docstrings.
+- Python 3.14+, PEP 8, type hints, Google-style docstrings.
 
 Usage::
 

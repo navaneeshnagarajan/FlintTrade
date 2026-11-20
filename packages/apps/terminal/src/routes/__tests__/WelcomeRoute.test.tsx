@@ -16,6 +16,7 @@ import "@testing-library/jest-dom";
 const {
   mockNavigate,
   mockSetMode,
+  mockAdoptSessionToken,
   mockSetLoggedIn,
   mockSetSetupRequired,
   mockSetLoggedOut,
@@ -25,6 +26,7 @@ const {
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSetMode: vi.fn(),
+  mockAdoptSessionToken: vi.fn(),
   mockSetLoggedIn: vi.fn(),
   mockSetSetupRequired: vi.fn(),
   mockSetLoggedOut: vi.fn(),
@@ -100,7 +102,7 @@ vi.mock("@/stores/authStore", () => ({
 
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: Object.assign(() => ({}), {
-    getState: () => ({ setMode: mockSetMode }),
+    getState: () => ({ setMode: mockSetMode, adoptSessionToken: mockAdoptSessionToken }),
     setState: vi.fn(),
   }),
 }));
@@ -242,6 +244,7 @@ describe("WelcomeRoute", () => {
       ),
     );
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    expect(mockAdoptSessionToken).toHaveBeenCalledWith("jwt-alice");
     expect(fetchSpy).toHaveBeenCalled();
     fetchSpy.mockRestore();
   });

@@ -50,6 +50,7 @@ vi.mock("@/stores/modeStore", () => ({
 vi.mock("@/lib/market", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/market")>()),
   isMarketHours: () => false,
+  orderPadSessionBadge: () => ({ greenContinuous: false, label: "Closed" }),
 }));
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import {
   orderSuccessToast,
 } from "../modeVocabulary";
 
-describe("FT-UX-001 mode vocabulary", () => {
+describe("mode vocabulary", () => {
   it("Explore order CTA uses sample wording, not Practice or Live", () => {
     expect(orderPadCtaLabel("explore", "BUY")).toBe("Example Buy");
     expect(orderPadCtaLabel("explore", "SELL")).toBe("Example Sell");

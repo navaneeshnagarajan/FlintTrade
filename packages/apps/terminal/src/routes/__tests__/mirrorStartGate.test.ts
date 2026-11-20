@@ -24,7 +24,7 @@ function gate(
   };
 }
 
-describe("mirrorStartGate (FT-DITTO-002)", () => {
+describe("mirrorStartGate", () => {
   it("mutes Live mirror start with the incident rectify and leaves Explore on its own helper", () => {
     const live = gate({
       mode: "live",

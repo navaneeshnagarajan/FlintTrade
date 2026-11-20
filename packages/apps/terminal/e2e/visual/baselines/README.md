@@ -2,7 +2,7 @@
 
 Screenshot baselines for `e2e/visual-a11y.spec.ts` live in this directory.
 They are produced by one runner only: the `visual-a11y.yml` workflow on
-`ubuntu-latest`, which is the same hosted image as the terminal Playwright
+`ubuntu-26.04`, which is the same hosted image as the terminal Playwright
 job. Do not commit baselines generated on a laptop or another image. Font
 rasterisation and subpixel coverage will not match, and every later run
 will report a false diff.

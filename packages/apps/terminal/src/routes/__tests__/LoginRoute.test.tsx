@@ -20,6 +20,7 @@ const {
   mockSetLoggedInIfCurrent,
   mockSetLoggedOut,
   mockSetMode,
+  mockAdoptSessionToken,
   mockUpdateToken,
 } = vi.hoisted(() => {
   type MockAuthStatus =
@@ -74,9 +75,34 @@ const {
     return true;
   });
   const mockSetLoggedOut = vi.fn();
-  const modeState = { mode: "explore" as "explore" | "practice" | "live" | null };
-  const mockSetMode = vi.fn((mode: "explore" | "practice" | "live") => {
+  const modeState = {
+    mode: "explore" as "explore" | "practice" | "live" | "unavailable" | null,
+  };
+  const mockSetMode = vi.fn((mode: "explore" | "practice" | "live" | "unavailable") => {
     modeState.mode = mode;
+  });
+  function claimFromToken(token: string): "explore" | "practice" | "live" | "unavailable" | null {
+    const parts = token.split(".");
+    if (parts.length !== 3 || !parts[1]) return null;
+    try {
+      const segment = parts[1];
+      const padded = segment
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .padEnd(Math.ceil(segment.length / 4) * 4, "=");
+      const payload = JSON.parse(atob(padded)) as { mode?: unknown };
+      if (payload.mode === "explore" || payload.mode === "practice" || payload.mode === "live") {
+        return payload.mode;
+      }
+      return "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  }
+  const mockAdoptSessionToken = vi.fn((token: string) => {
+    const claim = claimFromToken(token);
+    if (!claim) return;
+    modeState.mode = claim;
   });
   return {
     authState,
@@ -85,6 +111,7 @@ const {
     mockSetLoggedInIfCurrent,
     mockSetLoggedOut,
     mockSetMode,
+    mockAdoptSessionToken,
     mockUpdateToken,
     fenceIsCurrent,
   };
@@ -117,6 +144,7 @@ vi.mock("@/stores/modeStore", () => ({
     getState: () => ({
       mode: modeState.mode,
       setMode: mockSetMode,
+      adoptSessionToken: mockAdoptSessionToken,
     }),
     setState: vi.fn(),
   }),
@@ -632,7 +660,7 @@ describe("LoginRoute", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  function sessionJwt(mode: string): string {
+  function sessionJwt(mode?: string): string {
     const payload = btoa(JSON.stringify({ mode, type: "session" }))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -761,6 +789,7 @@ describe("LoginRoute", () => {
       }),
     );
     expect(mockSetMode).not.toHaveBeenCalled();
+    expect(mockAdoptSessionToken).toHaveBeenCalledWith("restored-token");
     expect(modeState.mode).toBe("practice");
     expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
       "restored-token",
@@ -825,7 +854,67 @@ describe("LoginRoute", () => {
     expect(mockSetLoggedInIfCurrent).toHaveReturnedWith(false);
     expect(authState).toMatchObject({ status: "logged-out", token: null, username: null });
     expect(mockSetMode).not.toHaveBeenCalledWith("live");
+    expect(mockAdoptSessionToken).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("copies the restored Practice claim on PIN unlock and ignores a live response field", async () => {
+    modeState.mode = "live";
+    const restored = sessionJwt("practice");
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("practice"),
+      username: "testuser",
+      sessionGeneration: 4,
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { token: restored, mode: "live", live_mode_unlocked: true },
+      }),
+    );
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
+
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /unlock practice desk/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(mockAdoptSessionToken).toHaveBeenCalledWith(restored);
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("live");
+    const pinCall = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(JSON.parse(String((pinCall?.[1] as RequestInit).body))).toEqual({ pin: "123456" });
+  });
+
+  it("shows unavailable when the restored claim is missing and does not keep Live", async () => {
+    modeState.mode = "live";
+    const restored = sessionJwt();
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: restored,
+      username: "testuser",
+      sessionGeneration: 4,
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { token: restored, mode: "live" },
+      }),
+    );
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => expect(mockAdoptSessionToken).toHaveBeenCalledWith(restored));
+    expect(modeState.mode).toBe("unavailable");
+    expect(modeState.mode).not.toBe("live");
   });
 
   it("does not downgrade or navigate when a stale Practice upgrade fails", async () => {

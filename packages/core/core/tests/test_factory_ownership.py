@@ -125,8 +125,41 @@ def test_factory_execution_shutdown_timeout_keeps_exact_worker_and_dependencies(
 
     monkeypatch.setattr(sessions, "shutdown", held_shutdown)
     if kind == "desktop":
+        import flinttrade_core.desktop as desktop
+
         owner = _DesktopShutdownRecoveryOwner(app)
         app.extensions["test.release"] = owner
+        real_remaining = desktop._remaining_shutdown_budget
+        real_wait = threading.Event.wait
+
+        def remaining(deadline: float) -> float:
+            budget = real_remaining(deadline)
+            if entered.is_set():
+                return budget
+            # The 0.2s deadline is the blocked execution drain. Shutdown steps
+            # before that worker exist share it, and under parallel load they
+            # consume it first. ExecutionSessions.shutdown is then never called,
+            # and an expired local-AI attempt is retained so the later 8s retry
+            # fails closed. Keep those steps alive until the drain worker enters.
+            return max(budget, 30.0)
+
+        def wait(self: threading.Event, timeout: float | None = None) -> bool:
+            drain = owner._workers.get("execution-drain")
+            drain_done = getattr(drain, "_done", None)
+            if (
+                drain_done is not None
+                and self is drain_done
+                and not entered.is_set()
+                and not drain_done.is_set()
+            ):
+                # Expire this attempt once the exact worker is inside shutdown,
+                # rather than racing its scheduling against the short deadline.
+                real_wait(entered)
+                return False
+            return real_wait(self, timeout)
+
+        monkeypatch.setattr(desktop, "_remaining_shutdown_budget", remaining)
+        monkeypatch.setattr(threading.Event, "wait", wait)
 
         async def stop(timeout):
             await asyncio.to_thread(owner.release, deadline=time.monotonic() + timeout)

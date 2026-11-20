@@ -20,6 +20,9 @@ export function useOperatorMarketSession(): MarketSessionInfo {
       !isLoading &&
       dataUpdatedAt > 0 &&
       Date.now() - dataUpdatedAt <= MARKET_TIMINGS_MAX_AGE_MS;
+    // Shipped Muhurat data is the default. An explicit empty calendar is the
+    // fail-closed path and is covered by getNseCashSessionStatus tests. This
+    // hook does not start a holiday read of its own.
     return getNseCashSessionStatus(timingIsTrustworthy ? timings : undefined);
   }, [dataUpdatedAt, isError, isLoading, timings]);
   const [statusInfo, setStatusInfo] = useState<MarketSessionInfo>(() => currentStatus());

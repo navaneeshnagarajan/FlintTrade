@@ -53,7 +53,7 @@ _EXPLORE_SCHEDULE_WRITE_BLOCKED = "Example schedule — control unavailable"
 
 
 def _explore_schedule_write_blocked() -> tuple[Any, int] | None:
-    """Reject Explore-mode schedule pause/resume (FT-AUTO-004).
+    """Reject Explore-mode schedule pause/resume.
 
     JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
     """
@@ -1655,7 +1655,7 @@ def _ditto_explore_mode() -> tuple[str, str] | None:
 
 
 def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
-    """Reject Explore-mode mirror starts (FT-DITTO-002).
+    """Reject Explore-mode mirror starts.
 
     JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
     """
@@ -1678,7 +1678,7 @@ def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
 
 
 def _explore_ditto_kill_all_blocked() -> tuple[Any, int] | None:
-    """Reject Explore-mode Kill All (FT-DITTO-003).
+    """Reject Explore-mode Kill All.
 
     JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as mirror Start.
     """
@@ -1914,9 +1914,9 @@ def _native_account_statuses() -> list[dict[str, Any]]:
                 expires_at = state.expires_at if has_session else None
             except Exception:  # noqa: BLE001 - no registered live session
                 has_session = False
-        from flinttrade_gateway.monday_read_smoke import monday_read_connectable  # noqa: PLC0415
+        from flinttrade_gateway.connected_read_smoke import connected_read_connectable  # noqa: PLC0415
 
-        connectable = monday_read_connectable(adapter_id, bool(info.connectable))
+        connectable = connected_read_connectable(adapter_id, bool(info.connectable))
         selector = f"{adapter_id}:{account_id}"
         last_login = str(login_status.get(selector) or "")
         login_retryable = bool(connectable and not has_session and last_login == BROKER_LOGIN_RETRY_MESSAGE)

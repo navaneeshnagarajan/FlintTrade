@@ -18,6 +18,7 @@ import {
   isAuthSessionFenceCurrent,
   useAuthStore,
 } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
 import { AuthStatusSchema } from "@/lib/schemas/ftApi";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
@@ -47,25 +48,29 @@ export function useAuthGuard(): {
               navigate(WELCOME_GATE_PATH, { replace: true });
               return;
             }
-            useAuthStore
+            if (useAuthStore
               .getState()
               .setLoggedInIfCurrent(
                 persisted.token,
                 persisted.username,
                 persisted.expiresAt,
                 probeFence,
-              );
+              )) {
+              useModeStore.getState().adoptSessionToken(persisted.token);
+            }
           })
           .catch(() => {
             if (!isAuthSessionFenceCurrent(probeFence)) return;
-            useAuthStore
+            if (useAuthStore
               .getState()
               .setLoggedInIfCurrent(
                 persisted.token,
                 persisted.username,
                 persisted.expiresAt,
                 probeFence,
-              );
+              )) {
+              useModeStore.getState().adoptSessionToken(persisted.token);
+            }
           });
         return;
       }

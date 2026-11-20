@@ -1,9 +1,9 @@
 import { brokerAccountKey, findBrokerAccountMatch } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 export interface MarketDataScopeInput {
-  mode: AppMode;
+  mode: SessionMode;
   accounts: BrokerAccount[];
   activeAccountId: string | null;
 }
@@ -35,6 +35,7 @@ export function resolveMarketDataScope({
   activeAccountId,
 }: MarketDataScopeInput): string {
   if (mode === "explore") return "explore:mock";
+  if (mode === "unavailable") return "unavailable";
   const nativeAccount = resolveNativeDataAccount(accounts, activeAccountId);
   return nativeAccount
     ? `${mode}:${brokerAccountKey(nativeAccount)}`

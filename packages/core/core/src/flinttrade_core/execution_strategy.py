@@ -33,26 +33,58 @@ class _BoundStrategyRunner(StrategyRunner):
             if type(run.adapter) is not PracticeAgentAdapter:
                 raise ValueError("canonical strategy adapter required")
             run.adapter.validate_session()
-            if not self.scheduler.is_market_open(self.strategy.exchange, symbol=self.symbol):
+            exchange = self.strategy.exchange
+            # Past the runner session the tick does not run. Inside it, quotes,
+            # exits, and square-off continue. A new risk-increasing order also
+            # needs admission, so the exit window does not open a new entry.
+            if not self.scheduler.session_active(exchange, symbol=self.symbol):
                 return
+            admits = self.scheduler.accepts_new_entries(exchange, symbol=self.symbol)
             data = await run.adapter.quotes(symbol=self.symbol, exchange=self.strategy.exchange)
             quote = Quote.model_validate({**data["data"], "symbol": self.symbol, "exchange": self.strategy.exchange})
             await self._invoke_strategy_callback(lambda: self.strategy.on_tick(quote))
             orders = await self._invoke_strategy_callback(self.strategy.generate_orders)
             if type(orders) is not list:
                 raise ValueError("strategy intents unavailable")
+            signed_routed = 0
+            to_route: list[Order] = []
             for order in orders:
                 if (not isinstance(order, Order) or order.symbol != self.symbol
                         or str(order.exchange) != run.config["exchange"] or str(order.product) != run.config["product"]):
                     raise ValueError("strategy execution scope mismatch")
-                quantity = int(order.quantity)
+                signed = int(order.quantity) if str(order.action) == "BUY" else -int(order.quantity)
                 with owner.execution_binding.fence():
-                    positions = owner.sandbox.get_positions()
-                    net = sum(row["net_qty"] for row in positions if row["symbol"] == order.symbol
-                              and row["exchange"] == str(order.exchange) and row["product"] == str(order.product))
-                    after = net + (quantity if str(order.action) == "BUY" else -quantity)
-                    if abs(after) > abs(net) and abs(after) > run.config["max_position_size"]:
-                        raise ValueError("strategy position limit")
+                    net = self._net_quantity()
+                base = net + signed_routed
+                after = base + signed
+                risk_increasing = abs(after) > abs(base)
+                if risk_increasing and not admits:
+                    continue
+                if risk_increasing and abs(after) > run.config["max_position_size"]:
+                    raise ValueError("strategy position limit")
+                to_route.append(order)
+                signed_routed += signed
+            square_off = getattr(self.scheduler, "should_square_off", None)
+            if callable(square_off) and square_off(exchange, symbol=self.symbol):
+                with owner.execution_binding.fence():
+                    net = self._net_quantity()
+                if net > 0:
+                    covered = max(0, -signed_routed)
+                    action = "SELL"
+                else:
+                    covered = max(0, signed_routed)
+                    action = "BUY"
+                remaining = abs(net) - covered
+                if remaining > 0:
+                    to_route.append(Order(
+                        symbol=self.symbol,
+                        exchange=run.config["exchange"],
+                        product=run.config["product"],
+                        action=action,
+                        quantity=str(remaining),
+                        pricetype="MARKET",
+                    ))
+            for order in to_route:
                 result = await run.adapter.route_order(order)
                 if not result.passed:
                     owner.execution_binding.registry.retire_entries(owner.execution_binding.scope)
@@ -60,6 +92,18 @@ class _BoundStrategyRunner(StrategyRunner):
             self._tick_count += 1
         except Exception:
             owner.execution_binding.registry.retire_entries(owner.execution_binding.scope)
+
+    def _net_quantity(self) -> int:
+        """Signed sandbox quantity for this runner's symbol, exchange, and product."""
+        run = self.owner.run
+        symbol = self.symbol
+        exchange = str(self.strategy.exchange)
+        product = str(run.config["product"])
+        return sum(
+            int(row["net_qty"])
+            for row in self.owner.sandbox.get_positions()
+            if row["symbol"] == symbol and row["exchange"] == exchange and row["product"] == product
+        )
 
 
 class ExecutionStrategyOwner:
@@ -114,7 +158,7 @@ class ExecutionStrategyOwner:
     async def _close_positions(self) -> None:
         if self.run is None or type(self.run.adapter) is not PracticeAgentAdapter:
             raise ValueError("canonical strategy adapter required")
-        # Explicit Close is a fixed reduction, never a fallback opening order.
+        # Explicit Close is a fixed reduction. It does not consult entry admission.
         for position in self.sandbox.get_positions():
             quantity = position["net_qty"]
             if not quantity:

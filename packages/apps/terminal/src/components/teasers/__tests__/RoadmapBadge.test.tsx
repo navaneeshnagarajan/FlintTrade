@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { RoadmapBadge } from "../RoadmapBadge";
+import { PRODUCT_ROADMAP_HREF, RoadmapBadge } from "../RoadmapBadge";
 import { ROADMAP_STAGE_LABELS } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,13 @@ describe("RoadmapBadge", () => {
     // Completed dots carry the bg-blue-400 class
     expect(completedDesigned.className).toContain("bg-blue-400");
     expect(completedInDev.className).toContain("bg-blue-400");
+  });
+
+  it("links the product roadmap", () => {
+    render(<RoadmapBadge status="testing" />);
+    const link = screen.getByRole("link", { name: "Product roadmap" });
+    expect(link).toHaveAttribute("href", PRODUCT_ROADMAP_HREF);
+    expect(link.getAttribute("href")).toContain("ROADMAP.md");
   });
 
   it("matches snapshot for testing status", () => {

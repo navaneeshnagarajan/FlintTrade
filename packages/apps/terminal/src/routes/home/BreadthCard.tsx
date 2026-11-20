@@ -73,11 +73,11 @@ export function BreadthCard() {
   return (
     <BentoCard
       size="default"
-      label={isLive ? "Market Breadth" : "Market Breadth (placeholder data)"}
+      label={isLive ? "Market Breadth" : "Market Breadth (sample data)"}
       data-testid="breadth-card"
     >
       {!isLive && (
-        <DemoBadge testId="breadth-demo-badge" title="Placeholder breadth — not live NSE data" />
+        <DemoBadge testId="breadth-demo-badge" title="Sample breadth — not live NSE data" />
       )}
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">

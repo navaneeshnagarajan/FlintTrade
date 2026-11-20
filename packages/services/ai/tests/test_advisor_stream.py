@@ -22,7 +22,7 @@ from flask import Flask
 # ---------------------------------------------------------------------------
 
 
-def _finite_stream(tokens: list[str]) -> Generator[str, None, None]:
+def _finite_stream(tokens: list[str]) -> Generator[str]:
     """Yield a fixed sequence of tokens then stop.
 
     Args:

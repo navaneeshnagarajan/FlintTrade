@@ -132,7 +132,7 @@ export function isExplicitAdvisorConfiguration(input: AdvisorStatusHint): boolea
   return provider !== "" && !selectsManagedOllama(provider);
 }
 
-/** Same states Settings `#llm` uses (FT-SET-001). */
+/** Same states Settings `#llm` uses. */
 export type SettingsLlmHydration = "loading" | "ready" | "error" | "empty";
 
 /**

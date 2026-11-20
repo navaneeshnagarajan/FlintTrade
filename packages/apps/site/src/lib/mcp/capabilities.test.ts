@@ -56,7 +56,8 @@ describe('docs index generation', () => {
     const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
     const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
 
-    expect(claude).toContain('`BROKER_CATALOG` (6 brokers)');
+    expect(claude).toContain('AGENTS.md');
+    expect(agents).toContain('`BROKER_CATALOG` (6 brokers)');
     expect(agents).toContain('6 brokers');
     expect(claude).not.toContain('`BROKER_CATALOG` (35 brokers)');
     expect(agents).not.toContain('35 brokers');
@@ -79,8 +80,10 @@ describe('docs index generation', () => {
     expect(pageSource).toContain('<strong>71</strong>');
     expect(pageSource).not.toContain('<strong>84</strong>');
     expect(pageSource).toContain('Broker connections use the native gateway.');
-    expect(pageSource).toContain('Native broker HTTP is frozen until Task 9D and Task 7C.2');
-    expect(pageSource).toContain('adapters stay evidence-gated behind credential, ACL, and SDK checks');
+    expect(pageSource).toContain('A broker session cannot be started from the terminal today.');
+    expect(pageSource).toContain('Practice mode works without a broker.');
+    expect(pageSource).not.toContain('Task 9D');
+    expect(pageSource).toContain('Adapters stay evidence-gated behind credential, ACL, and SDK checks.');
     expect(pageSource).not.toContain('<strong>84</strong>');
     expect(pageSource).not.toContain('verified native brokers');
   });

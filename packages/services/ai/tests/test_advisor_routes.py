@@ -291,7 +291,7 @@ class TestAdvisorStatus:
 
 
 # ---------------------------------------------------------------------------
-# FT-MONDAY-001 — Practice simulated fills for AI
+# Practice simulated fills for AI
 # ---------------------------------------------------------------------------
 
 
@@ -325,7 +325,7 @@ class TestAdvisorPracticeSandboxBook:
     def _headers(mode: str) -> dict[str, str]:
         from flinttrade_core.auth_routes import _create_token
 
-        token = _create_token("ft-monday-001-ai", mode=mode, live_mode_unlocked=False)
+        token = _create_token("practice-sandbox-ai", mode=mode, live_mode_unlocked=False)
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -378,7 +378,7 @@ class TestAdvisorPracticeSandboxBook:
 
 
 # ---------------------------------------------------------------------------
-# FT-MONDAY-003 — native Connected (read) feeds for AI
+# native Connected (read) feeds for AI
 # ---------------------------------------------------------------------------
 
 
@@ -389,7 +389,7 @@ class TestAdvisorNativeLiveReadContext:
     def _headers(mode: str) -> dict[str, str]:
         from flinttrade_core.auth_routes import _create_token
 
-        token = _create_token("ft-monday-003-ai", mode=mode, live_mode_unlocked=False)
+        token = _create_token("ai-connected-read", mode=mode, live_mode_unlocked=False)
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -422,7 +422,7 @@ class TestAdvisorNativeLiveReadContext:
 
     def test_practice_jwt_injects_native_read_feeds(self, app) -> None:
         """A Practice JWT plus stamped Connected (read) feeds reach the LLM."""
-        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        app.config["CONNECTED_AI_READ_FEED_COLLECTOR"] = self._feed_rows
         mock_llm = MagicMock()
         mock_llm.chat.return_value = _make_llm_response(content="Reliance is 1400")
         client = app.test_client()
@@ -450,7 +450,7 @@ class TestAdvisorNativeLiveReadContext:
 
     def test_live_jwt_injects_native_reads_without_practice_book(self, app) -> None:
         """Live JWT may read Connected (read) feeds; paper book stays dark."""
-        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        app.config["CONNECTED_AI_READ_FEED_COLLECTOR"] = self._feed_rows
         mock_llm = MagicMock()
         mock_llm.chat.return_value = _make_llm_response()
         client = app.test_client()
@@ -471,7 +471,7 @@ class TestAdvisorNativeLiveReadContext:
 
     def test_explore_jwt_does_not_inject_native_reads(self, app) -> None:
         """Explore stays sample-only — no Connected (read) analysis context."""
-        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        app.config["CONNECTED_AI_READ_FEED_COLLECTOR"] = self._feed_rows
         mock_llm = MagicMock()
         mock_llm.chat.return_value = _make_llm_response()
         client = app.test_client()
@@ -512,11 +512,11 @@ class TestAdvisorNativeLiveReadContext:
             patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
             patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
             patch(
-                "flinttrade_core.ai_broker_context.collect_authorised_monday_read_feeds",
+                "flinttrade_core.ai_broker_context.collect_authorised_connected_read_feeds",
                 return_value=rows,
             ) as authorised,
             patch(
-                "flinttrade_gateway.monday_read_smoke.list_monday_ai_read_handles",
+                "flinttrade_gateway.connected_read_smoke.list_connected_ai_read_handles",
             ) as raw_handles,
         ):
             resp = client.post(
@@ -544,7 +544,7 @@ class TestAdvisorNativeLiveReadContext:
             collected["called"] = True
             raise AssertionError("unconfigured chat must not read broker feeds")
 
-        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = _boom
+        app.config["CONNECTED_AI_READ_FEED_COLLECTOR"] = _boom
         client = app.test_client()
         with patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=False):
             resp = client.post(

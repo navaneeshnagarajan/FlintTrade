@@ -2,7 +2,7 @@
 name = "flinttrade-ditto"
 version = "0.0.1"
 description = "Multi-account manager, position mirror, margin calculator, trailing SL, risk manager"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "flinttrade-core",
     "flinttrade-screener",
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-numba = ["numba==0.68.0"]
+numba = ["numba==0.68.1"]
 
 [build-system]
 requires = ["hatchling"]

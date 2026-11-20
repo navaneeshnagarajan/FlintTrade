@@ -132,7 +132,7 @@ const BASICS_SECTIONS: BasicsSection[] = [
     readingTime: 2,
     difficulty: "Beginner",
     content:
-      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is personal-use software and does not make a regulatory-compliance guarantee.",
+      "Indian market access is governed by exchanges, brokers, and regulators. If you connect a broker API, review your broker's static-IP, session, order-rate, and account-safety requirements first. FlintTrade is self-hosted software and does not make a regulatory-compliance guarantee.",
   },
 ];
 
@@ -248,7 +248,7 @@ const RESOURCES: ResourceCard[] = [
   { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "DEVELOPER_GUIDE.md" },
 ];
 
-/** Locked Resource Hub local-doc load copy (FT-LEARN-003). */
+/** Locked Resource Hub local-doc load copy. */
 export const RESOURCE_HUB_DOC_LOADING = "Loading document…";
 export const RESOURCE_HUB_DOC_SOFT_FAIL = "Document isn’t ready yet.";
 export const RESOURCE_HUB_DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";

@@ -38,12 +38,15 @@ describe("deriveTickerVenueStrip", () => {
   });
 
   it("adds NFO only when an F&O symbol feeds", () => {
+    const beforeRevision = new Date(Date.UTC(2026, 11, 4, 6, 30, 0));
     const strip = deriveTickerVenueStrip(
       [
         { name: "NIFTY 50", venue: "NSE" },
         { name: "NIFTY 24500 CE", exchange: "NFO" },
       ],
       (exchange) => exchange === "NFO",
+      undefined,
+      beforeRevision,
     );
 
     expect(strip).toMatchObject({

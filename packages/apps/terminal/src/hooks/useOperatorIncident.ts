@@ -9,12 +9,13 @@ import { classifyOperatorSignals, type OperatorIncident } from "@/lib/operatorIn
 import { resolveNseCashSession } from "@/lib/nseSession";
 import { isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
+import { useModeStore } from "@/stores/modeStore";
 import { useOperatorSignalStore, type OperatorSignalSnapshot } from "@/stores/operatorSignalStore";
 import type { BrokerAccount } from "@/types/broker";
 
 interface IncidentSnapshot {
-  mode: AppMode;
+  mode: SessionMode;
   legacyStatus: string;
   wsFailure: { kind: "auth" | "network"; reason: string } | null;
   accounts: BrokerAccount[];

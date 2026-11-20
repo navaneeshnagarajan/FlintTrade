@@ -5,7 +5,7 @@
  *   - Searchable symbol combobox (cmdk) — type to find any F&O stock
  *   - Exchange selector, first-5 expiry buttons, view tabs
  *   - Spot LTP, change, change% (green/red arrow), PCR badge (bullish/bearish/neutral)
- *   - OI profile + PCR strip for the selected expiry/symbol (FT-TRADE-012);
+ * - OI profile + PCR strip for the selected expiry/symbol;
  *     Explore keeps a Sample badge and never invents live OI; empty expiry
  *     is an honest empty, not zeros-as-data
  *   - Three view tabs: LTP | OI | GREEKS (Delta/Gamma/Theta/Vega/IV)

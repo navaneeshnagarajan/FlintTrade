@@ -2194,7 +2194,7 @@ def test_kotakneo_rest_hist_and_chain_are_admitted_not_static_unsupported(
     invoke,
     attribute,
 ) -> None:
-    """Monday Neo REST hist/chain are present — not a static UNSUPPORTED marker."""
+    """Connected-read Neo REST history and option chain are present — not a static UNSUPPORTED marker."""
     from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 
     adapter = KotakNeoAdapter()

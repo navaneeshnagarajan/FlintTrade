@@ -460,7 +460,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         name="kotakneo",
         display_name="Kotak Neo",
         # Native FlintTrade adapter (brokers/kotakneo.py). Distinct from the
-        # bridge "kotak" (Kotak Securities) above. FT-MONDAY-002: connectable
+        # bridge "kotak" (Kotak Securities) above. Connectable
         # for non-funded Connected (read) / API smoke. Live place stays
         # fail-closed. Neo has no sandbox.
         auth_flow=AuthFlowType.totp_form,

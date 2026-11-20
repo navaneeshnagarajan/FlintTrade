@@ -59,7 +59,7 @@ def adapter_and_session(transport: RecordingHTTP) -> tuple[DhanAdapter, Session]
 
 
 def test_sdk_version_is_the_repository_pin() -> None:
-    assert version("dhanhq") == "2.3.0rc1"
+    assert version("dhanhq") == "2.3.0"
     assert RecordingSDK.modify_super_order is SuperOrder.modify_super_order
     assert RecordingSDK.modify_forever is ForeverOrder.modify_forever
     assert RecordingSDK.modify_order is SDKOrder.modify_order

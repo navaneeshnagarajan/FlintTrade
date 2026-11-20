@@ -811,19 +811,19 @@ class TestTimeScheduler:
         sched = TimeScheduler()
         # 10:00 IST on a weekday — NSE is open
         mid_day = datetime(2026, 3, 16, 10, 0, 0, tzinfo=IST)
-        assert sched.is_market_open("NSE", at=mid_day)
+        assert sched.session_active("NSE", at=mid_day)
 
     def test_is_market_closed_after_hours(self):
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
         evening = datetime(2026, 3, 16, 18, 0, 0, tzinfo=IST)
-        assert not sched.is_market_open("NSE", at=evening)
+        assert not sched.session_active("NSE", at=evening)
 
     def test_mcx_open_late_evening(self):
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
         late = datetime(2026, 3, 16, 22, 0, 0, tzinfo=IST)
-        assert sched.is_market_open("MCX", at=late)
+        assert sched.session_active("MCX", at=late)
 
     @pytest.mark.parametrize(
         "symbol",
@@ -835,7 +835,7 @@ class TestTimeScheduler:
         sched = TimeScheduler()
         evening = datetime(2026, 3, 16, 18, 30, 0, tzinfo=IST)
 
-        assert sched.is_market_open("CDS", at=evening, symbol=symbol)
+        assert sched.session_active("CDS", at=evening, symbol=symbol)
 
     def test_cds_standard_currency_closes_at_five(self):
         from flinttrade_engine.scheduler import TimeScheduler
@@ -843,7 +843,7 @@ class TestTimeScheduler:
         sched = TimeScheduler()
         evening = datetime(2026, 3, 16, 18, 30, 0, tzinfo=IST)
 
-        assert not sched.is_market_open("CDS", at=evening, symbol="USDINR29JUL26FUT")
+        assert not sched.session_active("CDS", at=evening, symbol="USDINR29JUL26FUT")
 
     def test_cds_cross_currency_close_boundary_is_inclusive(self):
         from flinttrade_engine.scheduler import TimeScheduler
@@ -852,19 +852,19 @@ class TestTimeScheduler:
         close = datetime(2026, 3, 16, 19, 30, 0, tzinfo=IST)
         after = datetime(2026, 3, 16, 19, 31, 0, tzinfo=IST)
 
-        assert sched.is_market_open("CDS", at=close, symbol="EURUSD29JUL26FUT")
-        assert not sched.is_market_open("CDS", at=after, symbol="EURUSD29JUL26FUT")
+        assert sched.session_active("CDS", at=close, symbol="EURUSD29JUL26FUT")
+        assert not sched.session_active("CDS", at=after, symbol="EURUSD29JUL26FUT")
 
     def test_delta_always_open(self):
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
         any_time = datetime(2026, 3, 16, 3, 30, 0, tzinfo=IST)
-        assert sched.is_market_open("DELTA", at=any_time)
+        assert sched.session_active("DELTA", at=any_time)
 
     def test_unknown_exchange_closed(self):
         from flinttrade_engine.scheduler import TimeScheduler
         sched = TimeScheduler()
-        assert not sched.is_market_open("FAKE")
+        assert not sched.session_active("FAKE")
 
     def test_weekend_not_trading_day(self):
         from flinttrade_engine.scheduler import TimeScheduler
@@ -1208,7 +1208,7 @@ class TestStrategyRunner:
 
         # Scheduler that says market is open, not frozen, not square-off
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.is_deploy_frozen = MagicMock(return_value=False)
         scheduler.should_square_off = MagicMock(return_value=False)
 
@@ -1227,7 +1227,7 @@ class TestStrategyRunner:
         assert strategy.state.value == "STOPPED"
         assert runner.tick_count > 0
         assert len(strategy.ticks) > 0
-        scheduler.is_market_open.assert_any_call("NSE", symbol="RELIANCE")
+        scheduler.session_active.assert_any_call("NSE", symbol="RELIANCE")
         scheduler.should_square_off.assert_any_call("NSE", symbol="RELIANCE")
 
     @pytest.mark.asyncio
@@ -1246,7 +1246,7 @@ class TestStrategyRunner:
         mock_client.quotes = AsyncMock(return_value=None)
 
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.is_deploy_frozen = MagicMock(return_value=True)
         scheduler.should_square_off = MagicMock(return_value=False)
 
@@ -1272,7 +1272,7 @@ class TestStrategyRunner:
         mock_client.quotes = AsyncMock()
 
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=False)
+        scheduler.session_active = MagicMock(return_value=False)
         scheduler.is_deploy_frozen = MagicMock(return_value=False)
         scheduler.should_square_off = MagicMock(return_value=False)
 
@@ -1298,7 +1298,7 @@ class TestStrategyRunner:
         mock_client.quotes = AsyncMock()
 
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.is_deploy_frozen = MagicMock(return_value=False)
         scheduler.should_square_off = MagicMock(return_value=True)
 
@@ -1335,7 +1335,7 @@ class TestStrategyRunner:
             return_value=Quote(symbol="RELIANCE", exchange="NSE", ltp=110)
         )
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.should_square_off = MagicMock(return_value=False)
         runner = StrategyRunner(
             strategy=strategy,
@@ -1429,7 +1429,7 @@ class TestStrategyRunner:
         strategy.start = AsyncMock(side_effect=async_start)
         strategy.stop = AsyncMock(side_effect=async_stop)
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=False)
+        scheduler.session_active = MagicMock(return_value=False)
         runner = StrategyRunner(
             strategy=strategy,
             client=MagicMock(),
@@ -1468,7 +1468,7 @@ class TestStrategyRunner:
         client = MagicMock()
         client.quotes = AsyncMock(side_effect=delayed_quote)
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.should_square_off = MagicMock(return_value=False)
         runner = StrategyRunner(
             strategy=strategy,
@@ -1503,7 +1503,7 @@ class TestStrategyRunner:
         mock_client.quotes = AsyncMock(return_value=Quote(symbol="RELIANCE", ltp=2500))
 
         scheduler = TimeScheduler()
-        scheduler.is_market_open = MagicMock(return_value=True)
+        scheduler.session_active = MagicMock(return_value=True)
         scheduler.is_deploy_frozen = MagicMock(return_value=False)
         scheduler.should_square_off = MagicMock(return_value=False)
 
@@ -1580,7 +1580,7 @@ class TestStrategyScheduler:
         mock_client.quotes = AsyncMock(return_value=Quote(symbol="X", ltp=100))
 
         ts = TimeScheduler()
-        ts.is_market_open = MagicMock(return_value=True)
+        ts.session_active = MagicMock(return_value=True)
         ts.is_deploy_frozen = MagicMock(return_value=False)
         ts.should_square_off = MagicMock(return_value=False)
 

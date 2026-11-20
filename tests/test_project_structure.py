@@ -55,6 +55,7 @@ REQUIRED_ROOT_FILES = [
     "CLAUDE.md",
     "AGENTS.md",
     "PLAN.md",
+    "ROADMAP.md",
 ]
 
 

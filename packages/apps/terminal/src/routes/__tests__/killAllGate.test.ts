@@ -17,7 +17,7 @@ function gate(
   };
 }
 
-describe("killAllGate (FT-DITTO-003)", () => {
+describe("killAllGate", () => {
   it("locks the helper copy verbatim", () => {
     expect(RISK_RUNTIME_UNAVAILABLE_HELPER).toBe(
       "Risk runtime unavailable — Kill All disabled.",
@@ -58,7 +58,7 @@ describe("killAllGate (FT-DITTO-003)", () => {
     }
   });
 
-  it("disarms a successful empty snapshot without the runtime helper (FT-DITTO-001)", () => {
+  it("disarms a successful empty snapshot without the runtime helper", () => {
     const empty = gate({ mode: "live", hasManagedAccounts: false });
     expect(killAllArmed(empty)).toBe(false);
     expect(killAllHelper(empty)).toBeNull();

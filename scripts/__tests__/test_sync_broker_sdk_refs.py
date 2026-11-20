@@ -144,11 +144,62 @@ def test_sync_records_pypi_drift(tmp_path, monkeypatch) -> None:
     assert manifest["drift"] == [{"package": "dhanhq", "source": "pypi", "locked": "2.2.0", "upstream": "2.3.0"}]
 
 
+def test_non_kotak_git_drift_still_tracks_remote_head(tmp_path, monkeypatch) -> None:
+    digest = hashlib.sha256(b"wheel-bytes").hexdigest()
+    release = {
+        "info": {"version": "2.3.0"},
+        "releases": {
+            "2.3.0": [
+                {
+                    "filename": "dhanhq-2.3.0-py3-none-any.whl",
+                    "packagetype": "bdist_wheel",
+                    "python_version": "py3",
+                    "url": "https://files.example/dhanhq.whl",
+                    "digests": {"sha256": digest},
+                }
+            ]
+        },
+    }
+
+    def opener(url: str) -> tuple[int, bytes]:
+        if url == "https://pypi.org/pypi/dhanhq/json":
+            return 200, json.dumps(release).encode("utf-8")
+        if url == "https://files.example/dhanhq.whl":
+            return 200, b"wheel-bytes"
+        raise AssertionError(url)
+
+    locked_commit = "a" * 40
+    upstream_head = "b" * 40
+    monkeypatch.setattr(
+        syncer,
+        "load_broker_lock",
+        lambda _path: [{"name": "dhanhq", "version": "2.3.0", "source_commit": locked_commit, "sha256": digest}],
+    )
+    monkeypatch.setattr(
+        syncer,
+        "sync_git_mirror",
+        lambda _source, _audit_root: {
+            "path": "repo",
+            "remote": "origin",
+            "head": upstream_head,
+            "describe": "v2.3.0",
+        },
+    )
+
+    manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
+
+    assert manifest["sdks"][0]["git_current"] is False
+    assert manifest["drift"] == [
+        {"package": "dhanhq", "source": "git", "locked": locked_commit, "upstream": upstream_head}
+    ]
+    assert "locked behind upstream HEAD" in (tmp_path / "audit" / "README.md").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     ("git_change", "pypi_version", "expected_source"),
     [
         ({}, "3.0.7", None),
-        ({"head": "b" * 40}, "3.0.7", "git"),
+        ({"head": "b" * 40, "head_tree": "1" * 40}, "3.0.7", None),
         ({"latest_stable_tag": "v3.0.8"}, "3.0.8", "release-tag"),
         ({"release_commit": "c" * 40}, "3.0.7", "release-commit"),
         ({"latest_stable_tag": "v3.0.10"}, "3.0.10", "release-tag"),
@@ -224,10 +275,18 @@ def test_kotak_dual_track_drift_is_independent(
 
     manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
 
+    sdk = manifest["sdks"][0]
     if expected_source is None:
         assert manifest["drift"] == []
+        assert sdk["git_current"] is True
     else:
         assert any(d["package"] == "kotakneoapi" and d["source"] == expected_source for d in manifest["drift"])
-    assert manifest["sdks"][0]["version"] == "3.0.8"
+        if expected_source == "release-commit":
+            assert sdk["git_current"] is False
+    if "head" in git_change:
+        readme = (tmp_path / "audit" / "README.md").read_text(encoding="utf-8")
+        assert "locked behind upstream HEAD" not in readme
+        assert "git status: current" in readme
+    assert sdk["version"] == "3.0.8"
     assert manifest["sdks"][0]["release_version"] == "3.0.7"
     assert manifest["sdks"][0]["pypi"]["filename"] == "kotakneoapi-3.0.7-py3-none-any.whl"

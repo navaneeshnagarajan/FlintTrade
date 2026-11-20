@@ -156,13 +156,13 @@ describe("Positions real order-book availability", () => {
       return refuseUnexpected(url, init);
     };
     const { client } = renderWidget();
-    expect(await screen.findByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
     expect(screen.getByLabelText("Square off RELIANCE")).toBeDisabled();
     unavailable = true;
     await forceExactRefetch(client, ORDER_KEY_A);
     await waitFor(() => expect(screen.getByTestId("exit-orders-unavailable")).toHaveTextContent("A order book unavailable"));
     assertExitsUnavailable();
-    expect(screen.getByText("Cancel pending. This order may still fill.")).toBeInTheDocument();
+    expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(countReads(ORDER_URL_A)).toBe(2);
   });

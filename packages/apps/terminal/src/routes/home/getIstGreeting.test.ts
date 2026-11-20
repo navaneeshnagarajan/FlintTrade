@@ -3,7 +3,7 @@
  *
  * Pins FIXED Asia/Kolkata instants via {@link fromIstParts} so the suite
  * proves the same greeting whichever timezone the machine (or CI) is set to.
- * FT-HOME-001: noon IST must be Good afternoon, not Good evening from a
+ * noon IST must be Good afternoon, not Good evening from a
  * non-IST browser clock.
  */
 
@@ -22,7 +22,7 @@ describe("getIstGreeting", () => {
     expect(getIstGreeting(fromIstParts(2026, 8, 10, 12, 0))).toBe("Good afternoon");
   });
 
-  it("says Good afternoon at 12:01 IST (FT-HOME-001)", () => {
+  it("says Good afternoon at 12:01 IST", () => {
     expect(getIstGreeting(fromIstParts(2026, 8, 10, 12, 1))).toBe("Good afternoon");
   });
 

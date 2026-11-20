@@ -101,6 +101,11 @@ class PracticeDecision:
     response: dict[str, Any]
 
 
+# A configured quote read blocks until this age bound. The practice worker
+# publishes its cycle only after that read returns.
+PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS = 30.0
+
+
 class PracticeAgentAdapter:
     """Read-only data client and Practice-only executor for one operator run.
 
@@ -119,7 +124,7 @@ class PracticeAgentAdapter:
         app: Flask,
         session_token: str,
         *,
-        max_quote_age_seconds: float = 30.0,
+        max_quote_age_seconds: float = PRACTICE_QUOTE_READ_ALLOWANCE_SECONDS,
         event_sink: EventSink | None = None,
         stop_check: Callable[[], bool] | None = None,
         execution_binding: Any = None,
@@ -685,6 +690,15 @@ class PracticeAgentAdapter:
     def _refusal(code: str) -> dict[str, Any]:
         return {"status": "error", "code": code, "message": code}
 
+    @staticmethod
+    def _uncertain_outcome() -> dict[str, Any]:
+        """The dispatch already started. The tool must not describe that as a rejection."""
+        from flinttrade_core.order_outcome import unknown_outcome
+
+        payload = unknown_outcome()
+        payload["code"] = "practice_reconciliation_required"
+        return payload
+
     def _confirmed_fill(self, response: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         order_id = response.get("order_id")
         if response.get("status") != "COMPLETE" or type(order_id) is not str or not order_id:
@@ -784,7 +798,7 @@ class PracticeAgentAdapter:
             raise
         except Exception:
             self._reconciliation_required = True
-            return self._refusal("practice_reconciliation_required")
+            return self._uncertain_outcome()
 
     async def place_order(self, **kwargs: Any) -> dict[str, Any]:
         """Dispatch once through the canonical view; never resubmit a clamp/error."""

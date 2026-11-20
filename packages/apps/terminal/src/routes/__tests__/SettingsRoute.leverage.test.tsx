@@ -1,5 +1,5 @@
 /**
- * SettingsRoute.leverage.test — FT-SET-004 route-level blank-pane lock.
+ * SettingsRoute.leverage.test — route-level blank-pane lock.
  *
  * Selecting Settings `#leverage` must never leave the Leverage tab
  * highlighted over an empty tabpanel. Uses the real LeverageSection so a
@@ -156,7 +156,7 @@ function renderSettings() {
   return render(<SettingsRoute />, { wrapper });
 }
 
-describe("Settings #leverage blank-pane lock (FT-SET-004)", () => {
+describe("Settings #leverage blank-pane lock", () => {
   beforeEach(() => {
     // Visibility requires a connected UI snapshot; the capability query below
     // still exercises the real unsupported/empty LeverageSection.

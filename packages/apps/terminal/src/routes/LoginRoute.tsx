@@ -163,7 +163,7 @@ export default function LoginRoute({
     setError("");
     try {
       // Unlock restores the existing session. Do not send a mode, and do not
-      // set Mode from the response — the Mode store stays as it was.
+      // read Mode from the response body. Copy the restored JWT claim.
       const { token } = await unlockWithPin(pin);
       if (!useAuthStore.getState().setLoggedInIfCurrent(
         token,
@@ -171,6 +171,7 @@ export default function LoginRoute({
         "",
         requestFence,
       )) return;
+      useModeStore.getState().adoptSessionToken(token);
       onSuccess();
     } catch (err) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;

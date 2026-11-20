@@ -111,14 +111,14 @@ export default function TradeJournalTool({ onClose }: Props) {
         </div>
 
         {/* Date range + strategy filters (the tool's timeframe selector) */}
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div className="flex min-w-0 flex-1 basis-72 flex-wrap items-center gap-1.5">
           <Input
             type="text"
             placeholder="YYYY-MM-DD"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-7 text-xs w-28 bg-surface-base border-border-default text-text-primary placeholder:text-text-muted font-mono"
+            className="h-7 w-28 shrink-0 bg-surface-base border-border-default font-mono text-xs text-text-primary placeholder:text-text-muted md:text-xs"
             aria-label="Start date"
           />
           <span className="text-text-muted text-xs shrink-0">to</span>
@@ -128,7 +128,7 @@ export default function TradeJournalTool({ onClose }: Props) {
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-7 text-xs w-28 bg-surface-base border-border-default text-text-primary placeholder:text-text-muted font-mono"
+            className="h-7 w-28 shrink-0 bg-surface-base border-border-default font-mono text-xs text-text-primary placeholder:text-text-muted md:text-xs"
             aria-label="End date"
           />
           <Input
@@ -137,12 +137,12 @@ export default function TradeJournalTool({ onClose }: Props) {
             value={strategy}
             onChange={(e) => setStrategy(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-7 text-xs w-36 bg-surface-base border-border-default text-text-primary placeholder:text-text-muted"
+            className="h-7 w-36 min-w-24 flex-1 bg-surface-base border-border-default text-xs text-text-primary placeholder:text-text-muted sm:flex-none md:text-xs"
             aria-label="Strategy filter"
           />
           <Button
             size="sm"
-            className="h-7 px-3 text-xs"
+            className="h-7 shrink-0 px-3 text-xs"
             onClick={handleSearch}
           >
             <Search size={11} className="mr-1" />

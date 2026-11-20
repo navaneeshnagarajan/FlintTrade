@@ -13,9 +13,9 @@ contributors:
     gpg_fingerprint: ""
     signed_artefact: {}
     notes: >-
-      founder; recorded explicitly as repo-owner auto-attestation
+      repository owner; recorded explicitly as repo-owner auto-attestation
 
-cla_text_url: "https://github.com/navaneeshnagarajan/flinttrade/blob/main/CLA.md"
+cla_text_url: "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/CLA.md"
 require_signature_on_first_pr: true
 allow_in_pr_comment: true            # contributors sign by commenting "I agree to the CLA"
 require_gpg_signed_commits: true     # H8: every PR commit must be GPG-signed

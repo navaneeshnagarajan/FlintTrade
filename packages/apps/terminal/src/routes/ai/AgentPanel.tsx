@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { cn } from "@/lib/utils";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
   getAgentStatus, startAgent, stopAgent,
   getPracticeAgentRuns, getPracticeAgentEvents, resolvePracticeAgentRun,
@@ -47,6 +48,9 @@ function snapshotState(snapshot?: AgentSnapshot): string {
 
 export default function AgentPanel() {
   const appMode = useModeStore((s) => s.mode);
+  if (appMode === "unavailable") {
+    return <p role="status">Unavailable</p>;
+  }
   // Mode changes discard local action/selection state, including late mutation results.
   return <AgentModePanel key={appMode} appMode={appMode} />;
 }
@@ -342,9 +346,9 @@ function AgentModePanel({ appMode }: { appMode: AppMode }) {
         {runsQuery.isSuccess && runs.length === 0 && <p className="text-xs text-text-muted">No Practice runs recorded.</p>}
         {selectedRun && <>
           <label className="block text-xs text-text-secondary">Practice run
-            <select aria-label="Practice run" value={selectedRun.run_id} onChange={(e) => { setSelectedRunId(e.target.value); setActionError(null); }} className="block mt-1 w-full min-w-0 rounded border border-border-subtle bg-surface-base p-1.5 font-mono text-xs">
+            <NativeSelect aria-label="Practice run" value={selectedRun.run_id} onChange={(e) => { setSelectedRunId(e.target.value); setActionError(null); }} controlSize="sm" wrapperClassName="mt-1 flex w-full" className="font-mono">
               {runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.created_at} · {statusLabel(run.status)} · {run.run_id}</option>)}
-            </select>
+            </NativeSelect>
           </label>
           <p className="text-xs text-text-muted break-all">Run {selectedRun.run_id} · {statusLabel(selectedRun.status)} · Updated {selectedRun.updated_at}</p>
           {typeof selectedRun.config.entry_rationale === "string" && selectedRun.config.entry_rationale && <div className="text-xs text-text-secondary">

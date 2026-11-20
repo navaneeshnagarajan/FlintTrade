@@ -71,7 +71,7 @@ describe("pnlAtExpiry", () => {
 
 describe("computePayoffSummary", () => {
   it("treats a zero-premium long call as unbounded profit with breakeven at the strike", () => {
-    // Tester FT-LAB-001: Explore → /lab → Options Builder → Long Call → Payoff.
+    // Tester: Explore → /lab → Options Builder → Long Call → Payoff.
     // Example multiplier 65. A valid NIFTY quantity for this case; not a live master read.
     const call = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 0 });
     const summary = pricedSummary([call]);
@@ -153,7 +153,7 @@ describe("computePayoffSummary", () => {
     expect(summary.breakevens).toEqual([22550]);
   });
 
-  it("does not run a blank premium as honest zero-risk (FT-LAB-003)", () => {
+  it("does not run a blank premium as honest zero-risk", () => {
     const unset = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: null });
     expect(hasUnsetPremium([unset])).toBe(true);
     expect(hasExplicitZeroPremium([unset])).toBe(false);
@@ -162,7 +162,7 @@ describe("computePayoffSummary", () => {
     expect(validateLegs([unset]).valid).toBe(true);
   });
 
-  it("keeps an explicit ₹0 distinct from unset so FT-LAB-001 math still applies", () => {
+  it("keeps an explicit ₹0 distinct from unset so the max-loss math still applies", () => {
     const free = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 0 });
     expect(hasUnsetPremium([free])).toBe(false);
     expect(hasExplicitZeroPremium([free])).toBe(true);
@@ -175,14 +175,14 @@ describe("computePayoffSummary", () => {
 });
 
 describe("premium honesty copy", () => {
-  it("keeps the FT-LAB-003 helper strings stable", () => {
+  it("keeps the unset-premium helper strings stable", () => {
     expect(UNSET_PREMIUM_HELPER).toBe("Enter premium to model payoff");
     expect(SAMPLE_PREMIUM_HELPER).toBe("Example premium — edit to model");
     expect(ZERO_PREMIUM_WARNING).toBe("Premium is ₹0 — payoff treats cost as free");
   });
 });
 
-describe("position rupee basis (FT-LAB-005)", () => {
+describe("position rupee basis", () => {
   /** Example NIFTY quantity for these cases. Not a live master read. */
   const niftyLot = 65;
 

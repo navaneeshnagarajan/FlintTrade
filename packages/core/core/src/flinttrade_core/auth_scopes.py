@@ -1,6 +1,6 @@
 """Scope-based authorisation for admin / observability endpoints (OBS-09).
 
-Right-sized for personal use — NO multi-tenant RBAC ceremony. The model:
+Right-sized for a single operator. There is no multi-tenant role model. The model:
 
 * Every ``/v1/*`` request is authenticated at the app level. This guard also
   verifies the presented operator API key; absence of a session is not authority.

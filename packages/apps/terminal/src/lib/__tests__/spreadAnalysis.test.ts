@@ -227,7 +227,7 @@ describe("analyseVerticalSpread — economic rejection in the builder", () => {
 
   it("treats a freshly loaded template as unpriced rather than invalid", () => {
     // Templates land with premium unset (null) until the operator types one.
-    // An explicit ₹0 is priced (FT-LAB-003) and is judged separately.
+    // An explicit ₹0 is priced and is judged separately.
     const result = analyseVerticalSpread(
       [
         leg({ action: "BUY", strike: 24000, premium: null }),

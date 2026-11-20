@@ -8,11 +8,11 @@ description: NSE/BSE/MCX/CDS trading hours, pre-market, post-market, holidays, a
 ## Equity (NSE / BSE)
 
 SEBI Closing Auction Session (CAS) has been live from 3 Aug 2026 for
-F&O underlyings. Hours below are as of Aug 2026. Cash is never green
-"open" (continuous) after 15:15 on CAS names; CAS is not closed.
-Non-CAS cash still trades continuous to 15:30. The September 2026
-consultation is not product UI. Closing price is the CAS auction, not
-a VWAP of the last 30 minutes.
+F&O underlyings. Hours below are as of Aug 2026 and apply through
+6 Dec 2026. Cash is never green "open" (continuous) after 15:15 on CAS
+names; CAS is not closed. Non-CAS cash still trades continuous to 15:30.
+The September 2026 consultation is not product UI. Closing price is the
+CAS auction, not a VWAP of the last 30 minutes.
 
 | Session | Time (IST) | Notes |
 |---|---|---|
@@ -43,6 +43,33 @@ secondary `F&O open · till 15:40` chip after cash continuous ends.
 
 **Weekly expiry:** Thursday (Nifty 50, BankNifty, FinNifty)
 **Monthly expiry:** Last Thursday of the month
+
+## From 7 December 2026 (NSE)
+
+NSE/CMTR/77355 and NSE/FAOP/77356, following SEBI circular
+HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 October 2026). Dates before
+7 December 2026 keep the tables above. The Muhurat session still overrides
+this clock. BSE equity derivatives use the same closes. SEBI sections
+4.2.4 and 4.2.5 apply to every recognised exchange. Cash auction order
+entry stops from 15:38 because it can close at random; equity derivatives
+are not in that auction. Matching is 15:40–15:45 and 15:45–15:50 is the
+transition.
+
+| Session | Time (IST) | Notes |
+|---|---|---|
+| Continuous | 09:15–15:30 | Cash continuous, including CAS names |
+| CAS | 15:30–15:40 | Closing auction. Market orders 15:31–15:36, then limit orders only |
+| Matching | 15:40–15:45 | Order matching. Transition to post-close runs to 15:50 |
+| Post-close | 15:50–16:00 | Unchanged |
+| NSE equity derivatives | 09:15–15:45 | Stock derivatives, every day including expiry |
+| Expiring index contract | until 15:30 | The expiry written on that contract's symbol |
+
+An index contract stops at 15:30 on the expiry written on its symbol. A
+supplied expiry calendar confirms that date. A new order stays closed when
+the expiry cannot be read, or when a supplied calendar does not list it.
+The secondary chip reads `F&O open · till 15:45`. Expiry settlement
+for expiring contracts is the underlying VWAP from 15:00–15:30; this clock
+does not compute that price.
 
 ## Currency Derivatives (CDS)
 

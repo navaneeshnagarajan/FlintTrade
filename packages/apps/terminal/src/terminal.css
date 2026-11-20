@@ -8,6 +8,11 @@
 ::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
 
+/* Scroll strips that scroll without a bar (app bar, tab rows). The rules
+   above are unlayered, so a Tailwind utility cannot switch the bar off. */
+.ft-scroll-quiet { scrollbar-width: none; }
+.ft-scroll-quiet::-webkit-scrollbar { display: none; }
+
 body {
   margin: 0;
   overflow: hidden;
@@ -275,6 +280,17 @@ html[data-mode="dark"] .ft-tray-tab:not([aria-selected="true"]) {
   height: 100%;
   min-height: 0;
   max-height: 100%;
+}
+
+/* ---------- Native controls follow the theme ---------- */
+/* themeStore sets data-mode on <html>. Without a colour scheme the browser
+   draws its own select lists, checkboxes, date pickers and scrollbars for a
+   light page, even in the dark themes. */
+:root[data-mode="dark"] {
+  color-scheme: dark;
+}
+:root[data-mode="light"] {
+  color-scheme: light;
 }
 
 /* ---------- Focus ring (WCAG 2.4.7) ---------- */

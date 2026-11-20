@@ -251,7 +251,7 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   // Read imperatively: this runs from an approval handler, not a render. The
   // manual tickets all gate on mode, and an approval card is not a substitute
   // — approving an order in Explore approved something that cannot be placed.
-  // FT-MONDAY-003: AI may read Practice + Connected (read) feeds; Live place
+  // AI may read Practice + Connected (read) feeds; Live place
   // stays fail-closed on this path.
   const mode = useModeStore.getState().mode;
   const modeBlock = checkOrderEntryMode(mode);
@@ -325,7 +325,7 @@ export function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProp
   // not the model's free-text description, which a prompt-injected model
   // could arbitrage against the payload ("Buy 1 RELIANCE" describing a
   // SELL 1800). Non-approvable or malformed calls get no Approve button.
-  // Live place stays fail-closed on the AI path (FT-MONDAY-003).
+  // Live place stays fail-closed on the AI path.
   const mode = useModeStore((s) => s.mode);
   const liveBlocked = mode === "live";
   const approvable = toolCall.method === "POST" && APPROVABLE_ORDER_ENDPOINTS.has(normaliseToolEndpoint(toolCall.endpoint));

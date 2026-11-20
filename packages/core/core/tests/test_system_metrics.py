@@ -186,7 +186,13 @@ def _auth_headers() -> dict[str, str]:
 class TestAdminSystemRoute:
     """GET /v1/admin/system — requires FLINTTRADE_DEV=1 and a valid API key."""
 
-    def test_route_returns_200_with_metrics(self, monkeypatch):
+    def test_route_returns_200_with_metrics(self, monkeypatch, tmp_path):
+        # The incident owner lock lives under the active workspace and is held
+        # for the app object's lifetime. Each boot needs its own directory so a
+        # second test on the same worker is not stuck on the module lock.
+        workspace = tmp_path / "app-workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
         monkeypatch.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
         monkeypatch.setenv("FLINTTRADE_DEV", "1")
         from flinttrade_core.app import create_flask_app
@@ -216,7 +222,10 @@ class TestAdminSystemRoute:
         assert data["data"]["memory_percent"] == 50.0
         assert data["data"]["psutil_available"] is True
 
-    def test_route_returns_empty_metrics_when_psutil_missing(self, monkeypatch):
+    def test_route_returns_empty_metrics_when_psutil_missing(self, monkeypatch, tmp_path):
+        workspace = tmp_path / "app-workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
         monkeypatch.setenv("FLINTTRADE_API_KEY", _TEST_API_KEY)
         monkeypatch.setenv("FLINTTRADE_DEV", "1")
         from flinttrade_core.app import create_flask_app

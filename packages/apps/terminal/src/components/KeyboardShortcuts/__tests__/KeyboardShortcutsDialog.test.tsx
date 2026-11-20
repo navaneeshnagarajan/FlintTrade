@@ -108,8 +108,9 @@ describe("KeyboardShortcutsDialog", () => {
       expect(
         screen.getByText(/command palette/i),
       ).toBeInTheDocument();
-      expect(screen.getByText("Go to Home")).toBeInTheDocument();
-      expect(screen.getByText("Go to Trade")).toBeInTheDocument();
+      expect(screen.getByText("Go to Terminal")).toBeInTheDocument();
+      expect(screen.queryByText("Go to Home")).not.toBeInTheDocument();
+      expect(screen.queryByText("Go to Trade")).not.toBeInTheDocument();
       // Trading
       expect(
         screen.getByText(/cancel all open orders/i),
@@ -239,11 +240,24 @@ describe("KeyboardShortcutsDialog", () => {
 });
 
 describe("SHORTCUT_ENTRIES Slice 2 navigation", () => {
-  it("documents Go to Home (Alt+H) and Go to Trade (Alt+T)", async () => {
+  it("lists one Go to Terminal entry and keeps Alt+H as a hidden alias", async () => {
     const { SHORTCUT_ENTRIES } = await import("../KeyboardShortcutsDialog");
-    const home = SHORTCUT_ENTRIES.find((e) => e.id === "go-home");
-    const trade = SHORTCUT_ENTRIES.find((e) => e.id === "go-trade");
-    expect(home).toMatchObject({ label: "Go to Home", keys: ["Alt", "H"], category: "Navigation" });
-    expect(trade).toMatchObject({ label: "Go to Trade", keys: ["Alt", "T"], category: "Navigation" });
+    const listed = SHORTCUT_ENTRIES.filter((e) => e.label === "Go to Terminal" && !e.hidden);
+    const alias = SHORTCUT_ENTRIES.find((e) => e.id === "go-terminal-alias");
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      id: "go-terminal",
+      label: "Go to Terminal",
+      keys: ["Alt", "T"],
+      category: "Navigation",
+    });
+    expect(alias).toMatchObject({
+      label: "Go to Terminal",
+      keys: ["Alt", "H"],
+      category: "Navigation",
+      hidden: true,
+    });
+    expect(SHORTCUT_ENTRIES.find((e) => e.id === "go-home")).toBeUndefined();
+    expect(SHORTCUT_ENTRIES.find((e) => e.id === "go-trade")).toBeUndefined();
   });
 });

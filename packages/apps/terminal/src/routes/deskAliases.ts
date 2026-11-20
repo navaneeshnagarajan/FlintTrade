@@ -11,6 +11,7 @@ export interface DeskRouteAlias {
 /** Public bookmarks that should open the sign-in screen, not a 404. */
 export const PUBLIC_ENTRY_REDIRECTS: readonly DeskRouteAlias[] = [
   { path: "login", to: "/welcome" },
+  { path: "vault", to: "/setup#vault" },
 ];
 
 export const DESK_ROUTE_ALIASES: readonly DeskRouteAlias[] = [

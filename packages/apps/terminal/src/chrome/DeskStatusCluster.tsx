@@ -11,7 +11,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
-import { mondayReadChrome } from "@/lib/connectedReadChrome";
+import { connectedReadChrome } from "@/lib/connectedReadChrome";
 import { LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -93,9 +93,9 @@ function useLayaChip() {
   const [starting, setStarting] = useState(false);
   const [startNote, setStartNote] = useState<string | null>(null);
   const [watchTick, setWatchTick] = useState(0);
-  const readOnly = accounts.some((account) => mondayReadChrome(account) !== null);
+  const readOnly = accounts.some((account) => connectedReadChrome(account) !== null);
   const placeable = accounts.some(
-    (account) => account.status === "connected" && mondayReadChrome(account) === null,
+    (account) => account.status === "connected" && connectedReadChrome(account) === null,
   );
   const operator = authStatus === "logged-in" && Boolean(authToken) && !isDemoAuthSession();
   const chipStatus = layaChipStatus({ mode, practice: practiceStatus, live: liveStatus });

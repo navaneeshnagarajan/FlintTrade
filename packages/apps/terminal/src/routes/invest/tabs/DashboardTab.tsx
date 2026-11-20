@@ -79,7 +79,7 @@ export function DashboardTab() {
     positionBookReady,
   } = useInvest();
   // Count and rows come from InvestContext only — never a local sample
-  // overlay that would disagree with the header badge (FT-TRADE-010).
+  // overlay that would disagree with the header badge.
   const isDemo = Boolean(isSampleData);
   const isPracticeAccount = useModeStore((s) => s.mode === "practice") && !isDemo;
   const currentValue = liveSummary.currentValue;

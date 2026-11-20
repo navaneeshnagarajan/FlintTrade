@@ -14,8 +14,9 @@
  *     `live_mode_unlocked: false`. No PIN required. Example data is not a
  *     desk downgrade.
  *   - `unlockWithPin` → POST /v1/auth/pin : PIN quick-unlock. Restores the
- *     existing server-side session and never changes Mode. The request does
- *     not send a mode, and callers must not set Mode from the response.
+ *     existing server-side session and does not change server Mode. The
+ *     request does not send a mode. Callers copy the restored JWT mode claim
+ *     into the Mode store. The response body's mode field is not a source.
  *   - `confirmLiveMode` → POST /v1/auth/live : the explicit Live switch.
  *     Keeps the authenticator enrolment check. Unlock does not call this.
  *
@@ -103,10 +104,11 @@ async function postSessionPin(
 }
 
 /**
- * PIN quick-unlock. Restores the existing session and never changes Mode.
+ * PIN quick-unlock. Restores the existing session and does not change server Mode.
  *
  * The server reads Mode from the session. This function does not send a mode
- * and does not return one — callers must leave the Mode store as it was.
+ * and does not read one from the response body. Callers copy the restored
+ * token's JWT mode claim into the Mode store.
  */
 export async function unlockWithPin(pin: string): Promise<{ token: string }> {
   return { token: await postSessionPin("/v1/auth/pin", pin, "PIN unlock") };

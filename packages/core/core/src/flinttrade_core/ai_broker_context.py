@@ -395,7 +395,7 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
             owner.revoke(port)
 
 
-def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dict[str, Any]]:
+def collect_authorised_connected_read_feeds(symbol: str, exchange: str) -> list[dict[str, Any]]:
     """Collect Dhan/Neo Connected (read) quotes and depth for authorised accounts.
 
     Requires ``admin.accounts.read`` and each selected account's ACL via
@@ -406,9 +406,9 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
     """
     from flinttrade_engine.request_context import RequestContext
     from flinttrade_gateway.broker_read_service import BrokerReadOwner
-    from flinttrade_gateway.monday_read_smoke import (
+    from flinttrade_gateway.connected_read_smoke import (
         CHROME_CONNECTED_READ,
-        MONDAY_READ_BROKERS,
+        CONNECTED_READ_BROKERS,
         NEO_OPERATOR_COPY,
     )
 
@@ -453,7 +453,7 @@ def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dic
         candidates = [
             state
             for state in states
-            if getattr(state.selector, "adapter_id", "") in MONDAY_READ_BROKERS
+            if getattr(state.selector, "adapter_id", "") in CONNECTED_READ_BROKERS
             and state.status == "connected"
             and state.read_smoke_ok is True
         ]

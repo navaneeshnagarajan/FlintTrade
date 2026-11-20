@@ -812,7 +812,7 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.message).toContain("FT-123");
   });
 
-  it("refuses Live place from the AI path — fail-closed (FT-MONDAY-003)", async () => {
+  it("refuses Live place from the AI path — fail-closed", async () => {
     useModeStore.setState({ mode: "live" });
     const outcome = await executeApprovedToolCall(orderCall);
     expect(mockPlaceOrder).not.toHaveBeenCalled();

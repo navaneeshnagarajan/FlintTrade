@@ -1,106 +1,64 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Link, useLocation } from "react-router";
-import { BookOpen, ChartNoAxesCombined, ChevronDown, FlaskConical, Landmark, ListChecks, PanelsTopLeft, Settings2, Workflow, Wrench } from "lucide-react";
+import { Activity, CandlestickChart, FlaskConical, GraduationCap, Landmark, NotebookPen, PieChart, Settings, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { AppId } from "@/layout/appCatalog";
 import { useSystemDiagnostics } from "@/hooks/useSystemDiagnostics";
-import { APPS } from "@/layout/appCatalog";
+import { APPS, type AppId } from "@/layout/appCatalog";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useDeveloperEnabled } from "./DeveloperPreference";
 import { HelpFooterSlot } from "@/components/help/HelpFooter";
-import { Button } from "@/components/ui/button";
+import { formatExchangeClock } from "./exchangeClock";
 
-const GROUPS = ["Trading", "Studio", "Review"] as const;
-type NavigationGroup = typeof GROUPS[number] | "Utilities";
-// Presentation metadata only: paths, labels and capability ownership stay in APPS.
-const PRESENTATION: Record<AppId, { group: NavigationGroup; icon: LucideIcon }> = {
-  terminal: { group: "Trading", icon: PanelsTopLeft },
-  portfolio: { group: "Trading", icon: ChartNoAxesCombined },
-  brokers: { group: "Trading", icon: Landmark },
-  testing: { group: "Studio", icon: FlaskConical },
-  automation: { group: "Studio", icon: Workflow },
-  learn: { group: "Studio", icon: BookOpen },
-  reports: { group: "Review", icon: ListChecks },
-  system: { group: "Review", icon: Wrench },
-  settings: { group: "Utilities", icon: Settings2 },
+const APP_ICONS: Record<AppId, LucideIcon> = {
+  terminal: CandlestickChart,
+  testing: FlaskConical,
+  portfolio: PieChart,
+  automation: Workflow,
+  reports: NotebookPen,
+  learn: GraduationCap,
+  brokers: Landmark,
+  settings: Settings,
+  system: Activity,
 };
 
-function AppLinks({ group, onNavigate }: { group: NavigationGroup; onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void }) {
-  return <ul aria-label={group} className={group === "Utilities" ? "ft-app-nav-utilities" : undefined}>
-    {APPS.filter(app => PRESENTATION[app.id].group === group).map(app => {
-      const Icon = PRESENTATION[app.id].icon;
-      return <li key={app.id}><NavLink to={app.path} onClick={onNavigate} className="ft-app-nav-link" title={app.description}>
-        <Icon aria-hidden="true" /><span>{app.name}</span>
-      </NavLink></li>;
-    })}
-  </ul>;
+/** Which edges of the scrolling app bar still have apps beyond them. */
+function overflowEdges(element: HTMLElement): { left: boolean; right: boolean } {
+  return {
+    left: element.scrollLeft > 1,
+    right: element.scrollLeft + element.clientWidth < element.scrollWidth - 1,
+  };
 }
-
-const COMPACT_NAV_QUERY = "(max-width: 767px)";
 
 export function AppNavigation() {
   const developer = useDeveloperEnabled();
-  const { pathname } = useLocation();
-  const current = APPS.find(app => app.path === pathname);
-  const [compact, setCompact] = useState(() => window.matchMedia(COMPACT_NAV_QUERY).matches);
-  const [expanded, setExpanded] = useState(false);
-  const navigation = useRef<HTMLElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const restoreFocus = useRef(false);
-  const groupsId = useId();
-
-  useEffect(() => {
-    const media = window.matchMedia(COMPACT_NAV_QUERY);
-    const update = () => {
-      restoreFocus.current = navigation.current?.contains(document.activeElement) ?? false;
-      setCompact(media.matches);
-      setExpanded(false);
-    };
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+  const location = useLocation();
+  const nav = useRef<HTMLElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  const measure = useCallback(() => {
+    if (!nav.current) return;
+    const next = overflowEdges(nav.current);
+    setEdges(current => current.left === next.left && current.right === next.right ? current : next);
   }, []);
-  useLayoutEffect(() => {
-    if (!restoreFocus.current) return;
-    restoreFocus.current = false;
-    trigger.current?.focus({ preventScroll: true });
-  }, [compact]);
-  useEffect(() => { setExpanded(false); }, [pathname]);
+  // The bar scrolls sideways on a narrow window; keep the current app in view.
   useEffect(() => {
-    if (!expanded) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !navigation.current?.contains(event.target)) setExpanded(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [expanded]);
-
-  function onNavigate(event: MouseEvent<HTMLAnchorElement>) {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    setExpanded(false);
-    // A same-route link does not run the shell's route-focus effect.
-    if (event.currentTarget.pathname === pathname) trigger.current?.focus();
-  }
-
-  return <nav ref={navigation} aria-label="Apps" className="ft-app-nav" data-compact={compact} onBlur={event => {
-    if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setExpanded(false);
-  }} onKeyDown={event => {
-    if (event.key !== "Escape" || !expanded) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setExpanded(false);
-    trigger.current?.focus();
-  }}>
-    <Button ref={trigger} type="button" variant="ghost" className="ft-app-nav-toggle justify-start" aria-label="Choose app" aria-expanded={expanded} aria-controls={groupsId} onClick={() => setExpanded(value => !value)}>
-      <PanelsTopLeft aria-hidden="true" /><span>{current?.name ?? "Apps"}</span><ChevronDown aria-hidden="true" />
-    </Button>
-    <div id={groupsId} className="ft-app-nav-groups" hidden={!expanded}>
-      {developer && <p className="px-2 text-xs text-warning">Developer</p>}
-      {GROUPS.map(group => <div className="ft-app-nav-group" key={group}>
-        <h2>{group}</h2><AppLinks group={group} onNavigate={onNavigate} />
-      </div>)}
-    </div>
-    <AppLinks group="Utilities" onNavigate={onNavigate} />
+    nav.current?.querySelector<HTMLElement>("[aria-current='page']")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    measure();
+  }, [location.pathname, measure]);
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
+  // A faded edge is the cue that more apps are off-screen in that direction.
+  const mask = edges.left || edges.right
+    ? `linear-gradient(to right, ${edges.left ? "transparent, black 28px" : "black"}, ${edges.right ? "black calc(100% - 28px), transparent" : "black"})`
+    : undefined;
+  return <nav ref={nav} aria-label="Apps" onScroll={measure} style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined} className="ft-scroll-quiet flex shrink-0 gap-1 overflow-x-auto border-b border-border-default bg-surface-base px-3 py-1">
+    {developer && <span className="self-center px-2 text-xs text-warning">Developer</span>}
+    {APPS.map(app => {
+      const Icon = APP_ICONS[app.id];
+      return <NavLink key={app.id} to={app.path} title={app.description} className={({ isActive }) => `flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${isActive ? "bg-accent/15 text-accent" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`}><Icon aria-hidden="true" className="size-3.5 shrink-0" />{app.name}</NavLink>;
+    })}
   </nav>;
 }
 function percent(value: unknown, scope: unknown) {
@@ -112,16 +70,17 @@ export function SystemStatusBar() {
   const health = useSystemDiagnostics();
   const data = authenticated && mode !== "explore" ? health.data?.resources : undefined;
   const metric = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
-  return <footer className="ft-system-status flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-default bg-surface-base px-3 py-0.5 text-xs text-text-secondary" data-testid="system-status-bar">
-    <Link className="font-medium text-accent" to="/system">System</Link>
-    <details className="ft-system-details"><summary>Host diagnostics · {data ? "Last received" : "Unavailable"}</summary><div>
-    <span>Core: {data ? health.isError ? "Last known · refresh failed" : String(data.status ?? "Unmeasured") : "Unavailable"}</span>
-    <span>Host CPU: {percent(metric(data?.cpu).used_pct, metric(data?.cpu).scope)}</span>
-    <span>RAM: {percent(metric(data?.memory).used_pct, metric(data?.memory).scope)}</span>
-    <span>GPU: {percent(metric(data?.gpu).used_pct, metric(data?.gpu).scope)}</span>
-    <span title="No measured browser-to-core timing source is connected to this bar">Browser RTT: Unmeasured</span>
-    <span className="ml-auto">{data && health.dataUpdatedAt ? `Received ${new Date(health.dataUpdatedAt).toLocaleTimeString()}` : "No host measurement"}</span>
-    </div></details>
+  // Host detail needs a wide bar. A phone keeps the link, the core state and Help on one line.
+  const wide = "max-sm:hidden";
+  return <footer className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-default bg-surface-base px-3 py-0.5 text-xs text-text-secondary" data-testid="system-status-bar">
+    <Link className="font-medium text-accent hover:underline" to="/system">System</Link>
+    <span className="min-w-0 truncate">Core: {data ? health.isError ? "Last known · refresh failed" : String(data.status ?? "Unmeasured") : "Unavailable"}</span>
+    <span className={wide}>Host CPU: {percent(metric(data?.cpu).used_pct, metric(data?.cpu).scope)}</span>
+    <span className={wide}>RAM: {percent(metric(data?.memory).used_pct, metric(data?.memory).scope)}</span>
+    <span className={wide}>GPU: {percent(metric(data?.gpu).used_pct, metric(data?.gpu).scope)}</span>
+    <span className={wide} title="No measured browser-to-core timing source is connected to this bar">Browser RTT: Unmeasured</span>
+    <span className={`ml-auto ${wide}`}>{data && health.dataUpdatedAt ? `Received ${formatExchangeClock(new Date(health.dataUpdatedAt))}` : "No host measurement"}</span>
+    <span className="ml-auto sm:hidden" aria-hidden="true" />
     <HelpFooterSlot />
   </footer>;
 }

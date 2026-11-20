@@ -21,6 +21,7 @@ import { FlintDonutBreakdown, FlintRankedBarList } from "@flinttrade/design-syst
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { positionMtm } from "@/lib/pnl";
+import { muhuratFundsNote } from "@/lib/muhuratSession";
 import type { Funds, Position } from "@/types/api";
 import {
   averagePriceOf,
@@ -117,6 +118,7 @@ export interface SummaryViewProps {
 }
 
 export function SummaryView({ positions, funds, netPnL, estimatedCharges = 0 }: SummaryViewProps) {
+  const fundsNote = muhuratFundsNote();
   const openCount = positions.filter((p) => quantityOf(p) !== 0).length;
   const positiveCount = positions.filter((p) => positionMtm(p) > 0).length;
   const negativeCount = positions.filter((p) => positionMtm(p) < 0).length;
@@ -146,6 +148,9 @@ export function SummaryView({ positions, funds, netPnL, estimatedCharges = 0 }: 
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Available Margin</div>
             <div className="text-xl font-bold font-mono tabular-nums text-text-primary">{formatCompactINR(funds?.availableCash ?? 0)}</div>
             <div className="text-xs text-text-muted mt-0.5">Used: {formatCompactINR(funds?.usedMargin ?? 0)}</div>
+            {fundsNote ? (
+              <p className="text-xxs text-text-muted mt-1" data-testid="muhurat-funds-note">{fundsNote}</p>
+            ) : null}
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">

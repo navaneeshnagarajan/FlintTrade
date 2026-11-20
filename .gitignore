@@ -89,7 +89,6 @@ chroma_data/
 .agents/
 skills-lock.json
 
-# === Local dev (private docs, reference repos) ===
 .local/
 
 # === Internal dev docs (archived, not in active use) ===
@@ -104,13 +103,6 @@ REPOS.md
 # folder is a scratchpad for AI-generated design-rule outputs and should
 # not ship with the public repo.
 /design-system/
-
-# === Agent context is TRACKED (public repo, open for contributions) ===
-# CLAUDE.md / AGENTS.md / PLAN.md (and per-package agent docs, if added) SHIP
-# with the repo so every contributor and every agent — any OS, any model —
-# works from the same source of truth. They are NOT machine-local.
-# Only the per-machine GENERATED copies under .local/agent-context/ stay
-# ignored (covered by the .local/ rule above); the canonical files are tracked.
 
 # === Planning files (session-specific) ===
 task_plan.md

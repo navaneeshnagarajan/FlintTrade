@@ -133,7 +133,7 @@ export function SectionNav<T extends string>({
         aria-orientation={isDesktop ? "vertical" : "horizontal"}
         onKeyDown={handleKeyDown}
         className={cn(
-          "flex min-w-0 gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          "flex min-w-0 gap-1 overflow-x-auto px-3 py-2 ft-scroll-quiet",
           "md:flex-1 md:flex-col md:gap-0.5 md:overflow-y-auto md:overflow-x-hidden md:py-3",
           iconOnly && "md:px-2",
         )}
@@ -144,7 +144,9 @@ export function SectionNav<T extends string>({
               <div
                 role="presentation"
                 className={cn(
-                  "ft-text-overline px-2.5 pb-1 text-text-muted",
+                  idPrefix === "settings"
+                    ? "px-2.5 pb-1 text-[12px] font-semibold uppercase tracking-wide text-text-muted"
+                    : "ft-text-overline px-2.5 pb-1 text-text-muted",
                   groupIndex === 0 ? "pt-1" : "pt-4",
                 )}
               >

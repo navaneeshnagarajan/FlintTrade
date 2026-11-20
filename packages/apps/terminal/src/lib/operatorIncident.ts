@@ -4,7 +4,7 @@
  * One classifier drives the sticky strip under TopBar, broker Connected
  * honesty, and Live place/mirror muting. It reads signals we already have
  * (health, ping, broker rejects, account status, Dhan WS, advisor chrome,
- * the Task 9D freeze 503). It does not invent an exchange halt from the
+ * the broker-session 503). It does not invent an exchange halt from the
  * session clock, and it does not invent a Kotak Neo stream class.
  *
  * Detectably wired:
@@ -15,7 +15,7 @@
  *   broker_maintenance — account status, reject text, HTTP status, Dhan WS.
  * - host_unhealthy — `/health` overall status, or an HTTP error from our process.
  * - backend_unreachable — same-origin transport while the public site is up
- *   or still unknown, or the Task 9D native HTTP freeze 503.
+ *   or still unknown, or the native broker HTTP 503.
  * - network_local — the process answers ping and a neutral public-internet
  *   probe failed (gateway, DNS, or ping). Not a site/CDN miss, and not a
  *   single broker timeout.
@@ -71,6 +71,26 @@ export const EXIT_REQUESTED =
 /** Exit-all acknowledgement. A request is not a fill. */
 export const EXIT_ALL_REQUESTED =
   "Exit-all requested. Check positions and orders for the outcome.";
+
+/**
+ * A submit whose response was dropped, timed out, or came back without a
+ * definitive broker or engine result. Practice and Live use this same sentence.
+ */
+export const ORDER_STATUS_UNKNOWN =
+  "Order status unknown. Check Orders before trying again.";
+
+/**
+ * A Forever (GTT) submit whose response was dropped, timed out, or came back
+ * without a definitive broker result. Practice and Live use this same sentence.
+ */
+export const FOREVER_ORDER_STATUS_UNKNOWN =
+  "Order status unknown. Check Forever Orders before trying again.";
+
+/** The cancel was accepted. The order is not confirmed cancelled yet. */
+export const CANCELLATION_REQUESTED = "Cancellation requested";
+
+/** Shown only after an order-status read, the ledger, or a stream says cancelled. */
+export const ORDER_CANCELLED = "Order cancelled";
 
 export type OperatorStripLevel = "info" | "degraded" | "blocked";
 
@@ -178,7 +198,7 @@ export const EDGE_STATUS_LINKS: readonly { label: string; href: string }[] = [
 ];
 
 const FREEZE_RECTIFY =
-  "Native broker account changes stay frozen until the HTTP cutover. This is not a broker outage, and FlintTrade does not hold funds.";
+  "Broker account changes are not available in the terminal. This is not a broker outage, and FlintTrade does not hold funds.";
 
 const HOST_UNKNOWN_UPLINK_RECTIFY =
   "The desk did not answer, and the uplink check has not finished. Treat Live orders as closed until health recovers. FlintTrade does not hold funds.";
@@ -195,11 +215,11 @@ export function brokerSessionDarkened(incident: OperatorIncident | null): boolea
 export function honestBrokerStatus(input: {
   connected: boolean;
   connectedRead: boolean;
-  nativeMonday: boolean;
+  nativeConnectedRead: boolean;
   incident: OperatorIncident | null;
 }): string | null {
   const incident = input.incident;
-  if (incident?.nativeHttpFreeze && input.nativeMonday) {
+  if (incident?.nativeHttpFreeze && input.nativeConnectedRead) {
     return "Unavailable — backend unreachable";
   }
   if (

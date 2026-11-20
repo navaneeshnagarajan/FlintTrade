@@ -153,7 +153,7 @@ class TestPinVerification:
 
 
 class TestSetPin:
-    """Post-setup PIN set/change — ASCII ^\\d{6}$ only (FT-SET-003)."""
+    """Post-setup PIN set/change — ASCII ^\\d{6}$ only."""
 
     def _ready(self, tmp_path: Path) -> AuthService:
         svc = AuthService(db_path=tmp_path / "auth.db")
@@ -219,7 +219,7 @@ class TestTOTP:
         assert svc.verify_totp("000000") is False
 
     def test_setup_leaves_authenticator_deferred(self, tmp_path: Path):
-        """FT-SETUP-002: Explore/Practice start password-only. TOTP is
+        """Explore/Practice start password-only. TOTP is
         provisioned but not enrolled until the operator confirms a code."""
         svc = AuthService(db_path=tmp_path / "auth.db")
         svc.setup_account(

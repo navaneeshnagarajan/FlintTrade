@@ -38,7 +38,7 @@ export function brokerSurfaceLabel(input: {
   const honest = honestBrokerStatus({
     connected: input.connected,
     connectedRead: input.connectedRead,
-    nativeMonday: input.connectedRead,
+    nativeConnectedRead: input.connectedRead,
     incident: input.incident,
   });
   if (honest === "Connected" || honest === "Connected (read)") return honest;
@@ -59,11 +59,12 @@ export type DeskStatusTone = "ok" | "warn" | "down" | "neutral";
  * The LLM is optional: unconfigured stays quiet, a failing one warns.
  */
 export function summariseDeskStatus(input: {
-  mode: "explore" | "practice" | "live";
+  mode: "explore" | "practice" | "live" | "unavailable";
   broker: string;
   decision: "Ready" | "Degraded" | "Down" | "Still loading" | "Checking" | "Downloading";
   chat: string;
 }): { tone: DeskStatusTone; label: string } {
+  if (input.mode === "unavailable") return { tone: "neutral", label: "Unavailable" };
   if (input.mode === "explore") return { tone: "neutral", label: "Example data only" };
   if (input.decision === "Down") return { tone: "down", label: "Laya down" };
   if (input.broker.startsWith("Unavailable —")) return { tone: "down", label: "Broker unavailable" };

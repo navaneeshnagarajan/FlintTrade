@@ -53,7 +53,7 @@ async function main() {
   const [, version, platform, arch] = match;
   assert.equal(version, config.electronVersion);
   const checksumBytes = fs.readFileSync(path.join(__dirname, `electron-v${version}-SHASUMS256.txt`));
-  assert.equal(hashBytes(checksumBytes), 'ae1159fdb6d008ca267c267edb6dd82ded692529c9a930386452511aaaddb7b1');
+  assert.equal(hashBytes(checksumBytes), '2bf3a1ae7bcbd65d5c24b1dbc7626ceb098a8c61f21c89c8046512c9e3925a53');
   const published = Object.fromEntries(checksumBytes.toString('utf8').trim().split(/\r?\n/).map(line => {
     const row = /^([a-f0-9]{64}) [ *](\S+)$/.exec(line);
     assert(row, 'Malformed published checksum record');

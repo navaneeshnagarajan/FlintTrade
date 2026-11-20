@@ -121,6 +121,7 @@ import {
 } from "@/components/ui/table";
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
+import { orderOutcomeIsUncertain } from "@/lib/orderOutcome";
 import {
   exitAlreadyPendingMessage,
   exitRequestErrorMessage,
@@ -173,6 +174,15 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   net: "Net",
   heat: "Heat",
 };
+
+function OutcomeCopy({ message }: { message: string }) {
+  const uncertain = orderOutcomeIsUncertain(message);
+  return (
+    <p className={uncertain ? "text-xs text-warning" : "text-xs text-loss"} role={uncertain ? "status" : "alert"}>
+      {message}
+    </p>
+  );
+}
 
 function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
@@ -327,11 +337,7 @@ function ConvertPositionDialog({
             </SelectContent>
           </Select>
         </div>
-        {errorMsg && (
-          <p className="text-xs text-loss" role="alert">
-            {errorMsg}
-          </p>
-        )}
+        {errorMsg && <OutcomeCopy message={errorMsg} />}
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
@@ -498,11 +504,7 @@ function SquareOffDialog({
           </p>
         )}
         <LayaAdmissionNotice notice={layaNotice} />
-        {errorMsg && (
-          <p className="text-xs text-loss" role="alert">
-            {errorMsg}
-          </p>
-        )}
+        {errorMsg && <OutcomeCopy message={errorMsg} />}
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
@@ -741,15 +743,11 @@ function ExitAllDialog({
             {failure.notice ? (
               <LayaAdmissionNotice notice={failure.notice} />
             ) : (
-              <p className="text-xs text-loss" role="alert">{failure.message}</p>
+              <OutcomeCopy message={failure.message} />
             )}
           </div>
         ))}
-        {errorMsg && (
-          <p className="text-xs text-loss" role="alert">
-            {errorMsg}
-          </p>
-        )}
+        {errorMsg && <OutcomeCopy message={errorMsg} />}
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.

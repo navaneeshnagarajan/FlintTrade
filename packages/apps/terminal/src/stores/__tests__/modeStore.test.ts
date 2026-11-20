@@ -6,9 +6,32 @@ import type { AppMode } from "../modeStore";
 // Helpers
 // ---------------------------------------------------------------------------
 
+function sessionJwt(mode?: string): string {
+  const payload = btoa(JSON.stringify(mode === undefined ? { typ: "session" } : { mode, typ: "session" }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  return `header.${payload}.sig`;
+}
+
+function seedModeCache(mode: AppMode) {
+  localStorage.setItem(
+    "flinttrade:mode",
+    JSON.stringify({ state: { mode }, version: 2 }),
+  );
+}
+
+function seedSession(token: string) {
+  sessionStorage.setItem(
+    "flinttrade:auth-session",
+    JSON.stringify({ token, username: "operator", expiresAt: "" }),
+  );
+}
+
 function resetStore() {
   localStorage.removeItem("flinttrade:mode");
   sessionStorage.removeItem("flinttrade:mode");
+  sessionStorage.removeItem("flinttrade:auth-session");
   useModeStore.setState({ mode: INITIAL_MODE });
 }
 
@@ -115,6 +138,56 @@ describe("modeStore", () => {
       expect(useModeStore.getState().isPractice()).toBe(true);
       useModeStore.getState().setMode("live");
       expect(useModeStore.getState().isPractice()).toBe(false);
+    });
+  });
+
+  describe("session claim beats the mode cache", () => {
+    async function bootFreshStore() {
+      vi.resetModules();
+      return import("../modeStore");
+    }
+
+    it("keeps Practice after a reload when the cache says live", async () => {
+      seedModeCache("live");
+      seedSession(sessionJwt("practice"));
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("practice");
+      await fresh.useModeStore.persist.rehydrate();
+      expect(fresh.useModeStore.getState().mode).toBe("practice");
+      expect(JSON.parse(localStorage.getItem("flinttrade:mode") ?? "{}").state.mode).toBe("practice");
+    });
+
+    it("reads a Live claim before paint when the cache says practice", async () => {
+      seedModeCache("practice");
+      seedSession(sessionJwt("live"));
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("live");
+      await fresh.useModeStore.persist.rehydrate();
+      expect(fresh.useModeStore.getState().mode).toBe("live");
+    });
+
+    it("shows unavailable for a missing claim instead of the live cache", async () => {
+      seedModeCache("live");
+      seedSession(sessionJwt());
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("unavailable");
+    });
+
+    it("shows unavailable for a claim that is not a mode", async () => {
+      seedModeCache("live");
+      seedSession(sessionJwt("Connected (read)"));
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("unavailable");
+      expect(fresh.useModeStore.getState().mode).not.toBe("live");
+    });
+
+    it("shows unavailable for a connected claim instead of Example or Live", async () => {
+      seedModeCache("live");
+      seedSession(sessionJwt("connected"));
+      const fresh = await bootFreshStore();
+      expect(fresh.useModeStore.getState().mode).toBe("unavailable");
+      expect(fresh.useModeStore.getState().mode).not.toBe("live");
+      expect(fresh.useModeStore.getState().mode).not.toBe("explore");
     });
   });
 });

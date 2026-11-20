@@ -36,10 +36,12 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { layaOrderRefused } from "@/lib/layaStatus";
+import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
-import { liveWritesMuted } from "@/lib/operatorIncident";
+import { liveWritesMuted, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -2114,8 +2116,11 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     case "holdings":
       return { holdings: mockHoldings() } as T;
     case "holidays":
-    case "market/holidays":
+    case "market/holidays": {
+      const year = Number(params.year);
+      if (year === 2026) return shippedMuhuratHolidays() as T;
       return [] as T;
+    }
     case "intervals":
       return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
     case "timings":
@@ -2296,16 +2301,22 @@ async function postOrder<T>(
   authority?: PostOrderAuthorityPin,
   options?: PlaceOrderOptions,
 ): Promise<T> {
+  // A session with no usable mode claim must not place, including the
+  // Explore sample fill. Never treat that claim as Live.
+  const sessionMode = useModeStore.getState().mode;
+  if (sessionMode === "unavailable") {
+    throw new OrderPreflightRefusal("Unavailable. No order was sent.");
+  }
+  const currentModeForExplore = sessionMode;
   // Explore paper fill for place only. Checked before the generic mode-pin
   // mismatch so Order Pad can confirm with a Practice pin while the store is
   // still Explore. Live pins are still refused. The `placeOrder` export must
   // stay a brace-depth-0 `postOrder("place", …)` call so the orders-contract
   // lexer keeps seeing the Live frontend caller.
-  const currentModeForExplore = useModeStore.getState().mode;
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new OrderPreflightRefusal(
-        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentModeForExplore)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2316,10 +2327,10 @@ async function postOrder<T>(
   }
 
   // Read the current operating mode and auth state to assemble headers.
-  const currentMode = useModeStore.getState().mode;
+  const currentMode = sessionMode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new OrderPreflightRefusal(
-      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode)} to ${operatorModeName(currentMode)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
@@ -2387,7 +2398,13 @@ async function postOrder<T>(
       body: JSON.stringify(requestBody),
     });
   } catch {
-    throw new Error("Connection failed. Check FlintTrade backend is running.");
+    throw new OrderApiError(ORDER_STATUS_UNKNOWN, 0, {
+      status: "error",
+      order_outcome: "unknown",
+      reason: "response_unconfirmed",
+      retry_safe: false,
+      message: ORDER_STATUS_UNKNOWN,
+    });
   }
 
   if (!resp.ok) {
@@ -2401,16 +2418,30 @@ async function postOrder<T>(
       useOperatorSignalStore.getState().noteLayaDown();
     }
     const serverMsg = errorBody?.message ?? errorBody?.error ?? null;
+    const dispatchOutcome = errorBody && "dispatch_outcome" in errorBody
+      ? String((errorBody as { dispatch_outcome?: unknown }).dispatch_outcome ?? "")
+      : "";
+    const orderOutcome = errorBody && "order_outcome" in errorBody
+      ? String((errorBody as { order_outcome?: unknown }).order_outcome ?? "")
+      : "";
+    const serverText = typeof errorBody?.message === "string" ? errorBody.message : "";
+    const definiteNoSend = /no order was sent/i.test(serverText);
+    const uncertain = !definiteNoSend && (
+      orderOutcome === "unknown"
+      || dispatchOutcome === "unknown_after_dispatch"
+      || resp.status === 408
+      || (resp.status >= 500 && dispatchOutcome !== "refused_before_dispatch" && orderOutcome !== "rejected")
+    );
     let message: string;
-    if (resp.status === 401) {
+    if (uncertain) {
+      message = ORDER_STATUS_UNKNOWN;
+    } else if (resp.status === 401) {
       message = "API key invalid. Check Settings → Connection.";
     } else if (resp.status === 400) {
       message = serverMsg ?? "Invalid order parameters. Check symbol and exchange.";
     } else if (resp.status === 403) {
       // Backend returns 403 when mode blocks the action (e.g. real order in practice mode)
       message = serverMsg ?? `Order blocked in ${mode} mode.`;
-    } else if (resp.status === 500) {
-      message = serverMsg ?? "FlintTrade backend error. Try again in a few seconds.";
     } else {
       message = serverMsg ?? `Server error (${resp.status})`;
     }
@@ -2421,8 +2452,11 @@ async function postOrder<T>(
 
   const json = await resp.json();
   const responseStatus = String(json.status ?? "").toUpperCase();
+  if (json.order_outcome === "unknown") {
+    throw new OrderApiError(ORDER_STATUS_UNKNOWN, 503, json);
+  }
   if (responseStatus === "ERROR" || responseStatus === "REJECTED") {
-    throw new Error(json.message || `Order API ${ftEndpoint} error`);
+    throw new OrderApiError(json.message || `Order API ${ftEndpoint} error`, 400, json);
   }
   if (LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) noteAdmittedPlace(mode);
   if (ftEndpoint === "place") {
@@ -2576,8 +2610,8 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
       return `${symbol}: ${body.message}`;
     }
   }
-  const message = err instanceof Error ? err.message : "Square-off failed.";
-  return `${symbol}: ${message}`;
+  const outcome = presentSubmitError(err);
+  return `${symbol}: ${outcome.message}`;
 }
 
 /** Place one opposite MARKET order per open Practice position. */

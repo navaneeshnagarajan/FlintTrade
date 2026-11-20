@@ -825,7 +825,7 @@ def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path
     app.config["ML_SIGNAL_PIPELINE"] = pipeline
     cron = MagicMock()
     time_scheduler = MagicMock()
-    time_scheduler.is_market_open.side_effect = (
+    time_scheduler.session_active.side_effect = (
         lambda exchange, *, symbol: exchange == "MCX" and symbol == "GOLDM"
     )
 
@@ -853,11 +853,11 @@ def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path
     handler = call.kwargs["handler"]
     pipeline.run_cycle.return_value = {"MCX:GOLDM": {"signal": "BUY"}}
     assert handler() == {"MCX:GOLDM": {"signal": "BUY"}}
-    assert [call.args for call in time_scheduler.is_market_open.call_args_list] == [
+    assert [call.args for call in time_scheduler.session_active.call_args_list] == [
         ("NSE_INDEX",),
         ("MCX",),
     ]
-    assert [call.kwargs for call in time_scheduler.is_market_open.call_args_list] == [
+    assert [call.kwargs for call in time_scheduler.session_active.call_args_list] == [
         {"symbol": "NIFTY"},
         {"symbol": "GOLDM"},
     ]

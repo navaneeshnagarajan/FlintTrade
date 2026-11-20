@@ -24,8 +24,8 @@ const SECTORS: SectorItem[] = [
 
 export function SectorCard() {
   return (
-    <BentoCard size="default" label="Sector Performance (placeholder data)" data-testid="sector-card">
-      <DemoBadge testId="sector-demo-badge" title="Placeholder sector moves — not live" />
+    <BentoCard size="default" label="Sector Performance (sample data)" data-testid="sector-card">
+      <DemoBadge testId="sector-demo-badge" title="Sample sector moves — not live" />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Layers size={13} className="text-text-muted" aria-hidden="true" />

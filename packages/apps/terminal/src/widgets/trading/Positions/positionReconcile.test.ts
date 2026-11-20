@@ -92,9 +92,12 @@ describe("truthful request warnings", () => {
   });
 
   it.each([new TypeError("Failed to fetch"), Object.assign(new Error("Gateway timeout"), { status: 504 })])(
-    "does not relabel a lost response as a definite rejection", (error) => {
-      expect(exitRequestErrorMessage(error)).toBe(
-        `Exit status unknown. An order may still execute. ${error.message}`,
+    "does not relabel a lost response as a definite rejection", () => {
+      expect(exitRequestErrorMessage(new TypeError("Failed to fetch"))).toBe(
+        "Order status unknown. Check Orders before trying again.",
+      );
+      expect(exitRequestErrorMessage(Object.assign(new Error("Gateway timeout"), { status: 504 }))).toBe(
+        "Order status unknown. Check Orders before trying again.",
       );
     },
   );

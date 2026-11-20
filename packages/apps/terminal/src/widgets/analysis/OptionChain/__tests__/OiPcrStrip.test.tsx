@@ -1,5 +1,5 @@
 /**
- * FT-TRADE-012 — Option Chain OI profile + PCR strip.
+ * Option Chain OI profile + PCR strip.
  */
 
 import { describe, expect, it } from "vitest";

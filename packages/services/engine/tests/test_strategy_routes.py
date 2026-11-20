@@ -209,6 +209,74 @@ class TestStrategyRoutes:
         os.name == "nt",
         reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
     )
+    def test_list_and_status_keep_unknown_ownership(self, client):
+        upload_resp = client.post(
+            "/api/v1/strategies/upload",
+            json={"name": "uncertain_tree", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+        with patch("subprocess.Popen", return_value=_make_mock_process(pid=808)):
+            start = client.post(f"/api/v1/strategies/{strategy_id}/start")
+        assert start.status_code == 200
+
+        runner = client.application.config["STRATEGY_RUNNER"]
+        tree = MagicMock()
+        tree.is_alive.side_effect = OSError("job query failed")
+        runner._running[strategy_id].tree = tree
+
+        listed = client.get("/api/v1/strategies")
+        status = client.get(f"/api/v1/strategies/{strategy_id}/status")
+        listed_row = next(
+            row for row in listed.get_json()["data"]["strategies"] if row["strategy_id"] == strategy_id
+        )
+        status_row = status.get_json()["data"]["strategy"]
+
+        assert listed.status_code == 200
+        assert status.status_code == 200
+        assert listed_row["state"] == "unknown"
+        assert listed_row["ownership_retained"] is True
+        assert status_row["state"] == "unknown"
+        assert status_row["ownership_retained"] is True
+        assert strategy_id in runner._running
+        tree.close.assert_not_called()
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
+    )
+    def test_start_while_tree_state_is_unknown_does_not_release_ownership(self, client):
+        upload_resp = client.post(
+            "/api/v1/strategies/upload",
+            json={"name": "restart_blocked", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+        with patch("subprocess.Popen", return_value=_make_mock_process(pid=909)):
+            first = client.post(f"/api/v1/strategies/{strategy_id}/start")
+        assert first.status_code == 200
+
+        runner = client.application.config["STRATEGY_RUNNER"]
+        entry = runner._running[strategy_id]
+        tree = MagicMock()
+        tree.is_alive.side_effect = OSError("job query failed")
+        entry.tree = tree
+
+        with patch("subprocess.Popen") as popen:
+            second = client.post(f"/api/v1/strategies/{strategy_id}/start")
+
+        assert second.status_code != 200
+        assert second.get_json()["status"] == "error"
+        popen.assert_not_called()
+        assert strategy_id in runner._running
+        assert runner._running[strategy_id] is entry
+        tree.close.assert_not_called()
+        retained = client.get(f"/api/v1/strategies/{strategy_id}/status").get_json()["data"]["strategy"]
+        assert retained["state"] == "unknown"
+        assert retained["ownership_retained"] is True
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
+    )
     def test_start_strategy(self, client):
         upload_resp = client.post(
             "/api/v1/strategies/upload",

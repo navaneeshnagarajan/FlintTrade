@@ -26,7 +26,7 @@ export const LIVE_TOKEN = [
   "synthetic-presentation-not-a-signature",
 ].join(".");
 
-export const CANCEL_WARNING = "Cancel pending. This order may still fill.";
+export const CANCEL_WARNING = "Cancellation requested";
 export const CHILD_CAVEAT = "Trigger status does not confirm the outcome of any spawned order. Check broker positions and orders.";
 export const EXECUTION_WARNING = "This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.";
 export const GTT_EMPTY = "No resting forever orders for this broker account.";
@@ -150,6 +150,11 @@ export function registerDeskReads(
         json: { status: "success", data: [] },
       }, marketReads);
     }
+    // Scalper reads NIFTY options expiries on NFO. An unused desk still
+    // disposes cleanly; a mounted Scalper receives one future contract month.
+    registerRead(registry, `${nativePath("expiry", account, broker)}?symbol=NIFTY&exchange=NFO`, {
+      json: { status: "success", data: ["27AUG26"] },
+    }, { minimum: 0, maximum: 6 });
     for (const [symbol, exchange] of [
       ["NIFTY", "NSE_INDEX"], ["BANKNIFTY", "NSE_INDEX"], ["SENSEX", "BSE_INDEX"],
       ["INDIAVIX", "NSE_INDEX"], ["FINNIFTY", "NSE_INDEX"], ["NIFTYIT", "NSE_INDEX"],
@@ -213,7 +218,7 @@ export function deferredResponse() {
   return { promise, release };
 }
 
-export async function mountWidget(page: Page, component: "foreverorders" | "positions", narrowSibling = false): Promise<void> {
+export async function mountWidget(page: Page, component: "foreverorders" | "positions" | "scalper", narrowSibling = false): Promise<void> {
   await page.clock.install({ time: FIXED_TIME });
   await page.clock.pauseAt(FIXED_TIME);
   await page.addInitScript(({ widget, sibling }) => {
@@ -224,7 +229,7 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: sibling ? 60 : 100, children: [{
             type: "tab", id: "synthetic-order-flow-widget", component: widget,
-            name: widget === "foreverorders" ? "Forever (GTT) Orders" : "Positions",
+            name: widget === "foreverorders" ? "Forever (GTT) Orders" : widget === "scalper" ? "Scalper" : "Positions",
           }],
         }, ...(sibling ? [{
           type: "tabset", weight: 40, children: [{ type: "tab", id: "synthetic-narrow-sibling", component: widget, name: "Narrow Positions" }],
@@ -271,7 +276,9 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
       importModule("/src/routes/UnifiedAppRoute.tsx"),
       importModule(widget === "foreverorders"
         ? "/src/widgets/orders/ForeverOrdersWidget.tsx"
-        : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
+        : widget === "scalper"
+          ? "/src/widgets/trading/Scalper/ScalperWidget.tsx"
+          : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
     ]);
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -280,7 +287,9 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
   const initialControl = page.getByRole("button", {
     name: component === "foreverorders" ? "Refresh forever orders" : "Table", exact: true,
   }).first();
-  if (component === "foreverorders") {
+  if (component === "scalper") {
+    await tickUntil(page, page.getByRole("button", { name: /Buy CE/ }).first());
+  } else if (component === "foreverorders") {
     // The explicit companion must finish its first decoded book before the
     // caller tests unavailable detail. Its generic loading warning is not a
     // completed error. Preserve the original mount's 2s/15s notification bound;

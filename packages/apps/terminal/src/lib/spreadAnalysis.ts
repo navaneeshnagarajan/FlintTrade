@@ -264,7 +264,7 @@ export interface VerticalSpread {
  * spread) and carries no judgement — those shapes have their own economics and
  * this validator says nothing about them. `unpriced` is the freshly loaded
  * template, whose legs carry an unset (`null`) premium until the operator types
- * one. An explicit ₹0 is priced (FT-LAB-003).
+ * one. An explicit ₹0 is priced.
  */
 export type VerticalSpreadCheck =
   | { kind: "not-a-vertical" }

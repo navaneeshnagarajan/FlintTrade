@@ -1,5 +1,5 @@
 /**
- * Mirror Compact / Comfortable onto <html> from first paint (FT-UX-001).
+ * Mirror Compact / Comfortable onto <html> from first paint.
  */
 
 import { useEffect } from "react";

@@ -65,7 +65,7 @@ describe("AISuggestionsPanel", () => {
     expect(screen.getByText("AI Strategy Suggestions")).toBeInTheDocument();
   });
 
-  it("stays labelled illustrative — never sold as live alpha (FT-MONDAY-003)", () => {
+  it("stays labelled illustrative — never sold as live alpha", () => {
     render(<AISuggestionsPanel />);
     const labels = screen.getAllByText("Illustrative");
     expect(labels.length).toBeGreaterThan(1);

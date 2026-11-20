@@ -67,7 +67,7 @@ async def test_exact_lot_receipt_allows_canonical_sandbox_fill(runtime):
         calls.append((exchange, symbol))
         return True
 
-    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(is_market_open=market_open)
+    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=market_open)
     result = await runtime.create().route_order(_derivative_order())
     assert result.passed, result.response
     assert runtime.sandbox.get_positions()[0]["net_qty"] == 65
@@ -87,7 +87,7 @@ async def test_option_receipt_cannot_bypass_canonical_market_session(runtime, se
                 raise RuntimeError("synthetic scheduler failure")
             return False
 
-        runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(is_market_open=market_open)
+        runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=market_open)
     adapter = runtime.create()
     result = await adapter.route_order(_derivative_order())
     assert not result.passed
@@ -101,10 +101,10 @@ async def test_exact_option_reduction_retains_canonical_closed_session_refusal(r
     from flinttrade_data.practice_price import OPTION_PRICE_STALE
 
     runtime.context = _derivative()
-    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(is_market_open=lambda *_args, **_kwargs: True)
+    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=lambda *_args, **_kwargs: True)
     adapter = runtime.create()
     assert (await adapter.route_order(_derivative_order())).passed
-    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(is_market_open=lambda *_args, **_kwargs: False)
+    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=lambda *_args, **_kwargs: False)
     runtime.app.config["SAFETY"].l5_kill.activate("synthetic closed-session reduction")
 
     result = await adapter.route_order(_derivative_order(action=Action.SELL))

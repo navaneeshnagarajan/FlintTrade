@@ -51,30 +51,22 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
   // No auth/account seed and no API handlers. Retired and unexpected endpoints
   // remain fatal in the unchanged automatic HTTP registry, including at close.
   const app = page.getByRole("region", { name: "Terminal app", exact: true });
-  const chrome = page.locator('[data-app-chrome="terminal"]');
   const layouts = async (): Promise<Record<string, Layout>> => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "{}"), storageKey);
   const currentTabs = async () => tabs((await layouts())["Current"].layout);
   const chartIds = async () => (await currentTabs()).filter(tab => tab.component === "chart").map(tab => tab.id);
-  const openLayoutActions = async () => {
-    const disclosure = chrome.locator("details").filter({ has: page.getByText("Layout actions", { exact: true }) });
-    if (await disclosure.getAttribute("open") === null) await disclosure.locator("summary").click();
-    await expect(disclosure).toHaveAttribute("open", "");
-  };
   const save = async (name: string) => {
-    await openLayoutActions();
-    await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill(name);
-    await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
+    await app.getByRole("textbox", { name: "Layout name", exact: true }).fill(name);
+    await app.getByRole("button", { name: "Save layout", exact: true }).click();
     await expect(app.getByRole("status")).toHaveText(`Saved ${name}`);
     expect((await layouts())[name]).toEqual((await layouts())["Current"]);
   };
   const restore = async (name: string) => {
-    await openLayoutActions();
-    await chrome.getByRole("combobox", { name: "Restore saved layout", exact: true }).selectOption({ label: name });
+    await app.getByRole("combobox", { name: "Restore saved layout", exact: true }).selectOption({ label: name });
     await expect(app.getByRole("status")).toHaveText(`Restored ${name}`);
     await expect.poll(async () => (await layouts())["Current"]).toEqual((await layouts())[name]);
   };
   const anonymous = async () => {
-    await expect(page.getByRole("banner")).toHaveText(/Example · frozen simulation.*No accounts, sign-in, provider connections or real orders\./);
+    await expect(page.getByTestId("public-preview-header")).toHaveText(/Example · frozen simulation.*No accounts, sign-in, provider connections or real orders\./);
     await expect(app.getByTestId("app-execution-scope")).toHaveText("Example · No execution account selected · Linking changes selections, never execution authority.");
     expect(await page.evaluate(() => ({ session: sessionStorage.getItem("flinttrade:auth-session"), local: localStorage.getItem("flinttrade:auth-session"), mode: JSON.parse(localStorage.getItem("flinttrade:mode") ?? "null") }))).toEqual({ session: null, local: null, mode: { state: { mode: "explore" }, version: 2 } });
     await expect(page.getByRole("dialog", { name: "Manage workspaces", exact: true })).toHaveCount(0);
@@ -90,11 +82,11 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/terminal");
     await expect(app).toBeVisible();
     await anonymous();
+    // Layout management opens from the app toolbar and stays open until closed.
+    await app.getByRole("button", { name: "Layout", exact: true }).click();
     const frozenTime = await page.evaluate(() => Date.now());
-    await page.getByRole("button", { name: "Use Watchlist driven layout", exact: true }).click();
-    await openLayoutActions();
-    await expect(chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
-    await chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
+    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+    await app.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(4);
     await expect.poll(chartIds).toHaveLength(4);
     const fourIds = await chartIds();
@@ -113,21 +105,20 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(4);
     await restore("Three charts");
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(3);
-    await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
+    await app.getByRole("button", { name: "Add widget", exact: true }).click();
     await page.getByRole("dialog", { name: "Terminal widgets", exact: true }).getByRole("button", { name: "Add Watchlist", exact: true }).click();
     await expect.poll(async () => (await currentTabs()).map(tab => tab.component).sort()).toEqual(["chart", "chart", "chart", "watchlist"]);
     await save("Charts and watchlist");
     await app.getByRole("tab", { name: "Watchlist", exact: true }).press("Control+Delete");
-    await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
+    await app.getByRole("button", { name: "Add widget", exact: true }).click();
     await page.getByRole("dialog", { name: "Terminal widgets", exact: true }).getByRole("button", { name: "Add Risk", exact: true }).click();
     await expect.poll(async () => (await currentTabs()).map(tab => tab.component).sort()).toEqual(["chart", "chart", "chart", "riskdashboard"]);
     await save("Charts and risk");
     expect(tabs((await layouts())["Charts and watchlist"].layout).some(tab => tab.component === "watchlist")).toBe(true);
     const edited = (await layouts())["Charts and risk"];
-    await openLayoutActions();
-    await expect(chrome.getByText("Presentation only. Saved named layouts and all non-layout records are retained.", { exact: true })).toBeVisible();
+    await expect(app.getByText("Presentation only. Saved named layouts and all non-layout records are retained.", { exact: true })).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
-    await chrome.getByRole("button", { name: "Export layout", exact: true }).click();
+    await app.getByRole("button", { name: "Export layout", exact: true }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("flinttrade-terminal-layout.json");
     const exportPath = testInfo.outputPath(download.suggestedFilename());
@@ -137,8 +128,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     expect(exported).toEqual({ version: 1, app: "terminal", layout: edited });
     const nonLayouts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     const named = Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"));
-    await chrome.getByRole("button", { name: "Reset app layout", exact: true }).click();
-    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["watchlist", "overview:WelcomeCard", "chart", "positions", "orders"]);
+    await app.getByRole("button", { name: "Reset app layout", exact: true }).click();
+    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["overview:WelcomeCard", "watchlist", "chart", "positions", "orders"]);
     expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
     const afterReset = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     // Newly mounted default charts may add presentation preferences; the real
@@ -152,7 +143,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     previousSkill.state.metrics.trade.widgetsUsed += 1;
     expect(nextSkill).toEqual(previousSkill);
     checkpoints.push({ name: "reset-retained-records", before: nonLayouts, after: afterReset });
-    await chrome.getByLabel("Import app layout", { exact: true }).setInputFiles(exportPath);
+    await app.getByLabel("Import app layout", { exact: true }).setInputFiles(exportPath);
     await expect(app.getByRole("status")).toHaveText("Imported presentation layout; execution unchanged.");
     await expect.poll(async () => (await layouts())["Current"]).toEqual(edited);
     const rejected = [
@@ -163,7 +154,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     for (const [index, payload] of rejected.entries()) {
       await restore("Charts and risk");
       await expect(app.getByRole("alert")).toHaveCount(0);
-      await chrome.getByLabel("Import app layout", { exact: true }).setInputFiles({ name: `refused-${index}.json`, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(payload)) });
+      await app.getByLabel("Import app layout", { exact: true }).setInputFiles({ name: `refused-${index}.json`, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(payload)) });
       await expect(app.getByRole("alert")).toHaveText("Error: Not a compatible fresh app layout. Authority and legacy layouts cannot be imported.");
       expect((await layouts())["Current"]).toEqual(edited);
       expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
@@ -175,6 +166,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await page.reload();
     await expect(app).toBeVisible();
     await anonymous();
+    // A fresh document starts with the Layout panel closed.
+    await app.getByRole("button", { name: "Layout", exact: true }).click();
     await expect.poll(layouts).toEqual(beforeReload);
     // FlexLayout lazily mounts an inactive tab after a cold document. Select
     // each persisted chart through its real tab before counting mounted charts.
@@ -191,7 +184,6 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     document = 2;
     await page.goto("settings");
     await expect(page.getByText("The frozen preview cannot configure providers, change security or grant Live authority.", { exact: true })).toBeVisible();
-    await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("button", { name: "Choose app" }).click();
     await page.getByRole("link", { name: "Terminal", exact: true }).click();
     await expect(page).toHaveURL("http://127.0.0.1:5173/demo-app/terminal");
     await anonymous();

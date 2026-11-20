@@ -1,11 +1,11 @@
-import { LIVE_TOKEN, assertRequest, captureEvidence, deferredResponse, expect, notifications, test, tickUntil } from "./order-flow-fixtures";
+import { LIVE_TOKEN, assertRequest, captureEvidence, deferredResponse, expect, notifications, registerRead, test, tickUntil } from "./order-flow-fixtures";
 import { accountSnapshot, selectIndstocksScope } from "./indstocks-disclosure-fixtures";
 import { ERROR_A, ERROR_B, ERROR_BODY, ERROR_SCOPE, ERROR_WRITE, assertPainted, errorPad, errorPath, errorRaw, mountErrorPad, registerErrorReads } from "./operator-error-fixtures";
 import { UNICODE_ERROR_CASES, UNICODE_ERROR_MARKS, CAPTURED_ORIGIN_CASES, assertCapturedTextPainted, measureCapturedTextPainted, observeCapturedOriginReads, awaitCapturedOriginStartup, registerCapturedOriginReads, selectCapturedOrigin } from "./operator-error-fixtures";
 
 for (const control of ["fractional fit", "horizontal glyph crop", "vertical glyph crop"] as const) test(`Native title geometry control / ${control}`, async ({ page }, info) => {
   // Standalone geometry seam only: never alter a production heading to pass.
-  await page.setContent('<div style="position:absolute;left:100.25px;top:100.25px;border:1px solid;padding:2.25px;overflow:hidden;width:max-content"><span style="display:block;width:max-content;overflow:hidden;white-space:nowrap;font:13px/24px monospace;letter-spacing:-0.01px">Order outcome unknown: BUY INFY</span></div>');
+  await page.setContent('<div style="position:absolute;left:100.25px;top:100.25px;border:1px solid;padding:2.25px;overflow:hidden;width:max-content"><span style="display:block;width:max-content;overflow:hidden;white-space:nowrap;font:13px/24px monospace;letter-spacing:-0.01px">Order status unknown: BUY INFY</span></div>');
   const title = page.locator("span");
   const before = await title.evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
@@ -24,7 +24,7 @@ for (const control of ["fractional fit", "horizontal glyph crop", "vertical glyp
 });
 
 test("Native title geometry control / physical scrollbar viewport", async ({ page }, info) => {
-  await page.setContent('<div style="position:absolute;left:100.25px;top:100.25px;border:1px solid;padding:2.25px;overflow:scroll;scrollbar-gutter:stable;width:max-content;height:40.375px"><span style="display:block;width:max-content;overflow:hidden;white-space:nowrap;font:13px/24px monospace;letter-spacing:-0.01px">Order outcome unknown: BUY INFY</span></div>');
+  await page.setContent('<div style="position:absolute;left:100.25px;top:100.25px;border:1px solid;padding:2.25px;overflow:scroll;scrollbar-gutter:stable;width:max-content;height:40.375px"><span style="display:block;width:max-content;overflow:hidden;white-space:nowrap;font:13px/24px monospace;letter-spacing:-0.01px">Order status unknown: BUY INFY</span></div>');
   const title = page.locator("span");
   const width = await title.evaluate(node => node.getBoundingClientRect().width);
   await page.locator("div").evaluate((node, width) => { (node as HTMLElement).style.width = `${width}px`; }, width);
@@ -40,7 +40,7 @@ test("Native title geometry control / physical scrollbar viewport", async ({ pag
   await info.attach("native-title-scrollbar-control", { body: JSON.stringify({ cropped, complete }, null, 2), contentType: "application/json" });
 });
 
-const unknownCopy = "Order outcome unknown. An order may still execute. Check broker positions and orders. Do not retry automatically.";
+const unknownCopy = "Order status unknown. Check Orders before trying again.";
 const refusedCopy = "Order refused before dispatch. No order was sent. No automatic retry.";
 const fixtures: Array<{ name: string; status: number; raw?: unknown; body?: string; refused?: boolean; native?: boolean }> = [
   { name: "literal native reason is an observation, not a completed fill", status: 500, raw: errorRaw(), native: true },
@@ -69,18 +69,22 @@ for (const fixture of fixtures) test.describe(fixture.name, () => {
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished();
     if (fixture.body === undefined) expect(await response.json()).toEqual(fixture.raw); else expect(await response.text()).toBe(fixture.body);
-    const alert = errorPad(page).getByRole("alert"); await tickUntil(page, alert);
+    const alert = errorPad(page).getByRole(fixture.refused ? "alert" : "status"); await tickUntil(page, alert);
     const copy = fixture.refused ? refusedCopy : unknownCopy; await expect(alert).toContainText(copy);
-    await expect(alert).toContainText("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY (NSE / MIS).");
     await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
-    await expect(alert).not.toContainText(/Order filled|Position closed|Try again|SECRET|EXCEPTION_SECRET/);
-    if (!fixture.refused) await expect(alert).not.toContainText(/Not placed|No order was sent/);
-    if (fixture.native) {
-      const raw = fixture.raw as { broker_message: string; broker_code: string };
-      await expect(alert).toContainText(`Broker reason (observation): ${raw.broker_message}.`); await expect(alert).toContainText(`Broker code: ${raw.broker_code}.`);
-    } else await expect(alert).not.toContainText(/Broker reason|Broker code/);
+    await expect(alert).not.toContainText(/Order filled|Position closed|Try again in a few|SECRET|EXCEPTION_SECRET/);
+    if (fixture.refused) {
+      await expect(alert).toContainText("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY (NSE / MIS).");
+      if (fixture.native) {
+        const raw = fixture.raw as { broker_message: string; broker_code: string };
+        await expect(alert).toContainText(`Broker reason (observation): ${raw.broker_message}.`); await expect(alert).toContainText(`Broker code: ${raw.broker_code}.`);
+      }
+    } else {
+      await expect(alert).toHaveText(unknownCopy);
+      await expect(alert).not.toContainText(/Not placed|No order was sent|Origin:|Broker reason|Broker code|Order is completed/);
+    }
     await assertPainted(alert, info, "pad-error"); await captureEvidence(page, info, "normal-pad-error-visible");
-    const events = await notifications(page); expect(events).toEqual([expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: fixture.refused ? "Order refused: BUY INFY" : "Order outcome unknown: BUY INFY", body: await alert.innerText() })]);
+    const events = await notifications(page); expect(events).toEqual([expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: fixture.refused ? "Order refused: BUY INFY" : "Order status unknown: BUY INFY", body: await alert.innerText() })]);
     await page.getByRole("button", { name: /^Notifications —/ }).click(); await page.clock.runFor(700);
     const centre = page.getByRole("dialog", { name: "Notification Centre" }); await expect(centre).toBeVisible();
     const article = centre.getByRole("article").filter({ hasText: copy }); await expect(article).toHaveCount(1); await expect(article).toContainText(await alert.innerText());
@@ -112,7 +116,7 @@ for (const next of ["account-B", "Practice"] as const) for (const outcome of ["u
       const reads = paths.map((path) => ({ path, count: syntheticApi.callCount("GET", path) }));
       await info.attach("before-late-origin", { body: JSON.stringify({ scope: beforeScope, events: beforeEvents, reads }, null, 2), contentType: "application/json" });
       const arrived = page.waitForResponse((response) => response.url().endsWith(ERROR_WRITE)); late.release({ status: 500, json: raw }); const response = await arrived; await response.finished(); expect(await response.json()).toEqual(raw); await page.clock.runFor(100);
-      await expect.poll(() => notifications(page)).toEqual([...beforeEvents, expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: outcome === "unknown_after_dispatch" ? "Order outcome unknown: BUY INFY" : "Order refused: BUY INFY", body: expect.stringContaining("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY") })]);
+      await expect.poll(() => notifications(page)).toEqual([...beforeEvents, expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: outcome === "unknown_after_dispatch" ? "Order status unknown: BUY INFY" : "Order refused: BUY INFY", body: outcome === "unknown_after_dispatch" ? unknownCopy : expect.stringContaining("Origin: kotakneo / KOTAK-OFFLINE · BUY INFY") })]);
       expect(await accountSnapshot(page)).toEqual(beforeScope); for (const read of reads) expect(syntheticApi.callCount("GET", read.path)).toBe(read.count);
       await expect(errorPad(page).getByRole("alert", { includeHidden: true })).toHaveCount(0);
       if (next === "account-B") { await expect(dialog).toBeVisible(); await expect(dialog.getByRole("button", { name: "Confirm square off INFY", exact: true })).toBeEnabled(); }
@@ -131,7 +135,7 @@ test("operator-error repair leaves the real Practice review and sandbox positive
   await mountErrorPad(page, "practice"); await errorPad(page).getByRole("button", { name: "Practice Buy", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Review Practice order" }); await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Confirm simulated Practice order", exact: true }).click(); await tickUntil(page, errorPad(page).getByRole("alert"));
-  await expect(errorPad(page).getByRole("alert")).not.toContainText(/Order outcome unknown|Broker reason/); await captureEvidence(page, info, "practice-positive-not-native");
+  await expect(errorPad(page).getByRole("alert")).not.toContainText(/Order status unknown|Broker reason/); await captureEvidence(page, info, "practice-positive-not-native");
   presentationEvidence.assertWrites([{ method: "POST", path: "/ft-api/api/v1/orders/place", body }]); expect(syntheticApi.callCount("POST", ERROR_WRITE)).toBe(0);
 });
 
@@ -159,19 +163,22 @@ for (const viewport of [
     const arrived = page.waitForResponse((response) => response.url().endsWith(ERROR_WRITE));
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished(); expect(response.status()).toBe(fixture.status); expect(await response.json()).toEqual(fixture.raw);
-    const alert = errorPad(page).getByRole("alert"); await tickUntil(page, alert);
-    await expect(alert).toHaveText(fixture.expected); await expect(alert).toContainText("Broker code: 1021.");
-    await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Try again|Position flat|ACK/);
+    const alert = errorPad(page).getByRole(fixture.refused ? "alert" : "status"); await tickUntil(page, alert);
+    await expect(alert).toHaveText(fixture.expected);
+    if (fixture.refused) await expect(alert).toContainText("Broker code: 1021.");
+    else await expect(alert).not.toContainText(/Broker code|Origin:/);
+    await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Try again in a few|Position flat|ACK/);
     await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
     if (!fixture.refused) await expect(alert).not.toContainText(/Not placed|No order was sent/);
     for (const { mark } of UNICODE_ERROR_MARKS) expect(await alert.innerText()).not.toContain(mark);
     await assertPainted(alert, info, "unicode-pad-error"); await captureEvidence(page, info, "unicode-pad-error-visible");
-    const title = fixture.refused ? "Order refused: BUY INFY" : "Order outcome unknown: BUY INFY";
+    const title = fixture.refused ? "Order refused: BUY INFY" : "Order status unknown: BUY INFY";
     expect(await notifications(page)).toEqual([expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title, body: fixture.expected })]);
     await page.getByRole("button", { name: /^Notifications —/ }).click(); await page.clock.runFor(700);
     const centre = page.getByRole("dialog", { name: "Notification Centre" }); await expect(centre).toBeVisible();
     const article = centre.getByRole("article").filter({ hasText: fixture.expected }); await expect(article).toHaveCount(1);
-    await expect(article).toContainText(fixture.expected); await expect(article).toContainText("Broker code: 1021.");
+    await expect(article).toContainText(fixture.expected);
+    if (fixture.refused) await expect(article).toContainText("Broker code: 1021.");
     await expect(centre.getByText("Back to terminal", { exact: true })).toHaveCount(0);
     await assertPainted(article, info, "unicode-central-error"); await captureEvidence(page, info, "unicode-central-error-visible");
     const stored = await page.evaluate(() => localStorage.getItem("flinttrade:notifications"));
@@ -213,21 +220,21 @@ for (const viewport of [
     const beforeGets = [...getRequests];
     const paths = [errorPath("orders"), errorPath("positions"), errorPath("funds"), errorPath("orders", ERROR_B), errorPath("positions", ERROR_B), errorPath("funds", ERROR_B), "/ft-api/v1/sandbox/orders", "/ft-api/v1/sandbox/positions", "/ft-api/v1/sandbox/funds"];
     const reads = paths.map((path) => ({ path, count: syntheticApi.callCount("GET", path) }));
-    const title = fixture.title ?? (fixture.safe ? `Order outcome unknown: BUY ${symbol}` : "Order outcome unknown");
-    const expected = fixture.expected ?? (fixture.safe ? unknownCopy + ` Origin: kotakneo / KOTAK-OFFLINE · BUY ${symbol} (NSE / MIS). Broker reason (observation): Order is completed. Broker code: 1021.` : unknownCopy);
+    const title = fixture.title ?? (fixture.safe ? `Order status unknown: BUY ${symbol}` : "Order status unknown");
+    const expected = fixture.expected ?? unknownCopy;
     await info.attach("captured-origin-before-submit", { body: JSON.stringify({ symbol, body, scope: beforeScope, beforeStored, reads, getRequests: beforeGets, viewport }, null, 2), contentType: "application/json" });
     const arrived = page.waitForResponse((response) => response.url().endsWith(ERROR_WRITE));
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished(); expect(response.status()).toBe(status); expect(await response.json()).toEqual(raw);
-    const alert = errorPad(page).getByRole("alert"); await tickUntil(page, alert);
+    const alert = errorPad(page).getByRole(fixture.title === "Order failed" ? "alert" : "status"); await tickUntil(page, alert);
     await expect(alert).toHaveText(expected);
-    await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Not placed|Try again|Position flat|ACK/);
+    await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Not placed|Try again in a few|Position flat|ACK/);
     if (status === 500) await expect(alert).not.toContainText("No order was sent");
     await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
     await expect(errorPad(page).getByRole("textbox", { name: "Symbol", exact: true })).toHaveValue(symbol);
     if (!fixture.safe) await expect(alert).not.toContainText(/Origin:|Broker reason|Broker code|INFY|BUY/);
     await assertPainted(alert, info, "captured-pad-box");
-    await assertCapturedTextPainted(alert.locator("span").first(), info, "captured-pad-heading", fixture.expected ?? "Order outcome unknown.");
+    await assertCapturedTextPainted(alert.locator("span").first(), info, "captured-pad-heading", fixture.expected ?? "Order status unknown.");
     await assertCapturedTextPainted(alert.locator("span").first(), info, "captured-pad-body", expected);
     await captureEvidence(page, info, "captured-pad-visible");
     expect(await notifications(page)).toEqual([expect.objectContaining({ category: "order", accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title, body: expected })]);
@@ -259,5 +266,40 @@ for (const viewport of [
     expect(getRequests.filter((path) => path !== "/ft-api/api/v1/ping")).toEqual(beforeGets.filter((path) => path !== "/ft-api/api/v1/ping"));
     for (const read of reads) expect(syntheticApi.callCount("GET", read.path)).toBe(read.count);
     presentationEvidence.assertWrites([{ method: "POST", path: ERROR_WRITE, body }]);
+  });
+});
+
+test.describe("dropped Order Pad Close", () => {
+  test.use({
+    benignConsoleErrors: [{
+      text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+      url: `http://localhost:5173${ERROR_WRITE}`,
+      expectedCalls: 1,
+    }],
+  });
+
+  test("shows the unknown sentence, has no Retry, and sends one order POST", async ({ page, syntheticApi }) => {
+    registerErrorReads(syntheticApi);
+    registerRead(syntheticApi, `${errorPath("margin")}?symbol=INFY&exchange=NSE&qty=1&product=MIS&action=SELL&pricetype=MARKET`, {
+      json: { status: "success", data: { total_margin: 100, span_margin: 100, exposure_margin: 0 } },
+    }, { minimum: 0, maximum: 2 });
+    const closeBody = {
+      symbol: "INFY", exchange: "NSE", action: "SELL", product: "MIS", orderType: "MARKET",
+      quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad",
+      order_type: "MARKET", trigger_price: 0, broker: "kotakneo", account_id: ERROR_A,
+    };
+    let posts = 0;
+    await page.route(`**${ERROR_WRITE}`, async (route) => {
+      posts += 1;
+      expect(route.request().postDataJSON()).toEqual(closeBody);
+      await route.abort("connectionreset");
+    });
+    await mountErrorPad(page);
+    await errorPad(page).getByRole("button", { name: "Close", exact: true }).click();
+    const outcome = errorPad(page).getByRole("status").filter({ hasText: unknownCopy });
+    await tickUntil(page, outcome);
+    await expect(outcome).toBeVisible();
+    await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+    expect(posts).toBe(1);
   });
 });

@@ -288,7 +288,7 @@ describe("ScalperWidget", () => {
     expect(mockGetExpiry).not.toHaveBeenCalled();
   });
 
-  // ── FT-TRADE-009: Explore external-action gate (Telegram Send Test class) ─
+  // ── Explore external-action gate (Telegram Send Test class) ─
 
   const EXPLORE_SCALPER_HELPER = EXPLORE_SCALPER_ORDER_HELPER;
   const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for Example";
@@ -712,7 +712,7 @@ describe("ScalperWidget", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FT-TRADE-011: shared symbol bus (FDC3 red channel / selectedSymbolAtom)
+// shared symbol bus (FDC3 red channel / selectedSymbolAtom)
 // ---------------------------------------------------------------------------
 
 function scalperIndexValue(): string | null {
@@ -731,7 +731,7 @@ function renderScalperOnBus(
   return { ...view, store };
 }
 
-describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
+describe("ScalperWidget — shared symbol bus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTicks.current = {};

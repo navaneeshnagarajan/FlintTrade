@@ -26,6 +26,10 @@ import {
   type FeatureStatus,
 } from "./types";
 
+/** Public product roadmap. The badge stages are feature status; this link is the roadmap. */
+export const PRODUCT_ROADMAP_HREF =
+  "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/ROADMAP.md";
+
 // ---------------------------------------------------------------------------
 // Stage index helpers
 // ---------------------------------------------------------------------------
@@ -158,25 +162,33 @@ export function RoadmapBadge({ status, className }: RoadmapBadgeProps) {
   const reduceMotion = motionConfig.prefersReducedMotion();
 
   return (
-    <div
-      role="group"
-      aria-label={`Feature roadmap — current stage: ${ROADMAP_STAGE_LABELS[status]}`}
-      className={cn("flex items-start w-full px-1", className)}
-    >
-      {ROADMAP_STAGES.map((stage, i) => (
-        <div key={stage} className="flex items-start flex-1">
-          <StageDot
-            stage={stage}
-            activeIndex={activeIndex}
-            index={i}
-            reduceMotion={reduceMotion}
-          />
-          {/* Connector after every stage except the last */}
-          {i < ROADMAP_STAGES.length - 1 && (
-            <Connector leftIndex={i} activeIndex={activeIndex} />
-          )}
-        </div>
-      ))}
+    <div className={cn("flex flex-col gap-1 w-full", className)}>
+      <div
+        role="group"
+        aria-label={`Feature roadmap — current stage: ${ROADMAP_STAGE_LABELS[status]}`}
+        className="flex items-start w-full px-1"
+      >
+        {ROADMAP_STAGES.map((stage, i) => (
+          <div key={stage} className="flex items-start flex-1">
+            <StageDot
+              stage={stage}
+              activeIndex={activeIndex}
+              index={i}
+              reduceMotion={reduceMotion}
+            />
+            {/* Connector after every stage except the last */}
+            {i < ROADMAP_STAGES.length - 1 && (
+              <Connector leftIndex={i} activeIndex={activeIndex} />
+            )}
+          </div>
+        ))}
+      </div>
+      <a
+        href={PRODUCT_ROADMAP_HREF}
+        className="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+      >
+        Product roadmap
+      </a>
     </div>
   );
 }

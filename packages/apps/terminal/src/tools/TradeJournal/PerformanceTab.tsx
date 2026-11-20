@@ -14,7 +14,7 @@
  *   - avg-loss sign: ``computeAnalytics`` reports the signed average; R:R and
  *     expectancy take the absolute value explicitly.
  *
- * Timeframe scope (FT-TRADE-006):
+ * Timeframe scope:
  *   - "Review range" (default) — the tool's committed header date range,
  *     sharing the tool's main analytics query (``TRADE_JOURNAL_MAX_LIMIT``,
  *     1000). Opening Performance never auto-jumps to YTD; an empty Review

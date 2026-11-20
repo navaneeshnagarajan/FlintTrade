@@ -89,134 +89,144 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
           class="mb-4"
         >
           <div
-            aria-label="Feature roadmap — current stage: Designed"
-            class="flex items-start w-full px-1"
-            role="group"
+            class="flex flex-col gap-1 w-full"
           >
             <div
-              class="flex items-start flex-1"
+              aria-label="Feature roadmap — current stage: Designed"
+              class="flex items-start w-full px-1"
+              role="group"
             >
               <div
-                class="flex flex-col items-center gap-1 relative"
+                class="flex items-start flex-1"
               >
                 <div
-                  class="relative flex items-center justify-center w-5 h-5"
+                  class="flex flex-col items-center gap-1 relative"
                 >
                   <div
-                    aria-hidden="true"
-                    class="absolute inset-0 rounded-full"
-                    style="background: rgba(59, 130, 246, 0.25);"
-                    transition="[object Object]"
-                  />
+                    class="relative flex items-center justify-center w-5 h-5"
+                  >
+                    <div
+                      aria-hidden="true"
+                      class="absolute inset-0 rounded-full"
+                      style="background: rgba(59, 130, 246, 0.25);"
+                      transition="[object Object]"
+                    />
+                    <div
+                      aria-hidden="true"
+                      class="absolute inset-0 rounded-full bg-blue-400"
+                      layoutid="roadmap-active"
+                      transition="[object Object]"
+                    />
+                    <div
+                      aria-label="Designed: current"
+                      class="relative z-10 rounded-full transition-[width,height] duration-200 w-3 h-3 bg-blue-400"
+                      role="img"
+                    />
+                  </div>
+                  <span
+                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
+                  >
+                    Designed
+                  </span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  class="relative flex-1 mx-1 h-px mt-2.5"
+                >
                   <div
-                    aria-hidden="true"
-                    class="absolute inset-0 rounded-full bg-blue-400"
-                    layoutid="roadmap-active"
-                    transition="[object Object]"
-                  />
-                  <div
-                    aria-label="Designed: current"
-                    class="relative z-10 rounded-full transition-[width,height] duration-200 w-3 h-3 bg-blue-400"
-                    role="img"
+                    class="absolute inset-0 bg-border-default"
                   />
                 </div>
-                <span
-                  class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
-                >
-                  Designed
-                </span>
               </div>
               <div
-                aria-hidden="true"
-                class="relative flex-1 mx-1 h-px mt-2.5"
+                class="flex items-start flex-1"
               >
                 <div
-                  class="absolute inset-0 bg-border-default"
-                />
+                  class="flex flex-col items-center gap-1 relative"
+                >
+                  <div
+                    class="relative flex items-center justify-center w-5 h-5"
+                  >
+                    <div
+                      aria-label="In Dev: upcoming"
+                      class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
+                      role="img"
+                    />
+                  </div>
+                  <span
+                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                  >
+                    In Dev
+                  </span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  class="relative flex-1 mx-1 h-px mt-2.5"
+                >
+                  <div
+                    class="absolute inset-0 bg-border-default"
+                  />
+                </div>
+              </div>
+              <div
+                class="flex items-start flex-1"
+              >
+                <div
+                  class="flex flex-col items-center gap-1 relative"
+                >
+                  <div
+                    class="relative flex items-center justify-center w-5 h-5"
+                  >
+                    <div
+                      aria-label="Testing: upcoming"
+                      class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
+                      role="img"
+                    />
+                  </div>
+                  <span
+                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                  >
+                    Testing
+                  </span>
+                </div>
+                <div
+                  aria-hidden="true"
+                  class="relative flex-1 mx-1 h-px mt-2.5"
+                >
+                  <div
+                    class="absolute inset-0 bg-border-default"
+                  />
+                </div>
+              </div>
+              <div
+                class="flex items-start flex-1"
+              >
+                <div
+                  class="flex flex-col items-center gap-1 relative"
+                >
+                  <div
+                    class="relative flex items-center justify-center w-5 h-5"
+                  >
+                    <div
+                      aria-label="Live: upcoming"
+                      class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
+                      role="img"
+                    />
+                  </div>
+                  <span
+                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                  >
+                    Live
+                  </span>
+                </div>
               </div>
             </div>
-            <div
-              class="flex items-start flex-1"
+            <a
+              class="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+              href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/ROADMAP.md"
             >
-              <div
-                class="flex flex-col items-center gap-1 relative"
-              >
-                <div
-                  class="relative flex items-center justify-center w-5 h-5"
-                >
-                  <div
-                    aria-label="In Dev: upcoming"
-                    class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
-                    role="img"
-                  />
-                </div>
-                <span
-                  class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
-                >
-                  In Dev
-                </span>
-              </div>
-              <div
-                aria-hidden="true"
-                class="relative flex-1 mx-1 h-px mt-2.5"
-              >
-                <div
-                  class="absolute inset-0 bg-border-default"
-                />
-              </div>
-            </div>
-            <div
-              class="flex items-start flex-1"
-            >
-              <div
-                class="flex flex-col items-center gap-1 relative"
-              >
-                <div
-                  class="relative flex items-center justify-center w-5 h-5"
-                >
-                  <div
-                    aria-label="Testing: upcoming"
-                    class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
-                    role="img"
-                  />
-                </div>
-                <span
-                  class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
-                >
-                  Testing
-                </span>
-              </div>
-              <div
-                aria-hidden="true"
-                class="relative flex-1 mx-1 h-px mt-2.5"
-              >
-                <div
-                  class="absolute inset-0 bg-border-default"
-                />
-              </div>
-            </div>
-            <div
-              class="flex items-start flex-1"
-            >
-              <div
-                class="flex flex-col items-center gap-1 relative"
-              >
-                <div
-                  class="relative flex items-center justify-center w-5 h-5"
-                >
-                  <div
-                    aria-label="Live: upcoming"
-                    class="relative z-10 rounded-full transition-[width,height] duration-200 w-2 h-2 border border-border-default bg-transparent"
-                    role="img"
-                  />
-                </div>
-                <span
-                  class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
-                >
-                  Live
-                </span>
-              </div>
-            </div>
+              Product roadmap
+            </a>
           </div>
         </div>
         <div

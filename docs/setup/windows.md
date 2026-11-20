@@ -23,7 +23,7 @@ run:
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
-It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node and
+It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node and
 pnpm) into `~\.flinttrade\tools`, builds FlintTrade from a managed source
 checkout at `~\.flinttrade\web-src\FlintTrade`, and installs a launcher at
 `%LOCALAPPDATA%\Programs\FlintTradeWeb\flinttrade-web.cmd` plus a **FlintTrade
@@ -130,7 +130,7 @@ not cross-platform proof.
 
 ## Source development (advanced)
 
-Requires: Python `>=3.12`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
+Requires: Python `>=3.14`, Node.js `>=22.23.4`, `uv`, pnpm 10.34.5, Git, and
 optionally Rust. Those floors come from `[requirements]` in `flint.toml`, which
 is the single source of truth for them.
 `make` is **not** required and is not available on Windows — use

@@ -1,7 +1,7 @@
 /**
  * MetricCards.test.tsx
  *
- * Pins FT-LAB-002: Lab headline metrics must show one formatted value.
+ * Pins Lab headline metrics must show one formatted value.
  * AnimatedCounter used to paint a leftover count-up `0.00` beside an
  * sr-only final figure — Sharpe read as "0.00 1.84".
  */

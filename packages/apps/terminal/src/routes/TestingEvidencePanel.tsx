@@ -6,6 +6,7 @@ import { EVIDENCE_KINDS, HistoryBacktestRequest, readEvaluationEvidence, scoreEv
 
 import { runBacktest, type BacktestResult } from "@/services/ftApi";
 
+import { NativeSelect } from "@/components/ui/native-select";
 export default function TestingEvidencePanel() {
   const scope = useEvaluationScope();
   return <TestingActions key={scope} scope={scope} />;
@@ -57,7 +58,7 @@ function TestingActions({ scope }: { scope: string }) {
         {receipt.experimentId && <Button variant="outline" onClick={() => selectEvidence("experiments", receipt.experimentId!)}>Read experiment {receipt.experimentId}</Button>}
       </li>)}</ul>
       <p className="text-xs text-text-muted">References are captured automatically from X-Experiment-Id / X-Trial-Id for this session and execution scope, including failed runs. Core remains the durable evidence owner.</p>
-      <label className="block text-sm">Evidence kind<select aria-label="Evidence kind" className="ml-2 rounded bg-surface-card p-2" value={kind} onChange={e => { setKind(e.target.value as EvidenceKind); setEvidence(null); setNotice(""); setError(""); }}>{Object.entries(EVIDENCE_KINDS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+      <label className="block text-sm">Evidence kind<NativeSelect aria-label="Evidence kind" wrapperClassName="ml-2" value={kind} onChange={e => { setKind(e.target.value as EvidenceKind); setEvidence(null); setNotice(""); setError(""); }}>{Object.entries(EVIDENCE_KINDS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</NativeSelect></label>
       <Input aria-label="Immutable evidence ID" value={id} onChange={e => { setId(e.target.value); setEvidence(null); setNotice(""); setError(""); }} />
       <Button disabled={!id} onClick={() => void perform(() => readEvaluationEvidence(kind, id, scope))}>Read evidence</Button>
     </fieldset>
@@ -91,7 +92,7 @@ function TestingActions({ scope }: { scope: string }) {
       <legend className="font-semibold">Optional training</legend>
       <p className="text-sm">Submit only an exact request already prepared by core, with its immutable batch and run. Dataset/provider/purpose consent, recorded limits, current rights, owner-only decision training and protection-independent capacity are required. Inference access is not a learning grant. No local uploads, resume, streaming or publication.</p>
       {([["request_id", "Training request ID"], ["model_name", "Training model"], ["training_type", "Training method"], ["format_type", "Training format"], ["hf_dataset", "Registered remote dataset"], ["dataset", "Immutable batch ID"], ["run_id", "Training run ID"]] as const).map(([key, label]) => <label key={key} className="block text-sm">{label}<Input aria-label={label} value={training[key]} onChange={e => setTraining(previous => ({ ...previous, [key]: e.target.value }))} /></label>)}
-      <label className="block text-sm">Decision training<select aria-label="Decision training" value={decision} onChange={e => setDecision(e.target.value)} className="ml-2 rounded bg-surface-card p-2"><option value="">As prepared (field omitted)</option><option value="true">Yes — Studio owner required</option><option value="false">No</option></select></label>
+      <label className="block text-sm">Decision training<NativeSelect aria-label="Decision training" value={decision} onChange={e => setDecision(e.target.value)} wrapperClassName="ml-2"><option value="">As prepared (field omitted)</option><option value="true">Yes — Studio owner required</option><option value="false">No</option></NativeSelect></label>
       <Button disabled={Object.values(training).some(value => !value)} onClick={() => {
         const body = { request_id: training.request_id, payload: { model_name: training.model_name, training_type: training.training_type, format_type: training.format_type, hf_dataset: training.hf_dataset, ...(decision ? { is_decision: decision === "true" } : {}) }, lineage: { dataset: training.dataset, run_id: training.run_id } };
         setConfirmation({ label: "Submit this prepared training request", body, run: () => startTraining(body, scope) });
@@ -105,7 +106,7 @@ function TestingActions({ scope }: { scope: string }) {
       <legend className="font-semibold">Qualified adoption and rollback</legend>
       <p className="text-sm">Only a pre-authorised role/run within unchanged risk limits is eligible. Core must verify independent evaluation, prospective evidence, current grant, staged serving identity, protection and handover. Rollback additionally requires a retained qualified target. This action never switches the global Live/Practice mode.</p>
       {([["request_id", "Adoption request ID"], ["run_id", "Target run ID"], ["role", "Target role"], ["candidate", "Candidate version ID"], ["expected_generation", "Expected run generation"]] as const).map(([key, label]) => <label key={key} className="block text-sm">{label}<Input aria-label={label} value={adoption[key]} onChange={e => setAdoption(previous => ({ ...previous, [key]: e.target.value }))} /></label>)}
-      <label className="block text-sm">Adoption operation<select aria-label="Adoption operation" value={adoptionKind} onChange={e => setAdoptionKind(e.target.value)} className="ml-2 rounded bg-surface-card p-2"><option value="adopt">Adopt qualified candidate</option><option value="rollback">Rollback to retained candidate</option></select></label>
+      <label className="block text-sm">Adoption operation<NativeSelect aria-label="Adoption operation" value={adoptionKind} onChange={e => setAdoptionKind(e.target.value)} wrapperClassName="ml-2"><option value="adopt">Adopt qualified candidate</option><option value="rollback">Rollback to retained candidate</option></NativeSelect></label>
       <Button disabled={Object.values(adoption).some(value => !value)} onClick={() => {
         const body = { ...adoption, expected_generation: /^\d+$/.test(adoption.expected_generation) ? Number(adoption.expected_generation) : NaN, kind: adoptionKind };
         setConfirmation({ label: "Request the exact run-owned transition", body, run: () => adoptArtifact(body, scope) });

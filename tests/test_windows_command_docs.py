@@ -99,19 +99,6 @@ _WINDOWS_DOC_GLOBS: tuple[tuple[str, str], ...] = (
 # ---------------------------------------------------------------------------
 _AMPERSAND_ALLOWLIST: tuple[tuple[str, str], ...] = (
     (
-        "CLAUDE.md",
-        # Agent/maintainer guidance, not a user-facing setup page. Its snippets mirror the
-        # POSIX Makefile aliases run on the maintainer's macOS/Linux shell; Windows
-        # contributors are pointed at `python scripts/ft.py` by docs/setup/windows.md.
-        "agent-facing repo guide; mirrors POSIX-only Makefile aliases, never pasted by a Windows user",
-    ),
-    (
-        "docs/superpowers/specs/*.md",
-        # Frozen design specs describing deployment onto a Linux host (`cd /opt/flinttrade &&
-        # make setup`). They are a record of a decision, not instructions anyone follows today.
-        "frozen design specs describing Linux server deployment; historical record, not user instructions",
-    ),
-    (
         "flinttrade-design/baselines/*.md",
         # Dated rollback runbooks. They record verbatim what was executed on the Linux
         # release host on a specific day; rewriting them would falsify the record.

@@ -25,8 +25,8 @@ platform. Pick whatever you already run.
 
 | Tool | Version | How we manage it |
 |---|---|---|
-| **Python** | `>=3.12` (we develop against 3.14) | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
-| **Node.js** | `>=22.22.2` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
+| **Python** | `>=3.14` | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
+| **Node.js** | `>=22.23.4` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
 | **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick engine. |
 
 Those floors are not maintained here. `[requirements]` in
@@ -223,7 +223,7 @@ Never use `git add -A` or `git add .`. Stage the files you actually changed.
 
 **Never commit personal infrastructure or secrets.** This means no IP addresses,
 hostnames, VPN configs or endpoints, broker account names or IDs, fund amounts,
-order IDs, API keys, or `.env`. FlintTrade is personal-use open-source: anything
+order IDs, API keys, or `.env`. FlintTrade is self-hosted open-source software: anything
 that points at *your* machine, network, or accounts stays out of the repo. Use
 placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
 values in your private, gitignored `.env` only for dev/server fallback paths, and store secrets as keyring/env
@@ -244,6 +244,16 @@ staging the file. There is no tracked pre-commit secret hook.
 
 Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to `main` — but only while we're pre-1.0.
 
+## Issue labels
+
+| Label | Meaning |
+| --- | --- |
+| `needs-triage` | Needs evaluation |
+| `needs-info` | Waiting on the reporter |
+| `ready-for-agent` | Specified enough for an automated change |
+| `ready-for-human` | Needs a human implementation |
+| `wontfix` | Will not be actioned |
+
 ## Code style and lint
 
 ### Python
@@ -256,10 +266,9 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
 - Absolute imports for anything cross-package or top-level
   (`flinttrade_<pkg>....`). Intra-package relative imports
   (`from .sibling import x`) are fine.
-- The floor is Python 3.12 (`python_requires` in `flint.toml`); we develop and
-  run CI against `python_target`, currently 3.14. Write to the floor — `StrEnum`
-  and other 3.11+ features are used deliberately — but do not assume 3.12 is what
-  is executing.
+- The floor is Python 3.14 (`python_requires` in `flint.toml`), and CI runs
+  that same series. Write to the floor — `list[int]` and `X | None` — and do
+  not assume an older interpreter is executing.
 
 ### TypeScript and React
 

@@ -25,7 +25,7 @@ function closedHost(): OperatorSignals {
   };
 }
 
-describe("FT-UX-001 primary banner priority", () => {
+describe("primary banner priority", () => {
   it("Explore leaves the incident slot empty", () => {
     expect(
       selectPrimaryBanner({

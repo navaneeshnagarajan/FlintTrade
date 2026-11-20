@@ -7,7 +7,7 @@ const LAYOUT_KEY = "flinttrade:app-layouts:v1:terminal";
 
 test("creates, clones, switches, and restores two canonical workspaces", async ({ page, syntheticApi }) => {
   await seedExploreDemoSession(page);
-  // Explore probes advisor status (FT-AI-001) and the Mode menu reads
+  // Explore probes advisor status and the Mode menu reads
   // Live-arm status. `useAdvisorLlmStatus` refetches on every mount
   // (staleTime 0). Template create, clone, the Options Desk switch, the
   // switch back, and the reload each remount that probe. This journey
@@ -47,35 +47,29 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await page.goto("/trade");
   await expect(page).toHaveURL("http://localhost:5173/terminal");
   const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
-  const chrome = page.locator('[data-app-chrome="terminal"]');
-  const preset = chrome.getByRole("combobox", { name: "Terminal preset", exact: true });
-  const restore = chrome.getByRole("combobox", { name: "Restore saved layout", exact: true });
+  const preset = workspace.getByRole("combobox", { name: "Terminal preset", exact: true });
+  const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
   await expect(workspace).toBeVisible();
-  await page.getByRole("button", { name: "Use Watchlist driven layout", exact: true }).click();
-  await expect(preset.locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
-  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
+  // Layout management opens from the app toolbar and stays open until closed.
+  await workspace.getByRole("button", { name: "Layout", exact: true }).click();
+  await expect(preset.locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
   await preset.selectOption("trader");
-  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
+  await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
   const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
   await catalogue.getByRole("button", { name: "Add Risk", exact: true }).click();
-  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
-  // Named-layout controls remain native, inside the public disclosure.
-  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
-  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
+  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+  await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk");
+  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(workspace.getByRole("status")).toHaveText("Saved Trading Desk");
   const original = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk"], LAYOUT_KEY);
 
   // Save-as is the clone owner. Prove identity first, then edit only the copy.
-  await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk (Copy)");
-  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
+  await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill("Trading Desk (Copy)");
+  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY)).toEqual(original);
   await preset.selectOption("options-scalper");
-  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await expect(workspace.getByRole("tab", { name: "Option Chain", exact: true })).toBeVisible();
-  await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-  await chrome.getByRole("button", { name: "Save layout", exact: true }).click();
+  await expect(workspace.getByText("Option Chain", { exact: true }).first()).toBeVisible();
+  await workspace.getByRole("button", { name: "Save layout", exact: true }).click();
   const copy = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk (Copy)"], LAYOUT_KEY);
   expect(copy).not.toEqual(original);
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Trading Desk"], LAYOUT_KEY)).toEqual(original);
@@ -83,14 +77,12 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
 
   for (const [name, expected, label] of [["Trading Desk", original, "Risk"], ["Trading Desk (Copy)", copy, "Option Chain"], ["Trading Desk", original, "Risk"]] as const) {
     await restore.selectOption({ label: name });
-    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-    await expect(workspace.getByRole("tab", { name: label, exact: true })).toBeVisible();
+    await expect(workspace.getByText(label, { exact: true }).first()).toBeVisible();
     await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key)!).Current, LAYOUT_KEY)).toEqual(expected);
-    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
   }
   await page.reload();
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
+  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
   const persisted = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
   expect(Object.keys(persisted).sort()).toEqual(["Current", "Trading Desk", "Trading Desk (Copy)"]);
   expect(persisted["Trading Desk"]).toEqual(original);
@@ -179,23 +171,22 @@ for (const draftMode of ["new", "edit"] as const) {
     await page.goto("/settings#presets");
     await expect(page).toHaveURL("http://localhost:5173/terminal");
     const workspace = page.getByRole("region", { name: "Terminal app", exact: true });
-  const chrome = page.locator('[data-app-chrome="terminal"]');
     await expect(workspace).toBeVisible();
-    await chrome.locator("summary").filter({ hasText: "Layout actions" }).click();
-    const restore = chrome.getByRole("combobox", { name: "Restore saved layout", exact: true });
+    await workspace.getByRole("button", { name: "Layout", exact: true }).click();
+    const restore = workspace.getByRole("combobox", { name: "Restore saved layout", exact: true });
     await expect(restore.locator("option")).toHaveText(["Restore layout", "Synthetic saved layout"]);
     const before = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)["Synthetic saved layout"], LAYOUT_KEY);
     if (draftMode === "edit") await restore.selectOption({ label: "Synthetic saved layout" });
-    else await chrome.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("trader");
+    else await workspace.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("trader");
     const draftName = `Unsaved ${draftMode} browser draft`;
-    await chrome.getByRole("textbox", { name: "Layout name", exact: true }).fill(draftName);
-    await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
+    await workspace.getByRole("textbox", { name: "Layout name", exact: true }).fill(draftName);
+    await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
     const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
     await catalogue.getByRole("button", { name: "Add Risk", exact: true }).click();
     const expectDraft = async (): Promise<void> => {
       await expect(workspace).toBeVisible();
-      await expect(chrome.getByRole("textbox", { name: "Layout name", exact: true })).toHaveValue(draftName);
-      await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
+      await expect(workspace.getByRole("textbox", { name: "Layout name", exact: true })).toHaveValue(draftName);
+      await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
       await expect.poll(() => page.evaluate(key => JSON.stringify(JSON.parse(localStorage.getItem(key)!).Current), LAYOUT_KEY)).toContain('"riskdashboard"');
       const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
       expect(saved[draftName]).toBeUndefined();
@@ -207,10 +198,8 @@ for (const draftMode of ["new", "edit"] as const) {
     // A different app and chrome overlay replace the old manager's views.
     // Preserve the unsaved name/composition and the exact saved source bytes.
     const apps = page.getByRole("navigation", { name: "Apps", exact: true });
-    await apps.getByRole("button", { name: "Choose app", exact: true }).click();
     await apps.getByRole("link", { name: "Learn", exact: true }).click();
     await expect(workspace).not.toBeVisible();
-    await apps.getByRole("button", { name: "Choose app", exact: true }).click();
     await apps.getByRole("link", { name: "Terminal", exact: true }).click();
     await expectDraft();
     await page.keyboard.press("Control+,");
@@ -221,7 +210,7 @@ for (const draftMode of ["new", "edit"] as const) {
     await expectDraft();
 
     for (const dismissal of ["Close", "Escape"] as const) {
-      await chrome.getByRole("button", { name: "Add widget", exact: true }).click();
+      await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
       await expect(catalogue).toBeVisible();
       await expect(catalogue.getByRole("button", { name: "Add Risk", exact: true })).toBeVisible();
       if (dismissal === "Close") await catalogue.getByRole("button", { name: "Close widget catalogue", exact: true }).click();

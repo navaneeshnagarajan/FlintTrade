@@ -19,7 +19,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — install Python dependencies with uv
 # ---------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
 
 WORKDIR /app
 
@@ -38,7 +38,7 @@ RUN python scripts/broker_sdk_environment.py repair
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime — minimal image with only what we need
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.14-slim-trixie AS runtime
 
 # Install runtime dependencies: curl (health checks), tini (init system)
 RUN apt-get update \
@@ -51,7 +51,7 @@ RUN groupadd -r flinttrade && useradd -r -g flinttrade -m flinttrade
 WORKDIR /app
 
 # Copy installed Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code

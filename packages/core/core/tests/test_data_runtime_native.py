@@ -1,4 +1,4 @@
-"""Shared native history uses real read authority; HTTP cutover stays closed."""
+"""Shared native history uses real read authority; the HTTP session stays closed."""
 from __future__ import annotations
 
 import time

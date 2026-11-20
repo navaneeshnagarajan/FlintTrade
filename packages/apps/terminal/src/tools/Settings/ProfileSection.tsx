@@ -62,7 +62,9 @@ export function ProfileSection() {
 
   const loggedIn = authStatus === "logged-in";
 
-  const modeMeta = MODE_META[mode];
+  const modeMeta = mode === "unavailable"
+    ? { label: "Unavailable", icon: Compass, className: "bg-text-muted/15 text-text-secondary border-text-muted/25" }
+    : MODE_META[mode];
   const ModeIcon = modeMeta.icon;
   const initial = (name.trim()[0] ?? "T").toUpperCase();
 

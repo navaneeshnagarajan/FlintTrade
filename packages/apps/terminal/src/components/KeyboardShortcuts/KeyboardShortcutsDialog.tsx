@@ -39,6 +39,11 @@ export interface ShortcutEntry {
   keys: string[];
   /** Category this shortcut belongs to */
   category: ShortcutCategory;
+  /**
+   * Kept working, but omitted from the shortcut list.
+   * Used for a second binding that does the same thing as a listed entry.
+   */
+  hidden?: boolean;
 }
 
 export type ShortcutCategory = "Navigation" | "Trading" | "Chart" | "General";
@@ -68,16 +73,17 @@ export const SHORTCUT_ENTRIES: ShortcutEntry[] = [
     category: "Navigation",
   },
   {
-    id: "go-home",
-    label: "Go to Home",
-    keys: ["Alt", "H"],
+    id: "go-terminal",
+    label: "Go to Terminal",
+    keys: ["Alt", "T"],
     category: "Navigation",
   },
   {
-    id: "go-trade",
-    label: "Go to Trade",
-    keys: ["Alt", "T"],
+    id: "go-terminal-alias",
+    label: "Go to Terminal",
+    keys: ["Alt", "H"],
     category: "Navigation",
+    hidden: true,
   },
 
   // Trading
@@ -325,12 +331,13 @@ export default function KeyboardShortcutsDialog({
   const isSearching = trimmed.length > 0;
 
   // Filter entries by label.
+  const listed = SHORTCUT_ENTRIES.filter((e) => !e.hidden);
   const filtered = isSearching
-    ? SHORTCUT_ENTRIES.filter((e) =>
+    ? listed.filter((e) =>
         e.label.toLowerCase().includes(trimmed.toLowerCase()) ||
         e.keys.some((k) => k.toLowerCase().includes(trimmed.toLowerCase())),
       )
-    : SHORTCUT_ENTRIES;
+    : listed;
 
   // Group by category in the defined order.
   const grouped = CATEGORY_ORDER.map((cat) => ({

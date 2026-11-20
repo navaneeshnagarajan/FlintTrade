@@ -40,7 +40,6 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 }));
 
 import { useModeStore } from "@/stores/modeStore";
-import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 import { MonitoringSection } from "../MonitoringSection";
 
 const traffic = {
@@ -103,7 +102,6 @@ describe("MonitoringSection host resources", () => {
     api.getTrafficStats.mockResolvedValue(traffic);
     api.getLatencyStats.mockResolvedValue({});
     useModeStore.setState({ mode: "explore" });
-    setConnectedReadPosture(false);
   });
 
   it("paints install-host disk, RAM, CPU, GPU, and network", async () => {
@@ -130,7 +128,6 @@ describe("MonitoringSection host resources", () => {
 
   it("renders a retired Explore service note as Example in every Mode", async () => {
     useModeStore.setState({ mode: "practice" });
-    setConnectedReadPosture(true);
     api.getHealth.mockResolvedValue(health());
     const { unmount } = renderSection();
 

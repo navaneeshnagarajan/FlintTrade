@@ -25,6 +25,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { lotCountLabel } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
@@ -96,19 +97,22 @@ function PillGroup<T extends string>({ label, options, value, onChange }: PillGr
 // Status banner
 // ---------------------------------------------------------------------------
 
-type Status = { type: "success"; message: string } | { type: "error"; message: string } | null;
+type Status = { type: "success" | "error" | "unknown"; message: string } | null;
 
 function StatusBanner({ status }: { status: Status }) {
   if (!status) return null;
   const isSuccess = status.type === "success";
+  const unknown = status.type === "unknown";
   return (
     <div
       role="status"
       aria-live="polite"
       className={`flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border ${
-        isSuccess
-          ? "bg-profit/10 text-profit border-profit/30"
-          : "bg-loss/10 text-loss border-loss/30"
+        unknown
+          ? "bg-warning/10 text-warning border-warning/30"
+          : isSuccess
+            ? "bg-profit/10 text-profit border-profit/30"
+            : "bg-loss/10 text-loss border-loss/30"
       }`}
     >
       {isSuccess ? <CheckCircle2 size={11} aria-hidden="true" /> : <AlertCircle size={11} aria-hidden="true" />}
@@ -314,8 +318,8 @@ function QuickTradeWidget(props: WidgetProps) {
           return;
         }
         setAdmission(null);
-        const msg = err instanceof Error ? err.message : "Order failed";
-        setStatus({ type: "error", message: msg });
+        const outcome = presentSubmitError(err);
+        setStatus({ type: outcome.kind === "unknown" ? "unknown" : "error", message: outcome.message });
       } finally {
         setIsPending(false);
       }

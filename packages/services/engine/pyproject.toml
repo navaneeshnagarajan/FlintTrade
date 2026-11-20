@@ -2,7 +2,7 @@
 name = "flinttrade-engine"
 version = "0.0.1"
 description = "5-layer safety system, order router, scheduler, strategy registry, position sizer, sandbox executor"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "flinttrade-core",
     "flinttrade-data",

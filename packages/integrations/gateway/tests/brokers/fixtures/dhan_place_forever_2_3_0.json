@@ -1,0 +1,130 @@
+{
+  "single": {
+    "security_id": "11536",
+    "tag": "synthetic-correlation",
+    "order": {
+      "symbol": "TCS",
+      "action": "BUY",
+      "exchange": "NSE",
+      "product": "CNC",
+      "pricetype": "LIMIT",
+      "quantity": "5",
+      "price": "2900",
+      "trigger_price": "2890",
+      "disclosed_quantity": "2",
+      "validity": "IOC",
+      "variety": "gtt"
+    },
+    "kwargs": {
+      "security_id": "11536",
+      "exchange_segment": "NSE_EQ",
+      "transaction_type": "BUY",
+      "product_type": "CNC",
+      "order_type": "LIMIT",
+      "quantity": 5,
+      "price": 2900.0,
+      "trigger_Price": 2890.0,
+      "order_flag": "SINGLE",
+      "disclosed_quantity": 2,
+      "validity": "IOC",
+      "tag": "synthetic-correlation"
+    }
+  },
+  "short": {
+    "security_id": "11536",
+    "tag": null,
+    "order": {
+      "symbol": "RELIANCE",
+      "action": "SELL",
+      "exchange": "NSE",
+      "product": "MTF",
+      "pricetype": "MARKET",
+      "quantity": "1",
+      "price": "0",
+      "trigger_price": "2500",
+      "variety": "gtt"
+    },
+    "kwargs": {
+      "security_id": "11536",
+      "exchange_segment": "NSE_EQ",
+      "transaction_type": "SELL",
+      "product_type": "MTF",
+      "order_type": "MARKET",
+      "quantity": 1,
+      "price": 0.0,
+      "trigger_Price": 2500.0,
+      "order_flag": "SINGLE",
+      "disclosed_quantity": 0,
+      "validity": "DAY"
+    }
+  },
+  "oco": {
+    "security_id": "11536",
+    "tag": null,
+    "order": {
+      "symbol": "RELIANCE",
+      "action": "BUY",
+      "exchange": "NSE",
+      "product": "CNC",
+      "pricetype": "LIMIT",
+      "quantity": "5",
+      "price": "2900",
+      "trigger_price": "2890",
+      "variety": "gtt",
+      "price1": "2800",
+      "trigger_price1": "2805",
+      "quantity1": "5"
+    },
+    "kwargs": {
+      "security_id": "11536",
+      "exchange_segment": "NSE_EQ",
+      "transaction_type": "BUY",
+      "product_type": "CNC",
+      "order_type": "LIMIT",
+      "quantity": 5,
+      "price": 2900.0,
+      "trigger_Price": 2890.0,
+      "order_flag": "OCO",
+      "disclosed_quantity": 0,
+      "validity": "DAY",
+      "price1": 2800.0,
+      "trigger_Price1": 2805.0,
+      "quantity1": 5
+    }
+  },
+  "multi_lot": {
+    "security_id": "49229",
+    "tag": "lot-correlation",
+    "order": {
+      "symbol": "NIFTY25JUN24000CE",
+      "action": "BUY",
+      "exchange": "NFO",
+      "product": "CNC",
+      "pricetype": "LIMIT",
+      "quantity": "150",
+      "price": "12.5",
+      "trigger_price": "11",
+      "variety": "gtt",
+      "price1": "20",
+      "trigger_price1": "19.5",
+      "quantity1": "75"
+    },
+    "kwargs": {
+      "security_id": "49229",
+      "exchange_segment": "NSE_FNO",
+      "transaction_type": "BUY",
+      "product_type": "CNC",
+      "order_type": "LIMIT",
+      "quantity": 150,
+      "price": 12.5,
+      "trigger_Price": 11.0,
+      "order_flag": "OCO",
+      "disclosed_quantity": 0,
+      "validity": "DAY",
+      "price1": 20.0,
+      "trigger_Price1": 19.5,
+      "quantity1": 75,
+      "tag": "lot-correlation"
+    }
+  }
+}

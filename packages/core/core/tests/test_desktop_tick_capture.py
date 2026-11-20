@@ -571,6 +571,16 @@ def test_failed_storage_close_remains_retryable_and_unpublished(
 
 @pytest.mark.unit
 def test_deferred_storage_close_retries_one_transient_checkpoint_failure_in_one_call() -> None:
+    """One close call retries exactly one transient checkpoint failure.
+
+    ``close_storage`` spends a single deadline on the failing attempt and the
+    retry. The budget is a ceiling, not a sleep: the call returns as soon as
+    the retry finishes. One second does not leave enough of that deadline for
+    a loaded runner to schedule the close worker, publish the injected
+    failure, and observe the retry.
+    """
+    # Ceiling for scheduling the failing checkpoint worker and its one retry.
+    close_budget_seconds = 10.0
     recorder = MagicMock(pending_tick_count=0)
     storage = MagicMock()
     checkpoint_owner = MagicMock()
@@ -582,7 +592,7 @@ def test_deferred_storage_close_retries_one_transient_checkpoint_failure_in_one_
     )
 
     runtime.stop(timeout=1, close_storage=False)
-    runtime.close_storage(timeout=1)
+    runtime.close_storage(timeout=close_budget_seconds)
 
     assert checkpoint_owner.persist.call_args_list == [
         call(force=True),

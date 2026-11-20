@@ -21,7 +21,7 @@ function resolve(
   });
 }
 
-describe("FT-CORE-002 feed freshness", () => {
+describe("feed freshness", () => {
   it("Explore is always Example, even when a leftover live feed is connected", () => {
     const freshness = resolve({
       mode: "explore",

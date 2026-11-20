@@ -1,21 +1,20 @@
 /**
  * ModeSelectRoute — mode picker shown during the login flow.
  *
- * Presents three cards: Explore / Practice / Live.
+ * Presents Practice and Live. Connected (read) is a broker status, not a mode.
  * Selecting "Live" verifies the 6-digit PIN before calling onSelect.
  * Not a standalone route — used as a step inside WelcomeRoute.
  */
 
 import { useState } from "react";
-import { Eye, FlaskConical, Zap, AlertTriangle } from "lucide-react";
+import { FlaskConical, Zap, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 import { confirmLiveMode } from "@/lib/modeAuth";
 
-type ModeChoice = "practice" | "connected-read" | "live";
+type ModeChoice = "practice" | "live";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,17 +43,6 @@ interface ModeCardConfig {
 // ---------------------------------------------------------------------------
 
 const MODE_CARDS: ModeCardConfig[] = [
-  {
-    id: "connected-read",
-    label: "Connected (read)",
-    description: "Read a connected broker. Live orders stay off.",
-    brokerNote: "Broker connected",
-    icon: <Eye size={22} aria-hidden="true" />,
-    pillClass: "bg-sky-500/20 text-sky-300",
-    borderClass: "border-border-default/70 hover:border-sky-500/50",
-    selectedBorderClass: "border-sky-400 ring-1 ring-sky-400/30 shadow-[0_0_30px_rgba(56,189,248,0.16)]",
-    iconBgClass: "bg-sky-500/10 text-sky-300",
-  },
   {
     id: "practice",
     label: "Practice",
@@ -93,7 +81,6 @@ function initialChoice(initialMode: AppMode): ModeChoice {
 }
 
 export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: ModeSelectRouteProps) {
-  const brokerConnected = useBrokerConnected();
   const [selected, setSelected] = useState<ModeChoice>(initialChoice(initialMode));
   const [pin, setPin] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -125,16 +112,10 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         setIsVerifyingPin(false);
       }
     }
-    if (selected === "connected-read") {
-      if (!brokerConnected) return;
-      onSelect("practice");
-      return;
-    }
     onSelect("practice");
   };
 
   const handleCardSelect = (choice: ModeChoice) => {
-    if (choice === "connected-read" && !brokerConnected) return;
     setSelected(choice);
     setPin("");
     setTotpCode("");
@@ -155,19 +136,16 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         </div>
 
         {/* Mode cards */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Select trading mode">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Select trading mode">
           {MODE_CARDS.map((card) => {
             const isSelected = selected === card.id;
-            const locked = card.id === "connected-read" && !brokerConnected;
-            const note = locked ? "Connect a broker first" : card.brokerNote;
+            const note = card.brokerNote;
             return (
               <button
                 key={card.id}
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                aria-disabled={locked || undefined}
-                disabled={locked}
                 onClick={() => handleCardSelect(card.id)}
                 className={`
                   relative flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border p-4

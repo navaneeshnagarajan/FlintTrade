@@ -1,6 +1,6 @@
 /**
  * InvestContext — sample holdings must be the count source for the
- * Investor Dashboard header (FT-DEMO-001 / FT-TRADE-010).
+ * Investor Dashboard header.
  *
  * Practice and Explore with no broker expose `getDemoHoldings` so the
  * header badge matches the listed sample rows. A connected broker with
@@ -120,7 +120,7 @@ afterEach(() => {
   useModeStore.setState({ mode: "explore" });
 });
 
-describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
+describe("InvestContext sample holdings count", () => {
   it("exposes the demo holdings book in explore mode, not an empty live book", () => {
     useModeStore.setState({ mode: "explore" });
     const expected = getDemoHoldings();

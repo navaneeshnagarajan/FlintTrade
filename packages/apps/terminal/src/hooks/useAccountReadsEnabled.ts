@@ -7,17 +7,18 @@ import {
 } from "@/hooks/useDataScope";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useModeStore, type AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
+import { useModeStore } from "@/stores/modeStore";
 import type { BrokerAccount } from "@/types/broker";
 import type { ConnectionStatus } from "@/types/stores";
 
 /** Resolve whether account-backed reads have a valid source in the current mode. */
-export function resolveAccountReadsEnabled(mode: AppMode, brokerConnected: boolean): boolean {
+export function resolveAccountReadsEnabled(mode: SessionMode, brokerConnected: boolean): boolean {
   return mode === "practice" || (mode === "live" && brokerConnected);
 }
 
 interface ScopedAccountReadsInput {
-  mode: AppMode;
+  mode: SessionMode;
   apiKey: string;
   connectionStatus: ConnectionStatus;
   accounts: BrokerAccount[];
@@ -34,8 +35,8 @@ export function resolveScopedAccountReadsEnabled({
   accounts,
   activeAccountId,
 }: ScopedAccountReadsInput): boolean {
-  if (mode === "explore") return false;
   if (mode === "practice") return true;
+  if (mode !== "live") return false;
   return resolveNativeDataAccount(accounts, activeAccountId)?.status === "connected";
 }
 

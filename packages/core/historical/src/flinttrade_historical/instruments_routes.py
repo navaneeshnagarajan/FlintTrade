@@ -60,7 +60,7 @@ def _run_async(coro: Any) -> Any:
         loop.close()
 
 
-def _ndjson_stream(rows: list[Any]) -> Generator[str, None, None]:
+def _ndjson_stream(rows: list[Any]) -> Generator[str]:
     """Yield rows as newline-delimited JSON strings.
 
     Args:

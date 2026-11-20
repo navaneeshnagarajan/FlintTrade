@@ -792,7 +792,7 @@ class LLMClient:
         messages: list[LLMMessage],
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         """Stream chat completion tokens. Yields content chunks.
 
         Note: unlike :meth:`chat`, the streaming path yields only visible
@@ -853,7 +853,7 @@ class LLMClient:
         *,
         model: str | None = None,
         managed_ollama_base_url: str = "",
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         url = _request_endpoint(cfg, managed_ollama_base_url)
         headers = _openai_compat_headers(cfg)
 
@@ -902,7 +902,7 @@ class LLMClient:
     def _stream_anthropic(
         self, cfg: LLMConfig, messages: list[LLMMessage],
         temperature: float | None, max_tokens: int | None,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str]:
         url = "https://api.anthropic.com/v1/messages"
         headers = _anthropic_headers(cfg.api_key)
         system = ""

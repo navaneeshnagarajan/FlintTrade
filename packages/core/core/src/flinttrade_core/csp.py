@@ -13,8 +13,8 @@ Wire into Flask::
 The default policy follows OWASP recommendations and is intentionally
 strict.  The ``unsafe-inline`` entries for ``script-src`` and
 ``style-src`` are included because the React SPA (served by Vite)
-currently requires them; a ``TODO`` marker flags where nonce-based
-removal should happen in a later hardening pass.
+currently requires them. Nonce-based removal of those entries is a later
+hardening step.
 """
 
 from __future__ import annotations

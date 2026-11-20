@@ -1,7 +1,7 @@
-import { Activity, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Activity, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { ChevronDown, Download, LayoutGrid, Plus, RotateCcw, Search, Upload, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { Actions, Layout, Model, type TabNode, type IJsonModel } from "flexlayout-react";
-import { Download, Plus, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import "flexlayout-react/style/combined.css";
 import { APPS, APP_WIDGETS, widgetAllowed, widgetsForApp, type AppId } from "@/layout/appCatalog";
 import { APP_PRESETS, buildAppPreset, readAppLayouts, saveAppLayout, validateAppLayout } from "@/layout/appLayouts";
@@ -14,11 +14,12 @@ import { useCanonicalScopeKey } from "@/services/canonicalData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { NativeSelect } from "@/components/ui/native-select";
+import { EmptyState } from "@/components/ui/states";
+import { cn } from "@/lib/utils";
+import { executionScopeLine } from "@/lib/executionScopeLine";
 import { KillSwitchPill } from "./TerminalRoute";
 import { InstrumentLinks } from "@/chrome/InstrumentLinks";
-import { WorkspaceChrome } from "@/chrome/WorkspaceChrome";
-import { LayoutChooser } from "@/chrome/LayoutChooser";
-import { rowJson, tabsetJson, workspaceJson } from "@/layout/flexLayoutAdapter";
 import { PracticeLaterSetup } from "./SetupAccountRoute";
 
 interface WidgetRequest { widgetId?: string; props?: Record<string, unknown>; title?: string }
@@ -51,94 +52,53 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const account = useBrokerStore(s => s.activeAccountId);
   const theme = useThemeStore(s => s.getResolvedMode());
   const [initial] = useState(() => {
-    try {
-      const saved = readAppLayouts(app);
-      const existing = saved["Current"] ?? Object.values(saved)[0];
-      const choose = app === "terminal" && !existing;
-      const layout = existing ?? (choose ? workspaceJson(rowJson(100, [tabsetJson(100, [])])) : buildAppPreset(app, "default"));
-      return { model: Model.fromJson(layout), error: "", choose };
-    } catch (error) { return { model: Model.fromJson(buildAppPreset(app, "default")), error: String(error), choose: false }; }
+    try { return { model: Model.fromJson(readAppLayouts(app)["Current"] ?? buildAppPreset(app, "default")), error: "" }; }
+    catch (error) { return { model: Model.fromJson(buildAppPreset(app, "default")), error: String(error) }; }
   });
   const [model, setModel] = useState(initial.model);
-  const [choosing, setChoosing] = useState(initial.choose);
-  const [hasWorkspace, setHasWorkspace] = useState(!initial.choose);
   const modelRef = useRef(model);
   modelRef.current = model;
   const [error, setError] = useState(initial.error);
   const [picker, setPicker] = useState(false);
   const [search, setSearch] = useState("");
   const [layoutName, setLayoutName] = useState("");
-  // Current is the canonical autosaved draft. Named tabs are immutable
-  // snapshots until an explicit Save; editing one returns to Current.
-  const [selectedLayout, setSelectedLayout] = useState("Current");
-  const [draftFrom, setDraftFrom] = useState("");
-  const namedBaseline = useRef("");
   const [savedNames, setSavedNames] = useState(() => { try { return Object.keys(readAppLayouts(app)).filter(name => name !== "Current"); } catch { return []; } });
   const [notice, setNotice] = useState("");
   const [compact, setCompact] = useState(false);
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
+  // An open toolbar panel borrows height from the desk. That must not flip a
+  // wide desk into the one-panel compact view, so only width decides then.
+  const toolbarPanelOpen = useRef(false);
+  toolbarPanelOpen.current = layoutOpen || linksOpen;
+  const layoutPanelId = useId();
+  const importInput = useRef<HTMLInputElement>(null);
   const [revision, setRevision] = useState(0);
   const host = useRef<HTMLDivElement>(null);
   // Search + Enter closes the catalogue. Focus must not return to "+ Widget"
   // while that Enter is still down, or the trigger opens the dialog again.
   const closeFromSearchRef = useRef(false);
 
-  const replaceLayout = useCallback((layout: IJsonModel, message: string, name = "Current") => {
-    const next = Model.fromJson(layout);
-    namedBaseline.current = JSON.stringify(wideJson(next));
-    setSelectedLayout(name);
-    if (name === "Current") setDraftFrom("");
-    setModel(next);
-    setChoosing(false);
-    setHasWorkspace(true);
-    setError("");
-    setNotice(message);
-  }, []);
-  const applyPreset = useCallback((id?: string) => {
-    const preset = APP_PRESETS[app].find(item => item.id === id);
-    if (!preset) {
-      setNotice("");
-      setError("This preset is not compatible with the current app.");
-      return;
-    }
-    replaceLayout(buildAppPreset(app, preset.id), `Applied ${preset.name} preset; execution unchanged.`);
-  }, [app, replaceLayout]);
-  const resetLayout = useCallback(() => {
-    replaceLayout(buildAppPreset(app, "default"), "Reset app layout; saved layouts and execution unchanged.");
-  }, [app, replaceLayout]);
-
   const persist = useCallback((current: Model) => {
-    if (selectedLayout !== "Current") return;
     try { saveAppLayout(app, "Current", wideJson(current)); setError(""); }
     catch (problem) { setError(String(problem)); }
-  }, [app, selectedLayout]);
+  }, [app]);
   useEffect(() => {
     if (!active) setPicker(false);
   }, [active]);
   useEffect(() => {
-    if (!active || choosing) return;
+    if (!active) return;
     // Replacing/restoring a model is itself a presentation change. The old
     // effect's cleanup flushes its model; publish the replacement afterwards
     // even when the user performs no subsequent docking action before reload.
     persist(model);
-    const listener = () => {
-      if (selectedLayout !== "Current" && JSON.stringify(wideJson(model)) !== namedBaseline.current) {
-        setDraftFrom(selectedLayout);
-        setSelectedLayout("Current");
-      }
-      persist(model);
-      setRevision(v => v + 1);
-    };
+    const listener = () => { persist(model); setRevision(v => v + 1); };
     model.addChangeListener(listener);
     return () => { model.removeChangeListener(listener); persist(model); };
-  }, [active, choosing, model, persist, selectedLayout]);
+  }, [active, model, persist]);
   useEffect(() => {
     if (!active || !host.current) return;
-    const observer = new ResizeObserver(([entry]) => {
-      // A hidden chooser host has no geometry; it is not a compact workspace.
-      if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-        setCompact(entry.contentRect.width < 760 || entry.contentRect.height < 330);
-      }
-    });
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760 || (entry.contentRect.height < 330 && !toolbarPanelOpen.current)));
     observer.observe(host.current);
     return () => observer.disconnect();
   }, [active]);
@@ -157,8 +117,6 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const id = request.widgetId;
     if (!id || !widgetAllowed(app, id)) { setError("This widget belongs to a different app. No account or mode was changed."); return; }
     setPicker(false);
-    setChoosing(false);
-    setHasWorkspace(true);
     const current = modelRef.current;
     const api = createWorkspaceApi(() => current, setModel);
     const meta = APP_WIDGETS.find(w => w.id === id)!;
@@ -181,20 +139,22 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     const widget = (event: Event) => add((event as CustomEvent<WidgetRequest>).detail);
     const preset = (event: Event) => {
       const id = (event as CustomEvent<{ presetId?: string }>).detail?.presetId;
-      applyPreset(id);
+      if (id && APP_PRESETS[app].some(p => p.id === id)) setModel(Model.fromJson(buildAppPreset(app, id)));
+      else setError("This preset is not compatible with the current app.");
     };
+    const reset = () => setModel(Model.fromJson(buildAppPreset(app, "default")));
     const escape = () => setPicker(false);
     window.addEventListener("flinttrade:app-widget", widget);
     window.addEventListener("flinttrade:apply-layout", preset);
-    window.addEventListener("flinttrade:reset-layout", resetLayout);
+    window.addEventListener("flinttrade:reset-layout", reset);
     window.addEventListener("flinttrade:escape", escape);
     return () => {
       window.removeEventListener("flinttrade:app-widget", widget);
       window.removeEventListener("flinttrade:apply-layout", preset);
-      window.removeEventListener("flinttrade:reset-layout", resetLayout);
+      window.removeEventListener("flinttrade:reset-layout", reset);
       window.removeEventListener("flinttrade:escape", escape);
     };
-  }, [active, add, applyPreset, resetLayout]);
+  }, [active, app, add]);
   const exportLayout = useCallback(() => {
     const blob = new Blob([JSON.stringify({ version: 1, app, layout: wideJson(modelRef.current) }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
@@ -203,14 +163,12 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   useEffect(() => { if (!active) return; window.addEventListener("flinttrade:export-layout", exportLayout); return () => window.removeEventListener("flinttrade:export-layout", exportLayout); }, [active, exportLayout]);
   async function importLayout(file?: File) {
     if (!file) return;
-    setNotice("");
-    setError("");
     try {
       if (file.size > 1_000_000) throw new Error("Layout file is too large.");
       const document: unknown = JSON.parse(await file.text());
       const envelope = document as { version?: unknown; app?: unknown; layout?: unknown };
       if (envelope?.version !== 1 || envelope.app !== app || !validateAppLayout(app, envelope.layout)) throw new Error("Not a compatible fresh app layout. Authority and legacy layouts cannot be imported.");
-      replaceLayout(envelope.layout, "Imported presentation layout; execution unchanged.");
+      setModel(Model.fromJson(envelope.layout)); setNotice("Imported presentation layout; execution unchanged.");
     } catch (e) { setError(String(e)); }
   }
   // Activity belongs INSIDE the ref-dependent docking tree. Hiding Layout
@@ -239,105 +197,76 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
     closeFromSearchRef.current = false;
     event.preventDefault();
   }
-  function restoreLayout(name: string) {
-    if (!name) return;
-    setNotice(""); setError("");
-    if (name === "Current" && selectedLayout === "Current") { setChoosing(false); return; }
+  const scope = executionScopeLine({ app, mode, account });
+  const selectedPanel = model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? "";
+  function saveNamedLayout() {
+    try {
+      saveAppLayout(app, layoutName, wideJson(model));
+      setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current"));
+      setNotice(`Saved ${layoutName}`);
+    } catch (e) { setError(String(e)); }
+  }
+  function restoreNamedLayout(name: string) {
     try {
       const saved = readAppLayouts(app)[name];
-      if (!validateAppLayout(app, saved)) throw new Error("This saved layout is no longer available or compatible with the current app.");
-      replaceLayout(saved, `Restored ${name}`, name);
-    } catch (problem) { setError(String(problem)); }
+      if (validateAppLayout(app, saved)) { setModel(Model.fromJson(saved)); setNotice(`Restored ${name}`); }
+    } catch (e) { setError(String(e)); }
   }
-  function layoutTabKey(event: KeyboardEvent<HTMLDivElement>) {
-    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    const index = controls.indexOf(event.target as HTMLButtonElement);
-    if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + controls.length) % controls.length;
-    controls[next].focus();
-    controls[next].scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }
-  return <section className="ft-app flex h-full min-h-0 min-w-0 flex-col" aria-label={`${meta.name} app`} data-app={app} data-testid="unified-app">
+  return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
     <Activity mode={active ? "visible" : "hidden"}>
-    <h1 className="sr-only">{meta.name}</h1>
-    <WorkspaceChrome>
-    <div className="ft-app-toolbar" hidden={!active} data-app-chrome={app} aria-label={`${meta.name} layout controls`}>
-      {hasWorkspace ? <>
-        <div className="ft-saved-layout-tabs" role="tablist" aria-label={`${meta.name} saved layouts`} onKeyDown={layoutTabKey}>
-          {["Current", ...savedNames].map((name, index) => <button key={name} type="button" role="tab" id={`${app}-layout-tab-${index}`} aria-label={name} aria-selected={selectedLayout === name} aria-controls={`${app}-layout-panel`} tabIndex={selectedLayout === name ? 0 : -1} title={name === "Current" ? `Autosaved working draft${draftFrom ? ` · modified from ${draftFrom}` : ""}` : `Restore ${name}; edits create a Current draft`} onFocus={event => event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })} onClick={() => restoreLayout(name)}>
-            <span>{name}</span>{name === "Current" && draftFrom && <small>Modified</small>}
-          </button>)}
+    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border-default bg-surface-base px-3 py-1.5" data-testid="app-toolbar">
+      <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-text-primary", compact && "sr-only")}>{meta.name}</h1>
+      {compact && <NativeSelect aria-label="Compact panel" controlSize="sm" wrapperClassName="min-w-0 flex-1" onChange={e => selectPanel(e.target.value)} value={selectedPanel}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</NativeSelect>}
+      <p className={cn("min-w-0 truncate text-xs text-text-secondary", compact ? "order-last basis-full" : "flex-1 basis-40")} title={scope} data-testid="app-execution-scope">
+        {scope}
+      </p>
+      <Button variant="outline" size="sm" className="shrink-0" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" /><span className={cn(compact && "sr-only")}>Widget</span></Button>
+      <div className="contents">
+        <Button variant="ghost" size="sm" className="shrink-0" aria-expanded={layoutOpen} aria-controls={layoutPanelId} aria-label="Layout" onClick={() => setLayoutOpen(open => !open)}>
+          <LayoutGrid aria-hidden="true" /><span className={cn(compact && "sr-only")}>Layout</span><ChevronDown aria-hidden="true" className={cn("transition-transform", layoutOpen && "rotate-180")} />
+        </Button>
+        <div id={layoutPanelId} role="group" aria-label={`${meta.name} layout`} hidden={!layoutOpen} className="order-last flex basis-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border-default bg-surface-card px-3 py-2">
+          <label className="flex min-w-0 items-center gap-1.5 text-xs text-text-secondary">Preset
+            <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} defaultValue="" onChange={e => { if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
+          </label>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 w-40 min-w-0 text-xs md:text-xs" />
+            <Button variant="outline" size="sm" onClick={saveNamedLayout}>Save layout</Button>
+          </span>
+          <NativeSelect controlSize="sm" aria-label="Restore saved layout" value="" onChange={e => restoreNamedLayout(e.target.value)}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</NativeSelect>
+          <span className="flex flex-wrap items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={exportLayout}><Download aria-hidden="true" />Export layout</Button>
+            <Button size="sm" variant="ghost" onClick={() => importInput.current?.click()}><Upload aria-hidden="true" />Import layout</Button>
+            <input ref={importInput} aria-label="Import app layout" type="file" accept="application/json,.json" className="sr-only" tabIndex={-1} onChange={event => { void importLayout(event.target.files?.[0]); event.target.value = ""; }} />
+            <Button size="sm" variant="ghost" onClick={() => setModel(Model.fromJson(buildAppPreset(app, "default")))}><RotateCcw aria-hidden="true" />Reset app layout</Button>
+          </span>
+          <p className="basis-full text-xs text-text-muted">Presentation only. Saved named layouts and all non-layout records are retained.</p>
         </div>
-        <span className="ft-current-layout"><span className="text-text-muted">{tabs.length} {tabs.length === 1 ? "panel" : "panels"}</span></span>
-      </> : <span className="ft-current-layout ft-no-layout">No layout selected</span>}
-      <Button variant="outline" size="sm" onClick={() => setPicker(true)} aria-label="Add widget"><Plus aria-hidden="true" />Widget</Button>
-    <details className="ft-layout-management" onKeyDown={event => {
-      if (event.key !== "Escape") return;
-      event.currentTarget.open = false;
-      event.currentTarget.querySelector("summary")?.focus();
-    }}>
-      <summary><SlidersHorizontal aria-hidden="true" /><span>Layout actions</span><span className="ft-layout-hint" aria-hidden="true">Save, restore or transfer</span></summary>
-      <div className="ft-layout-management-body">
-        <label className="ft-layout-restore">Saved layouts
-          <select aria-label="Restore saved layout" value="" onChange={e => restoreLayout(e.target.value)}><option value="">Restore layout</option>{savedNames.map(n => <option key={n}>{n}</option>)}</select>
-        </label>
-        {app === "terminal" && <Button size="sm" variant="outline" onClick={event => { setChoosing(true); const details = event.currentTarget.closest("details"); if (details) details.open = false; }}>Browse layout templates</Button>}
-        {/* Templates are actions, never identities of a customised workspace. */}
-        <label className="ft-app-preset">Preset <select aria-label={`${meta.name} preset`} value="" onChange={e => { if (e.target.value) applyPreset(e.target.value); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
-        <div className="ft-layout-save" role="group" aria-label="Save a named layout">
-          <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 min-w-0" />
-          <Button variant="outline" size="sm" disabled={!hasWorkspace} onClick={() => { setNotice(""); setError(""); try { const snapshot = wideJson(model); saveAppLayout(app, layoutName, snapshot); namedBaseline.current = JSON.stringify(snapshot); setSelectedLayout(layoutName); setDraftFrom(""); setSavedNames(Object.keys(readAppLayouts(app)).filter(n => n !== "Current")); setNotice(`Saved ${layoutName}`); } catch (e) { setError(String(e)); } }}><Save aria-hidden="true" />Save layout</Button>
-        </div>
-
-        <div className="ft-layout-transfer" role="group" aria-label="Transfer or reset layout">
-          <Button size="sm" variant="outline" disabled={!hasWorkspace} onClick={exportLayout}><Download aria-hidden="true" />Export layout</Button>
-          <label className="ft-layout-import">Import layout <input aria-label="Import app layout" type="file" accept="application/json,.json" onChange={event => {
-            const file = event.currentTarget.files?.[0];
-            // Native inputs do not emit change when the same file is chosen
-            // again. Retain the File, not the selection, while reading it.
-            event.currentTarget.value = "";
-            void importLayout(file);
-          }} /></label>
-          <Button size="sm" variant="ghost" onClick={resetLayout}><RotateCcw aria-hidden="true" />Reset app layout</Button>
-        </div>
-        <p className="ft-layout-explanation">Presentation only. Saved named layouts and all non-layout records are retained.</p>
-        <p className="ft-layout-explanation">Current autosaves your working draft and returns on reload. Named tabs restore snapshots; edits become a modified Current draft. Save explicitly to update a name, or use a new name to keep a copy.</p>
-        {notice && <p className="text-xs text-text-secondary" aria-hidden="true">{notice}</p>}
       </div>
-    </details>
-    {hasWorkspace && compact && <label className="ft-compact-panel">Panel <select aria-label="Compact panel" onChange={e => selectPanel(e.target.value)} value={model.getActiveTabset()?.getSelectedNode()?.getId() ?? tabs[0]?.getId() ?? ""}>{tabs.map(tab => <option key={tab.getId()} value={tab.getId()}>{tab.getName()}</option>)}</select></label>}
-    </div>
-    </WorkspaceChrome>
-    <div className="ft-app-scope-row">
-    <p className="ft-app-context" data-testid="app-execution-scope">
-      {app === "testing" ? "Testing · Practice research scope only. Terminal account and Live authority are unchanged." : `${mode === "live" ? "Live" : mode === "practice" ? "Practice" : "Example"} · ${account || "No execution account selected"}`}
-      {app === "terminal" ? " · Linking changes selections, never execution authority." : ""}
-
-    </p>
-    <InstrumentLinks app={app} />
+      <InstrumentLinks app={app} compact={compact} onOpenChange={setLinksOpen} />
     </div>
     {app === "terminal" && <PracticeLaterSetup />}
-    {error && <p role="alert" className="shrink-0 px-3 py-2 text-xs text-warning">{error}</p>}
-    {notice && <p role="status" className="sr-only">{notice}</p>}
-
+    {error && <p role="alert" className="flex shrink-0 items-start gap-2 border-b border-warning/30 bg-warning/[0.08] px-3 py-1.5 text-xs text-[var(--color-warning-text,var(--color-warning))]"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss message" onClick={() => setError("")}><X aria-hidden="true" /></Button></p>}
+    {notice && <p role="status" className="flex shrink-0 items-center gap-2 border-b border-border-default bg-surface-card px-3 py-1 text-xs text-text-secondary"><span className="min-w-0 flex-1 truncate">{notice}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss notice" onClick={() => setNotice("")}><X aria-hidden="true" /></Button></p>}
     </Activity>
-    {active && choosing && <LayoutChooser app={app} canReturn={hasWorkspace} onChoose={applyPreset} onReturn={() => setChoosing(false)} onCustom={() => {
-      replaceLayout(workspaceJson(rowJson(100, [tabsetJson(100, [])])), "Started empty presentation layout; execution unchanged.");
-      setPicker(true);
-    }} />}
-    <div ref={host} id={`${app}-layout-panel`} role="tabpanel" aria-label={`${selectedLayout} layout`} hidden={choosing} className={`ft-app-panels relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
+    <div ref={host} className={`relative min-h-0 flex-1 overflow-hidden flexlayout__theme_${theme === "light" ? "light" : "dark"}`} data-testid="app-layout">
       <Layout model={model} factory={factory} onRenderTab={renderWorkspaceTabExtras} onRenderTabSet={renderWorkspaceTabSetExtras} realtimeResize />
-      {!tabs.length && <div className="absolute inset-0 grid place-items-center"><Button onClick={() => setPicker(true)}>Add your first widget</Button></div>}
+      {!tabs.length && <div className="absolute inset-0 grid place-items-center bg-surface-base"><EmptyState icon={LayoutGrid} title={`${meta.name} has no panels`} description="Add a widget, or choose a preset from Layout, to fill this page." action={<Button onClick={() => setPicker(true)}>Add your first widget</Button>} /></div>}
     </div>
     <Activity mode={active ? "visible" : "hidden"}>
     {app === "terminal" && <KillSwitchPill />}
     </Activity>
-    {active && picker ? <Dialog open onOpenChange={next => { if (!next) setPicker(false); }}><DialogContent className="max-h-[80dvh] overflow-y-auto" onCloseAutoFocus={keepFocusOffTrigger}><DialogTitle>{meta.name} widgets</DialogTitle>
-      <Input aria-label="Search widgets" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={addFromSearch} />
-      <p className="text-xs text-text-muted">Tools for this app. Availability still depends on source, account and qualification.</p>
-      <div className="grid gap-2">{catalogue.map(w => <Button key={w.id} type="button" variant="outline" className="h-auto justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span><strong className="block text-sm">{w.name}</strong><span className="text-xs text-text-muted">{w.description}</span></span></Button>)}</div>
-      <Button type="button" variant="ghost" onClick={() => setPicker(false)} aria-label="Close widget catalogue">Close</Button>
+    {active && picker ? <Dialog open onOpenChange={next => { if (!next) setPicker(false); }}><DialogContent className="flex max-h-[80dvh] flex-col gap-3 sm:max-w-2xl" onCloseAutoFocus={keepFocusOffTrigger}><DialogTitle>{meta.name} widgets</DialogTitle>
+      <div className="relative shrink-0">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted" />
+        <Input aria-label="Search widgets" placeholder="Search widgets" className="pl-9" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={addFromSearch} />
+      </div>
+      <p className="shrink-0 text-xs text-text-muted">Tools for this app. Availability still depends on source, account and qualification.</p>
+      <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+        {catalogue.length ? <div className="grid gap-2 sm:grid-cols-2">{catalogue.map(w => <Button key={w.id} type="button" variant="outline" className="h-auto items-start justify-start whitespace-normal p-3 text-left" aria-label={`Add ${w.name}`} onClick={() => add({ widgetId: w.id })}><span className="min-w-0"><strong className="block text-sm font-medium text-text-primary">{w.name}</strong><span className="text-xs font-normal text-text-secondary">{w.description}</span></span></Button>)}</div>
+          : <EmptyState size="sm" icon={Search} title="No widgets match" description="Try a shorter search, or clear it to see every widget for this app." />}
+      </div>
+      <Button type="button" variant="ghost" className="shrink-0 self-end" onClick={() => setPicker(false)} aria-label="Close widget catalogue">Close</Button>
     </DialogContent></Dialog> : null}
   </section>;
 }

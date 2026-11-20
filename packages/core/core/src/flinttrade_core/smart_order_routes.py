@@ -223,6 +223,8 @@ class GatedChildExecutor:
                 if reason:
                     raise SmartRouteAbort(reason)
             try:
+                from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
                 admission = portfolio_state.admission_for(0)
                 results = self._safety.check_order(
                     order,
@@ -235,6 +237,7 @@ class GatedChildExecutor:
                     ltp=portfolio_state.ltp_for(order),
                     net_delta=admission.net_delta,
                     net_vega=admission.net_vega,
+                    expiry_calendar=symbol_expiry_context(order.symbol),
                 )
             except Exception as exc:
                 logger.warning("Smart-route child validation failed: %s", exc)
@@ -641,6 +644,8 @@ def start_smart_route() -> tuple[Any, int]:
             }
         ), 503
     try:
+        from flinttrade_engine.market_hours import symbol_expiry_context  # noqa: PLC0415
+
         admission = portfolio_state.admission_for(0)
         parent_results = safety.check_order(
             parent_order,
@@ -653,6 +658,7 @@ def start_smart_route() -> tuple[Any, int]:
             ltp=portfolio_state.ltp_for(parent_order),
             net_delta=admission.net_delta,
             net_vega=admission.net_vega,
+            expiry_calendar=symbol_expiry_context(parent_order.symbol),
         )
     except Exception:
         return jsonify({"status": "error", "message": "Order validation failed"}), 400

@@ -1,5 +1,5 @@
 /**
- * Overflow sheet for skinny-window TopBar chrome (FT-MOBILE-002).
+ * Overflow sheet for skinny-window TopBar chrome.
  *
  * Holds Workspace, account, Tools, search, fullscreen, clock, and related
  * controls that would otherwise clip off-screen. Rows keep a 44px hit target.

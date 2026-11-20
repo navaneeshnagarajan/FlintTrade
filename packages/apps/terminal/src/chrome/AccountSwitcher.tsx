@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { honestBrokerStatus } from "@/lib/operatorIncident";
-import { isMondayReadBroker } from "@/lib/connectedReadChrome";
+import { isConnectedReadBroker } from "@/lib/connectedReadChrome";
 import { brokerAccountKey, isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
 import type { OperatorIncident } from "@/lib/operatorIncident";
@@ -30,8 +30,8 @@ import type { OperatorIncident } from "@/lib/operatorIncident";
 // Status dot colour
 // ---------------------------------------------------------------------------
 
-function statusColor(status: AccountStatus, incident: OperatorIncident | null, nativeMonday: boolean): string {
-  const label = statusLabel(status, incident, nativeMonday);
+function statusColor(status: AccountStatus, incident: OperatorIncident | null, nativeConnectedRead: boolean): string {
+  const label = statusLabel(status, incident, nativeConnectedRead);
   if (label.startsWith("Unavailable")) return "bg-loss";
   if (label.startsWith("Degraded")) return "bg-amber-400";
   switch (status) {
@@ -47,12 +47,12 @@ function statusColor(status: AccountStatus, incident: OperatorIncident | null, n
   }
 }
 
-function statusLabel(status: AccountStatus, incident: OperatorIncident | null, nativeMonday: boolean): string {
+function statusLabel(status: AccountStatus, incident: OperatorIncident | null, nativeConnectedRead: boolean): string {
   if (status === "connected") {
     return honestBrokerStatus({
       connected: true,
       connectedRead: false,
-      nativeMonday,
+      nativeConnectedRead,
       incident,
     }) ?? "Connected";
   }
@@ -124,7 +124,7 @@ export default function AccountSwitcher() {
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor(
                 activeAccount.status,
                 operatorIncident,
-                isMondayReadBroker(activeAccount.broker),
+                isConnectedReadBroker(activeAccount.broker),
               )}`}
               aria-hidden="true"
             />
@@ -164,7 +164,7 @@ export default function AccountSwitcher() {
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor(
                     account.status,
                     operatorIncident,
-                    isMondayReadBroker(account.broker),
+                    isConnectedReadBroker(account.broker),
                   )}`}
                   aria-hidden="true"
                 />
@@ -173,7 +173,7 @@ export default function AccountSwitcher() {
                     {account.broker.toUpperCase()} · {account.label}
                   </p>
                   <p className="text-xxs text-text-muted">
-                    {statusLabel(account.status, operatorIncident, isMondayReadBroker(account.broker))}
+                    {statusLabel(account.status, operatorIncident, isConnectedReadBroker(account.broker))}
                   </p>
                 </div>
               </div>

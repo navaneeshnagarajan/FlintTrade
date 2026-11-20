@@ -1354,24 +1354,24 @@ def test_plugin_autoload_disable_keeps_timeout_and_respects_explicit_xdist(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("module_name", ["xdist", "xdist.plugin", "pytest_timeout", "timeout"])
-def test_autoload_disabled_environment_plugin_specs_load_modules_without_entrypoint_aliases(
+def test_autoload_disabled_environment_plugin_specs_load_entry_points_and_modules(
     module_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PYTEST_PLUGINS imports modules; hookless aliases cannot register worker/watchdog flags."""
+    """PYTEST_PLUGINS accepts entry-point names and module names, matching -p."""
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("PYTEST_PLUGINS", module_name)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
-    # A module named timeout may exist, but it is distinct from pytest's
-    # entry-point alias. Supply a hookless one to exercise that boundary.
+    # A hookless module named timeout must not shadow the installed plugin
+    # when PYTEST_PLUGINS uses the entry-point name.
     (tmp_path / "timeout.py").write_text("# no pytest hooks\n", encoding="utf-8")
     target = tmp_path / "test_sample.py"
     target.write_text("def test_example(): assert False, 'collection only'\n", encoding="utf-8")
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     argv = ft.pytest_argv([str(target), "--collect-only", "-q", "-c", str(config)])
-    assert ("-n" in argv) == (module_name == "xdist.plugin")
+    assert ("-n" in argv) == (module_name in {"xdist", "xdist.plugin"})
     assert "--timeout-method=thread" in argv
-    assert ("pytest_timeout" in argv) == (module_name != "pytest_timeout")
+    assert ("pytest_timeout" in argv) == (module_name not in {"timeout", "pytest_timeout"})
     result = subprocess.run(
         argv, cwd=tmp_path, env=ft.pytest_env({"PYTEST_ADDOPTS": ""}),
         capture_output=True, text=True, check=False, timeout=30,

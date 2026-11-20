@@ -35,8 +35,9 @@ export default function ContributePage() {
         <h1>Contribute without getting lost.</h1>
         <p>
           FlintTrade spans Python services, a React terminal, Rust tick processing,
-          an evidence-gated native broker gateway whose HTTP surfaces are frozen until
-          Task 9D and Task 7C.2, and a desktop shell. The public docs and MCP tools are designed
+          an evidence-gated native broker gateway, and a desktop shell. A broker session
+          cannot be started from the terminal today. Practice mode works without a broker.
+          The public docs and MCP tools are designed
           to get contributors to the right package, tests, and context quickly.
         </p>
 

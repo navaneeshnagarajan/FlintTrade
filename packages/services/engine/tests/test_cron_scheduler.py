@@ -86,7 +86,7 @@ def test_time_scheduler_market_open_requires_trading_calendar(
     scheduler = TimeScheduler()
     scheduler._holidays[str(at.year)] = holidays
 
-    assert scheduler.is_market_open("NSE", at=at) is False
+    assert scheduler.session_active("NSE", at=at) is False
 
 
 # ---------------------------------------------------------------------------

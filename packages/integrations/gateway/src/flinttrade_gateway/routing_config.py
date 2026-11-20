@@ -93,7 +93,7 @@ class RoutingHint:
 
     Use cases:
         - Force a specific adapter (override config): ``adapter_id='dhan'``
-        - Ditto multi-account fan-out: ``account_id='spouse'``
+        - Ditto multi-account fan-out: ``account_id='secondary'``
         - Test/replay: bypass config entirely.
     """
 

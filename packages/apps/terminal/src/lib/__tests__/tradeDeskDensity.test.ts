@@ -17,7 +17,7 @@ import {
   usesCompactProgressiveDisclosure,
 } from "../tradeDeskDensity";
 
-describe("FT-UX-001 Compact Trade disclosure", () => {
+describe("Compact Trade disclosure", () => {
   it("applies progressive disclosure at 1280 Compact and widescreen Compact", () => {
     expect(usesCompactProgressiveDisclosure("compact", DESK_MIN_WIDTH)).toBe(true);
     expect(usesCompactProgressiveDisclosure("compact", DESK_COMPACT_FOCUS_MAX_WIDTH)).toBe(true);

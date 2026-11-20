@@ -1,7 +1,7 @@
 /**
  * LogsSection.test.tsx
  *
- * Execution Logs (FT-AUTO-003) — Explore empty ≠ outage, Practice/Live
+ * Execution Logs — Explore empty ≠ outage, Practice/Live
  * empty range, real load failure, and loading must not flash the outage copy.
  */
 

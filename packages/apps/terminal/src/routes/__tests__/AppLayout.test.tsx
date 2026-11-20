@@ -464,12 +464,12 @@ describe("AppLayout", () => {
     act(() => {
       handlers.onGoHome?.();
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/home");
+    expect(mockNavigate).toHaveBeenCalledWith("/terminal");
 
     act(() => {
       handlers.onGoTrade?.();
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/trade");
+    expect(mockNavigate).toHaveBeenCalledWith("/terminal");
   });
 
   it("source-guard: AppLayout is the sole useGlobalKeys mount and handles Alt+H/T", () => {
@@ -481,8 +481,7 @@ describe("AppLayout", () => {
     expect(mountMatches).toHaveLength(1);
     expect(layout).toMatch(/onGoHome\s*:/);
     expect(layout).toMatch(/onGoTrade\s*:/);
-    expect(layout).toMatch(/navigate\(\s*[\\\"']\/home[\\\"']\s*\)/);
-    expect(layout).toMatch(/navigate\(\s*[\\\"']\/trade[\\\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\\\"']\/terminal[\\\"']\s*\)/);
 
     // Real handlers exist in the hook (not dialog-only advertising).
     expect(hook).toMatch(/onGoHome/);

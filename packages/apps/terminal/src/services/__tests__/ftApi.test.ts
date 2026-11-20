@@ -27,7 +27,6 @@ vi.mock("@/stores/modeStore", () => ({
   ),
 }));
 import { useBrokerStore } from "@/stores/brokerStore";
-import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 import {
   getStrategies,
   getRunningStrategies,
@@ -71,7 +70,6 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     useBrokerStore.setState({ accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected", label: "Upstox", connected_at: null, error_message: null, is_primary: true }], activeAccountId: "native:upstox:U1" });
     authState.token = "";
     modeState.mode = "practice";
-    setConnectedReadPosture(false);
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -253,7 +251,6 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     });
 
     modeState.mode = "practice";
-    setConnectedReadPosture(true);
     fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
     const connected = await getHealth();
     expect(connected.broker.note).toBe("Example");

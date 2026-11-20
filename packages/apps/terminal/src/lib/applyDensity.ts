@@ -1,6 +1,6 @@
 /**
  * Mirror Compact / Comfortable onto <html> so token CSS and data-density
- * consumers stay in sync (FT-UX-001).
+ * consumers stay in sync.
  */
 
 import type { UiDensity } from "@/lib/tradeDeskDensity";

@@ -1,5 +1,5 @@
 /**
- * FT-UX-001 — at most one primary banner.
+ * at most one primary banner.
  *
  * Kinds feed the incident strip between the TopBar and the Mode line.
  * Mode honesty owns Explore and Practice, so this slot stays empty there.
@@ -11,7 +11,7 @@
  */
 
 import type { FailureClass, OperatorIncident } from "@/lib/operatorIncident";
-import type { AppMode } from "@/stores/modeStore";
+import type { SessionMode } from "@/lib/modeClaim";
 
 export type PrimaryBannerKind =
   | "live_risk"
@@ -23,7 +23,7 @@ export const LIVE_RISK_BANNER = "Live risk — kill switch or daily-loss alert i
 export const FEED_DISCONNECTED_BANNER = "Live market feed disconnected";
 
 export function selectPrimaryBanner(input: {
-  mode: AppMode;
+  mode: SessionMode;
   liveRiskActive?: boolean;
   feedDisconnected?: boolean;
   incident?: OperatorIncident | null;

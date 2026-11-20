@@ -1,5 +1,9 @@
 """Persistent state machine for strategy lifecycle.
 
+No production caller constructs this machine for a live runner. Do not wire
+it through the live strategy runner. Live runners keep BaseStrategy lifecycle
+and process ownership on their own.
+
 Manages the full strategy session lifecycle with DuckDB-backed persistence
 and automatic crash recovery. Thread-safe state transitions with timestamps
 and reason codes.

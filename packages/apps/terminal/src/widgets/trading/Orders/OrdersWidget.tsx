@@ -35,6 +35,8 @@ import {
   runWithMatchingAccountAuthority,
 } from "@/lib/accountQueryState";
 import { cancelOrder, modifyOrder } from "@/services/api";
+import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { presentCancelResult } from "@/lib/orderOutcome";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -92,6 +94,12 @@ function statusVariant(
   if (status === "complete") return "default";
   if (status === "rejected") return "destructive";
   return "secondary";
+}
+
+function confirmedCancelled(status: unknown): boolean {
+  if (typeof status !== "string" || !status.trim()) return false;
+  const token = status.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return token === "CANCELLED" || token === "CANCELED";
 }
 
 /** Whether a broker order status still allows cancel/modify. */
@@ -433,11 +441,26 @@ function OrdersWidget(_props: WidgetProps) {
   const [modifyIntent, setModifyIntent] = useState<OrderActionIntent | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [awaitingCancelId, setAwaitingCancelId] = useState<string | null>(null);
 
   const rows = useMemo<OrderRow[]>(() => {
     const raw = (ordersData ?? []) as RawOrderRecord[];
     return raw.map(toOrderRow);
   }, [ordersData]);
+
+  useEffect(() => {
+    if (!awaitingCancelId) return;
+    const row = rows.find((item) => item.orderId === awaitingCancelId);
+    if (!row || !confirmedCancelled(row.orderStatus)) return;
+    setAwaitingCancelId(null);
+    setActionNotice(ORDER_CANCELLED);
+    emitNotification({
+      category: "order",
+      title: ORDER_CANCELLED,
+      body: `Order ID ${awaitingCancelId}`,
+    });
+  }, [awaitingCancelId, rows]);
 
   const queryUi = resolveAccountQueryUi({
     accountReadsEnabled,
@@ -509,22 +532,54 @@ function OrdersWidget(_props: WidgetProps) {
     setActionPending(true);
     setActionError(null);
     try {
-      await cancelOrder(row.orderId!, row.strategy, mutationIdentity);
+      const result = await cancelOrder(row.orderId!, row.strategy, mutationIdentity);
       if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
-        emitNotification({
-          category: "order",
-          title: `Order cancelled: ${row.action} ${row.symbol}`,
-          body: `Order ID ${row.orderId}`,
-          accountScopeKey: mutationIdentity.scopeKey,
-          skipAccountRefresh: true,
-        });
+        const presented = presentCancelResult(result);
+        if (presented.kind === "cancelled") {
+          setAwaitingCancelId(null);
+          setActionError(null);
+          setActionNotice(ORDER_CANCELLED);
+          emitNotification({
+            category: "order",
+            title: ORDER_CANCELLED,
+            body: `Order ID ${row.orderId}`,
+            accountScopeKey: mutationIdentity.scopeKey,
+            skipAccountRefresh: true,
+          });
+        } else if (presented.kind === "rejected") {
+          setAwaitingCancelId(null);
+          setActionNotice(null);
+          setActionError(presented.message);
+        } else if (presented.kind === "unknown") {
+          setAwaitingCancelId(null);
+          setActionError(null);
+          setActionNotice(ORDER_STATUS_UNKNOWN);
+        } else {
+          setActionError(null);
+          setActionNotice(CANCELLATION_REQUESTED);
+          setAwaitingCancelId(row.orderId ?? null);
+          emitNotification({
+            category: "order",
+            title: CANCELLATION_REQUESTED,
+            body: `Order ID ${row.orderId}`,
+            accountScopeKey: mutationIdentity.scopeKey,
+            skipAccountRefresh: true,
+          });
+        }
         setCancelIntent(null);
         refreshOrders(mutationIdentity);
       }
     } catch (err) {
       if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
-        setActionError(err instanceof Error ? err.message : "Cancel failed");
+        const presented = presentCancelResult(undefined, err);
         setCancelIntent(null);
+        if (presented.kind === "unknown") {
+          setActionError(null);
+          setActionNotice(presented.message);
+        } else {
+          setActionNotice(null);
+          setActionError(presented.message);
+        }
       }
     } finally {
       setActionPending(false);
@@ -802,6 +857,15 @@ function OrdersWidget(_props: WidgetProps) {
           {queryUi.isPaused
             ? "Offline — displayed orders are frozen"
             : "Broker disconnected — displayed orders are frozen"}
+        </div>
+      )}
+
+      {actionNotice && (
+        <div
+          role="status"
+          className="px-3 py-2 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning"
+        >
+          {actionNotice}
         </div>
       )}
 

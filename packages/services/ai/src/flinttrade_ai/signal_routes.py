@@ -286,7 +286,7 @@ def _sse_generator(
     heartbeat_interval: float = 15.0,
     auth_revalidator: StreamAuthRevalidator | None = None,
     shutdown_event: threading.Event | None = None,
-) -> Generator[str, None, None]:
+) -> Generator[str]:
     """Yield SSE events when new signals arrive.
 
     Monotonic event IDs avoid the old deque-length bug once the 100-item ring

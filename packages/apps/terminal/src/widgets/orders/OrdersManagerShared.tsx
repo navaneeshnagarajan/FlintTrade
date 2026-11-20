@@ -339,7 +339,7 @@ export function BrokerTargetSelect({
 
   return (
     <Select
-      value={value === null ? undefined : encodeTarget(value)}
+      value={value === null ? "" : encodeTarget(value)}
       onValueChange={(v) => onChange(decodeTarget(v))}
       disabled={options.length === 0}
     >

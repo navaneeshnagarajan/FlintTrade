@@ -16,12 +16,12 @@ from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailabl
 from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
 
 
-def _ctx(actor_id: str = "nava@flinttrade.local") -> RequestContext:
+def _ctx(actor_id: str = "alice@example.invalid") -> RequestContext:
     return RequestContext(jti="x", actor_type="human", actor_id=actor_id, mode="explore")
 
 
 def _provider(session: object) -> AuthenticatingSessionProvider:
-    return AuthenticatingSessionProvider(BrokerRegistry(), {"dhan": {"personal": ["nava@flinttrade.local"]}})
+    return AuthenticatingSessionProvider(BrokerRegistry(), {"dhan": {"personal": ["alice@example.invalid"]}})
 
 
 def test_authorised_actor_still_requires_persisted_authority():

@@ -7,6 +7,9 @@ import { flexLayoutFactory } from "./widgetFactory";
 import { HOME_WIDGET_COMPONENTS } from "@/routes/home/homeWidgetRegistry";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { widgetAllowed, type AppId } from "./appCatalog";
+import { EmbeddedPage } from "@/components/layout/Page";
+import { Callout } from "@/components/ui/Callout";
+import { LoadingState } from "@/components/ui/states";
 
 const Observability = lazy(() => import("@/admin/observability/ObservabilityDashboard"));
 const SkillDrafts = lazy(() => import("@/tools/Settings/SkillSection").then(m => ({ default: m.SkillDraftReviewSection })));
@@ -29,11 +32,16 @@ const SystemConsole = lazy(() => import("@/routes/AdminRoute"));
 const HistoricalDownloads = lazy(() => import("@/tools/Settings/HistoricalDownloadPanel").then(m => ({ default: m.HistoricalDownloadPanel })));
 const LocalData = lazy(() => import("@/tools/Settings/LocalDataPanel").then(m => ({ default: m.LocalDataPanel })));
 
+/** Page gutter and width for sections that were written to sit inside Settings. */
+function PanelBody({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-[var(--ft-page-width)] px-[var(--ft-page-gutter)] py-5">{children}</div>;
+}
+
 export function appWidgetFactory(app: AppId, node: TabNode): ReactNode {
   const id = node.getComponent() ?? "";
-  if (!widgetAllowed(app, id)) return <p role="alert">This widget is not compatible with {app}. No execution scope was changed.</p>;
-  if (isPublicDemoBuild() && ["broker-connections", "broker-roles", "preferences", "aibackends", "obsidian", "system-console", "model-routing", "learning-permissions", "knowledge-library", "experiment-evidence", "observability", "skill-drafts"].includes(id)) return <section className="space-y-3 p-6"><h2 className="text-lg">{node.getName()}</h2><p>This public preview has no accounts, credentials or connected services. Install FlintTrade to use these controls against your own backend.</p><p className="text-sm text-text-muted">The frozen preview cannot configure providers, change security or grant Live authority.</p></section>;
-  if (["system-console", "observability"].includes(id) && !developerEnabled()) return <p className="p-4 text-sm">Enable Developer features in Settings → General to open the experimental system console. Monitoring remains available without Developer.</p>;
+  if (!widgetAllowed(app, id)) return <div className="p-4"><Callout tone="warning" role="alert">This widget is not compatible with {app}. No execution scope was changed.</Callout></div>;
+  if (isPublicDemoBuild() && ["broker-connections", "broker-roles", "preferences", "aibackends", "obsidian", "system-console", "model-routing", "learning-permissions", "knowledge-library", "experiment-evidence", "observability", "skill-drafts"].includes(id)) return <section className="mx-auto max-w-2xl space-y-3 p-6"><h2 className="ft-text-section-title text-text-primary">{node.getName()}</h2><p className="text-sm text-text-secondary">This public preview has no accounts, credentials or connected services. Install FlintTrade to use these controls against your own backend.</p><p className="text-sm text-text-muted">The frozen preview cannot configure providers, change security or grant Live authority.</p></section>;
+  if (["system-console", "observability"].includes(id) && !developerEnabled()) return <div className="p-4"><Callout tone="neutral">Enable Developer features in Settings → General to open the experimental system console. Monitoring remains available without Developer.</Callout></div>;
   let view: ReactNode;
   switch (id) {
     case "observability": view = <Observability />; break;
@@ -49,19 +57,19 @@ export function appWidgetFactory(app: AppId, node: TabNode): ReactNode {
     case "ai-centre": view = <AIWorkspace />; break;
     case "trade-review": view = <TradeReview onClose={() => window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/terminal" }))} />; break;
     case "learning": view = <Learning />; break;
-    case "broker-connections": view = <BrokerConnections pollAccounts={false} />; break;
+    case "broker-connections": view = <PanelBody><BrokerConnections pollAccounts={false} /></PanelBody>; break;
     case "broker-roles": view = <BrokerRoles />; break;
     case "preferences": view = <Preferences />; break;
-    case "monitoring": view = <Monitoring />; break;
+    case "monitoring": view = <PanelBody><Monitoring /></PanelBody>; break;
     case "system-console": view = <SystemConsole />; break;
-    case "historical-downloads": view = <HistoricalDownloads />; break;
-    case "local-data": view = <LocalData />; break;
+    case "historical-downloads": view = <PanelBody><HistoricalDownloads /></PanelBody>; break;
+    case "local-data": view = <PanelBody><LocalData /></PanelBody>; break;
     default: {
       const HomeCard = HOME_WIDGET_COMPONENTS[id.replace(/^overview:/, "")];
       view = id.startsWith("overview:") && HomeCard ? <HomeCard /> : flexLayoutFactory(node);
     }
   }
-  return <ErrorBoundary><Suspense fallback={<p role="status" className="p-4 text-text-muted">Loading {node.getName()}…</p>}>
-    <div className="h-full min-h-0 min-w-0 overflow-auto" data-app-widget={id}>{view}</div>
+  return <ErrorBoundary><Suspense fallback={<LoadingState fill label={`Loading ${node.getName()}…`} />}>
+    <div className="h-full min-h-0 min-w-0 overflow-auto" data-app-widget={id}><EmbeddedPage>{view}</EmbeddedPage></div>
   </Suspense></ErrorBoundary>;
 }

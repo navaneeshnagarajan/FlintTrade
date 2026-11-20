@@ -512,8 +512,18 @@ def test_unresolved_entry_dispatch_is_not_erased_by_protection_restart(protectio
 def test_completed_exact_duty_can_be_reconciled_and_closed(protection_desk):
     desk = protection_desk
     assert grant(desk).status_code == 201
-    _supervisor(desk).stop(desk.owner)
+    supervisor = _supervisor(desk)
+    supervisor.stop(desk.owner)
     _wait_for(lambda: desk.store.get_run(desk.scope.run_id)["status"] == "stopped")
+    # Status is published before the worker finishes its own reconcile and
+    # leaves the thread. That reconcile holds the protection store lock. Closing
+    # while the thread is still inside it either times the lock out or observes
+    # a duty that has not drained.
+    _wait_for(
+        lambda: supervisor.run.cleanup_complete
+        and supervisor.run.adapter._closed
+        and not supervisor.run.thread.is_alive()
+    )
     result = desk.protection.reconcile(desk.scope)
     assert result["remaining_quantity"] == 0
     census = desk.protection.maintenance_snapshot()

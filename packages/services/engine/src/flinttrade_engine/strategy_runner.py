@@ -44,6 +44,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .strategy_status import (
+    REASON_IDLE,
+    REASON_LEADER_EXITED,
+    REASON_RUNNING,
+    REASON_TREE_UNREADABLE,
+    annotate_status,
+    verified_exit_reason,
+)
+
 logger = logging.getLogger("flinttrade.engine.strategy_runner")
 
 
@@ -1594,8 +1603,11 @@ class UserStrategyRunner:
             strategy_id: ID of the strategy.
 
         Returns:
-            Dict with keys: strategy_id, name, state (running/stopped/crashed),
-            pid, memory_mb, uptime_seconds, log_path.
+            Dict with keys: strategy_id, name, state
+            (running/stopped/crashed/unknown), reason, pid, memory_mb,
+            uptime_seconds, log_path. ``unknown`` includes
+            ``ownership_retained`` and does not mean the process stopped.
+            ``lifecycle`` is included when this runner holds a BaseStrategy.
 
         Raises:
             FileNotFoundError: If the strategy does not exist.
@@ -1613,15 +1625,18 @@ class UserStrategyRunner:
         log_path = self._log_dir / f"{strategy_id}.log"
 
         if strategy_id not in self._running:
-            return {
-                "strategy_id": strategy_id,
-                "name": name,
-                "state": "stopped",
-                "pid": None,
-                "memory_mb": None,
-                "uptime_seconds": None,
-                "log_path": str(log_path),
-            }
+            return self._annotate_status(
+                {
+                    "strategy_id": strategy_id,
+                    "name": name,
+                    "state": "stopped",
+                    "pid": None,
+                    "memory_mb": None,
+                    "uptime_seconds": None,
+                    "log_path": str(log_path),
+                },
+                reason=REASON_IDLE,
+            )
 
         entry = self._running[strategy_id]
         proc = entry.process
@@ -1631,31 +1646,37 @@ class UserStrategyRunner:
             tree_alive = entry.tree.is_alive()
         except Exception:
             logger.exception("Could not verify process-tree state for strategy %s", strategy_id)
-            return {
-                "strategy_id": strategy_id,
-                "name": name,
-                "state": "unknown",
-                "pid": proc.pid,
-                "memory_mb": None,
-                "uptime_seconds": None,
-                "ownership_retained": True,
-                "log_path": str(log_path),
-            }
+            return self._annotate_status(
+                {
+                    "strategy_id": strategy_id,
+                    "name": name,
+                    "state": "unknown",
+                    "pid": proc.pid,
+                    "memory_mb": None,
+                    "uptime_seconds": None,
+                    "ownership_retained": True,
+                    "log_path": str(log_path),
+                },
+                reason=REASON_TREE_UNREADABLE,
+            )
 
         if not tree_alive:
             exit_code = self._release_verified_entry(entry)
             del self._running[strategy_id]
             state = "crashed" if exit_code not in (None, 0) else "stopped"
-            return {
-                "strategy_id": strategy_id,
-                "name": name,
-                "state": state,
-                "pid": proc.pid,
-                "memory_mb": None,
-                "uptime_seconds": None,
-                "exit_code": exit_code,
-                "log_path": str(log_path),
-            }
+            return self._annotate_status(
+                {
+                    "strategy_id": strategy_id,
+                    "name": name,
+                    "state": state,
+                    "pid": proc.pid,
+                    "memory_mb": None,
+                    "uptime_seconds": None,
+                    "exit_code": exit_code,
+                    "log_path": str(log_path),
+                },
+                reason=verified_exit_reason(exit_code),
+            )
 
         # Process is running — collect memory usage via psutil
         memory_mb: float | None = None
@@ -1668,16 +1689,24 @@ class UserStrategyRunner:
 
         uptime = (datetime.now(UTC) - entry.started_at).total_seconds()
 
-        return {
-            "strategy_id": strategy_id,
-            "name": name,
-            "state": "running",
-            "pid": proc.pid,
-            "leader_exited": poll is not None,
-            "memory_mb": memory_mb,
-            "uptime_seconds": uptime,
-            "log_path": str(log_path),
-        }
+        return self._annotate_status(
+            {
+                "strategy_id": strategy_id,
+                "name": name,
+                "state": "running",
+                "pid": proc.pid,
+                "leader_exited": poll is not None,
+                "memory_mb": memory_mb,
+                "uptime_seconds": uptime,
+                "log_path": str(log_path),
+            },
+            reason=REASON_LEADER_EXITED if poll is not None else REASON_RUNNING,
+        )
+
+    def _annotate_status(self, payload: dict[str, Any], *, reason: str) -> dict[str, Any]:
+        """Add the stable reason and the held strategy lifecycle, if any."""
+        held = getattr(self, "strategy", None)
+        return annotate_status(payload, reason=reason, strategy=held)
 
     # ------------------------------------------------------------------
     # List

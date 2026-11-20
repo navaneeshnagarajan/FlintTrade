@@ -6,7 +6,7 @@ self-hosted deployment example.
 ## Purpose
 
 FlintTrade runs fine on a single machine with no VPN at all. If you choose to
-self-host the backend on a separate box and reach it from your own devices over
+self-host the backend on a separate machine and reach it from your own devices over
 an encrypted tunnel, WireGuard is one way to do that. This directory holds the
 config templates and key-management notes for that optional setup.
 

@@ -1,5 +1,5 @@
 /**
- * FT-TRADE-012 — Option Chain OI profile + PCR strip model.
+ * Option Chain OI profile + PCR strip model.
  *
  * Explore stays Sample and never invents live OI. An empty expiry is an
  * honest empty — not a profile of zeros.

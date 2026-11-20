@@ -795,6 +795,95 @@ def test_forever_cancel_happy_path(*, backend_lease_factory) -> None:
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "cancel_forever"
     assert kw["payload"] == {"_op": "cancel_forever", "order_id": "GTT-9"}
+    body = resp.get_json()
+    assert body["order_outcome"] == "cancel_requested"
+    assert body["reason"] == "awaiting_confirmation"
+    assert body["message"] == "Cancellation requested"
+    assert body["retry_safe"] is False
+    assert body["message"] != "Order cancelled"
+
+
+def test_synthetic_dhan_gtt_cancel_confirmed_only_when_status_says_cancelled(*, backend_lease_factory) -> None:
+    router = _gated_router(result={
+        "orderId": "SYNTHETIC-GTT",
+        "orderStatus": "CANCELLED",
+        "status": "CANCELLED",
+    })
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/forever/SYNTHETIC-GTT?broker=dhan", headers=_live_headers())
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body["order_outcome"] == "cancelled"
+    assert body["reason"] == "status_confirmed"
+    assert body["message"] == "Order cancelled"
+    assert body["retry_safe"] is False
+
+
+def test_synthetic_dhan_gtt_broker_reject_stays_a_rejection(*, backend_lease_factory) -> None:
+    router = _gated_router(result={
+        "orderId": "SYNTHETIC-GTT",
+        "status": "REJECTED",
+        "message": "GTT rejected by broker",
+    })
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/forever/SYNTHETIC-GTT?broker=dhan", headers=_live_headers())
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body["order_outcome"] == "rejected"
+    assert body["reason"] == "broker_rejected"
+    assert body["message"] == "GTT rejected by broker"
+    assert body["retry_safe"] is False
+    assert body["message"] != "Order cancelled"
+
+
+def test_synthetic_dhan_gtt_cancel_timeout_is_unknown(*, backend_lease_factory) -> None:
+    router = _gated_router()
+
+    async def dropped(*_args, **kwargs):
+        kwargs["on_adapter_invoke"]()
+        raise TimeoutError("synthetic response dropped")
+
+    router.execute_gated = dropped
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete("/api/v1/orders/forever/SYNTHETIC-GTT?broker=dhan", headers=_live_headers())
+    body = resp.get_json()
+    assert resp.status_code == 500
+    assert body["order_outcome"] == "unknown"
+    assert body["reason"] == "response_unconfirmed"
+    assert body["retry_safe"] is False
+    assert body["dispatch_outcome"] == "unknown_after_dispatch"
+    assert body["message"] != "Order cancelled"
+
+
+def test_synthetic_dhan_gtt_modify_timeout_is_unknown(*, backend_lease_factory) -> None:
+    router = _gated_router()
+
+    async def dropped(*_args, **kwargs):
+        kwargs["on_adapter_invoke"]()
+        raise TimeoutError("synthetic modify response dropped")
+
+    router.execute_gated = dropped
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.put(
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": _dhan_forever_changes(), "broker": "dhan", "account_id": "personal"},
+        headers=_live_headers(),
+    )
+    body = resp.get_json()
+    assert resp.status_code == 500
+    assert body["order_outcome"] == "unknown"
+    assert body["reason"] == "response_unconfirmed"
+    assert body["retry_safe"] is False
+    assert body["dispatch_outcome"] == "unknown_after_dispatch"
+    assert "GTT modification status unknown" not in body["message"]
 
 
 def test_forever_cancel_is_blocked_by_kill_switch(*, backend_lease_factory) -> None:

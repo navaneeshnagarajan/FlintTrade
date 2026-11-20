@@ -142,7 +142,7 @@ def test_dispatch_exception_records_uncertain_terminal_state(app: Flask, queue) 
     request = queue.get("intent-1")
     assert request.status == "failed"
     assert request.outcome_uncertain is True
-    assert "inspect" in request.failure_reason.lower()
+    assert request.failure_reason == "Order status unknown. Check Orders before trying again."
 
 
 def test_missing_dispatcher_leaves_request_pending(app: Flask, queue) -> None:

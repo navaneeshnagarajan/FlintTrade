@@ -1,6 +1,6 @@
 # Machine Setup Guide
 
-> Works on any Windows, macOS, or Ubuntu machine — including a new contributor's box.
+> Works on any Windows, macOS, or Ubuntu machine.
 > FlintTrade `v0.0.1` is not production ready; use Practice, and example data,
 > before connecting any live broker workflow.
 
@@ -20,7 +20,7 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
-It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
+It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
 launcher. Open http://127.0.0.1:5100 and complete Setup — no `.env` file is
@@ -106,7 +106,7 @@ python scripts/ft.py dev
 
 ## 3. Configure Broker Access
 
-Native broker HTTP remains frozen until Task 9D and Task 7C.2. Start with
+A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Start with
 Practice. Credentials belong in the encrypted gateway vault.
 
 ## 4. Start and Verify
@@ -166,15 +166,3 @@ only, and production/native connection settings must come from Setup or
 Settings so they remain runtime user choices rather than build-time bundle
 constants.
 
-## Optional Agent Context
-
-The public repository includes reusable agent-context templates under
-`templates/agent-context/`. If you use a coding agent, scaffold local copies
-with the POSIX helper (on Windows, run it in WSL2 or Git Bash, or copy the
-templates by hand):
-
-```bash
-bash scripts/setup-agent-context.sh
-```
-
-The generated files live under `.local/agent-context/` and stay gitignored.

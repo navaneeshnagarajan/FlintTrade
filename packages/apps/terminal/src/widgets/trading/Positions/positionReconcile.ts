@@ -5,6 +5,9 @@
  * ``exit_orders_unreadable_message`` in ``flinttrade_engine.reduce_only``.
  */
 
+import { CANCELLATION_REQUESTED } from "@/lib/operatorIncident";
+import { presentSubmitError } from "@/lib/orderOutcome";
+
 export const GTT_UNSUPPORTED_MESSAGE = "Not placed. GTT orders aren't supported right now.";
 
 export function exitAlreadyPendingMessage(contract: string): string {
@@ -32,13 +35,10 @@ export function orderRequestOutcomeIsUnknown(error: unknown): boolean {
 
 /** Request failure without a definite refusal leaves execution unresolved. */
 export function exitRequestErrorMessage(error: unknown): string {
-  const details = error instanceof Error ? error.message : "";
-  return orderRequestOutcomeIsUnknown(error)
-    ? `Exit status unknown. An order may still execute.${details ? ` ${details}` : ""}`
-    : (details || "Exit request refused.");
+  return presentSubmitError(error).message;
 }
 
-export const CANCEL_PENDING_MESSAGE = "Cancel pending. This order may still fill.";
+export const CANCEL_PENDING_MESSAGE = CANCELLATION_REQUESTED;
 export const EXECUTION_FIRST_WARNING = "This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.";
 
 /** Exact known cancellation variants only; unfamiliar states remain unknown. */

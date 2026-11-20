@@ -145,7 +145,7 @@ interface ConnectionCardProps {
 function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: ConnectionCardProps) {
   // An auth rejection is more actionable than a bare "Disconnected" — name it,
   // and show the server's reason so the operator knows which key to fix.
-  // Explore has no broker subsystem — never green / Connected (FT-UX-001).
+  // Explore has no broker subsystem — never green / Connected.
   // A money-path incident replaces Connected with Unavailable / Degraded.
   const operatorIncident = useOperatorIncident();
   const authFailed = !exploreMode && !connected && wsFailure?.kind === "auth";
@@ -153,7 +153,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
     ? honestBrokerStatus({
       connected: true,
       connectedRead: false,
-      nativeMonday: false,
+      nativeConnectedRead: false,
       incident: operatorIncident,
     })
     : null;
@@ -230,7 +230,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const isPractice = appMode === "practice";
   const isExplore = appMode === "explore";
 
-  // Connection state — Explore never reports Connected/green (FT-UX-001).
+  // Connection state — Explore never reports Connected/green.
   const status = useConnectionStore((s) => s.status);
   const wsFailure = useConnectionStore((s) => s.wsFailure);
   const connected = !isExplore && status === "connected";
@@ -522,10 +522,13 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
             </p>
           </div>
           <span
-            className={cn("text-xs font-semibold font-heading", MODE_LABEL[appMode].className)}
-            aria-label={`Current trading mode: ${MODE_LABEL[appMode].text}`}
+            className={cn(
+              "text-xs font-semibold font-heading",
+              appMode === "unavailable" ? "text-text-muted" : MODE_LABEL[appMode].className,
+            )}
+            aria-label={`Current trading mode: ${appMode === "unavailable" ? "Unavailable" : MODE_LABEL[appMode].text}`}
           >
-            {MODE_LABEL[appMode].text}
+            {appMode === "unavailable" ? "Unavailable" : MODE_LABEL[appMode].text}
           </span>
         </div>
 

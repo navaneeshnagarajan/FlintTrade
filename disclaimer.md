@@ -1,12 +1,12 @@
 # FlintTrade Disclaimer
 
-FlintTrade `v0.0.1` is a beta-stage open-source project. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
+FlintTrade `v0.0.1` is pre-release software. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
 
-Use FlintTrade for learning, research, paper trading, local automation experiments, and contributor development first. Do not place live orders until you have reviewed the source, configured broker-side safeguards, verified the backend and terminal locally, and accepted the operational risk yourself.
+Use Practice and example data before any live broker workflow. Do not place live orders until you have reviewed the source, configured broker-side safeguards, verified the backend and terminal locally, and accepted the operational risk yourself.
 
 ## No Financial Advice
 
-Nothing in this repository, the terminal UI, the public website, generated docs, MCP surfaces, AI outputs, sample strategies, screenshots, or example configuration is financial, investment, tax, legal, or regulatory advice. All signals, strategy templates, analytics, and AI commentary are educational software outputs.
+Nothing in this repository, the terminal UI, the public website, generated docs, MCP surfaces, AI outputs, sample strategies, screenshots, or example configuration is financial, investment, tax, legal, or regulatory advice. All signals, strategy templates, analytics, and AI commentary are software outputs, not advice.
 
 ## Trading Risk
 

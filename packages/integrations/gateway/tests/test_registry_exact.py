@@ -433,8 +433,8 @@ def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
 
 
 def test_list_read_smoke_sessions_requires_stamped_connected_session(authority):
-    """FT-MONDAY-003: AI reads only Connected (read) sessions, never writes."""
-    from flinttrade_gateway.monday_read_smoke import stamp_monday_read_smoke
+    """AI reads only Connected (read) sessions, never writes."""
+    from flinttrade_gateway.connected_read_smoke import stamp_connected_read_smoke
 
     registry, owner = api.create_owned_registry()
     selector = BrokerSelector("dhan", "Main")
@@ -442,10 +442,10 @@ def test_list_read_smoke_sessions_requires_stamped_connected_session(authority):
     receipt, session = prepare(owner, registry, selector, auth)
     owner.publish_prepared_candidate(receipt, current_authority=auth)
     assert registry.list_read_smoke_sessions() == ()
-    stamp_monday_read_smoke(session, True)
+    stamp_connected_read_smoke(session, True)
     listed = registry.list_read_smoke_sessions()
     assert len(listed) == 1
     assert listed[0][0] == selector
     assert listed[0][1] is session
-    stamp_monday_read_smoke(session, False)
+    stamp_connected_read_smoke(session, False)
     assert registry.list_read_smoke_sessions() == ()

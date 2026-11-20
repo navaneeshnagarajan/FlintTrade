@@ -9,7 +9,7 @@
  *   - the YTD window ends on the IST trading day, not the lagging UTC day;
  *   - shared Flint chart primitives (threshold-line equity, signed
  *     categorical-bar day-of-week);
- *   - FT-TRADE-006: Performance defaults to the Review range (never a silent
+ * - Performance defaults to the Review range (never a silent
  *     YTD jump); YTD is an explicit chip that labels its window.
  */
 
