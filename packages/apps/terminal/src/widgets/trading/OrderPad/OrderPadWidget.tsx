@@ -1402,9 +1402,9 @@ function OrderPadWidget(props: WidgetProps) {
     : "bg-loss hover:bg-loss/85 active:bg-loss/70 text-white";
 
   return (
-    <div className="relative h-full flex flex-col bg-surface-base text-text-primary overflow-hidden" data-tour-target="order-pad">
+    <div className="relative h-full flex flex-col overflow-hidden bg-[#071018] text-[#e8eef2]" data-tour-target="order-pad">
       {/* Header */}
-      <div className="flex-none bg-surface-card border-b border-border-default px-3 py-2 flex items-center gap-2">
+      <div className="flex flex-none items-center gap-2 border-b border-white/10 bg-[#071018] px-3 py-2">
         <FileEdit size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="font-heading font-semibold text-sm text-text-primary uppercase tracking-wider">
           Order Pad

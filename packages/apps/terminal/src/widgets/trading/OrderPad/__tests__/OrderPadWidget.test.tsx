@@ -165,6 +165,7 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
 
     expect(screen.getByText("Order Pad")).toBeInTheDocument();
+    expect(document.querySelector("[data-tour-target='order-pad']")).toHaveClass("bg-[#071018]");
   });
 
   it("has BUY and SELL radio buttons", () => {
