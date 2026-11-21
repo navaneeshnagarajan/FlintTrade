@@ -229,22 +229,19 @@ interchangeable, and the venue has no default. Setup → Brokers still fails on 
 uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
-You register a static IP with your broker before API orders are sent. See
-[Broker static IP](#broker-static-ip).
+See [Broker static IP](#broker-static-ip).
 
 <a id="broker-static-ip"></a>
 
 ### Broker static IP
 
-Brokers require API orders to come from a static IP. You get that IP and
-register it with your broker.
+You register a static IP with your broker before API orders are sent.
 
 Changing the registered IP is limited to once every 7 days.
 
 Where your broker allows it, a static IP may be shared with family members
-as defined for this purpose (your spouse, dependent children and dependent
-parents). Some brokers require each person to register their own IP, so you
-should check with your broker.
+(your spouse, dependent children and dependent parents). Some brokers require
+each person to register their own IP, so you should check with your broker.
 
 On Kotak Neo, the API sign-in itself must happen from the machine with the
 registered static IP, not only orders.
@@ -1665,23 +1662,23 @@ the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
 quantity on its own. The hub has three sub-tools. What you run here is
 your own automation. See
-[Your automation, your responsibility](#self-run-automation).
+[Running your own automation](#self-run-automation).
 
 <a id="self-run-automation"></a>
 
-### Your automation, your responsibility
+### Running your own automation
 
-You run FlintTrade on your own computer, through your own broker account and
-API, under your own settings and limits. You run the strategies and read the
-analysis there. You register your own static IP. See
-[Broker static IP](#broker-static-ip).
+You run FlintTrade on your own computer, with your own broker account. It does
+not host execution, sell strategies or signals, or provide a static IP.
 
 Brokers may ask clients who write their own algorithms to sign an undertaking
 with them. Under that undertaking, losses caused by the logic of your own
 strategy or automation cannot be taken to the exchange's investor grievance
 process. Problems on the broker's side are not covered by this.
 
-Chat cannot place Live orders. A spoken order request is reviewed in
+You opt in to Live yourself.
+Chat cannot place Live orders.
+A spoken order request is a proposal you review. See
 [Speaking with the AI assistant](#speaking-with-the-ai-assistant).
 
 ### Cron
@@ -1739,9 +1736,9 @@ flashes the outage copy.
 
 Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
 `packages/services/ai`. The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order. Suggest is a local filter UI over an
-illustrative strategy list — not a live AI fetch. Suggest stays
+illustrative strategy list. It is not a live AI fetch. Suggest stays
 labelled illustrative. See
-[Your automation, your responsibility](#self-run-automation).
+[Running your own automation](#self-run-automation).
 
 ### Chat
 
