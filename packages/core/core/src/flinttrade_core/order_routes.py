@@ -171,11 +171,11 @@ def _live_write_error_status(
         SafetyBypassError,
         UnsupportedCapabilityError,
     )
-    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     # Match the real inheritance used by except, not a duck-typed __class__.
     from flinttrade_core.order_rules import OrderRuleRefused  # noqa: PLC0415
+    from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     error_type = type(exc)
     if issubclass(error_type, OrderRuleRefused):
@@ -3052,7 +3052,7 @@ def _order_rule_results(body: Mapping[str, Any], *, broker: str) -> list[Any]:
     shows. ``last_price`` is optional; without it the price-band warning is
     skipped and the exchange decides.
     """
-    from flinttrade_core.order_rules import evaluate_order  # noqa: PLC0415
+    from flinttrade_core.order_rules import evaluate_order, ist_minutes  # noqa: PLC0415
     from flinttrade_gateway.service_profiles import order_entry_profile  # noqa: PLC0415
 
     profile = order_entry_profile(broker)
@@ -3066,6 +3066,7 @@ def _order_rule_results(body: Mapping[str, Any], *, broker: str) -> list[Any]:
         broker_name=profile["broker_name"],
         stop_loss_target_placement=profile["stop_loss_target_placement"],
         last_price=body.get("last_price"),
+        at_minutes=ist_minutes(),
     )
 
 

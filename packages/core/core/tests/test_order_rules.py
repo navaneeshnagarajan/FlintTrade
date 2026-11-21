@@ -12,6 +12,7 @@ import pytest
 
 from flinttrade_core import order_rules as rules
 from flinttrade_core.order_rules import (
+    blocking,
     AUTHORITIES,
     CHECKS,
     LEVELS,
@@ -27,7 +28,6 @@ from flinttrade_core.order_rules import (
     market_price_cap,
     max_stop_limit_gap,
     price_band,
-    refuse_blocked,
     results_payload,
     rules_markdown,
 )
@@ -36,7 +36,7 @@ CASES = json.loads((Path(__file__).parent / "fixtures" / "order_rules_cases.json
 NIFTY_CE = "NIFTY25NOV2624000CE"
 SENSEX_CE = "SENSEX27NOV2680000CE"
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
-_EVALUATOR_PLACEHOLDERS = {"max_gap", "low", "high", "limit", "window", "secs", "broker_name", "band"}
+_EVALUATOR_PLACEHOLDERS = {"max_gap", "low", "high", "limit", "window", "wait", "broker_name", "band"}
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +72,20 @@ def test_every_placeholder_can_be_filled() -> None:
 
 def test_raw_rows_carry_no_reference_or_verification_fields() -> None:
     payload = json.loads(rules.table_path().read_text(encoding="utf-8"))
-    allowed = {"id", "authority", "level", "source", "description", "check", "scope", "effective_from", "effective_to", "parameters", "message", "family"}
+    allowed = {
+        "id",
+        "authority",
+        "level",
+        "source",
+        "description",
+        "check",
+        "scope",
+        "effective_from",
+        "effective_to",
+        "parameters",
+        "message",
+        "family",
+    }
     for raw in payload["rules"]:
         assert set(raw) <= allowed, raw["id"]
         text = json.dumps(raw)
@@ -85,7 +98,10 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
     lines = table.strip().splitlines()
     assert lines[0] == "| Rule id | Scope | Effective from | Description | Message |"
     assert len(lines) == len(load_rules()) + 2
-    assert "| `bse-stop-limit-gap` | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price" in table
+    assert (
+        "| `bse-stop-limit-gap` | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price"
+        in table
+    )
     # Parameters already known from the row are filled in; sources are not listed.
     assert "Intraday F&O positions are closed from 15:25 — exit before then." in table
     assert "Regulation" not in table
@@ -97,8 +113,14 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
 
 # One order that the rule decides, for every per-order rule id.
 _TRIGGERS: dict[str, tuple[dict, dict]] = {
-    "sl-m-not-allowed-options": ({"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "SL-M", "trigger_price": "80"}, {}),
-    "options-stop-market-not-sent": ({"symbol": SENSEX_CE, "exchange": "BFO", "pricetype": "SL-M", "trigger_price": "80"}, {}),
+    "sl-m-not-allowed-options": (
+        {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "SL-M", "trigger_price": "80"},
+        {},
+    ),
+    "options-stop-market-not-sent": (
+        {"symbol": SENSEX_CE, "exchange": "BFO", "pricetype": "SL-M", "trigger_price": "80"},
+        {},
+    ),
     "options-market-order-not-sent": ({"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "MARKET"}, {}),
     "algo-market-orders-fo-rejected": ({"symbol": "NIFTY25NOVFUT", "exchange": "NFO", "pricetype": "MARKET"}, {}),
     "market-order-needs-trade-today": (
@@ -170,18 +192,20 @@ def test_rule_applies_from_its_effective_date_and_not_the_day_before(rule_id: st
 
 
 def test_order_rate_threshold_starts_on_its_effective_date() -> None:
+    # The throttle itself reads this row; here only its dates and value.
     row = rules.rule_by_id("order-rate-threshold")
-    assert rules.order_rate_limit(row.effective_from - timedelta(days=1)) is None
-    assert rules.order_rate_limit(row.effective_from) == 10
+    assert not row.in_force(row.effective_from - timedelta(days=1))
+    assert row.in_force(row.effective_from)
+    assert row.parameters["max_per_second"] == 10
 
 
 def test_live_acknowledgement_starts_on_its_effective_date() -> None:
+    # The terminal's Live switch shows this row's message (see liveAcknowledgement.ts).
     row = rules.rule_by_id("self-built-algo-undertaking")
-    assert rules.live_acknowledgement_rule(row.effective_from - timedelta(days=1)) is None
-    result = rules.live_acknowledgement_rule(row.effective_from)
-    assert result is not None
-    assert result.level == "warn"
-    assert "exchange grievance process" in result.message
+    assert not row.in_force(row.effective_from - timedelta(days=1))
+    assert row.in_force(row.effective_from)
+    assert row.level == "warn"
+    assert "exchange grievance process" in row.message
 
 
 @pytest.mark.parametrize("rule_id", ["dhan-order-rate-limits", "dhan-modifications-per-order"])
@@ -290,21 +314,25 @@ def test_price_band_never_changes_the_price_and_only_warns() -> None:
     results = evaluate_order(order, on=date(2026, 11, 22), last_price="100")
     assert [r.level for r in results] == ["warn"]
     assert order["price"] == "500"
-    assert refuse_blocked(order, on=date(2026, 11, 22), last_price="100") == results
+    assert blocking(results) == []
 
 
 def test_results_are_ordered_block_warn_info_then_authority() -> None:
     order = {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "MARKET"}
-    results = evaluate_order(order, on=date(2026, 11, 22), broker="kotakneo", broker_name="Kotak Neo", traded_today=False)
+    results = evaluate_order(
+        order, on=date(2026, 11, 22), broker="kotakneo", broker_name="Kotak Neo", traded_today=False
+    )
     # The two no-trade-today rows share one sentence, so only the exchange's fires.
     assert [r.level for r in results] == ["block", "block"]
     assert [r.source for r in results] == ["Exchange", "FlintTrade"]
     assert results[0].message == "This contract hasn't traded today — use a limit price."
 
 
-def test_refuse_blocked_raises_with_every_result() -> None:
+def test_refusal_carries_every_result() -> None:
     with pytest.raises(OrderRuleRefused) as excinfo:
-        refuse_blocked({"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "MARKET"}, on=date(2026, 11, 22))
+        raise OrderRuleRefused(
+            evaluate_order({"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "MARKET"}, on=date(2026, 11, 22))
+        )
     assert str(excinfo.value) == "FlintTrade · Market orders aren't accepted on options. Use a limit price."
     assert excinfo.value.results[0].rule_id == "options-market-order-not-sent"
 
@@ -312,7 +340,9 @@ def test_refuse_blocked_raises_with_every_result() -> None:
 def test_equity_and_futures_limit_orders_pass() -> None:
     on = date(2026, 11, 22)
     assert evaluate_order({"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "LIMIT", "price": "1"}, on=on) == []
-    assert evaluate_order({"symbol": "NIFTY25NOVFUT", "exchange": "NFO", "pricetype": "LIMIT", "price": "1"}, on=on) == []
+    assert (
+        evaluate_order({"symbol": "NIFTY25NOVFUT", "exchange": "NFO", "pricetype": "LIMIT", "price": "1"}, on=on) == []
+    )
 
 
 def test_exact_circuit_blocks_and_estimated_band_only_warns() -> None:
@@ -335,7 +365,11 @@ def test_raw_future_market_blocks_only_where_the_broker_does_not_convert() -> No
     assert [(r.level, r.rule_id) for r in raw] == [("block", "algo-market-orders-fo-rejected")]
     converted = evaluate_order(order, on=on, broker="kotakneo", broker_name="Kotak Neo", last_price="24000")
     assert [(r.level, r.rule_id, r.message) for r in converted] == [
-        ("warn", "kotak-market-price-protection", "Market orders are sent as limits within about 0.5% of the last price and may not fill."),
+        (
+            "warn",
+            "kotak-market-price-protection",
+            "Market orders are sent as limits within about 0.5% of the last price and may not fill.",
+        ),
     ]
 
 
@@ -374,12 +408,28 @@ def test_order_budget_counts_cancels_without_refusing_them() -> None:
     for _ in range(10):
         budget.record("dhan", now=0.0, on=on)
     refused = budget.check_and_record("dhan", now=0.5, on=on)
-    assert refused is not None and refused.message == "Wait 1 seconds — the limit is 10 orders per second."
+    assert refused is not None and refused.message == "Wait 1 second — the limit is 10 orders per second."
 
 
 def test_intraday_square_off_follows_the_broker_profile() -> None:
-    assert rules.intraday_square_off_time("dhan") == "15:25"
-    assert rules.intraday_square_off_time("kotakneo") is None
+    order = {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "LIMIT", "price": "100", "product": "MIS"}
+    on = date(2026, 11, 22)
+    dhan = [r.rule_id for r in evaluate_order(order, on=on, broker="dhan", at_minutes=15 * 60 + 20)]
+    kotak = [r.rule_id for r in evaluate_order(order, on=on, broker="kotakneo", at_minutes=15 * 60 + 20)]
+    assert "dhan-intraday-square-off" in dhan
+    assert "dhan-intraday-square-off" not in kotak
+
+
+def test_wait_is_worded_for_its_window() -> None:
+    from flinttrade_core.order_rules import _wait_label
+
+    assert [_wait_label(n) for n in (1, 40, 61, 3600, 7201)] == [
+        "1 second",
+        "40 seconds",
+        "2 minutes",
+        "1 hour",
+        "3 hours",
+    ]
 
 
 # ---------------------------------------------------------------------------

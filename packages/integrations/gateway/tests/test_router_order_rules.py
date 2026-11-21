@@ -118,13 +118,19 @@ async def test_dhan_order_budget_refuses_the_eleventh_order_in_a_second(*, backe
     for _ in range(10):
         order = _order("RELIANCE", Exchange.NSE, PriceType.LIMIT, price="100")
         await router.place_order(
-            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order,
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=order,
             safety_ctx=_mint(order, "dhan", backend_lease_factory),
         )
     order = _order("RELIANCE", Exchange.NSE, PriceType.LIMIT, price="100")
     with pytest.raises(OrderBudgetExceeded, match="the limit is 10 orders per second"):
         await router.place_order(
-            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order,
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=order,
             safety_ctx=_mint(order, "dhan", backend_lease_factory),
         )
     assert len(adapter.placed) == 10

@@ -320,7 +320,7 @@
         "per_hour": 1000,
         "per_day": 7000
       },
-      "message": "Wait {secs} seconds — the limit is {limit} orders per {window}."
+      "message": "Wait {wait} — the limit is {limit} orders per {window}."
     },
     {
       "id": "dhan-modifications-per-order",

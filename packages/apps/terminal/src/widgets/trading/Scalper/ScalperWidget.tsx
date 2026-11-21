@@ -34,6 +34,7 @@ import {
   type RuleResult,
 } from "@/lib/orderRules";
 import { useBrokerStore } from "@/stores/brokerStore";
+import { istMinutes } from "@/lib/ist";
 import { resolveAccountAuthorityIdentity } from "@/hooks/useDataScope";
 import { EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
@@ -367,6 +368,7 @@ function ScalperWidget(props: WidgetProps) {
       brokerName: brokerDisplayName(ruleBroker),
       product,
       stopLossTargetPlacement: stopLossTargetPlacement(ruleBroker),
+      atMinutes: istMinutes(),
     };
     const results = evaluateOrderRules({
       ...shared,

@@ -24,7 +24,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -84,6 +84,25 @@ _ORDER_TYPE_ALIASES = {
     "STOP_LOSS_MARKET": "SL-M",
 }
 _PAISA = Decimal("0.05")
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist_now() -> datetime:
+    """Current wall-clock time in India; rule dates and session times are IST."""
+    return datetime.now(_IST)
+
+
+def ist_today() -> date:
+    """Today's date in India."""
+    return ist_now().date()
+
+
+def ist_minutes() -> int:
+    """Minutes since IST midnight, for session-time rules such as square-off."""
+    now = ist_now()
+    return now.hour * 60 + now.minute
+
+
 _STRIKE_THEN_SIDE = re.compile(r"\d[-_ ]?(CE|PE|CALL|PUT)$")
 
 
@@ -262,8 +281,6 @@ def contract_expiry(symbol: str) -> date | None:
     if len(token) < 7 or not token[:2].isdigit():
         return None
     try:
-        from datetime import datetime
-
         return datetime.strptime(token[:7], "%d%b%y").date()
     except ValueError:
         return None
@@ -291,7 +308,7 @@ def _decimal(value: object) -> Decimal | None:
         return None
     try:
         number = Decimal(str(value))
-    except (InvalidOperation, ValueError):
+    except InvalidOperation, ValueError:
         return None
     if not number.is_finite():
         return None
@@ -356,14 +373,6 @@ def market_band_label(reference: Decimal, parameters: Mapping[str, Any], *, opti
         if upper is None or reference < Decimal(str(upper)):
             return f"₹{value}" if unit == "inr" else f"{value}%"
     return ""
-
-
-def order_rate_limit(on: date | None = None) -> int | None:
-    """Orders per second per exchange allowed on ``on``, or None before the rule."""
-    row = rule_by_id("order-rate-threshold")
-    if not row.in_force(on or date.today()):
-        return None
-    return int(row.parameters["max_per_second"])
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +442,11 @@ def _evaluate_row(row: OrderRule, facts: OrderFacts, order_type: str) -> RuleRes
         reference = facts.last_price
         if reference is None or reference <= 0:
             return None
-        band = market_band_label(reference, row.parameters, option=(facts.instrument or instrument_kind(facts.symbol, facts.exchange)) == "option")
+        band = market_band_label(
+            reference,
+            row.parameters,
+            option=(facts.instrument or instrument_kind(facts.symbol, facts.exchange)) == "option",
+        )
         return RuleResult(row.level, source, row.id, _fill(row.message, {"band": band}))
     if row.check == "needs_trade_today":
         return RuleResult(row.level, source, row.id, row.message) if facts.traded_today is False else None
@@ -455,7 +468,7 @@ def _sort_key(index: int, row: OrderRule) -> tuple[int, int, int]:
 
 def evaluate(facts: OrderFacts, *, on: date | None = None) -> list[RuleResult]:
     """Return every rule result for one order, most serious first."""
-    day = on or date.today()
+    day = on or ist_today()
     venue = exchange_family(facts.exchange)
     kind = facts.instrument or instrument_kind(facts.symbol, facts.exchange)
     order_type = normalise_order_type(facts.order_type)
@@ -576,17 +589,21 @@ class OrderBudgetExceeded(OrderRuleRefused):
     http_status = 429
 
 
-def refuse_blocked(order: object, *, on: date | None = None, **kwargs: Any) -> list[RuleResult]:
-    """Raise :class:`OrderRuleRefused` when a block rule applies, else return the results."""
-    results = evaluate_order(order, on=on, **kwargs)
-    if blocking(results):
-        raise OrderRuleRefused(results)
-    return results
+# ---------------------------------------------------------------------------
+# Rows read directly: broker order budget and modification cap
+# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Rows read directly: broker order budget, modification cap, square-off, Live
-# ---------------------------------------------------------------------------
+def _wait_label(seconds: int) -> str:
+    """``1 second``, ``40 seconds``, ``3 minutes`` or ``2 hours``, rounded up."""
+    if seconds < 60:
+        return "1 second" if seconds == 1 else f"{seconds} seconds"
+    if seconds < 3600:
+        minutes = -(-seconds // 60)
+        return "1 minute" if minutes == 1 else f"{minutes} minutes"
+    hours = -(-seconds // 3600)
+    return "1 hour" if hours == 1 else f"{hours} hours"
+
 
 _WINDOWS: tuple[tuple[str, str, float], ...] = (
     ("per_second", "second", 1.0),
@@ -598,11 +615,7 @@ _WINDOWS: tuple[tuple[str, str, float], ...] = (
 
 def _broker_rows(check: str, broker: str, on: date) -> list[OrderRule]:
     key = str(broker or "").strip().lower()
-    return [
-        row
-        for row in load_rules()
-        if row.check == check and row.broker in {key, "all"} and row.in_force(on)
-    ]
+    return [row for row in load_rules() if row.check == check and row.broker in {key, "all"} and row.in_force(on)]
 
 
 class OrderBudget:
@@ -632,7 +645,7 @@ class OrderBudget:
         broker_name: str = "",
     ) -> RuleResult | None:
         """Return a block result, or record the write and return None."""
-        day = on or date.today()
+        day = on or ist_today()
         key = str(broker or "").strip().lower()
         budget_rows = _broker_rows("order_budget", key, day)
         cap_rows = _broker_rows("modification_cap", key, day) if modify_order_id else []
@@ -649,7 +662,7 @@ class OrderBudget:
                     recent = [stamp for stamp in history if now - stamp < seconds]
                     if len(recent) >= limit:
                         wait = max(1, int(-(-(seconds - (now - min(recent))) // 1)))
-                        message = _fill(row.message, {"limit": limit, "window": window, "secs": wait})
+                        message = _fill(row.message, {"limit": limit, "window": window, "wait": _wait_label(wait)})
                         return RuleResult(row.level, source, row.id, message)
             for row in cap_rows:
                 limit = int(row.parameters["max_modifications"])
@@ -667,28 +680,12 @@ class OrderBudget:
     def record(self, broker: str, *, now: float, on: date | None = None) -> None:
         """Count a write that must never be refused, such as a cancel."""
         key = str(broker or "").strip().lower()
-        if not _broker_rows("order_budget", key, on or date.today()):
+        if not _broker_rows("order_budget", key, on or ist_today()):
             return
         with self._lock:
             history = [stamp for stamp in self._writes.get(key, []) if now - stamp < 86400.0]
             history.append(now)
             self._writes[key] = history
-
-
-def intraday_square_off_time(broker: str, on: date | None = None) -> str | None:
-    """HH:MM the broker starts closing intraday F&O positions, when it publishes one."""
-    for row in _broker_rows("square_off", broker, on or date.today()):
-        if row.broker != "all":
-            return str(row.parameters["square_off_from"])
-    return None
-
-
-def live_acknowledgement_rule(on: date | None = None) -> RuleResult | None:
-    """The one-time acknowledgement shown when Live is turned on, if in force."""
-    for row in load_rules():
-        if row.check == "live_acknowledgement" and row.in_force(on or date.today()):
-            return RuleResult(row.level, row.source, row.id, row.message)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +700,9 @@ def _scope_label(row: OrderRule) -> str:
     parts = []
     parts.append("all exchanges" if row.exchange == "all" else row.exchange)
     parts.append("all brokers" if row.broker == "all" else _BROKER_LABELS.get(row.broker, row.broker))
-    instrument = {"all": "all instruments", "derivative": "futures and options"}.get(row.instrument, f"{row.instrument}s")
+    instrument = {"all": "all instruments", "derivative": "futures and options"}.get(
+        row.instrument, f"{row.instrument}s"
+    )
     parts.append(instrument)
     if "all" not in row.order_types:
         parts.append(", ".join(row.order_types))
@@ -751,8 +750,6 @@ __all__ = [
     "exchange_family",
     "facts_from_order",
     "headline",
-    "intraday_square_off_time",
-    "live_acknowledgement_rule",
     "underlying_of",
     "instrument_kind",
     "is_option_contract",
@@ -761,9 +758,7 @@ __all__ = [
     "market_price_cap",
     "max_stop_limit_gap",
     "normalise_order_type",
-    "order_rate_limit",
     "price_band",
-    "refuse_blocked",
     "results_payload",
     "rule_by_id",
     "rules_markdown",

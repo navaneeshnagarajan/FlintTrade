@@ -76,6 +76,7 @@ import {
 } from "@/lib/orderGuards";
 import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import { OrderRuleLine } from "@/components/orders/OrderRuleLine";
+import { istMinutes } from "@/lib/ist";
 import {
   brokerDisplayName,
   evaluateOrderRules,
@@ -770,6 +771,8 @@ function OrderPadWidget(props: WidgetProps) {
     broker: ruleBroker,
     brokerName: brokerDisplayName(ruleBroker),
     product,
+    // Re-read on every tick or edit, which is often enough for a minute clock.
+    atMinutes: istMinutes(),
   }), [action, exchange, ltp, orderType, price, product, ruleBroker, symbol, trigPrice]);
   const ruleBlocked = hasBlockingRule(ruleResults);
   // A server or broker refusal of the last press, shown on the same line until

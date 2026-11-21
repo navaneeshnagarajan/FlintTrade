@@ -359,10 +359,10 @@ export function ruleResultsFrom(payload: unknown): RuleResult[] {
   );
 }
 
-/** Text of the Live switch acknowledgement, from its dated row. */
-export function liveAcknowledgementText(): string {
+/** Text of the Live switch acknowledgement when its dated row is in force, else "". */
+export function liveAcknowledgementText(on: string = istToday()): string {
   const row = ROWS.find((item) => item.check === "live_acknowledgement");
-  return row ? row.message : "";
+  return row && inForce(row, on) ? row.message : "";
 }
 
 const BROKER_NAMES: Record<string, string> = {

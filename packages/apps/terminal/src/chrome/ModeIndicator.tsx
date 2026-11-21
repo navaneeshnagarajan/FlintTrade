@@ -40,6 +40,8 @@ import { useLiveArmFactors } from "@/hooks/useTotpEnrolled";
 import { sessionModeFromToken } from "@/lib/modeClaim";
 import { operatorModeName } from "@/lib/operatorModeLabel";
 import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
+import { LiveAcknowledgementDialog } from "@/components/LiveAcknowledgementDialog";
+import { pendingLiveAcknowledgement } from "@/lib/liveAcknowledgement";
 import {
   CREATE_A_PIN,
   ENROL_2FA_AND_CONNECT_BROKER,
@@ -132,12 +134,22 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     await switchToPractice();
   }, [switchToPractice]);
 
-  const selectLive = useCallback(() => {
-    if (!liveEligible || mode === "live") return;
+  const [ackText, setAckText] = useState("");
+  const openPinStep = useCallback(() => {
     setPin("");
     setPinError("");
     setConfirmOpen(true);
-  }, [liveEligible, mode]);
+  }, []);
+  const selectLive = useCallback(() => {
+    if (!liveEligible || mode === "live") return;
+    // First switch to Live (or changed wording): acknowledge once, then PIN.
+    const pending = pendingLiveAcknowledgement();
+    if (pending) {
+      setAckText(pending);
+      return;
+    }
+    openPinStep();
+  }, [liveEligible, mode, openPinStep]);
 
   const handleConfirmLive = useCallback(async () => {
     if (pin.length !== 6 || /\D/.test(pin)) {
@@ -237,6 +249,15 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
           {toggleError}
         </span>
       ) : null}
+
+      <LiveAcknowledgementDialog
+        text={ackText}
+        onCancel={() => setAckText("")}
+        onAccept={() => {
+          setAckText("");
+          openPinStep();
+        }}
+      />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>

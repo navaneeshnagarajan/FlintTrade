@@ -25,20 +25,40 @@ SENSEX_CE = "SENSEX27NOV2680000CE"
 _BLOCKED = [
     (
         "option market",
-        {"symbol": NIFTY_CE, "exchange": "NFO", "action": "BUY", "quantity": 75, "price": 0, "product": "MIS", "order_type": "MARKET"},
+        {
+            "symbol": NIFTY_CE,
+            "exchange": "NFO",
+            "action": "BUY",
+            "quantity": 75,
+            "price": 0,
+            "product": "MIS",
+            "order_type": "MARKET",
+        },
     ),
     (
         "option stop market",
         {
-            "symbol": NIFTY_CE, "exchange": "NFO", "action": "SELL", "quantity": 75, "price": 0,
-            "trigger_price": 80, "product": "MIS", "order_type": "SL-M",
+            "symbol": NIFTY_CE,
+            "exchange": "NFO",
+            "action": "SELL",
+            "quantity": 75,
+            "price": 0,
+            "trigger_price": 80,
+            "product": "MIS",
+            "order_type": "SL-M",
         },
     ),
     (
         "bse stop limit gap",
         {
-            "symbol": SENSEX_CE, "exchange": "BFO", "action": "SELL", "quantity": 20, "price": 39.95,
-            "trigger_price": 50, "product": "MIS", "order_type": "SL",
+            "symbol": SENSEX_CE,
+            "exchange": "BFO",
+            "action": "SELL",
+            "quantity": 20,
+            "price": 39.95,
+            "trigger_price": 50,
+            "product": "MIS",
+            "order_type": "SL",
         },
     ),
 ]
@@ -142,9 +162,13 @@ def test_blocked_order_has_one_result_on_every_surface(name: str, body: dict, fl
     engine = SandboxEngine(db_path=":memory:")
     try:
         result = engine.place_order(
-            body["symbol"], body["exchange"], body["action"], int(body["quantity"]),
+            body["symbol"],
+            body["exchange"],
+            body["action"],
+            int(body["quantity"]),
             float(body.get("price") or 0) or 100.0,
-            order_type=body["order_type"], trigger_price=float(body.get("trigger_price") or 0),
+            order_type=body["order_type"],
+            trigger_price=float(body.get("trigger_price") or 0),
         )
     finally:
         engine.close()
@@ -231,11 +255,21 @@ def test_equity_backtest_market_orders_are_unchanged() -> None:
 
 def test_api_returns_warnings_with_an_accepted_practice_order(flask_app, client) -> None:
     sandbox = MagicMock()
-    sandbox.place_order.return_value = {"order_id": "SB-1", "status": "PENDING", "message": "Practice LIMIT order is pending"}
+    sandbox.place_order.return_value = {
+        "order_id": "SB-1",
+        "status": "PENDING",
+        "message": "Practice LIMIT order is pending",
+    }
     flask_app.config["DATA_SANDBOX_ENGINE"] = sandbox
     body = {
-        "symbol": NIFTY_CE, "exchange": "NFO", "action": "BUY", "quantity": 75, "price": 200,
-        "product": "MIS", "order_type": "LIMIT", "last_price": 100,
+        "symbol": NIFTY_CE,
+        "exchange": "NFO",
+        "action": "BUY",
+        "quantity": 75,
+        "price": 200,
+        "product": "MIS",
+        "order_type": "LIMIT",
+        "last_price": 100,
     }
     response = client.post("/api/v1/orders/place", json=body, headers=_practice_headers())
     expected = results_payload(evaluate_order(body, broker="practice", broker_name="Practice", last_price=100))
