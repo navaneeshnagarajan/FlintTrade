@@ -26,6 +26,7 @@ import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import { CANCELLATION_REQUESTED, EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
@@ -513,7 +514,7 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       void submitOnce(
-        { key: `${exch}:${sym}`, symbol: sym, exchange: exch, action },
+        { key: instrumentOrderKey(exch, sym), symbol: sym, exchange: exch, action },
         () => executeOrder(sym, exch, action),
       ).catch(() => {
         // The unknown line is on screen and the contract is locked.
@@ -528,7 +529,7 @@ function ScalperWidget(props: WidgetProps) {
         showStatus(orderBlockCopy ?? "", "error");
         return;
       }
-      if (sym && contractLocked(`${exch}:${sym}`)) return;
+      if (sym && contractLocked(instrumentOrderKey(exch, sym))) return;
       if (oneClick) {
         sendGuarded(sym, exch, action);
       } else {
@@ -771,10 +772,10 @@ function ScalperWidget(props: WidgetProps) {
         onCancelAll={() => setCancelAllOpen(true)}
         ordersArmed={ordersArmed}
         orderBlockCopy={orderBlockCopy}
-        ceLocked={ceSymbol != null && contractLocked(`${optExch}:${ceSymbol}`)}
-        peLocked={peSymbol != null && contractLocked(`${optExch}:${peSymbol}`)}
-        ceStatusUnknown={ceSymbol != null && contractUnknown(`${optExch}:${ceSymbol}`)}
-        peStatusUnknown={peSymbol != null && contractUnknown(`${optExch}:${peSymbol}`)}
+        ceLocked={ceSymbol != null && contractLocked(instrumentOrderKey(optExch, ceSymbol))}
+        peLocked={peSymbol != null && contractLocked(instrumentOrderKey(optExch, peSymbol))}
+        ceStatusUnknown={ceSymbol != null && contractUnknown(instrumentOrderKey(optExch, ceSymbol))}
+        peStatusUnknown={peSymbol != null && contractUnknown(instrumentOrderKey(optExch, peSymbol))}
       />
 
       <OrderConfirmModal

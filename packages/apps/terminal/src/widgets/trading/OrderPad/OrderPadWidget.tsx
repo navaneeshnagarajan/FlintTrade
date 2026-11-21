@@ -63,6 +63,9 @@ import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import { resolveAccountAuthorityIdentity, resolveDataScope, useDataScope } from "@/hooks/useDataScope";
 import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErrorPresentation";
 import { presentSubmitError } from "@/lib/orderOutcome";
+import { instrumentOrderKey, submitReplyWasLost } from "@/lib/orderSubmitGuard";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
@@ -965,6 +968,13 @@ function OrderPadWidget(props: WidgetProps) {
     return () => clearTimeout(toastTimerRef.current);
   }, []);
 
+  // Shared single-flight and lost-submit lock, the same one the fast paths use.
+  const submitGuard = useOrderSubmitGuard();
+  const { submit: guardSubmit, isLocked: isSubmitLocked } = submitGuard;
+  const padKey = instrumentOrderKey(exchange, symbol);
+  const padLocked = isSubmitLocked(padKey);
+  const padStatusUnknown = submitGuard.isUnknown(padKey);
+
   const submitOrder = useCallback(async (
     params: Readonly<PlaceOrderParams>,
     authority?: { mode: "practice" | "live" },
@@ -976,14 +986,29 @@ function OrderPadWidget(props: WidgetProps) {
       showToast("error", "Unavailable. No order was sent.", 6000);
       return false;
     }
+    const lockKey = instrumentOrderKey(params.exchange, params.symbol);
+    // One place request per intent: a second submit while the first is in
+    // flight, or while a lost one is unsettled, sends nothing.
+    if (isSubmitLocked(lockKey)) return false;
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
     setNativeDisclosure(null);
     setLoading(true);
     try {
-      const result = options?.exit
-        ? await placeOrder(params, authority, { exit: true })
-        : await placeOrder(params, authority);
+      const submitted = await guardSubmit(
+        { key: lockKey, symbol: params.symbol, exchange: params.exchange, action: params.action, quantity: params.quantity },
+        () => options?.exit
+          ? placeOrder(params, authority, { exit: true })
+          : placeOrder(params, authority),
+        // Lock exactly when the pad will say the status is unknown.
+        (err) => submissionMode === "live"
+          ? nativeOrderErrorPresentation(err, {
+            broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
+          })?.body === ORDER_STATUS_UNKNOWN
+          : submitReplyWasLost(err),
+      );
+      if (!submitted.sent) return false;
+      const result = submitted.value;
       const scopeStillCurrent = isOperatorIncidentScopeCurrent(incidentScope) && submissionScope === resolveDataScope({
         ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
       });
@@ -1133,7 +1158,7 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [getValues, setError, setValue, showToast]);
+  }, [getValues, guardSubmit, isSubmitLocked, setError, setValue, showToast]);
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
@@ -1178,6 +1203,7 @@ function OrderPadWidget(props: WidgetProps) {
   }, [currentIntentIdentity, practiceReview, showToast]);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
+    if (isSubmitLocked(instrumentOrderKey(values.exchange, values.symbol))) return;
     clearErrors("qty");
     const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
       ?? (lotSizeKnown
@@ -1983,7 +2009,7 @@ function OrderPadWidget(props: WidgetProps) {
           <Button
             type="button"
             data-testid="orderpad-close"
-            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "laya")}
+            disabled={loading || padLocked || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "laya")}
             onClick={() => void handleClosePosition()}
             className={`${btnBase} bg-surface-hover text-text-primary border border-border-default hover:bg-surface-card`}
           >
@@ -1997,12 +2023,17 @@ function OrderPadWidget(props: WidgetProps) {
         ) : null}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny" || admission?.kind === "clamp"}
+          disabled={loading || padLocked || !symbol || !qty || liveMuted || admission?.kind === "deny" || admission?.kind === "clamp"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
+        {padStatusUnknown ? (
+          <div data-testid="order-pad-status-unknown">
+            <OrderStatusUnknownLine />
+          </div>
+        ) : null}
         {showPracticeLayaDown ? (
           <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
             {LAYA_DOWN_REFUSAL}

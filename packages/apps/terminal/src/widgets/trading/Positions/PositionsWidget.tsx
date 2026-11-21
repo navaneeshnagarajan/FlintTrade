@@ -84,8 +84,11 @@ import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_ALL_REQUESTED, EXIT_REQUESTED } from "@/lib/operatorIncident";
+import { EXIT_ALL_REQUESTED, EXIT_REQUESTED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
+import { useOrderSubmitGuard, type OrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -374,6 +377,19 @@ interface SquareOffDialogProps {
   getCurrentIdentity: () => AccountAuthorityIdentity;
   onClose: () => void;
   onSquaredOff: (mutationIdentity: AccountAuthorityIdentity) => void;
+  /** Shared single-flight and lost-submit lock for this contract. */
+  submitGuard: OrderSubmitGuard;
+}
+
+/** Lock intent for the exit order of one position. */
+function exitIntent(position: PositionRow) {
+  return {
+    key: instrumentOrderKey(position.exchange, position.symbol),
+    symbol: position.symbol,
+    exchange: position.exchange,
+    action: position.quantity > 0 ? "SELL" as const : "BUY" as const,
+    quantity: Math.abs(position.quantity),
+  };
 }
 
 function squareOffProduct(position: PositionRow): (typeof PRODUCTS)[number] | null {
@@ -398,6 +414,7 @@ function SquareOffDialog({
   getCurrentIdentity,
   onClose,
   onSquaredOff,
+  submitGuard,
 }: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -423,8 +440,8 @@ function SquareOffDialog({
     setLayaNotice(null);
     try {
       // Same place route as the Order Pad: Laya, then SafetySystem on Live
-      // and the sandbox on Practice.
-      await placeOrder({
+      // and the sandbox on Practice. One request per contract at a time.
+      const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
         action: exitAction,
@@ -435,7 +452,8 @@ function SquareOffDialog({
         triggerPrice: 0,
         strategy: "FlintPositions",
         rationale: admissionRationale(note),
-      }, mutationIdentity, { exit: true });
+      }, mutationIdentity, { exit: true }));
+      if (!submitted.sent) return;
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
@@ -476,6 +494,7 @@ function SquareOffDialog({
     onClose,
     onSquaredOff,
     note,
+    submitGuard,
   ]);
 
   return (
@@ -517,7 +536,7 @@ function SquareOffDialog({
           </Button>
           <Button
             onClick={() => void handleSquareOff()}
-            disabled={isSubmitting || !product || !canSubmit}
+            disabled={isSubmitting || !product || !canSubmit || submitGuard.isLocked(exitIntent(position).key)}
             aria-label={`Confirm square off ${position.symbol}`}
             className="bg-loss hover:bg-loss/90 text-white"
           >
@@ -552,6 +571,8 @@ interface ExitAllDialogProps {
   hasPendingExit: (position: PositionRow) => boolean;
   onOpenChange: (open: boolean) => void;
   onExited: (mutationIdentity: AccountAuthorityIdentity) => void;
+  /** Shared single-flight and lost-submit lock; Practice rows go through it. */
+  submitGuard: OrderSubmitGuard;
 }
 
 function ExitAllDialog({
@@ -565,9 +586,12 @@ function ExitAllDialog({
   hasPendingExit,
   onOpenChange,
   onExited,
+  submitGuard,
 }: ExitAllDialogProps) {
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // A Live exit-all whose reply was lost is not sent again from this dialog.
+  const [liveExitUnknown, setLiveExitUnknown] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rowFailures, setRowFailures] = useState<ExitAllRowFailure[]>([]);
   const [submittedExits, setSubmittedExits] = useState<string[]>([]);
@@ -579,6 +603,7 @@ function ExitAllDialog({
     (next: boolean) => {
       if (!next) {
         setConfirmText("");
+        setLiveExitUnknown(false);
         setErrorMsg(null);
         setRowFailures([]);
         setSubmittedExits([]);
@@ -589,7 +614,7 @@ function ExitAllDialog({
   );
 
   const handleExitAll = useCallback(async () => {
-    if (!confirmed || !isActionAllowed()) return;
+    if (!confirmed || liveExitUnknown || !isActionAllowed()) return;
     const mutationIdentity = runWithMatchingAccountAuthority(
       openingIdentity,
       getCurrentIdentity,
@@ -628,7 +653,7 @@ function ExitAllDialog({
             continue;
           }
           try {
-            await placeOrder({
+            const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
               symbol: position.symbol,
               exchange: position.exchange,
               action: position.quantity > 0 ? "SELL" : "BUY",
@@ -638,7 +663,17 @@ function ExitAllDialog({
               price: squareOffMark(position, true),
               triggerPrice: 0,
               strategy: "FlintPositions",
-            }, mutationIdentity, { exit: true });
+            }, mutationIdentity, { exit: true }));
+            if (!submitted.sent) {
+              // An earlier exit for this row is in flight or its outcome is unknown.
+              failures.push({
+                key: `${position.symbol}-${position.exchange}-${position.product}`,
+                symbol: label,
+                notice: null,
+                message: ORDER_STATUS_UNKNOWN,
+              });
+              continue;
+            }
             done.push(label);
           } catch (err) {
             const notice = layaNoticeFromOrderError(err);
@@ -694,6 +729,7 @@ function ExitAllDialog({
     } catch (err) {
       // Mode-guard 403s ("live mode only", PIN unlock) and broker errors are
       // shown verbatim — never a generic failure.
+      if (!practice && presentSubmitError(err).kind === "unknown") setLiveExitUnknown(true);
       setErrorMsg(exitRequestErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -708,6 +744,8 @@ function ExitAllDialog({
     onExited,
     close,
     hasPendingExit,
+    liveExitUnknown,
+    submitGuard,
   ]);
 
   return (
@@ -759,7 +797,7 @@ function ExitAllDialog({
           </Button>
           <Button
             onClick={() => void handleExitAll()}
-            disabled={!confirmed || isSubmitting || !canSubmit}
+            disabled={!confirmed || isSubmitting || !canSubmit || liveExitUnknown}
             aria-label="Confirm exit all positions"
             className="bg-loss hover:bg-loss/90 text-white"
           >
@@ -787,6 +825,8 @@ function PositionsWidget(props: WidgetProps) {
   const { identity: readIdentity, enabled: accountReadsEnabled } = accountReadContext;
   const appMode = readIdentity.mode;
   const isExplore = appMode === "explore";
+  // Shared with the Order Pad and fast paths: a lost exit locks its contract.
+  const submitGuard = useOrderSubmitGuard();
   const {
     data: positionsData,
     dataUpdatedAt,
@@ -1085,7 +1125,7 @@ function PositionsWidget(props: WidgetProps) {
     const exitAction = position.quantity > 0 ? "SELL" : "BUY";
     const exitQty = Math.abs(position.quantity);
     try {
-      await placeOrder({
+      const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
         action: exitAction,
@@ -1095,7 +1135,8 @@ function PositionsWidget(props: WidgetProps) {
         price: squareOffMark(position, appMode === "practice"),
         triggerPrice: 0,
         strategy: "FlintPositions",
-      }, identity, { exit: true });
+      }, identity, { exit: true }));
+      if (!submitted.sent) return;
       if (!accountAuthorityMatches(identity, getCurrentReadIdentity())) return;
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
@@ -1123,10 +1164,11 @@ function PositionsWidget(props: WidgetProps) {
         ),
       });
     }
-  }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions]);
+  }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions, submitGuard]);
 
   const renderRowActions = useCallback((position: PositionRow) => {
-    const exitPending = pendingExitKeys.has(positionContractKey(position));
+    const exitPending = pendingExitKeys.has(positionContractKey(position))
+      || submitGuard.isLocked(exitIntent(position).key);
     const unexpected = unexpectedKeys.has(positionContractKey(position));
     if (!(canSquareOff || canUseNativePositionVerbs)) {
       // Explore has no book to trade. Practice with a frozen feed omits the hint.
@@ -1195,6 +1237,7 @@ function PositionsWidget(props: WidgetProps) {
     isExplore,
     pendingExitKeys,
     readIdentity,
+    submitGuard,
     unexpectedKeys,
   ]);
 
@@ -1691,6 +1734,7 @@ function PositionsWidget(props: WidgetProps) {
           getCurrentIdentity={getCurrentReadIdentity}
           onClose={() => setSquareOffIntent(null)}
           onSquaredOff={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
+          submitGuard={submitGuard}
         />
       )}
 
@@ -1709,6 +1753,7 @@ function PositionsWidget(props: WidgetProps) {
             if (!open) setExitAllIntent(null);
           }}
           onExited={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
+          submitGuard={submitGuard}
         />
       )}
     </div>

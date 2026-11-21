@@ -60,6 +60,9 @@ import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder, getSymbol } from "@/services/api";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import {
   checkLotMultiple,
@@ -276,9 +279,19 @@ function bestAskPrice(book: NormalisedDepth): number | null {
 // Level row
 // ---------------------------------------------------------------------------
 
-function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk, onCancel }: {
+/**
+ * Lock key for one ladder price. Resting orders at other prices are separate
+ * intents; a lost reply locks only the price it was sent at.
+ */
+function ladderOrderKey(exchange: string, symbol: string, price: number): string {
+  return `${instrumentOrderKey(exchange, symbol)}@${price}`;
+}
+
+function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid, onAsk, onCancel }: {
   level: LadderLevel; isCenter: boolean; order?: PendingOrder;
   maxQty: number; qty: number; disabled: boolean;
+  /** A place at this price is in flight or its outcome is unknown. */
+  locked: boolean;
   onBid: (p: number) => void; onAsk: (p: number) => void; onCancel: (id: string) => void;
 }) {
   return (
@@ -290,7 +303,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
         {fmtOrders(level.bidOrders)}
       </div>
 
-      <Button variant="ghost" onClick={() => onBid(level.price)} disabled={disabled}
+      <Button variant="ghost" onClick={() => onBid(level.price)} disabled={disabled || locked}
         className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-loss/15",
           level.bidQty ? "text-profit" : "text-transparent")}
@@ -329,7 +342,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
         )}
       </div>
 
-      <Button variant="ghost" onClick={() => onAsk(level.price)} disabled={disabled}
+      <Button variant="ghost" onClick={() => onAsk(level.price)} disabled={disabled || locked}
         className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-profit/15",
           level.askQty ? "text-loss" : "text-transparent")}
@@ -547,6 +560,10 @@ function OrderLadderWidget(props: Props) {
     ? `Book updated ${new Date(depthQuery.dataUpdatedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}`
     : undefined;
 
+  // One place request per price at a time; a lost reply locks that price.
+  const { submit: submitOnce, isLocked, unknown: unknownSubmits } = useOrderSubmitGuard();
+  const ladderStatusUnknown = unknownSubmits.some((record) => record.key.startsWith(`${instrumentOrderKey(exchange, symbol)}@`));
+
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
     const modeRefusal = checkOrderEntryMode(mode);
     if (modeRefusal) { showMsg(modeRefusal); return; }
@@ -574,12 +591,21 @@ function OrderLadderWidget(props: Props) {
       qty,
       status: "placing",
     };
-    setPendingOrders((p) => [...p, order]);
-    try {
-      const result = await placeOrder(
+    const submitted = submitOnce(
+      { key: ladderOrderKey(exchange, symbol, price), symbol, exchange, action, quantity: qty },
+      () => placeOrder(
         { symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder", rationale: admissionRationale(note) },
         authority,
-      );
+      ),
+    );
+    setPendingOrders((p) => [...p, order]);
+    try {
+      const sent = await submitted;
+      if (!sent.sent) {
+        setPendingOrders((p) => p.filter((o) => o.localId !== localId));
+        return;
+      }
+      const result = sent.value;
       // Store the REAL broker order id — cancel is disabled until it is known,
       // so the ladder can never send a fabricated id to the broker.
       const brokerOrderId = extractBrokerOrderId(result);
@@ -592,10 +618,11 @@ function OrderLadderWidget(props: Props) {
       track("trade", `order_ladder_${action.toLowerCase()}`);
     } catch (err) {
       const outcome = presentSubmitError(err);
-      showMsg(outcome.message);
+      // A lost reply shows the persistent unknown line from the shared lock instead.
+      if (outcome.kind !== "unknown") showMsg(outcome.message);
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
-  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note]);
+  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note, submitOnce]);
 
   const cancelPending = useCallback(async (localId: string) => {
     const order = pendingOrders.find((o) => o.localId === localId);
@@ -702,6 +729,7 @@ function OrderLadderWidget(props: Props) {
         </div>
       )}
 
+      {ladderStatusUnknown && <OrderStatusUnknownLine className="flex-none px-2.5 py-1 border-b border-border-subtle" />}
       {statusMsg && (
         <div role="status" aria-live="polite"
           className="flex-none px-2.5 py-1 text-xxs text-center text-text-secondary bg-surface-elevated border-b border-border-subtle">
@@ -715,6 +743,7 @@ function OrderLadderWidget(props: Props) {
             <LevelRow key={level.price} level={level} isCenter={idx === LEVELS_ABOVE}
               order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
               disabled={!hasUsablePrice}
+              locked={isLocked(ladderOrderKey(exchange, symbol, level.price))}
               onBid={(p) => { void sendOrder("SELL", p); }}
               onAsk={(p) => { void sendOrder("BUY", p); }}
               onCancel={cancelPending} />
