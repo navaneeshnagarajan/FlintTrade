@@ -140,10 +140,13 @@ const defaultProps = makeWidgetPanelProps();
 /** The order-submit guard reads the order book through React Query. */
 function render(ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(ui, {
-    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
-    ...options,
-  });
+  return {
+    client,
+    ...rtlRender(ui, {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+      ...options,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -832,26 +835,31 @@ describe("ScalperWidget", () => {
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
       selector({ mode: "practice" }),
     );
-    let answerRead!: (rows: unknown[]) => void;
-    mockGetOrderbook.mockImplementation(() => new Promise((resolve) => { answerRead = resolve; }));
+    const answerReads: Array<(rows: unknown[]) => void> = [];
+    mockGetOrderbook.mockImplementation(() => new Promise((resolve) => { answerReads.push(resolve); }));
     mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
-    render(<ScalperWidget {...defaultProps} />);
+    const view = render(<ScalperWidget {...defaultProps} />);
     await armOneClick();
 
     fireEvent.click(screen.getByText("Buy CE"));
     await waitFor(() => expectCeLocked());
-    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalled());
+    await waitFor(() => expect(answerReads.length).toBeGreaterThanOrEqual(1));
+    // An empty read that started immediately after the loss does not unlock.
+    await act(async () => answerReads[0]([]));
     expectCeLocked();
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    await act(async () => answerRead([]));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+    act(() => { void view.client.invalidateQueries(); });
+    await waitFor(() => expect(answerReads.length).toBeGreaterThanOrEqual(2));
+    await act(async () => answerReads[1]([]));
     await waitFor(() => {
       expect((screen.getByText("Buy CE").closest("button") as HTMLButtonElement).disabled).toBe(false);
     });
-    // The persistent line beside the buttons is gone with the lock.
+    // The reserved slot remains; the persistent line beside the buttons is gone with the lock.
+    expect(screen.getByTestId("scalper-ce-status-slot")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Orders" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
-  });
+  }, 20_000);
 
   it("does not lock after a definite refusal", async () => {
     mockPlaceOrder.mockRejectedValue(Object.assign(new Error("Quantity exceeds the freeze limit"), { status: 400, body: { message: "Quantity exceeds the freeze limit" } }));
