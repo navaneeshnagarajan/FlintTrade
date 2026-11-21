@@ -236,6 +236,18 @@ class PrimitiveFixtureSource:
         return primitive_copy(facts)
 
 
+def _generation_only_move(pinned: str, snapshot: Any) -> bool:
+    """Whether the publication was pinned to this same evidence at an earlier generation."""
+    evidence = getattr(snapshot, "evidence_json", None)
+    generation = getattr(snapshot, "generation", None)
+    if type(evidence) is not str or type(generation) is not int or generation < 1:
+        return False
+    for prior in range(generation - 1, -1, -1):
+        if pinned == _digest([prior, evidence]):
+            return True
+    return False
+
+
 def _snapshot_has_no_new_financial_evidence(snapshot: Any) -> bool:
     """Whether a moved canonical generation adds no fill, conflict or unallocated trade."""
     return not (
@@ -247,19 +259,22 @@ def _snapshot_has_no_new_financial_evidence(snapshot: Any) -> bool:
 
 
 def _resolve_published_facts(issuer: PrimitiveFixtureSource, row: dict[str, Any], snapshot: Any) -> dict[str, Any]:
-    """Resolve the current publication, retrying only a financially quiet generation move.
+    """Resolve the current publication after a generation-only move.
 
-    A generation move with no new fill or conflict is not a duty. Conflicting or
-    filled evidence is not rebound; that failure must not be stored as an entry.
+    The same evidence at a later generation is resolved again. A book that
+    gained a fill, conflict or unallocated trade is not rebound, and that
+    refusal is not stored as an unresolved entry.
     """
     try:
         return issuer.resolve(row, snapshot)
     except ValueError as exc:
-        if str(exc) != "primitive source generation changed" or not _snapshot_has_no_new_financial_evidence(snapshot):
+        if str(exc) != "primitive source generation changed":
             raise
         identity = row["binding"]["run_id"]
-        revision, _pinned, published = issuer.records[identity]
+        revision, pinned, published = issuer.records[identity]
         if revision != row["revision"]:
+            raise
+        if not (_generation_only_move(pinned, snapshot) or _snapshot_has_no_new_financial_evidence(snapshot)):
             raise
         issuer.records[identity] = (revision, _digest([snapshot.generation, snapshot.evidence_json]), published)
         return issuer.resolve(row, snapshot)
