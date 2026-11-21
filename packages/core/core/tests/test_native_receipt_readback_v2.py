@@ -71,6 +71,25 @@ def test_complete_receipt_readback_preserves_current_and_historical_acceptance(
     assert desk.calls == []
 
 
+def test_aged_settled_cash_does_not_keep_an_unresolved_entry(mounted_desk: MountedDesk) -> None:
+    """A completed exit is not an unresolved entry when the mark has aged out."""
+    from packages.core.core.tests.test_native_financial_owner import _cash_filled, _facts, _financial, _settle_cash
+
+    desk = mounted_desk
+    source, _registration = model_desk(desk, response, options=False)
+    facts = _facts()
+    entry = _cash_filled(facts, mark="4")
+    facts["observed_at_ms"] -= 61_000
+    entry["mark_at_ms"] = facts["observed_at_ms"]
+    for fee in facts["fees"]:
+        fee["as_of_ms"] = facts["observed_at_ms"]
+    source.publish("mounted-native", facts)
+    _qualify(desk)
+    _settle_cash(desk, source, facts)
+    assert _financial(desk).get("unresolved_entry_ids") == []
+    assert desk.app.config["EXECUTION_SESSIONS"].shutdown(0) is True
+
+
 def test_generation_move_after_unadmitted_prepare_is_not_an_unresolved_duty(mounted_desk: MountedDesk) -> None:
     """A prepare that has not been admitted must not pin a duty onto a moved generation."""
     from dataclasses import replace

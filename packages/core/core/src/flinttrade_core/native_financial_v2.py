@@ -248,6 +248,24 @@ def _generation_only_move(pinned: str, snapshot: Any) -> bool:
     return False
 
 
+def _fully_exited(facts: object) -> bool:
+    """True when every published lot has exited and no quantity remains possible."""
+    if type(facts) is not dict or type(facts.get("entries")) is not list or not facts["entries"]:
+        return False
+    for entry in facts["entries"]:
+        if type(entry) is not dict:
+            return False
+        if entry.get("remaining_possible_quantity") not in (0, "0"):
+            return False
+        lots = entry.get("lots")
+        if type(lots) is not list or not lots:
+            return False
+        for lot in lots:
+            if type(lot) is not dict or lot.get("exited_quantity") != lot.get("quantity"):
+                return False
+    return True
+
+
 def _snapshot_fills_are_already_published(snapshot: Any, published: Any) -> bool:
     """True when this snapshot adds no fill the publication has not already admitted."""
     if getattr(snapshot, "conflicts", ()) or getattr(snapshot, "unallocated_trades", ()) or getattr(snapshot, "order_fills", ()):
@@ -638,7 +656,12 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
         result = {"status": assessment.status, "reasons": list(assessment.reasons),
                   **{key: None if getattr(assessment, key) is None else str(getattr(assessment, key))
                      for key in ("capital", "exposure", "loss")}}
-        if assessment.status == "unavailable" and not row.pop("_generation_recovered", False):
+        if assessment.status == "unavailable" and _fully_exited(facts) and set(assessment.reasons) <= {
+            "source_time_unavailable", "fee_date_unavailable", "mark_time_unavailable",
+        }:
+            row.pop("_generation_recovered", None)
+            state["unresolved_entry_ids"] = []
+        elif assessment.status == "unavailable" and not row.pop("_generation_recovered", False):
             state["unresolved_entry_ids"] = sorted(set(state.get("unresolved_entry_ids", ())) | entry_ids)
         elif assessment.status == "unavailable":
             row.pop("_generation_recovered", None)
@@ -695,7 +718,9 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
     except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
         # A moved primitive pin is refused, not stored as an entry. A real
         # missing source still retains the entries it could not evaluate.
-        if str(exc) != "primitive source generation changed" and not row.pop("_generation_recovered", False) and type(facts) is dict and type(facts.get("entries")) is list:
+        if _fully_exited(facts) and str(exc) in {"source_time_unavailable", "fee_date_unavailable", "mark_time_unavailable"}:
+            state["unresolved_entry_ids"] = []
+        elif str(exc) != "primitive source generation changed" and not row.pop("_generation_recovered", False) and type(facts) is dict and type(facts.get("entries")) is list:
             identities = set(state.get("unresolved_entry_ids", ()))
             for entry in facts["entries"]:
                 if type(entry) is dict and type(entry.get("entry_ref")) is dict:
