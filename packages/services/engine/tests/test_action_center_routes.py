@@ -212,6 +212,7 @@ def test_dispatch_exception_is_terminal_and_truthfully_uncertain(client, app, qu
     assert response.status_code == 503
     assert response.get_json()["message"] == "Order status unknown. Check Orders before trying again."
     assert response.get_json()["order_outcome"] == "unknown"
+    assert response.get_json()["leg_outcomes"] == {"entry": "unknown"}
     assert response.get_json()["retry_safe"] is False
     failed = queue.get("intent-1")
     assert failed.status == "failed"

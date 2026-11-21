@@ -33,7 +33,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, jsonify
 
 from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
-from flinttrade_core.order_outcome import cancel_acknowledgement
+from flinttrade_core.order_outcome import cancel_acknowledgement, leg_outcomes
 from flinttrade_core.rate_limiter import rate_limit
 
 from .bracket_order import BracketOrderError, BracketPrincipal
@@ -456,6 +456,12 @@ def cancel_bracket(bracket_id: str) -> Response:
     # A swept leg cancel is the broker's acknowledgement. It is not a confirmed
     # cancel, so the response says a cancellation was requested.
     acknowledgement = cancel_acknowledgement({})
+    # Each bracket leg is reported on its own; a leg never placed is absent.
+    acknowledgement["leg_outcomes"] = leg_outcomes(
+        entry="confirmed",
+        target="confirmed" if bracket.target_order_id else "absent",
+        stop_loss="confirmed" if bracket.sl_order_id else "absent",
+    )
     warnings = list(bracket.cancel_warnings)
     message = str(acknowledgement["message"])
     if warnings:

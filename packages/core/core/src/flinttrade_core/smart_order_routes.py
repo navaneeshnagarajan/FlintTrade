@@ -49,7 +49,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from .order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED
+from .order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED, single_leg_outcomes
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.core.smart_order_routes")
@@ -415,7 +415,10 @@ def _snapshot(job: _SmartJob) -> dict[str, Any]:
     if any(child["status"] == "unknown" for child in children):
         # A child was sent and its result is not known. The job response says
         # so in the shared outcome fields, and nothing here resends it.
-        snapshot.update(order_outcome="unknown", reason=REASON_RESPONSE_UNCONFIRMED, retry_safe=False)
+        snapshot.update(
+            order_outcome="unknown", reason=REASON_RESPONSE_UNCONFIRMED, retry_safe=False,
+            leg_outcomes=single_leg_outcomes("unknown"),
+        )
     return snapshot
 
 

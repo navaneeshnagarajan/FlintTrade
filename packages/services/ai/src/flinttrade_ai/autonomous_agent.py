@@ -314,13 +314,18 @@ def _outcome_unknown(decision: Any) -> bool:
 
 
 def _unknown_outcome_result(status: str) -> dict[str, Any]:
-    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED  # noqa: PLC0415
+    from flinttrade_core.order_outcome import (  # noqa: PLC0415
+        ORDER_STATUS_UNKNOWN,
+        REASON_RESPONSE_UNCONFIRMED,
+        single_leg_outcomes,
+    )
 
     return {
         "status": status,
         "order_outcome": "unknown",
         "reason": REASON_RESPONSE_UNCONFIRMED,
         "retry_safe": False,
+        "leg_outcomes": single_leg_outcomes("unknown"),
         "message": ORDER_STATUS_UNKNOWN,
     }
 

@@ -1859,10 +1859,12 @@ async def test_execute_unknown_outcome_is_reported_and_never_resubmitted() -> No
 
     assert first["status"] == "error"
     assert first["order_outcome"] == "unknown"
+    assert first["leg_outcomes"] == {"entry": "unknown"}
     assert first["retry_safe"] is False
     assert first["message"] == ORDER_STATUS_UNKNOWN
     assert second["status"] == "blocked"
     assert second["order_outcome"] == "unknown"
+    assert second["leg_outcomes"] == {"entry": "unknown"}
     agent.order_executor.route_order.assert_awaited_once()
     assert "RELIANCE" not in agent.state.active_positions
 
