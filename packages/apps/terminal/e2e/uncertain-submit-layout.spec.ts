@@ -594,6 +594,42 @@ for (const viewport of VIEWPORTS) {
       expectUnmoved(beforeSell, await collectBoxes((await sellButtons.all()).slice(0, 6)), `ladder sell ${viewport.width}`);
     });
 
+    test("Ladder price rows never move when the locked price changes, and the line sits outside the list", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerLadderReads(syntheticApi);
+      await mountWidget(page, "orderladder", false, { params: { symbol: "NIFTY", exchange: "NSE", tick: 0.05 } });
+      await seedInstrumentTick(page, "NSE", "NIFTY", 24_000);
+      await page.clock.runFor(100);
+      const ladder = page.getByLabel("Price ladder");
+      await expect(ladder.getByLabel("Price level", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+      const rows = ladder.getByLabel("Price level", { exact: false });
+      const slot = page.getByTestId("ladder-status-unknown");
+      await expect(ladder.getByTestId("ladder-status-unknown")).toHaveCount(0);
+      const idleRows = await collectBoxes(await rows.all());
+      const idleSlot = await collectBoxes([slot]);
+      const tick = async (locator: Locator) => {
+        let advanced = 0;
+        await expect.poll(async () => {
+          if (advanced < 2_000) {
+            await page.clock.runFor(25);
+            advanced += 25;
+          }
+          return locator.isVisible();
+        }, { timeout: 15_000, intervals: [50] }).toBe(true);
+      };
+      await recordLostSubmit(page, { key: "NSE:NIFTY@24000.1", symbol: "NIFTY", exchange: "NSE", action: "BUY", quantity: 25 });
+      await tick(slot.getByText(UNKNOWN));
+      await expect(ladder.getByTestId("ladder-status-unknown")).toHaveCount(0);
+      await expect(ladder.getByText(UNKNOWN)).toHaveCount(0);
+      expectUnmoved(idleRows, await collectBoxes(await rows.all()), `ladder rows, first locked price ${viewport.width}`);
+      expectUnmoved(idleSlot, await collectBoxes([slot]), `ladder slot ${viewport.width}`);
+      await expectLineFits(slot, `ladder ${viewport.width}`);
+      await recordLostSubmit(page, { key: "NSE:NIFTY@23999.9", symbol: "NIFTY", exchange: "NSE", action: "SELL", quantity: 25 });
+      await page.clock.runFor(200);
+      expectUnmoved(idleRows, await collectBoxes(await rows.all()), `ladder rows, second locked price ${viewport.width}`);
+      expectUnmoved(idleSlot, await collectBoxes([slot]), `ladder slot after second lock ${viewport.width}`);
+    });
+
     test("Orders table rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {
       test.setTimeout(60_000);
       registerOrdersReads(syntheticApi);
