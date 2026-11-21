@@ -305,7 +305,7 @@ describe("AIRoute", () => {
     );
   });
 
-  it("owns the signal stream at route scope before the Signals overlay opens", () => {
+  it("owns the signal stream at route scope before the Analysis overlay opens", () => {
     renderAI();
 
     expect(screen.queryByText("Trading Signals")).not.toBeInTheDocument();
@@ -336,13 +336,14 @@ describe("AIRoute", () => {
     });
   });
 
-  it("shows navigation with Chat and Signals buttons", () => {
+  it("shows navigation with Chat and Analysis buttons", () => {
     renderAI();
 
     const nav = screen.getByRole("navigation", { name: /ai section navigation/i });
     expect(nav).toBeInTheDocument();
     expect(screen.getByLabelText("Chat")).toBeInTheDocument();
-    expect(screen.getByLabelText("Signals")).toBeInTheDocument();
+    expect(screen.getByLabelText("Analysis")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Signals")).not.toBeInTheDocument();
   });
 
   it("opens the Practice agent explicitly at Advanced level without starting it", async () => {
@@ -415,7 +416,7 @@ describe("AIRoute", () => {
     const user = userEvent.setup();
     renderAI();
 
-    await user.click(screen.getByLabelText("Signals"));
+    await user.click(screen.getByLabelText("Analysis"));
 
     expect(await screen.findByText("Trading Signals")).toBeInTheDocument();
     expect(screen.getByText("Rule")).toBeInTheDocument();
@@ -429,7 +430,7 @@ describe("AIRoute", () => {
     expect(getRecentSignals).not.toHaveBeenCalled();
   });
 
-  it("surfaces live stream and replay-loss state in the production Signals view", async () => {
+  it("surfaces live stream and replay-loss state in the production Analysis view", async () => {
     signalStreamMocks.state.connected = true;
     signalStreamMocks.state.replayLoss = {
       reason: "cursor_before_retained",
@@ -440,7 +441,7 @@ describe("AIRoute", () => {
     const user = userEvent.setup();
     renderAI();
 
-    await user.click(screen.getByLabelText("Signals"));
+    await user.click(screen.getByLabelText("Analysis"));
 
     expect(await screen.findByText("Live")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
