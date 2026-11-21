@@ -1114,7 +1114,6 @@ function OrderPadWidget(props: WidgetProps) {
       const outcome = presentSubmitError(err);
       if (outcome.kind === "unknown") {
         setPracticeReview(null);
-        showToast("unknown", outcome.message, 6000);
         emitNotification({
           category: "order",
           skipAccountRefresh: true,
@@ -2032,7 +2031,7 @@ function OrderPadWidget(props: WidgetProps) {
         </Button>
         {padStatusUnknown ? (
           <div data-testid="order-pad-status-unknown">
-            <OrderStatusUnknownLine linkOnly={toast?.type === "unknown" && toast.scopeKey === dataScope} />
+            <OrderStatusUnknownLine />
           </div>
         ) : null}
         {showPracticeLayaDown ? (
@@ -2057,7 +2056,7 @@ function OrderPadWidget(props: WidgetProps) {
       </form>
 
       {/* Toast */}
-      <Toast msg={toast?.scopeKey === dataScope ? toast : null} />
+      <Toast msg={toast?.scopeKey === dataScope && toast.type !== "unknown" ? toast : null} />
 
       {practiceReview && appMode !== "unavailable" ? (
         <PracticeOrderReviewStage

@@ -60,6 +60,7 @@ vi.mock("@/hooks/usePositions", () => ({
 }));
 
 const mockOpenOrders = vi.hoisted(() => ({
+  isFetching: false,
   updatedAt: 0,
   rows: [] as Array<{
     symbol: string;
@@ -71,7 +72,7 @@ const mockOpenOrders = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useOrders", () => ({
-  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false, isError: false, dataUpdatedAt: mockOpenOrders.updatedAt }),
+  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: mockOpenOrders.isFetching, isError: false, dataUpdatedAt: mockOpenOrders.updatedAt }),
 }));
 
 // Setup imports the real account/incident scope readers. Keep their mode and
@@ -148,6 +149,7 @@ describe("OrderPadWidget", () => {
     mockOpenPositions.rows = [];
     mockOpenOrders.rows = [];
     mockOpenOrders.updatedAt = 0;
+    mockOpenOrders.isFetching = false;
     clearPendingOrderOutcomes();
     useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
@@ -750,7 +752,8 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
-    expect(await screen.findByTestId("order-pad-outcome")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(await screen.findByTestId("order-pad-status-unknown")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     // The contract stays locked until a newer order read settles the lost exit.
@@ -778,8 +781,9 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot 1 · Max 1,800 per order");
     fireEvent.click(screen.getByTestId("orderpad-close"));
 
-    const outcome = await screen.findByTestId("order-pad-outcome");
+    const outcome = await screen.findByTestId("order-pad-status-unknown");
     expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
     const unknownNotify = listener.mock.calls
       .map((call) => (call[0] as CustomEvent).detail)
       .find((detail) => detail?.title?.startsWith("Order status unknown"));
@@ -812,8 +816,9 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot 1 · Max 1,800 per order");
     fireEvent.click(screen.getByTestId("orderpad-close"));
 
-    const outcome = await screen.findByTestId("order-pad-outcome");
+    const outcome = await screen.findByTestId("order-pad-status-unknown");
     expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
@@ -861,12 +866,11 @@ describe("OrderPadWidget", () => {
     await reviewAndConfirmPractice();
 
     const line = await screen.findByTestId("order-pad-status-unknown");
-    // The outcome line says the sentence once; the lock adds only the link.
+    expect(line).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
     const statuses = screen.getAllByRole("status").filter((el) => el.textContent?.includes("Order status unknown"));
     expect(statuses).toHaveLength(1);
-    expect(statuses[0]).toHaveTextContent(/^Order status unknown\. Check Orders before trying again\.$/);
-    expect(line).not.toHaveTextContent("Order status unknown");
-    expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     const buy = screen.getByRole("button", { name: /practice buy/i });
     expect(buy).toBeDisabled();
@@ -877,22 +881,15 @@ describe("OrderPadWidget", () => {
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the unknown sentence and Open Orders beside a locked Buy after the outcome line clears", async () => {
+  it("shows the unknown sentence and Open Orders beside a locked Buy without a bottom bar", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot 1 · Max 1,800 per order");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
-    try {
-      await reviewAndConfirmPractice();
-      expect(await screen.findByTestId("order-pad-outcome")).toHaveTextContent("Order status unknown");
-      await act(async () => { vi.advanceTimersByTime(6_000); });
-    } finally {
-      vi.useRealTimers();
-    }
-    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
-    const line = screen.getByTestId("order-pad-status-unknown");
+    await reviewAndConfirmPractice();
+    const line = await screen.findByTestId("order-pad-status-unknown");
     expect(within(line).getByRole("status")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
   });
 
@@ -923,12 +920,16 @@ describe("OrderPadWidget", () => {
     await screen.findByTestId("order-pad-status-unknown");
     expect(screen.getByRole("button", { name: "Place BUY Order" })).toBeDisabled();
 
-    // A newer complete order read arrives; any re-render picks it up.
-    mockOpenOrders.updatedAt = Date.now() + 1_000;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+    mockOpenOrders.isFetching = true;
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    await act(async () => {});
+    mockOpenOrders.isFetching = false;
+    mockOpenOrders.updatedAt = Date.now();
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "3" } });
     await waitFor(() => expect(screen.queryByTestId("order-pad-status-unknown")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Place BUY Order" })).not.toBeDisabled();
-  });
+  }, 15_000);
 
   it("does not lock after a definite refusal", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(

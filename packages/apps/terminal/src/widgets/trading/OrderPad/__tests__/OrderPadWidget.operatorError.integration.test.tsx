@@ -9,6 +9,7 @@ import { clearAll, getSnapshot } from "@/components/NotificationCentre/notificat
 import { renderAccountSurface, resetAccountRuntime, setAccountRuntime } from "@/test-utils/accountQueryHarness";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { OrderApiError, placeOrder } from "@/services/api";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import type { BrokerAccount } from "@/types/broker";
 import OrderPadWidget from "../OrderPadWidget";
 
@@ -56,20 +57,29 @@ const fetchMock = vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
   } catch (error) { unexpected.push(String(error)); return Promise.reject(error); }
 });
 function Surface() { useNotificationFeed(); return <OrderPadWidget {...props} />; }
+function outcomeText(alert: HTMLElement): string {
+  const button = alert.querySelector("button");
+  const text = alert.textContent ?? "";
+  return button ? text.replace(button.textContent ?? "", "").replace(/\s+/g, " ").trim() : text;
+}
 async function submit() {
   renderAccountSurface(() => <Surface />);
   await screen.findByText("Lot: 1");
   fireEvent.click(screen.getByRole("button", { name: "Place BUY Order" }));
-  const alert = await screen.findByTestId("order-pad-outcome");
   await waitFor(() => expect(events).toHaveLength(1));
+  const alert = screen.queryByTestId("order-pad-status-unknown") ?? screen.getByTestId("order-pad-outcome");
   expect(getSnapshot()[0]).toMatchObject({ title: events[0]?.title, body: events[0]?.body });
   expect(events[0]).toMatchObject({ accountScopeKey: "live:native:kotakneo:KOTAK-OFFLINE", skipAccountRefresh: true });
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   return alert;
 }
 function assertUnknown(alert: HTMLElement) {
-  expect(alert).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+  expect(outcomeText(alert)).toBe("Order status unknown. Check Orders before trying again.");
   expect(alert).not.toHaveTextContent(/Not placed|No order was sent|Order filled|Position closed|Try again in a few/i);
+  if (alert.getAttribute("data-testid") === "order-pad-status-unknown") {
+    expect(alert.querySelector("button")?.textContent).toBe("Open Orders");
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
+  }
   expect(events[0]?.title).toBe("Order status unknown: BUY INFY");
   expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   expect(getSnapshot()[0]).not.toHaveProperty("action");
@@ -77,7 +87,7 @@ function assertUnknown(alert: HTMLElement) {
 beforeEach(() => {
   suppliedSymbol = "INFY"; props = makeWidgetPanelProps({ params: { symbol: suppliedSymbol, exchange: "NSE" } });
   clock = Math.max(clock, Date.now()) + 1000; vi.spyOn(Date, "now").mockReturnValue(clock);
-  events.length = 0; unexpected.length = 0; fetchMock.mockClear(); clearAll();
+  events.length = 0; unexpected.length = 0; fetchMock.mockClear(); clearAll(); clearPendingOrderOutcomes();
   window.addEventListener("flinttrade:notify", notify);
   setAccountRuntime({ accounts: [a, b], activeAccountId: brokerAccountKey(a) });
   useOperatorSignalStore.setState({ ...originalSignals, decisionStatus: "ready", layaPracticeStatus: "ready" });
@@ -85,7 +95,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
-  cleanup(); window.removeEventListener("flinttrade:notify", notify); resetAccountRuntime(); clearAll();
+  cleanup(); window.removeEventListener("flinttrade:notify", notify); resetAccountRuntime(); clearAll(); clearPendingOrderOutcomes();
   useOperatorSignalStore.setState(originalSignals); vi.unstubAllGlobals(); vi.restoreAllMocks();
   expect(unexpected).toEqual([]);
 });
@@ -99,7 +109,7 @@ describe("bounded truthful operator order errors", () => {
     const beforeFault = useOperatorSignalStore.getState().brokerReject;
     const alert = await submit(); assertUnknown(alert);
     expect(alert).not.toHaveTextContent(/Broker reason|Order is completed|Broker code/);
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(useOperatorSignalStore.getState().brokerReject).toEqual(beforeFault);
   });
   it("renders a complete matching pre-invocation refusal truthfully without a retry", async () => {
@@ -170,7 +180,7 @@ describe("bounded truthful operator order errors", () => {
     expect(alert).not.toHaveTextContent("SYNTHETIC_REASON");
     expect(alert.textContent).not.toContain(control);
     expect(alert).not.toHaveTextContent("Broker code");
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(JSON.stringify(getSnapshot())).not.toContain("SYNTHETIC_REASON");
   });
   it.each(bidiControls)("omits $name from a structured refusal summary without changing its safe observations", async ({ control }) => {
@@ -180,7 +190,7 @@ describe("bounded truthful operator order errors", () => {
     expect(alert).toHaveTextContent("Broker reason (observation): Protection is unavailable. Broker code: UNSUPPORTED.");
     expect(alert).not.toHaveTextContent("SYNTHETIC_SUMMARY");
     expect(alert.textContent).not.toContain(control);
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(getSnapshot()[0]).not.toHaveProperty("action");
   });
@@ -189,7 +199,7 @@ describe("bounded truthful operator order errors", () => {
     const alert = await submit(); assertUnknown(alert);
     expect(alert).not.toHaveTextContent(reason);
     expect(alert).not.toHaveTextContent("Broker code");
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
   });
   it.each(bidiControls)("omits an unsafe captured $name symbol whole from the notification title without changing the request", async ({ control }) => {
     suppliedSymbol = `SYNTHETIC_SYMBOL${control}NOT_FILLED`;
@@ -200,7 +210,7 @@ describe("bounded truthful operator order errors", () => {
     expect(alert.textContent).not.toContain("SYNTHETIC_SYMBOL");
     expect(events[0]?.title).toBe("Order status unknown");
     expect(getSnapshot()[0]?.title).toBe("Order status unknown");
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(getSnapshot()[0]).not.toHaveProperty("action");
     const write = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
@@ -214,7 +224,7 @@ describe("bounded truthful operator order errors", () => {
     expect(alert).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(events[0]?.title).toBe(`Order status unknown: BUY ${symbol}`);
     expect(getSnapshot()[0]?.title).toBe(events[0]?.title);
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(getSnapshot()[0]).not.toHaveProperty("action");
     const write = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
@@ -232,7 +242,7 @@ describe("bounded truthful operator order errors", () => {
     expect(alert).toHaveTextContent(copy);
     expect(events[0]?.title).toBe("Order failed");
     expect(getSnapshot()[0]?.title).toBe("Order failed");
-    expect(getSnapshot()[0]?.body).toBe(alert.textContent);
+    expect(getSnapshot()[0]?.body).toBe(outcomeText(alert));
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(getSnapshot()[0]).not.toHaveProperty("action");
     const write = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
