@@ -6,12 +6,14 @@ import {
   expect,
   mountWidget,
   nativePath,
+  positionSurface,
   recordLostSubmit,
   registerAccountBooks,
   registerDeskReads,
   registerRead,
   seedInstrumentTick,
   test,
+  tickUntil,
 } from "./order-flow-fixtures";
 import { registerExploreAdvisorStatusProbe, registerOperatorStatusProbes } from "./fixture-registry";
 
@@ -628,6 +630,51 @@ for (const viewport of VIEWPORTS) {
       await page.clock.runFor(200);
       expectUnmoved(idleRows, await collectBoxes(await rows.all()), `ladder rows, second locked price ${viewport.width}`);
       expectUnmoved(idleSlot, await collectBoxes([slot]), `ladder slot after second lock ${viewport.width}`);
+    });
+
+    test("a locked Positions row keeps its height, with Open Orders on the row and the sentence in its tooltip", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerDeskReads(syntheticApi);
+      registerAccountBooks(syntheticApi, { positionCalls: { minimum: 1, maximum: 8 }, orderCalls: { minimum: 0, maximum: 16 } });
+      await mountWidget(page, "positions");
+      const surface = positionSurface(page);
+      const squareOff = surface.getByRole("button", { name: "Square off SYNTHETIC-ALPHA", exact: true });
+      await tickUntil(page, squareOff);
+      const row = surface.getByRole("row").filter({ hasText: "SYNTHETIC-ALPHA" }).first();
+      const before = await collectBoxes([row, squareOff]);
+      await recordLostSubmit(page, { key: "NSE:SYNTHETIC-ALPHA", symbol: "SYNTHETIC-ALPHA", exchange: "NSE", action: "SELL", quantity: 10 });
+      const link = row.getByRole("button", { name: "Open Orders" });
+      await tickUntil(page, link);
+      await expect(squareOff).toBeDisabled();
+      await expect(link).toHaveAttribute("title", UNKNOWN);
+      await expect(link).toHaveAccessibleDescription(UNKNOWN);
+      expectUnmoved(before, await collectBoxes([row, squareOff]), `positions row ${viewport.width}`);
+      const linkBox = (await link.boundingBox())!;
+      const rowBox = (await row.boundingBox())!;
+      expect(linkBox.y).toBeGreaterThanOrEqual(rowBox.y - 0.5);
+      expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 0.5);
+    });
+
+    test("the Square off dialog keeps its size when the unknown line appears", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerDeskReads(syntheticApi);
+      registerAccountBooks(syntheticApi, { positionCalls: { minimum: 1, maximum: 8 }, orderCalls: { minimum: 0, maximum: 16 } });
+      await mountWidget(page, "positions");
+      const surface = positionSurface(page);
+      const squareOff = surface.getByRole("button", { name: "Square off SYNTHETIC-ALPHA", exact: true });
+      await tickUntil(page, squareOff);
+      await squareOff.click();
+      const dialog = page.getByRole("dialog", { name: "Square off position?" });
+      const confirm = dialog.getByRole("button", { name: "Confirm square off SYNTHETIC-ALPHA", exact: true });
+      const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      await expect(confirm).toBeVisible();
+      await page.clock.runFor(500);
+      const before = await collectBoxes([dialog, confirm, cancel]);
+      await recordLostSubmit(page, { key: "NSE:SYNTHETIC-ALPHA", symbol: "SYNTHETIC-ALPHA", exchange: "NSE", action: "SELL", quantity: 10 });
+      await tickUntil(page, dialog.getByText(UNKNOWN, { exact: true }));
+      await expect(dialog.getByRole("button", { name: "Open Orders" })).toBeVisible();
+      await expect(confirm).toBeDisabled();
+      expectUnmoved(before, await collectBoxes([dialog, confirm, cancel]), `square off dialog ${viewport.width}`);
     });
 
     test("Orders table rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {
