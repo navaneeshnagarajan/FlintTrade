@@ -1669,7 +1669,7 @@ your own automation. See
 ### Running your own automation
 
 You run FlintTrade on your own computer, with your own broker account. It does
-not host execution, sell strategies or signals, or provide a static IP.
+not host execution or sell strategies or signals.
 
 Brokers may ask clients who write their own algorithms to sign an undertaking
 with them. Under that undertaking, losses caused by the logic of your own
