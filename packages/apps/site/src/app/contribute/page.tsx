@@ -29,9 +29,9 @@ export const metadata = {
 
 export default function ContributePage() {
   return (
-    <div className="site-shell">
-      <SiteHeader activePath="/contribute" />
-      <main className="subpage" id="site-content" tabIndex={-1}>
+    <main className="site-shell">
+      <SiteHeader />
+      <section className="subpage">
         <h1>Contribute without getting lost.</h1>
         <p>
           FlintTrade spans Python services, a React terminal, Rust tick processing,
@@ -88,7 +88,7 @@ npm run build`}</pre>
           </div>
         </div>
 
-        <div className="section-actions">
+        <div className="hero-actions">
           <Link className="button primary" href="/docs/developer-guide">
             Developer guide <ArrowRight aria-hidden="true" size={17} />
           </Link>
@@ -96,8 +96,8 @@ npm run build`}</pre>
             Configure MCP
           </Link>
         </div>
-      </main>
+      </section>
       <SiteFooter />
-    </div>
+    </main>
   );
 }

@@ -15,9 +15,6 @@ const nextConfig = {
   },
   images: {
     localPatterns: [
-      { pathname: '/product/trading.webp', search: '' },
-      { pathname: '/product/studio.webp', search: '' },
-      { pathname: '/product/review.webp', search: '' },
       {
         pathname: '/flinttrade/**',
       },
@@ -30,9 +27,6 @@ const nextConfig = {
   },
   async rewrites() {
     return {
-      beforeFiles: [
-        { source: '/favicon.ico', destination: '/flinttrade/logo.svg' },
-      ],
       // SPA fallback for the full-page terminal demo build under
       // public/demo-app/ — real files win first, deep routes get index.html.
       afterFiles: [

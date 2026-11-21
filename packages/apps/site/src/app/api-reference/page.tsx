@@ -28,9 +28,9 @@ export default function ApiReferencePage() {
   const headings = apiDoc?.headings.slice(0, 10) ?? [];
 
   return (
-    <div className="site-shell">
-      <SiteHeader activePath="/api-reference" />
-      <main className="subpage" id="site-content" tabIndex={-1}>
+    <main className="site-shell">
+      <SiteHeader />
+      <section className="subpage">
         <h1>Terminal transport contracts.</h1>
         <p>
           The public site mirrors the repository API reference so endpoint docs and
@@ -60,7 +60,7 @@ export default function ApiReferencePage() {
           </div>
         </div>
 
-        <div className="section-actions">
+        <div className="hero-actions">
           <Link className="button primary" href="/docs/api">
             Full API docs <ArrowRight aria-hidden="true" size={17} />
           </Link>
@@ -68,8 +68,8 @@ export default function ApiReferencePage() {
             Query with MCP <Cable aria-hidden="true" size={17} />
           </Link>
         </div>
-      </main>
+      </section>
       <SiteFooter />
-    </div>
+    </main>
   );
 }

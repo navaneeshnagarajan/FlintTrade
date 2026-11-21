@@ -1,7 +1,8 @@
 /**
- * Signature and availability source contracts. Mounted public journeys live
- * in app/page.test.ts. Product sections are static; the protected hero and
- * default-off Spark Path keep their existing implementation and fallback.
+ * Graphite Continuity A1 motion composition on the honest PR #157 homepage.
+ * Source-based guards (no React render): one primary web-app CTA, shared
+ * WEB_INSTALL_COMMANDS, Electron pending, async origin MCP, section-enter
+ * controller, and default-off Spark Path chapters 0–5 on current bands.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,7 +16,6 @@ function readSite(relativePath: string): string {
 }
 
 const pageSource = readSite('src/app/page.tsx');
-const productSource = readSite('src/components/product-overview.tsx');
 const cssSource = readSite('src/app/globals.css');
 const nextConfigSource = readSite('next.config.mjs');
 const controllerSource = readSite('src/components/section-enter-controller.tsx');
@@ -28,16 +28,19 @@ const sitePackage = JSON.parse(readSite('package.json') || '{}') as {
   devDependencies?: Record<string, string>;
 };
 
-describe('product-led homepage with the preserved signature', () => {
-  it('keeps product navigation separate from unavailable desktop-install claims', () => {
+describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
+  it('keeps the current product bands instead of the retired A1 desktop-install IA', () => {
     expect(pageSource).toContain('section className="section hero"');
-    expect(pageSource).toContain('<ProductOverview />');
+    expect(pageSource).toContain('Built for people who read the source.');
+    expect(pageSource).toContain('Docs, API, and contribution paths in one flow.');
     expect(pageSource).toContain('MCP for development, not trading.');
+    expect(pageSource).toContain('Package map at contributor speed.');
     expect(pageSource).not.toContain('Evaluate and install');
+    expect(pageSource).not.toContain('Contributor resources');
     expect(pageSource).not.toContain('Start exploring — no install needed');
     expect(pageSource).not.toContain('Download desktop app');
     expect(pageSource).not.toContain('<your-site>');
-    const sectionMatches = `${pageSource}\n${productSource}`.match(/<section className="section/g) || [];
+    const sectionMatches = pageSource.match(/<section className="section/g) || [];
     expect(sectionMatches.length).toBeGreaterThanOrEqual(5);
   });
 
@@ -52,7 +55,7 @@ describe('product-led homepage with the preserved signature', () => {
 
   it('advertises only the shared web-install commands and an explicit pending Electron note', () => {
     expect(pageSource).toContain('WEB_INSTALL_COMMANDS');
-    expect(pageSource).toContain('className="install-commands"');
+    expect(pageSource).toContain('className="hero-install"');
     expect(pageSource).toContain('Electron installer pending');
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(pageSource).toContain('hostedMcpUrl');
@@ -77,12 +80,12 @@ describe('product-led homepage with the preserved signature', () => {
     expect(cssSource).toMatch(/prefers-reduced-motion[\s\S]*hero-electron-note/);
   });
 
-  it('adds no animation dependency to the static product composition', () => {
+  it('uses only CSS + IntersectionObserver for section enter motion (no new deps)', () => {
     expect(pageSource).not.toContain('framer-motion');
     expect(pageSource).not.toContain("from 'three'");
     expect(pageSource).not.toContain('from "three"');
     expect(pageSource).not.toContain('@react-three');
-    expect(productSource).not.toMatch(/framer-motion|motion\/react|useEffect|section-enter/);
+    expect(cssSource).toMatch(/section-enter|data-observed|IntersectionObserver/);
   });
 
   it('preserves Canvas2D HeroCinematic, /demo-app rewrite, CSP, target blank', () => {
@@ -96,13 +99,14 @@ describe('product-led homepage with the preserved signature', () => {
     expect(nextConfigSource).toContain('root: repoRoot');
   });
 
-  it('puts shared web install commands after the compact hero, never desktop commands', () => {
-    const installIdx = pageSource.indexOf('className="install-commands"');
+  it('keeps the honest install block in the hero rather than duplicating desktop commands', () => {
+    const installIdx = pageSource.indexOf('className="hero-install"');
     const actionsIdx = pageSource.indexOf('className="hero-actions"');
+    const gridIdx = pageSource.indexOf('className="hero-feature-grid"');
     expect(installIdx).toBeGreaterThan(-1);
     expect(actionsIdx).toBeGreaterThan(-1);
-    expect(installIdx).toBeGreaterThan(actionsIdx);
-    expect(pageSource).not.toContain('desktopInstallCommands');
+    expect(gridIdx).toBeGreaterThan(-1);
+    expect(installIdx).toBeLessThan(actionsIdx);
   });
 
   it('keeps page.tsx a pure server component with no top-level use client, hooks, or observer logic', () => {
@@ -113,9 +117,9 @@ describe('product-led homepage with the preserved signature', () => {
     expect(pageSource).not.toContain('matchMedia');
   });
 
-  it('leaves the legacy section controller intact but does not hide the new product sections', () => {
-    expect(pageSource).not.toContain('<SectionEnterController');
-    expect(productSource).not.toContain('section-enter');
+  it('mounts a tiny dedicated client controller for section reveal', () => {
+    expect(pageSource).toMatch(/import.*SectionEnterController|from ['"].*section-enter-controller['"]/);
+    expect(pageSource).toContain('<SectionEnterController');
     expect(controllerSource).toContain('SectionEnterController');
     expect(controllerSource).toContain('useEffect');
     expect(controllerSource).toContain('js-motion-enabled');
@@ -242,9 +246,8 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     expect(cssSource).toMatch(/\.site-scroll-world-canvas\s*\{[^}]*pointer-events:\s*none/);
   });
 
-  it('retains every Spark Path chapter exactly once across the page and its static product sections', () => {
-    const chapterIds = [...`${pageSource}\n${productSource}`.matchAll(/data-scroll-chapter="([0-5])"/g)]
-      .map((match) => Number(match[1])).sort((a, b) => a - b);
+  it('binds each Spark Path chapter 0 through 5 exactly once to the current homepage bands', () => {
+    const chapterIds = [...pageSource.matchAll(/data-scroll-chapter="([0-5])"/g)].map((match) => Number(match[1]));
     expect(chapterIds).toEqual([0, 1, 2, 3, 4, 5]);
     expect(chapterSource).toContain("anchor: 'hero'");
     expect(chapterSource).toContain("anchor: 'source'");
@@ -257,7 +260,7 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     expect(chapterSource).toContain('MCP for development, not trading');
     expect(chapterSource).toContain('Package map at contributor speed');
     expect(pageSource).toContain('data-scroll-chapter="0"');
-    expect(productSource).toContain('className="section product-section"');
+    expect(pageSource).toContain('className="section section-enter"');
   });
 
   it('uses procedural/local scene data only and contains no network, trading, broker, terminal or demo integration', () => {
