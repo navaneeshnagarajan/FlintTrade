@@ -92,6 +92,9 @@ export const CANCELLATION_REQUESTED = "Cancellation requested";
 /** Shown only after an order-status read, the ledger, or a stream says cancelled. */
 export const ORDER_CANCELLED = "Order cancelled";
 
+/** A pending cancel settled because the order is no longer in the open list. */
+export const ORDER_NO_LONGER_IN_ORDERS = "No longer in Orders. Check order history.";
+
 export type OperatorStripLevel = "info" | "degraded" | "blocked";
 
 export type TransportReason = "dns" | "timeout" | "connection_refused" | "failed_fetch";

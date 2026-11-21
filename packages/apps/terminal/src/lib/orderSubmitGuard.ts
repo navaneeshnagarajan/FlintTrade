@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import {
   createPendingOrderStore,
@@ -68,6 +69,31 @@ export interface OrderSubmitIntent {
   exchange: string;
   action: "BUY" | "SELL";
   quantity?: number;
+}
+
+
+const LEG_LABEL: Record<"entry" | "target" | "stop_loss", string> = {
+  entry: "Entry",
+  target: "Target",
+  stop_loss: "Stop-loss",
+};
+
+/**
+ * Copy shown on the unknown submit in Orders. A lone unknown entry uses the
+ * approved sentence. A bracket that reports mixed legs names each one, e.g.
+ * "Entry filled · Stop-loss status unknown".
+ */
+export function unknownSubmitSentence(record: Pick<UnknownOrderSubmit, "legs">): string {
+  const named = (["entry", "target", "stop_loss"] as const).filter((leg) => {
+    const outcome = record.legs[leg];
+    return outcome === "confirmed" || outcome === "unknown";
+  });
+  const onlyUnknownEntry = named.length === 1 && named[0] === "entry" && record.legs.entry === "unknown";
+  if (named.length === 0 || onlyUnknownEntry) return ORDER_STATUS_UNKNOWN;
+  return named.map((leg) => {
+    const label = LEG_LABEL[leg];
+    return record.legs[leg] === "confirmed" ? `${label === "Entry" ? "Entry filled" : `${label} filled`}` : `${label} status unknown`;
+  }).join(" · ");
 }
 
 /** Lock key for one instrument. Every ticket for the same contract shares it. */
