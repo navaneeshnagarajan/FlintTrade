@@ -69,17 +69,6 @@ export function useOrderSubmitGuard() {
   const orders = useOrders({ enabled: unknown.length > 0, context });
   const listComplete = orders.data !== undefined && !orders.isError && !orders.isFetching;
   useSettleUnknownSubmits(scope, orders.isFetching, orders.dataUpdatedAt, listComplete);
-  const rereadForUnknown = useRef(false);
-  const refetchOrders = orders.refetch;
-  useEffect(() => {
-    if (unknown.length === 0) {
-      rereadForUnknown.current = false;
-      return;
-    }
-    if (rereadForUnknown.current) return;
-    rereadForUnknown.current = true;
-    void refetchOrders?.();
-  }, [unknown.length, refetchOrders]);
 
   const isLocked = useCallback(
     (key: string) => orderSubmitInFlight(scope, key) || unknown.some((record) => record.key === key),
