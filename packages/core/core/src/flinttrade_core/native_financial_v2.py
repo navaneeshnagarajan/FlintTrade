@@ -276,6 +276,7 @@ def _resolve_published_facts(issuer: PrimitiveFixtureSource, row: dict[str, Any]
             raise
         if not (_generation_only_move(pinned, snapshot) or _snapshot_has_no_new_financial_evidence(snapshot)):
             raise
+        row["_generation_recovered"] = True
         issuer.records[identity] = (revision, _digest([snapshot.generation, snapshot.evidence_json]), published)
         return issuer.resolve(row, snapshot)
 
@@ -622,9 +623,12 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
         result = {"status": assessment.status, "reasons": list(assessment.reasons),
                   **{key: None if getattr(assessment, key) is None else str(getattr(assessment, key))
                      for key in ("capital", "exposure", "loss")}}
-        if assessment.status == "unavailable":
+        if assessment.status == "unavailable" and not row.pop("_generation_recovered", False):
             state["unresolved_entry_ids"] = sorted(set(state.get("unresolved_entry_ids", ())) | entry_ids)
+        elif assessment.status == "unavailable":
+            row.pop("_generation_recovered", None)
         if assessment.status != "unavailable":
+            row.pop("_generation_recovered", None)
             state["unresolved_entry_ids"] = []
             state["fee_liabilities"] = _fee_liabilities(inputs)
             state["history"] = current_history
@@ -676,7 +680,7 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
     except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
         # A moved primitive pin is refused, not stored as an entry. A real
         # missing source still retains the entries it could not evaluate.
-        if str(exc) != "primitive source generation changed" and type(facts) is dict and type(facts.get("entries")) is list:
+        if str(exc) != "primitive source generation changed" and not row.pop("_generation_recovered", False) and type(facts) is dict and type(facts.get("entries")) is list:
             identities = set(state.get("unresolved_entry_ids", ()))
             for entry in facts["entries"]:
                 if type(entry) is dict and type(entry.get("entry_ref")) is dict:

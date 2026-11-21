@@ -78,6 +78,7 @@ def test_generation_move_after_unadmitted_prepare_is_not_an_unresolved_duty(moun
     from packages.core.core.tests.test_native_financial_owner import _financial
 
     test_complete_receipt_readback_preserves_current_and_historical_acceptance(mounted_desk, False)
+    before_ids = list(_financial(mounted_desk).get("unresolved_entry_ids") or [])
     ledger = mounted_desk.app.extensions["flinttrade_broker_dependencies"].lifecycle_store
     before = ledger.latest_snapshot_generation(adapter_id="dhan", account_id="Mounted")
     with ledger._connection(write=True) as connection:
@@ -97,4 +98,5 @@ def test_generation_move_after_unadmitted_prepare_is_not_an_unresolved_duty(moun
         _qualify(mounted_desk)
     finally:
         ledger.observation_snapshot = original
-    assert _financial(mounted_desk).get("unresolved_entry_ids") == []
+    after_ids = list(_financial(mounted_desk).get("unresolved_entry_ids") or [])
+    assert after_ids == [], (before_ids, after_ids)
