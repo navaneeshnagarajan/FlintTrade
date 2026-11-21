@@ -38,8 +38,7 @@ import { cancelOrder, modifyOrder } from "@/services/api";
 import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentCancelResult } from "@/lib/orderOutcome";
 import { pendingOrderScope } from "@/lib/pendingOrderStore";
-import { reconcileUnknownOrderSubmits } from "@/lib/orderSubmitGuard";
-import { useUnknownOrderSubmits } from "@/hooks/useOrderSubmitGuard";
+import { useSettleUnknownSubmits, useUnknownOrderSubmits } from "@/hooks/useOrderSubmitGuard";
 import { usePendingOrderCancels, type PendingCancelSettlement } from "./usePendingOrderCancels";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
@@ -474,10 +473,7 @@ function OrdersWidget(_props: WidgetProps) {
   const pendingScope = pendingOrderScope(currentIdentity);
   // Lost fast-path submits show here until a newer complete read settles them.
   const unknownSubmits = useUnknownOrderSubmits(pendingScope);
-  useEffect(() => {
-    if (!listComplete || unknownSubmits.length === 0) return;
-    reconcileUnknownOrderSubmits(pendingScope, ordersDataUpdatedAt);
-  }, [listComplete, unknownSubmits, pendingScope, ordersDataUpdatedAt]);
+  useSettleUnknownSubmits(pendingScope, isFetching, ordersDataUpdatedAt, listComplete);
   const pendingCancels = usePendingOrderCancels({
     scope: pendingScope,
     rows: listComplete ? rows : null,

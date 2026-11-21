@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import { useOrders } from "@/hooks/useOrders";
 import {
@@ -8,6 +8,7 @@ import {
   reconcileUnknownOrderSubmits,
   submitOrderOnce,
   subscribeOrderSubmitGuard,
+  type OrderBookRead,
   type OrderSubmitIntent,
   type UnknownOrderSubmit,
 } from "@/lib/orderSubmitGuard";
@@ -21,9 +22,45 @@ export function useUnknownOrderSubmits(scope: string): UnknownOrderSubmit[] {
 }
 
 /**
+ * Remember the start of a fetch that later completes, and settle lost
+ * submits only with that read. A cached list that never fetched does not
+ * unlock.
+ */
+export function useSettleUnknownSubmits(
+  scope: string,
+  isFetching: boolean,
+  dataUpdatedAt: number,
+  listComplete: boolean,
+): void {
+  const unknown = useUnknownOrderSubmits(scope);
+  const startedAtRef = useRef<number | null>(null);
+  const seenFetchingRef = useRef(false);
+  const [completedRead, setCompletedRead] = useState<OrderBookRead | null>(null);
+
+  useEffect(() => {
+    if (isFetching) {
+      if (!seenFetchingRef.current) startedAtRef.current = Date.now();
+      seenFetchingRef.current = true;
+      return;
+    }
+    const startedAt = startedAtRef.current;
+    startedAtRef.current = null;
+    if (seenFetchingRef.current && startedAt != null && listComplete) {
+      setCompletedRead({ startedAt, completedAt: dataUpdatedAt });
+    }
+    seenFetchingRef.current = false;
+  }, [isFetching, listComplete, dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!completedRead || unknown.length === 0) return;
+    reconcileUnknownOrderSubmits(scope, completedRead);
+  }, [completedRead, unknown, scope]);
+}
+
+/**
  * Shared single-flight and lost-submit lock for fast order paths. While an
- * instrument is locked this polls the order book, and a newer complete read
- * unlocks it.
+ * instrument is locked this polls the order book, and a complete read that
+ * started a few seconds after the loss unlocks it.
  */
 export function useOrderSubmitGuard() {
   const context = useAccountReadContext();
@@ -31,11 +68,7 @@ export function useOrderSubmitGuard() {
   const unknown = useUnknownOrderSubmits(scope);
   const orders = useOrders({ enabled: unknown.length > 0, context });
   const listComplete = orders.data !== undefined && !orders.isError && !orders.isFetching;
-
-  useEffect(() => {
-    if (unknown.length === 0 || !listComplete) return;
-    reconcileUnknownOrderSubmits(scope, orders.dataUpdatedAt);
-  }, [unknown, listComplete, scope, orders.dataUpdatedAt]);
+  useSettleUnknownSubmits(scope, orders.isFetching, orders.dataUpdatedAt, listComplete);
 
   const isLocked = useCallback(
     (key: string) => orderSubmitInFlight(scope, key) || unknown.some((record) => record.key === key),

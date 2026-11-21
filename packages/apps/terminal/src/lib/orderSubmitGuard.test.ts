@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearPersistedAuthSession, writePersistedAuthSession } from "@/lib/homeEntry";
 import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import {
+  UNKNOWN_SUBMIT_SETTLE_MS,
   orderSubmitLocked,
   readUnknownOrderSubmits,
   reconcileUnknownOrderSubmits,
@@ -60,13 +61,34 @@ describe("order submit guard", () => {
     expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
   });
 
-  it("unlocks only on a complete read newer than the lost reply", async () => {
-    await expect(submitOrderOnce(SCOPE, INTENT, lost, 100)).rejects.toThrow();
-    const [record] = readUnknownOrderSubmits(SCOPE);
-    reconcileUnknownOrderSubmits(SCOPE, record.receivedAt);
-    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
-    reconcileUnknownOrderSubmits(SCOPE, record.receivedAt + 1);
-    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
+  it("keeps the lock when a complete read started immediately after the loss", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = submitOrderOnce(SCOPE, INTENT, lost, 100);
+      await expect(pending).rejects.toThrow();
+      const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
+      const startedAt = receivedAt + 40;
+      reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 10 });
+      expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("unlocks only on a complete read that started after the settle delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = submitOrderOnce(SCOPE, INTENT, lost, 100);
+      await expect(pending).rejects.toThrow();
+      const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
+      vi.advanceTimersByTime(UNKNOWN_SUBMIT_SETTLE_MS);
+      const startedAt = Date.now();
+      expect(startedAt).toBeGreaterThanOrEqual(receivedAt + UNKNOWN_SUBMIT_SETTLE_MS);
+      reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 10 });
+      expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("records one unknown entry leg for a lost submit", async () => {

@@ -1117,7 +1117,8 @@ function OrderPadWidget(props: WidgetProps) {
         showToast("unknown", outcome.message, 6000);
         emitNotification({
           category: "order",
-          ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+          skipAccountRefresh: true,
+          ...(submissionMode === "live" ? { accountScopeKey: submissionScope } : {}),
           ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
           title: capturedOrderTitle("Order status unknown", params),
           body: outcome.message,
