@@ -8,6 +8,7 @@ import { OptionalSpeedInsights } from '@/components/optional-speed-insights';
 import { siteMetadataOrigin } from '@/lib/site-origin';
 
 import './globals.css';
+import './presentation.css';
 
 // Canonical fallback https://flinttrade.vercel.app is applied inside
 // siteMetadataOrigin() when FLINTTRADE_SITE_URL / NEXT_PUBLIC_SITE_URL are unset.
