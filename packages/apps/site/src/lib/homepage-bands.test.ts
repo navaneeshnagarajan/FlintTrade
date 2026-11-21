@@ -46,7 +46,7 @@ describe('product-led homepage with the preserved signature', () => {
     expect(primaryMatches.length).toBe(1);
     expect(pageSource).toContain('Install the web app');
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Open the demo (example data)');
+    expect(pageSource).toContain('Demo (example data)');
     expect(pageSource).toContain('/demo-app/welcome');
   });
 
