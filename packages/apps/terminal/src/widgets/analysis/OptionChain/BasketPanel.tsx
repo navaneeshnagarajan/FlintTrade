@@ -115,7 +115,10 @@ export default function BasketPanel({
               Sell All
             </button>
           </div>
-          {statusUnknown && <OrderStatusUnknownLine className="pt-1" />}
+          {/* Reserved, so Buy All and the chain below never move when the line appears. */}
+          <div data-testid="basket-status-slot" className="min-h-9 pt-1">
+            {statusUnknown ? <OrderStatusUnknownLine /> : null}
+          </div>
         </>
       )}
     </div>

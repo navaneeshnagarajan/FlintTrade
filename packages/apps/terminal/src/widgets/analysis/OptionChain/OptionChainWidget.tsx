@@ -505,8 +505,10 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
       } catch (e) {
         const outcome = presentSubmitError(e);
-        setOrderMsg({ text: outcome.message, ok: false });
+        // An unknown outcome is not a failure: the basket's unknown line says
+        // it, and the red error strip would contradict it and move the chain.
         if (outcome.kind === "unknown") throw e;
+        setOrderMsg({ text: outcome.message, ok: false });
       } finally {
         clearTimeout(orderMsgTimerRef.current);
         orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
