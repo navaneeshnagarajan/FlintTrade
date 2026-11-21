@@ -121,7 +121,7 @@ export function ScalperChartPanel({
             aria-label={`Buy CE ${ceSymbol ?? symbol} ${ceStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
-        <div className="shrink-0 h-10 overflow-hidden px-2 py-1" data-testid="scalper-ce-status-slot">
+        <div className="shrink-0 h-12 overflow-hidden px-2 py-1" data-testid="scalper-ce-status-slot">
           {ceStatusUnknown ? <OrderStatusUnknownLine /> : null}
         </div>
       </div>
@@ -243,7 +243,7 @@ export function ScalperChartPanel({
             aria-label={`Sell PE ${peSymbol ?? symbol} ${peStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
-        <div className="shrink-0 h-10 overflow-hidden px-2 py-1" data-testid="scalper-pe-status-slot">
+        <div className="shrink-0 h-12 overflow-hidden px-2 py-1" data-testid="scalper-pe-status-slot">
           {peStatusUnknown ? <OrderStatusUnknownLine /> : null}
         </div>
       </div>

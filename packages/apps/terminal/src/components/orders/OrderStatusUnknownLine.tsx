@@ -7,7 +7,7 @@ function openOrders(): void {
 
 function OpenOrdersButton() {
   return (
-    <button type="button" onClick={openOrders} className="underline underline-offset-2 hover:text-text-primary">
+    <button type="button" onClick={openOrders} className="shrink-0 whitespace-nowrap underline underline-offset-2 hover:text-text-primary">
       Open Orders
     </button>
   );
