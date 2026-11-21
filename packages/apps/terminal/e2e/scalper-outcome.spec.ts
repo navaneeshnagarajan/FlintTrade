@@ -136,3 +136,66 @@ for (const lost of LOST_SUBMITS) {
     });
   });
 }
+
+const BRACKET = "/ft-api/api/v1/orders/bracket";
+
+test.describe("lost Scalper Bracket exit leg", () => {
+  test.use({
+    benignConsoleErrors: [{
+      text: "Failed to load resource: the server responded with a status of 502 (Bad Gateway)",
+      url: `http://localhost:5173${BRACKET}`,
+      expectedCalls: 1,
+    }],
+  });
+
+  test("locks the contract with the unknown sentence and keeps each leg's outcome", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    registerScalperReads(syntheticApi);
+
+    let posts = 0;
+    await page.route(`**${BRACKET}`, async (route) => {
+      posts += 1;
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "error",
+          message: UNKNOWN,
+          error: UNKNOWN,
+          order_outcome: "unknown",
+          reason: "response_unconfirmed",
+          dispatch_outcome: "unknown_after_dispatch",
+          retry_safe: false,
+          leg_outcomes: { entry: "confirmed", stop_loss: "unknown" },
+          data: { bracket_id: "synthetic-bracket", status: "partial", symbol: CE, action: "BUY", quantity: 65 },
+        }),
+      });
+    });
+
+    await mountWidget(page, "scalper");
+    await page.clock.runFor(5_000);
+    await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+    // A LIMIT price anchors the stop-loss points without a live quote.
+    await page.getByRole("radio", { name: "LIMIT", exact: true }).click();
+    await page.getByPlaceholder("0.00").fill("12");
+    await page.getByLabel("Stop-loss points").fill("2");
+    await page.getByRole("textbox", { name: "Add a reason (optional)" }).click();
+    await page.keyboard.press("Shift+ArrowUp");
+    await page.getByRole("button", { name: "Confirm BUY", exact: true }).click();
+
+    const outcome = page.getByRole("status").filter({ hasText: UNKNOWN });
+    await tickUntil(page, outcome);
+    await expect(outcome.getByRole("button", { name: "Open Orders", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Buy CE/ }).first()).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^Sell CE/ }).first()).toBeDisabled();
+    await expect(page.getByText(/protective exit leg failed/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /retry/i })).toHaveCount(0);
+
+    const legs = await page.evaluate(() => Object.keys(sessionStorage)
+      .filter((key) => key.startsWith("flinttrade:order-unknown-submits:"))
+      .flatMap((key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as { legs: unknown }[])
+      .map((record) => record.legs));
+    expect(legs).toEqual([{ entry: "confirmed", stop_loss: "unknown" }]);
+    expect(posts).toBe(1);
+  });
+});
