@@ -126,7 +126,6 @@ def _terminal_lifecycle_case(
     qualifier = desk.app.config["LAYA_QUALIFICATION_OWNER"]
     qualifier.configure(cases=(("positive", "BUY", "Reviewed limit", "allow"),
                                ("negative", "BUY", "revenge", "deny")), max_age_seconds=10.0)
-    assert qualifier.qualify()["qualified"]
     order = {"symbol": "SYNTH", "exchange": "NSE", "product": "CNC", "action": "BUY",
              "quantity": "1", "price": "4", "pricetype": "LIMIT", "admission_note": "Reviewed limit"}
     phases: list[dict[str, Any]] = []
@@ -224,7 +223,11 @@ def _terminal_lifecycle_case(
     # and every real authority/deadline/budget check in its bounded read plan.
     dependencies.read_owner._native_scope_source = native_source
     _plan(source, registration, mark="4")
-    owner = _start(desk, _granted(desk))
+    granted = _granted(desk)
+    # Qualify immediately before the worker so the configured lifetime covers
+    # the write, not fixture construction that does not use the evidence.
+    assert qualifier.qualify()["qualified"]
+    owner = _start(desk, granted)
     completed = owner.completed.wait(30)
     print("QUALIFIED_CANONICAL_PHASES " + json.dumps(phases), flush=True)
     assert completed and owner.shutdown(0)

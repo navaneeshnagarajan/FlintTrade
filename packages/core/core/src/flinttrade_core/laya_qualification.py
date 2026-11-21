@@ -220,7 +220,9 @@ class LayaQualificationOwner:
                       "source_revision": before[6], "config_revision": before[8],
                       "runtime_revision": before[1], "case_ids": [case[0] for case in cases]}
             if qualified:
-                self._record, self._binding, self._expires = report, before, deadline
+                # Measurement is already bounded by the configured age. The
+                # published lifetime starts when that evidence is accepted.
+                self._record, self._binding, self._expires = report, before, time.monotonic() + max_age
         # Status is derived through the original health publisher, not set by a
         # caller-provided success flag or a constructed qualification DTO.
         runtime.publish_status()

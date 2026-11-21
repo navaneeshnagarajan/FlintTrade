@@ -235,6 +235,8 @@ jobs:
         with: { python-version: '3.14' }
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv sync --frozen --extra ml
+      - name: Install the validator the contract test executes
+        run: npm install --ignore-scripts --no-save --no-package-lock --prefix packages/apps/terminal zod@4.6.7
       - name: Run Python package shard
         run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=4 -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
       - name: Upload Python timing and failure evidence

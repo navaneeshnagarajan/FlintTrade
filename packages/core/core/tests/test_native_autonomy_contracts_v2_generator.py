@@ -29,6 +29,17 @@ from flinttrade_core import native_autonomy_contracts_v2 as contracts
 pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def _installed_zod() -> str:
+    """Return the installed validator entry the emitted contract imports."""
+    direct = ROOT / "packages/apps/terminal/node_modules/zod/index.js"
+    if direct.is_file():
+        return str(direct)
+    matches = sorted((ROOT / "node_modules/.pnpm").glob("zod@*/node_modules/zod/index.js"))
+    if len(matches) == 1 and matches[0].is_file():
+        return str(matches[0])
+    raise AssertionError("installed zod validator is required to execute the emitted contract")
 SCRIPT = ROOT / "scripts/generate-native-autonomy-v2-contracts.py"
 
 
@@ -294,7 +305,7 @@ def test_generator_supports_structural_extensions_and_exact_inherited_validator(
         '"../lib/schemaValidation"',
         json.dumps(str(ROOT / "packages/apps/terminal/src/lib/schemaValidation.ts")),
     )
-    text = text.replace('"zod"', json.dumps(str(ROOT / "packages/apps/terminal/node_modules/zod/index.js")))
+    text = text.replace('"zod"', json.dumps(_installed_zod()))
     generated.write_text(text)
     runner = tmp_path / "verify.mjs"
     runner.write_text(
@@ -532,7 +543,7 @@ def test_generator_executes_matched_reference_extensions(
                 with pytest.raises(ValidationError, match="entry_grant"):
                     parse(payload)
     text = generator.render_zod(generator.schema_document())
-    zod = str(ROOT / "packages/apps/terminal/node_modules/zod/index.js")
+    zod = _installed_zod()
     text = text.replace('"zod"', json.dumps(zod)).replace(
         '"../lib/schemaValidation"', json.dumps(str(ROOT / "packages/apps/terminal/src/lib/schemaValidation.ts")))
     (tmp_path / "emitted.ts").write_text(text)
