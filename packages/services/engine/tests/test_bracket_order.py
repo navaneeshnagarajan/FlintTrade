@@ -21,7 +21,9 @@ import pytest
 from flask import Flask
 
 from flinttrade_core.models import Order, PriceType
+from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
 from flinttrade_engine.bracket_order import (
+    BracketLegOutcomeUnknown,
     BracketOrderError,
     BracketOrderService,
     BracketPrincipal,
@@ -119,6 +121,71 @@ def test_gated_leg_checks_prospective_greeks_before_router(
     router.place_order.assert_not_called()
 
 
+def _passing_leg_app(monkeypatch: pytest.MonkeyPatch, router: object) -> Flask:
+    """A gated leg dispatcher whose safety checks pass, so the router is reached."""
+    from flinttrade_core import l2_state
+    from flinttrade_engine import safety as safety_module
+
+    state = SimpleNamespace(
+        positions=[], used_margin=0.0, total_balance=100000.0, daily_pnl=0.0,
+        starting_capital=100000.0, net_delta=0.0, net_vega=0.0,
+        ltp_for=lambda _order: None,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[], used_margin=0.0, net_delta=0.0, net_vega=0.0,
+        ),
+    )
+
+    async def _state(*_args: object, **_kwargs: object) -> object:
+        return state
+
+    monkeypatch.setattr(l2_state, "gather_safety_state", _state)
+    monkeypatch.setattr(safety_module, "gate_order", lambda *_args, **_kwargs: object())
+    safety = SafetySystem(SafetyConfig(check_market_hours=False))
+    safety.check_order = lambda _order, **_kwargs: []
+    app = Flask("bracket-leg-outcome")
+    app.config.update(BROKER_ROUTER=router, SAFETY=safety, SAFETY_CONFIG_READY=True)
+    return app
+
+
+class _LosingRouter:
+    """Router fake that fails with or without reaching the adapter."""
+
+    backend_lease_proof = object()
+
+    def __init__(self, *, reach_adapter: bool) -> None:
+        self.reach_adapter = reach_adapter
+        self.calls = 0
+
+    async def place_order(self, _ctx, *, order, safety_ctx, hint, on_adapter_invoke=None):
+        del order, safety_ctx, hint
+        self.calls += 1
+        if self.reach_adapter and on_adapter_invoke is not None:
+            on_adapter_invoke()
+        raise TimeoutError("response lost")
+
+
+def test_a_leg_whose_reply_is_lost_after_the_adapter_is_reached_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = _LosingRouter(reach_adapter=True)
+    place_leg, _cancel_leg = build_gated_leg_dispatchers(_passing_leg_app(monkeypatch, router))
+
+    with pytest.raises(BracketLegOutcomeUnknown, match="Order status unknown"):
+        place_leg(Order(symbol="NIFTY", action="BUY", exchange="NFO", quantity="1"), PRINCIPAL)
+    assert router.calls == 1
+
+
+def test_a_leg_that_fails_before_the_adapter_is_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = _LosingRouter(reach_adapter=False)
+    place_leg, _cancel_leg = build_gated_leg_dispatchers(_passing_leg_app(monkeypatch, router))
+
+    with pytest.raises(BracketOrderError) as raised:
+        place_leg(Order(symbol="NIFTY", action="BUY", exchange="NFO", quantity="1"), PRINCIPAL)
+    assert not isinstance(raised.value, BracketLegOutcomeUnknown)
+
+
 class RecordingPlaceLeg:
     """Fake gated placement dispatcher — records calls and returns order ids.
 
@@ -126,15 +193,18 @@ class RecordingPlaceLeg:
         calls: Every ``(order, principal)`` pair the service dispatched.
     """
 
-    def __init__(self, fail_on_call: set[int] | None = None) -> None:
+    def __init__(self, fail_on_call: set[int] | None = None, lose_on_call: set[int] | None = None) -> None:
         self.calls: list[tuple[Order, BracketPrincipal]] = []
         self._fail_on_call = fail_on_call or set()
+        self._lose_on_call = lose_on_call or set()
 
     def __call__(self, order: Order, principal: BracketPrincipal) -> str:
         self.calls.append((order, principal))
         n = len(self.calls)
         if n in self._fail_on_call:
             raise BracketOrderError(f"leg {n} refused by the safety gate")
+        if n in self._lose_on_call:
+            raise BracketLegOutcomeUnknown(ORDER_STATUS_UNKNOWN)
         return f"OID-{n}"
 
 
@@ -174,9 +244,10 @@ def _entry(
 def _svc(
     fail_on_call: set[int] | None = None,
     fail_cancel_ids: set[str] | None = None,
+    lose_on_call: set[int] | None = None,
 ) -> tuple[BracketOrderService, RecordingPlaceLeg, RecordingCancelLeg]:
     """Return a service wired with recording fakes for both gated dispatchers."""
-    place_leg = RecordingPlaceLeg(fail_on_call=fail_on_call)
+    place_leg = RecordingPlaceLeg(fail_on_call=fail_on_call, lose_on_call=lose_on_call)
     cancel_leg = RecordingCancelLeg(fail_ids=fail_cancel_ids)
     return BracketOrderService(place_leg=place_leg, cancel_leg=cancel_leg), place_leg, cancel_leg
 
@@ -524,6 +595,64 @@ class TestExitLegFailure:
         svc, _, _ = _svc(fail_on_call={2})
         result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
         assert result.bracket.bracket_id in [b.bracket_id for b in svc.get_active_brackets()]
+
+
+# ---------------------------------------------------------------------------
+# Per-leg outcomes — a lost leg is unknown, never a refusal
+# ---------------------------------------------------------------------------
+
+
+class TestLegOutcomes:
+    """Each leg reports unknown, confirmed or absent on its own."""
+
+    def test_both_legs_placed_are_confirmed(self):
+        svc, _, _ = _svc()
+        result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
+        assert result.leg_outcomes == {"entry": "confirmed", "stop_loss": "confirmed"}
+        assert not result.outcome_unknown
+
+    def test_a_target_bracket_names_its_target_leg(self):
+        svc, _, _ = _svc()
+        result = svc.place_bracket(entry=_entry(), target=23000.0, principal=PRINCIPAL)
+        assert result.leg_outcomes == {"entry": "confirmed", "target": "confirmed"}
+
+    def test_a_refused_entry_leaves_both_legs_absent(self):
+        svc, _, _ = _svc(fail_on_call={1})
+        result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
+        assert result.leg_outcomes == {"entry": "absent", "stop_loss": "absent"}
+        assert not result.outcome_unknown
+
+    def test_a_lost_entry_is_unknown_and_the_exit_is_never_sent(self):
+        svc, place_leg, _ = _svc(lose_on_call={1})
+        result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
+        assert not result.success
+        assert result.outcome_unknown
+        assert result.message == ORDER_STATUS_UNKNOWN
+        assert result.leg_outcomes == {"entry": "unknown", "stop_loss": "absent"}
+        assert len(place_leg.calls) == 1
+        assert svc.get_active_brackets() == []
+
+    def test_a_lost_exit_is_unknown_and_never_asks_for_a_manual_exit(self):
+        svc, place_leg, _ = _svc(lose_on_call={2})
+        result = svc.place_bracket(entry=_entry(), target=23000.0, principal=PRINCIPAL)
+        assert not result.success
+        assert result.outcome_unknown
+        assert result.message == ORDER_STATUS_UNKNOWN
+        assert "manually" not in result.message
+        assert result.leg_outcomes == {"entry": "confirmed", "target": "unknown"}
+        assert len(place_leg.calls) == 2
+        assert result.bracket is not None and result.bracket.status == "partial"
+
+    def test_a_refused_exit_is_absent(self):
+        svc, _, _ = _svc(fail_on_call={2})
+        result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
+        assert result.leg_outcomes == {"entry": "confirmed", "stop_loss": "absent"}
+        assert "UNPROTECTED" in result.message
+
+    def test_to_dict_carries_leg_outcomes(self):
+        svc, _, _ = _svc(lose_on_call={1})
+        result = svc.place_bracket(entry=_entry(), stoploss=22000.0, principal=PRINCIPAL)
+        assert result.to_dict()["leg_outcomes"] == {"entry": "unknown", "stop_loss": "absent"}
 
 
 # ---------------------------------------------------------------------------

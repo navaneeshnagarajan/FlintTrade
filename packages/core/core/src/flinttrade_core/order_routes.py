@@ -37,7 +37,6 @@ import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any
@@ -53,6 +52,7 @@ from .order_outcome import (
     ORDER_STATUS_UNKNOWN,
     REASON_BROKER_REJECTED,
     REASON_RESPONSE_UNCONFIRMED,
+    DispatchProgress as _LiveWriteProgress,
     annotate,
     cancel_acknowledgement,
     single_leg_outcomes,
@@ -60,33 +60,6 @@ from .order_outcome import (
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
-
-
-@dataclass
-class _LiveWriteProgress:
-    """Request-local invocation evidence, not execution or durable authority.
-
-    A sync wait can time out while the router coroutine still runs. Only its
-    completed failure before the invocation hook proves no adapter invocation.
-    """
-
-    started: bool = False
-    invoked: bool = False
-    failed_before_invoke: bool = False
-
-    def on_adapter_invoke(self) -> None:
-        self.invoked = True
-
-    @property
-    def outcome_unknown(self) -> bool:
-        return self.started and not self.failed_before_invoke
-
-    async def run(self, coroutine: Any) -> Any:
-        try:
-            return await coroutine
-        except BaseException:
-            self.failed_before_invoke = not self.invoked
-            raise
 
 
 def _run_on_client_loop(coro: Any) -> Any:

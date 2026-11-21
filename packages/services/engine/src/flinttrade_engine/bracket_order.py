@@ -35,6 +35,7 @@ from typing import Any
 from flask import Flask
 
 from flinttrade_core.models import Action, Exchange, Order, PriceType, Product
+from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, DispatchProgress, leg_outcomes
 
 logger = logging.getLogger("flinttrade.engine.bracket_order")
 
@@ -46,6 +47,10 @@ logger = logging.getLogger("flinttrade.engine.bracket_order")
 
 class BracketOrderError(Exception):
     """Raised when bracket order placement, cancellation, or dispatch fails."""
+
+
+class BracketLegOutcomeUnknown(BracketOrderError):
+    """A leg reached the broker adapter and its reply was lost. Never place it again."""
 
 
 class BracketNotFoundError(KeyError):
@@ -176,12 +181,21 @@ class BracketResult:
         bracket: The BracketOrder state after the operation.
         message: Human-readable description of the outcome.
         error: Non-empty only when ``success`` is ``False``.
+        leg_outcomes: One outcome per dispatched or skipped leg (``entry``
+            and ``stop_loss`` or ``target``): unknown, confirmed or absent.
+            Empty when the request was refused before any leg.
     """
 
     success: bool
     bracket: BracketOrder | None
     message: str
     error: str = ""
+    leg_outcomes: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def outcome_unknown(self) -> bool:
+        """A leg may be at the broker without a reply. Nothing may resend it."""
+        return "unknown" in self.leg_outcomes.values()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict for API responses."""
@@ -190,6 +204,7 @@ class BracketResult:
             "bracket": self.bracket.to_dict() if self.bracket else None,
             "message": self.message,
             "error": self.error,
+            "leg_outcomes": dict(self.leg_outcomes),
         }
 
 
@@ -387,6 +402,9 @@ class BracketOrderService:
         pricetype: str = str(entry.get("pricetype", "MARKET" if price == 0 else "LIMIT")).upper()
 
         bracket_id = str(uuid.uuid4())
+        exit_action = "SELL" if action == "BUY" else "BUY"
+        exit_kind = "stoploss" if stoploss is not None else "target"
+        exit_leg = "stop_loss" if stoploss is not None else "target"
 
         # Step 2 — build + place the entry leg through the gated dispatcher
         try:
@@ -410,6 +428,16 @@ class BracketOrderService:
 
         try:
             entry_order_id = self._place_leg(entry_order, principal)
+        except BracketLegOutcomeUnknown as exc:
+            # The entry may be at the broker. The exit leg is not sent.
+            logger.error("Bracket entry leg outcome unknown for %s", symbol)
+            return BracketResult(
+                success=False,
+                bracket=None,
+                message=ORDER_STATUS_UNKNOWN,
+                error=str(exc),
+                leg_outcomes=leg_outcomes(entry="unknown", **{exit_leg: "absent"}),
+            )
         except Exception as exc:
             logger.error("Bracket entry leg failed for %s: %s", symbol, exc)
             return BracketResult(
@@ -417,11 +445,10 @@ class BracketOrderService:
                 bracket=None,
                 message="Entry order placement failed",
                 error=str(exc),
+                leg_outcomes=leg_outcomes(entry="absent", **{exit_leg: "absent"}),
             )
 
         # Step 3 — build + place the single protective exit leg
-        exit_action = "SELL" if action == "BUY" else "BUY"
-        exit_kind = "stoploss" if stoploss is not None else "target"
 
         try:
             if stoploss is not None:
@@ -478,12 +505,19 @@ class BracketOrderService:
                     "an exit order manually."
                 ),
                 error=str(exc),
+                leg_outcomes=leg_outcomes(entry="confirmed", **{exit_leg: "absent"}),
             )
 
         exit_order_id: str | None = None
         exit_error = ""
+        exit_outcome = "absent"
         try:
             exit_order_id = self._place_leg(exit_order, principal)
+            exit_outcome = "confirmed"
+        except BracketLegOutcomeUnknown as exc:
+            exit_error = str(exc)
+            exit_outcome = "unknown"
+            logger.error("Bracket %s exit leg (%s) outcome unknown", bracket_id, exit_kind)
         except Exception as exc:
             exit_error = str(exc)
             logger.error(
@@ -512,6 +546,13 @@ class BracketOrderService:
             status=status,
         )
 
+        legs = leg_outcomes(entry="confirmed", **{exit_leg: exit_outcome})
+        if exit_outcome == "unknown":
+            # The exit may be resting at the broker. A manual exit could double it.
+            return BracketResult(
+                success=False, bracket=bracket, message=ORDER_STATUS_UNKNOWN,
+                error=exit_error, leg_outcomes=legs,
+            )
         if status == "partial":
             return BracketResult(
                 success=False,
@@ -522,6 +563,7 @@ class BracketOrderService:
                     "exit order manually."
                 ),
                 error=exit_error,
+                leg_outcomes=legs,
             )
 
         logger.info(
@@ -533,6 +575,7 @@ class BracketOrderService:
             success=True,
             bracket=bracket,
             message=f"Bracket placed: entry + {exit_kind} exit leg",
+            leg_outcomes=legs,
         )
 
     def modify_bracket(
@@ -940,17 +983,32 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
                     backend_lease_proof=router.backend_lease_proof,
                 )
                 reservation = lease.reserve(order, admission.positions)
-                result = _call_on_owner_loop(
-                    router.place_order(
-                        ctx,
-                        order=order,
-                        safety_ctx=safety_ctx,
-                        hint=RoutingHint(
-                            adapter_id=principal.adapter_id, account_id=principal.account_id
-                        ),
-                    )
-                )
+                progress = DispatchProgress(started=True)
+                try:
+                    result = _call_on_owner_loop(progress.run(
+                        router.place_order(
+                            ctx,
+                            order=order,
+                            safety_ctx=safety_ctx,
+                            hint=RoutingHint(
+                                adapter_id=principal.adapter_id, account_id=principal.account_id
+                            ),
+                            on_adapter_invoke=progress.on_adapter_invoke,
+                        )
+                    ))
+                except Exception as exc:
+                    # Only a failure that finished before the adapter call proves
+                    # no order was sent. Anything else may be at the broker.
+                    if progress.outcome_unknown:
+                        logger.exception(
+                            "Bracket leg outcome unknown | adapter=%s symbol=%s",
+                            principal.adapter_id, order.symbol,
+                        )
+                        raise BracketLegOutcomeUnknown(ORDER_STATUS_UNKNOWN) from exc
+                    raise
                 lease.acknowledge(reservation, result)
+            except BracketLegOutcomeUnknown:
+                raise
             except SafetyBypassError as exc:
                 logger.warning("Bracket leg refused by safety gate: %s", exc)
                 raise BracketOrderError("Order refused by the safety gate") from exc

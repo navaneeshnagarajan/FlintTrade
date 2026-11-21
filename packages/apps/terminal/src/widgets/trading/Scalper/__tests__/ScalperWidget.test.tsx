@@ -877,6 +877,26 @@ describe("ScalperWidget", () => {
     expect(mockPlaceBracketOrder).toHaveBeenCalledTimes(1);
   });
 
+  it("locks the contract after a lost exit leg instead of calling it failed", async () => {
+    const lostExit = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      data: { bracket_id: "br-lost", status: "partial", action: "BUY", quantity: 75, symbol: "NIFTY" },
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    mockPlaceBracketOrder.mockRejectedValue(lostExit);
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+    fireEvent.click(screen.getByText("LIMIT"));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    await buyCeWithConfirm();
+
+    await waitFor(() => expectCeLocked());
+    expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+    expect(screen.queryByText(/protective exit leg failed/)).not.toBeInTheDocument();
+    expect(mockPlaceBracketOrder).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the SL leg in the confirm modal before placing", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");

@@ -13,7 +13,7 @@
  * are hidden by a mode or account switch, and clear on sign-out.
  *
  * Each record carries one outcome per leg (entry, and target and stop_loss
- * when the order has them), matching the API's `leg_outcomes`, and a client
+ * when the order has them), copied from the API's `leg_outcomes`, and a client
  * key generated for that intent. No broker adapter has a free per-order tag
  * on the place path today (the tag slots carry the exchange algo id), so the
  * key is not sent and a newer complete order read settles the lock.
@@ -31,6 +31,14 @@ const legOutcomeSchema = z.enum(["unknown", "confirmed", "absent"]);
 
 const CLIENT_REF_PATTERN = /^[0-9a-f]{16}$/;
 
+const legOutcomesSchema = z.object({
+  entry: legOutcomeSchema,
+  target: legOutcomeSchema.optional(),
+  stop_loss: legOutcomeSchema.optional(),
+}).strict();
+
+type LegOutcomes = z.infer<typeof legOutcomesSchema>;
+
 const unknownSubmitSchema = z.object({
   key: z.string().min(1),
   symbol: z.string().min(1),
@@ -40,11 +48,7 @@ const unknownSubmitSchema = z.object({
   receivedAt: z.number().finite(),
   listUpdatedAt: z.number().finite(),
   clientRef: z.string().regex(CLIENT_REF_PATTERN),
-  legs: z.object({
-    entry: legOutcomeSchema,
-    target: legOutcomeSchema.optional(),
-    stop_loss: legOutcomeSchema.optional(),
-  }).strict(),
+  legs: legOutcomesSchema,
 });
 
 export type UnknownOrderSubmit = z.infer<typeof unknownSubmitSchema>;
@@ -77,6 +81,21 @@ export function newClientRef(): string {
 
 function hasUnknownLeg(record: UnknownOrderSubmit): boolean {
   return Object.values(record.legs).includes("unknown");
+}
+
+/**
+ * The legs a lost reply reports, such as a Bracket whose entry is confirmed
+ * and whose exit is unknown. Without a valid report that names an unknown
+ * leg, the entry leg is unknown.
+ */
+function lostLegOutcomes(error: unknown): LegOutcomes {
+  const body = error && typeof error === "object" && "body" in error ? error.body : undefined;
+  const reported = body && typeof body === "object" && "leg_outcomes" in body
+    ? legOutcomesSchema.safeParse(body.leg_outcomes)
+    : null;
+  return reported?.success && Object.values(reported.data).includes("unknown")
+    ? reported.data
+    : { entry: "unknown" };
 }
 
 export type SubmitOnceResult<T> = { sent: false } | { sent: true; value: T };
@@ -153,7 +172,7 @@ export async function submitOrderOnce<T>(
     if (isLost(error)) {
       writeLocks(scope, [
         ...readLocks(scope).filter((record) => record.key !== intent.key),
-        { ...intent, receivedAt: Date.now(), listUpdatedAt, clientRef, legs: { entry: "unknown" } },
+        { ...intent, receivedAt: Date.now(), listUpdatedAt, clientRef, legs: lostLegOutcomes(error) },
       ]);
     }
     throw error;

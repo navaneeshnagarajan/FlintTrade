@@ -7,6 +7,7 @@ ledger, which refuses a second broker write while an outcome is unknown.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 ORDER_STATUS_UNKNOWN = "Order status unknown. Check Orders before trying again."
@@ -20,6 +21,33 @@ REASON_BROKER_REJECTED = "broker_rejected"
 REASON_TOOL_UNAVAILABLE = "tool_unavailable"
 
 _CONFIRMED_CANCELLED = frozenset({"CANCELLED", "CANCELED"})
+
+@dataclass
+class DispatchProgress:
+    """Request-local invocation evidence, not execution or durable authority.
+
+    A sync wait can time out while the router coroutine still runs. Only its
+    completed failure before the invocation hook proves no adapter invocation.
+    """
+
+    started: bool = False
+    invoked: bool = False
+    failed_before_invoke: bool = False
+
+    def on_adapter_invoke(self) -> None:
+        self.invoked = True
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self.started and not self.failed_before_invoke
+
+    async def run(self, coroutine: Any) -> Any:
+        try:
+            return await coroutine
+        except BaseException:
+            self.failed_before_invoke = not self.invoked
+            raise
+
 
 # Each leg of an order record is unknown (its reply was lost), confirmed (a
 # reply or read shows it at the broker) or absent (it was refused or never

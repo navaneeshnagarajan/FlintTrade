@@ -33,7 +33,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, jsonify
 
 from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
-from flinttrade_core.order_outcome import cancel_acknowledgement, leg_outcomes
+from flinttrade_core.order_outcome import REASON_RESPONSE_UNCONFIRMED, cancel_acknowledgement, leg_outcomes
 from flinttrade_core.rate_limiter import rate_limit
 
 from .bracket_order import BracketOrderError, BracketPrincipal
@@ -172,7 +172,10 @@ def place_bracket() -> Response:
     Returns:
         201 with bracket details on success; 400 on bad input; 401/403 from
         the mode guard; 422 for an OCO pair, a trailing stop, GTT, or a
-        broker-held variety; 503 when the bracket service is not configured.
+        broker-held variety; 502 with ``order_outcome`` ``unknown`` when a
+        leg's reply was lost; 503 when the bracket service is not configured.
+        Every dispatched bracket reports ``leg_outcomes`` for ``entry`` and
+        its exit leg (``stop_loss`` or ``target``).
     """
     svc, err = _service_required()
     if err:
@@ -322,14 +325,26 @@ def place_bracket() -> Response:
         principal=principal,
     )
 
+    legs = {"leg_outcomes": dict(result.leg_outcomes)} if result.leg_outcomes else {}
     if not result.success:
         payload: dict[str, Any] = {
             "status": "error",
             "message": result.message,
             "error": result.error,
+            **legs,
         }
         if result.bracket is not None:
             payload["data"] = result.bracket.to_dict()
+        if result.outcome_unknown:
+            # A leg may be at the broker. This is not a refusal, and the
+            # request must not be sent again.
+            payload.update(
+                order_outcome="unknown",
+                reason=REASON_RESPONSE_UNCONFIRMED,
+                dispatch_outcome="unknown_after_dispatch",
+                retry_safe=False,
+            )
+            return jsonify(payload), 502
         return jsonify(payload), 422
 
     return (
@@ -338,6 +353,7 @@ def place_bracket() -> Response:
                 "status": "success",
                 "message": result.message,
                 "data": result.bracket.to_dict() if result.bracket else None,
+                **legs,
             }
         ),
         201,

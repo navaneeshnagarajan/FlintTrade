@@ -445,6 +445,12 @@ function ScalperWidget(props: WidgetProps) {
           const message = err instanceof Error ? err.message : "Bracket order failed";
           const data = (err as { data?: BracketOrderData }).data;
           const code = String((err as { code?: unknown }).code ?? "");
+          if (presentSubmitError(err).kind === "unknown") {
+            // The broker may hold the entry or the exit leg. The contract stays
+            // locked and the unknown line beside its buttons carries the message.
+            setStatus({ message: "", type: "idle" });
+            throw err;
+          }
           // A 'partial' bracket means the entry leg is LIVE but the protective
           // exit leg failed — the position is unprotected. Persist it (never a
           // fading toast) with the bracket id and a working cancel path.
@@ -453,12 +459,6 @@ function ScalperWidget(props: WidgetProps) {
             setStatus({ message: "", type: "idle" });
             announceOrder(action, sym, qty);
             return;
-          }
-          if (presentSubmitError(err).kind === "unknown") {
-            // The broker may hold the entry. The contract stays locked and the
-            // unknown line beside its buttons carries the message.
-            setStatus({ message: "", type: "idle" });
-            throw err;
           }
           // Practice/Explore JWTs are refused server-side — tell the user
           // why, alongside the backend's own message.

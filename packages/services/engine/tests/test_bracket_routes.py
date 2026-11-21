@@ -80,6 +80,11 @@ def _make_service(success: bool = True, bracket_id: str = "br-001") -> MagicMock
     result.message = "OK" if success else "Rejected"
     result.error = "" if success else "validation_error"
     result.bracket = bracket if success else None
+    result.leg_outcomes = (
+        {"entry": "confirmed", "stop_loss": "confirmed"} if success
+        else {"entry": "absent", "stop_loss": "absent"}
+    )
+    result.outcome_unknown = False
     svc.place_bracket.return_value = result
 
     svc.get_active_brackets.return_value = [bracket] if success else []
@@ -434,6 +439,41 @@ class TestPlaceBracket:
         data = resp.get_json()
         assert data["data"]["status"] == "partial"
         assert data["data"]["bracket_id"] == "br-p1"
+
+    def test_place_reports_each_leg_outcome(self, client) -> None:
+        resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        assert resp.status_code == 201
+        assert resp.get_json()["leg_outcomes"] == {"entry": "confirmed", "stop_loss": "confirmed"}
+
+    def test_a_refused_bracket_reports_absent_legs(self) -> None:
+        with _make_app(_make_service(success=False)).test_client() as c:
+            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        assert resp.status_code == 422
+        assert resp.get_json()["leg_outcomes"] == {"entry": "absent", "stop_loss": "absent"}
+        assert "order_outcome" not in resp.get_json()
+
+    def test_a_lost_leg_is_order_outcome_unknown_not_a_refusal(self) -> None:
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+        svc = _make_service(success=False)
+        result = svc.place_bracket.return_value
+        result.message = ORDER_STATUS_UNKNOWN
+        result.error = "Order dispatch failed"
+        result.leg_outcomes = {"entry": "confirmed", "stop_loss": "unknown"}
+        result.outcome_unknown = True
+        partial = MagicMock()
+        partial.to_dict.return_value = {"bracket_id": "br-p1", "status": "partial"}
+        result.bracket = partial
+        with _make_app(svc).test_client() as c:
+            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        body = resp.get_json()
+        assert resp.status_code == 502
+        assert body["order_outcome"] == "unknown"
+        assert body["retry_safe"] is False
+        assert body["message"] == ORDER_STATUS_UNKNOWN
+        assert body["leg_outcomes"] == {"entry": "confirmed", "stop_loss": "unknown"}
+        assert body["data"]["bracket_id"] == "br-p1"
+        svc.place_bracket.assert_called_once()
 
     def test_no_service_returns_503(self, client_no_service) -> None:
         """Missing BRACKET_SERVICE returns HTTP 503.
