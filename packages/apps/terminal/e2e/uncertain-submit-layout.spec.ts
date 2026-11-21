@@ -91,6 +91,33 @@ async function rereadOrderBook(page: Page): Promise<void> {
   });
 }
 
+/** The element is inside the viewport and nothing, such as the status footer, paints over it. */
+async function expectOnScreenAndUncovered(page: Page, locator: Locator, label: string): Promise<Box> {
+  await expect(locator, label).toBeVisible();
+  const box = (await locator.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.y, `${label} top`).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height, `${label} bottom`).toBeLessThanOrEqual(viewport.height);
+  const covered = await locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const points = [
+      [rect.left + 2, rect.top + rect.height / 2],
+      [rect.left + rect.width / 2, rect.top + rect.height / 2],
+      [rect.right - 2, rect.top + rect.height / 2],
+    ];
+    for (const [x, y] of points) {
+      const hit = document.elementFromPoint(x!, y!);
+      if (!hit || !(node === hit || node.contains(hit)
+        || (node instanceof HTMLButtonElement && node.disabled && hit === node.parentElement))) {
+        return hit ? `${hit.tagName}.${String(hit.className).slice(0, 80)} ${hit.textContent?.slice(0, 40) ?? ""}` : "nothing";
+      }
+    }
+    return null;
+  });
+  expect(covered, `${label} is painted over`).toBeNull();
+  return box;
+}
+
 async function expectLockHeld(page: Page, buy: Locator, line: Locator, ms = 3_000): Promise<void> {
   const started = Date.now();
   await expect(line).toBeVisible();
@@ -248,7 +275,11 @@ function registerPracticePadReads(
   return { orderReads };
 }
 
-async function confirmLostPracticeBuy(page: Page, beforeConfirm?: () => void): Promise<void> {
+async function confirmLostPracticeBuy(
+  page: Page,
+  beforeConfirm?: () => void,
+  beforeBuy?: () => Promise<void>,
+): Promise<void> {
   await page.goto("/welcome");
   await installPracticeAuthority(page);
   await page.evaluate(async () => {
@@ -263,6 +294,7 @@ async function confirmLostPracticeBuy(page: Page, beforeConfirm?: () => void): P
   await expect(limit).toBeVisible({ timeout: 20_000 });
   await limit.click();
   await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
+  await beforeBuy?.();
   await page.getByRole("button", { name: "Practice Buy" }).click();
   const review = page.getByRole("dialog", { name: "Review Practice order" });
   await expect(review).toBeVisible();
@@ -410,7 +442,76 @@ test.describe("lost Practice submit holds the lock in real time", () => {
       expect(delayed).toBe(true);
     });
   });
+  test.describe("scheduled settle read", () => {
+    test.use({
+      benignConsoleErrors: [{
+        text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+        url: `http://localhost:5173${PLACE}`,
+        expectedCalls: 1,
+      }],
+    });
+
+    test("one order-book read about 5s after the loss clears the lock within 5-7s", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      await seedOrderPadWorkspace(page);
+      const { orderReads } = registerPracticePadReads(syntheticApi);
+      let lostAt = 0;
+      await page.route(`**${PLACE}`, async (route) => {
+        lostAt = Date.now();
+        await route.abort("connectionreset");
+      });
+      await confirmLostPracticeBuy(page);
+      const line = page.getByTestId("order-pad-status-unknown").getByText(UNKNOWN);
+      const buy = page.getByRole("button", { name: "Practice Buy" });
+      await expect(line).toBeVisible({ timeout: 15_000 });
+      expect(lostAt).toBeGreaterThan(0);
+      while (Date.now() < lostAt + 4_700) {
+        await expect(line).toBeVisible();
+        await expect(buy).toBeDisabled();
+        await page.waitForTimeout(150);
+      }
+      await expect(line).toBeHidden({ timeout: 7_000 - (Date.now() - lostAt) });
+      const unlockedAfter = Date.now() - lostAt;
+      await expect(buy).toBeEnabled();
+      expect(unlockedAfter).toBeGreaterThanOrEqual(5_000);
+      expect(unlockedAfter).toBeLessThan(7_000);
+      const settling = orderReads.startedAt.filter((started) => started >= lostAt + 5_000 && started <= lostAt + 6_500);
+      expect(settling.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`Order Pad unknown line on screen at ${viewport.width}×${viewport.height}`, () => {
+    test.use({
+      viewport,
+      benignConsoleErrors: [{
+        text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+        url: `http://localhost:5173${PLACE}`,
+        expectedCalls: 1,
+      }],
+    });
+
+    test("Buy and the unknown line stay inside the viewport, uncovered and unmoved", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      await seedOrderPadWorkspace(page);
+      registerPracticePadReads(syntheticApi);
+      await page.route(`**${PLACE}`, async (route) => { await route.abort("connectionreset"); });
+      const buy = page.getByRole("button", { name: "Practice Buy" });
+      let before: Box | null = null;
+      await confirmLostPracticeBuy(page, undefined, async () => {
+        before = await expectOnScreenAndUncovered(page, buy, `Buy before at ${viewport.width}`);
+      });
+      const slot = page.getByTestId("order-pad-status-unknown");
+      const line = slot.getByText(UNKNOWN);
+      await expect(line).toBeVisible({ timeout: 15_000 });
+      await expectOnScreenAndUncovered(page, line, `unknown line at ${viewport.width}`);
+      await expectOnScreenAndUncovered(page, slot.getByRole("button", { name: "Open Orders" }), `Open Orders at ${viewport.width}`);
+      const after = await expectOnScreenAndUncovered(page, buy, `Buy after at ${viewport.width}`);
+      expectUnmoved([before!], [after], `Order Pad Buy ${viewport.width}`);
+    });
+  });
+}
 
 for (const viewport of VIEWPORTS) {
   test.describe(`no layout shift at ${viewport.width}×${viewport.height}`, () => {

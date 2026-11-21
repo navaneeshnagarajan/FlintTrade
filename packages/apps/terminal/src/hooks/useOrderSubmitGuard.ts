@@ -8,6 +8,7 @@ import {
   reconcileUnknownOrderSubmits,
   submitOrderOnce,
   subscribeOrderSubmitGuard,
+  UNKNOWN_SUBMIT_SETTLE_MS,
   type OrderBookRead,
   type OrderSubmitIntent,
   type UnknownOrderSubmit,
@@ -57,6 +58,43 @@ export function useSettleUnknownSubmits(
   }, [completedRead, unknown, scope]);
 }
 
+/** One order-book read just after the settle delay, so a lock clears promptly. */
+export const UNKNOWN_SUBMIT_SETTLE_READ_MS = UNKNOWN_SUBMIT_SETTLE_MS + 100;
+
+/**
+ * Schedule one order-book read for each lost submit, just after the settle
+ * delay. The read only counts if it starts after that delay, so when another
+ * read is still in flight at that moment, wait for it and read once more.
+ */
+export function useScheduledSettleRead(
+  unknown: UnknownOrderSubmit[],
+  isFetching: boolean,
+  refetch: (options?: { cancelRefetch?: boolean }) => Promise<unknown>,
+): void {
+  const fetchingRef = useRef(isFetching);
+  fetchingRef.current = isFetching;
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  const dueAt = unknown.length === 0
+    ? null
+    : Math.min(...unknown.map((record) => record.receivedAt)) + UNKNOWN_SUBMIT_SETTLE_READ_MS;
+
+  useEffect(() => {
+    if (dueAt == null) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (fetchingRef.current) await refetchRef.current({ cancelRefetch: false }).catch(() => undefined);
+        if (!cancelled) await refetchRef.current({ cancelRefetch: false }).catch(() => undefined);
+      })();
+    }, Math.max(0, dueAt - Date.now()));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [dueAt]);
+}
+
 /**
  * Shared single-flight and lost-submit lock for fast order paths. While an
  * instrument is locked this polls the order book, and a complete read that
@@ -69,6 +107,7 @@ export function useOrderSubmitGuard() {
   const orders = useOrders({ enabled: unknown.length > 0, context });
   const listComplete = orders.data !== undefined && !orders.isError && !orders.isFetching;
   useSettleUnknownSubmits(scope, orders.isFetching, orders.dataUpdatedAt, listComplete);
+  useScheduledSettleRead(unknown, orders.isFetching, orders.refetch);
 
   const isLocked = useCallback(
     (key: string) => orderSubmitInFlight(scope, key) || unknown.some((record) => record.key === key),

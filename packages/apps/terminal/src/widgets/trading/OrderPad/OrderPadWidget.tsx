@@ -2005,7 +2005,12 @@ function OrderPadWidget(props: WidgetProps) {
           </div>
         ) : null}
 
-        {/* Submit button */}
+        {/* Submit button and its outcome line stay pinned to the bottom of the
+            pad, so a short window never hides them behind the scroll edge. */}
+        <div
+          data-testid="order-pad-actions"
+          className="sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border-subtle bg-surface-base px-3 pt-2 pb-3"
+        >
         {openQty > 0 && exitSide ? (
           <Button
             type="button"
@@ -2030,11 +2035,15 @@ function OrderPadWidget(props: WidgetProps) {
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
-        {padStatusUnknown ? (
-          <div data-testid="order-pad-status-unknown">
-            <OrderStatusUnknownLine />
-          </div>
-        ) : null}
+        {/* Reserved so Buy does not move when the line appears. */}
+        <div data-testid="order-pad-status-slot" className="min-h-5">
+          {padStatusUnknown ? (
+            <div data-testid="order-pad-status-unknown">
+              <OrderStatusUnknownLine />
+            </div>
+          ) : null}
+        </div>
+        </div>
         {showPracticeLayaDown ? (
           <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
             {LAYA_DOWN_REFUSAL}
