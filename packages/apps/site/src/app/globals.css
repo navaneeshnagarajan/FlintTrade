@@ -419,8 +419,10 @@ kbd {
 
 .theme-toggle button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -727,6 +729,14 @@ kbd {
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
 }
 
+.install-commands {
+  display: grid;
+  gap: 12px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  text-align: left;
+}
+
 .hero-install > p {
   margin: 0;
   color: var(--site-hero-copy);
@@ -818,53 +828,6 @@ kbd {
   width: 40%;
   background: linear-gradient(105deg, transparent, rgba(var(--site-accent-rgb), 0.25), transparent);
   animation: siteShimmerSweep 2.5s linear infinite;
-}
-
-.hero-visual {
-  position: relative;
-  width: min(980px, 100%);
-  min-height: 540px;
-}
-
-.screenshot-stack {
-  position: relative;
-  height: 540px;
-}
-
-.screen-frame {
-  position: absolute;
-  overflow: hidden;
-  border: 1px solid var(--site-line);
-  border-radius: var(--site-radius);
-  background: var(--site-surface-card);
-  box-shadow: 0 32px 90px var(--site-frame-shadow);
-  backdrop-filter: blur(18px);
-}
-
-.screen-frame img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top left;
-}
-
-.screen-frame.main {
-  inset: 0 6% 74px 6%;
-}
-
-.screen-frame.side {
-  left: 0;
-  bottom: 0;
-  width: 35%;
-  height: 38%;
-}
-
-.screen-frame.float {
-  right: 0;
-  bottom: 24px;
-  width: 34%;
-  height: 30%;
 }
 
 .metric-rail {
@@ -1178,43 +1141,6 @@ kbd {
   .hero-electron-note {
     opacity: 1;
   }
-
-  /* A1 Graphite Continuity: new section-enter and float rules are static under reduced-motion */
-  .section-enter,
-  .screen-frame.float {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
-}
-
-/* Graphite Continuity A1: fail-open observed reveal — baseline visible (no-JS/SSR/reduced-motion), motion gated by controller-added class */
-.section-enter {
-  opacity: 1;
-  transform: none;
-}
-
-/* Motion only enabled when the tiny client controller mounts and adds the class */
-.js-motion-enabled .section-enter {
-  opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)), transform 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
-}
-
-.js-motion-enabled .section-enter.visible {
-  opacity: 1;
-  transform: none;
-}
-
-/* Optional screenshot side/float gentle drift — amplitude ≤6px, period ≥8s; not LCP */
-.screen-frame.float {
-  animation: screenshotFloat 8s ease-in-out infinite;
-}
-
-@keyframes screenshotFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
 }
 
 /* Quiet below-fold: reduce competing glow/shimmer on package and mcp surfaces */
@@ -1267,12 +1193,6 @@ kbd {
     min-height: auto;
   }
 
-  .hero-visual,
-  .screenshot-stack {
-    min-height: 390px;
-    height: 390px;
-  }
-
   .feature-grid,
   .install-grid,
   .metric-rail {
@@ -1283,6 +1203,7 @@ kbd {
 @media (max-width: 620px) {
   .site-header,
   .section,
+  .install-commands,
   .site-footer,
   .subpage {
     width: min(100% - 22px, 1180px);
@@ -1314,20 +1235,6 @@ kbd {
   .metric-rail,
   .package-row {
     grid-template-columns: 1fr;
-  }
-
-  .screen-frame.main {
-    inset: 0 0 92px 0;
-  }
-
-  .screen-frame.side {
-    left: 0;
-    right: auto;
-    width: 54%;
-  }
-
-  .screen-frame.float {
-    width: 54%;
   }
 
   /* Graphite Continuity A1 mobile: essential hero content immediately useful (no opacity:0 or cinematic delay on small viewports) */
