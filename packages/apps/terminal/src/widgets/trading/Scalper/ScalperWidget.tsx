@@ -25,6 +25,16 @@ import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hook
 import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
+import {
+  brokerDisplayName,
+  evaluateOrderRules,
+  hasBlockingRule,
+  ruleHeadline,
+  stopLossTargetPlacement,
+  type RuleResult,
+} from "@/lib/orderRules";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { resolveAccountAuthorityIdentity } from "@/hooks/useDataScope";
 import { EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
@@ -123,7 +133,8 @@ function ScalperWidget(props: WidgetProps) {
   }, [channelInstrument]);
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
-  const [orderType, setOrderType] = useState<OrderTypeValue>("MARKET");
+  // Scalper trades options, which are never sent at market.
+  const [orderType, setOrderType] = useState<OrderTypeValue>("LIMIT");
   // SL/Target points (blank = off). RESTORED now that they place a real
   // protective exit leg through the gated bracket endpoint — an earlier
   // incarnation displayed them without sending anything (silent-risk bug),
@@ -334,6 +345,54 @@ function ScalperWidget(props: WidgetProps) {
     if (ms) setTimeout(() => setStatus({ message: "", type: "idle" }), ms);
   }, []);
 
+  const ruleBroker = useBrokerStore((state) => (
+    mode === "live" ? resolveAccountAuthorityIdentity({ ...state, mode }).brokerType : "practice"
+  ));
+  // Entry and, when set, the protective exit leg, evaluated with the same
+  // rows the ticket and the server use. The user's price is never changed.
+  const presetRuleResults = useCallback((
+    sym: string,
+    exch: string,
+    action: OrderAction,
+    lastPrice: number | null,
+  ): RuleResult[] => {
+    const price = orderType === "LIMIT" ? parseFloat(limitPrice) : NaN;
+    const slPts = slPoints.trim() === "" ? null : Number(slPoints);
+    const tgtPts = targetPoints.trim() === "" ? null : Number(targetPoints);
+    const shared = {
+      symbol: sym,
+      exchange: exch,
+      lastPrice,
+      broker: ruleBroker,
+      brokerName: brokerDisplayName(ruleBroker),
+      product,
+      stopLossTargetPlacement: stopLossTargetPlacement(ruleBroker),
+    };
+    const results = evaluateOrderRules({
+      ...shared,
+      orderType,
+      action,
+      price: Number.isFinite(price) ? price : null,
+      hasStopLossOrTarget: (slPts ?? 0) > 0 || (tgtPts ?? 0) > 0,
+    });
+    const anchor = Number.isFinite(price) && price > 0 ? price : lastPrice;
+    if (slPts != null && slPts > 0 && anchor != null && anchor > 0) {
+      const stop = snapToTick(anchor - (action === "BUY" ? 1 : -1) * slPts);
+      const exitResults = evaluateOrderRules({
+        ...shared,
+        orderType: "SL",
+        action: action === "BUY" ? "SELL" : "BUY",
+        price: stop,
+        triggerPrice: stop,
+      });
+      for (const item of exitResults) {
+        if (!results.some((existing) => existing.rule_id === item.rule_id)) results.push(item);
+      }
+      results.sort((a, b) => ["block", "warn", "info"].indexOf(a.level) - ["block", "warn", "info"].indexOf(b.level));
+    }
+    return results;
+  }, [limitPrice, orderType, product, ruleBroker, slPoints, targetPoints]);
+
   const executeOrder = useCallback(
     async (sym: string | null, exch: string, action: OrderAction) => {
       if (!sym) {
@@ -376,6 +435,13 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       const qty = lots * resolvedLot.size;
+
+      const ruleTick = ticksRef.current[`${exch}:${sym}`];
+      const ruleResults = presetRuleResults(sym, exch, action, ruleTick?.ltp ?? ruleTick?.close ?? null);
+      if (hasBlockingRule(ruleResults)) {
+        showStatus(ruleHeadline(ruleResults.filter((item) => item.level === "block")), "error", 6000);
+        return;
+      }
 
       // Optional protective exit leg (points from entry). Validated before
       // anything is sent — a malformed value must never degrade to a silent
@@ -488,7 +554,7 @@ function ScalperWidget(props: WidgetProps) {
     // that used to sit in this array is not read by the callback and did not
     // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
     // callback kept checking against the mode it was created under.
-    [mode, ordersArmed, orderBlockCopy, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
+    [mode, ordersArmed, orderBlockCopy, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note, presetRuleResults],
   );
 
   const handleOrder = useCallback(
@@ -605,6 +671,14 @@ function ScalperWidget(props: WidgetProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [focused, ceSymbol, peSymbol, optExch, handleOrder]);
 
+  const previewTick = ceSymbol ? ticks[`${optExch}:${ceSymbol}`] : undefined;
+  const previewRuleResults = useMemo(
+    () => (ceSymbol
+      ? presetRuleResults(ceSymbol, optExch, "BUY", previewTick?.ltp ?? previewTick?.close ?? null)
+      : []),
+    [ceSymbol, optExch, presetRuleResults, previewTick?.ltp, previewTick?.close],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -698,6 +772,7 @@ function ScalperWidget(props: WidgetProps) {
         orderBlockCopy={orderBlockCopy}
         oneClickLockedTitle={oneClickLockedTitle}
         isExplore={isExplore}
+        ruleResults={previewRuleResults}
       />
 
       <ScalperChartPanel
