@@ -63,6 +63,7 @@ import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
 import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import {
   checkLotMultiple,
@@ -280,8 +281,9 @@ function bestAskPrice(book: NormalisedDepth): number | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Lock key for one ladder price. Resting orders at other prices are separate
- * intents; a lost reply locks only the price it was sent at.
+ * Submit key for one ladder price. A lost reply still records the price so
+ * the unknown line can sit next to that row, but every level of the contract
+ * stays locked until a later complete read settles it.
  */
 function ladderOrderKey(exchange: string, symbol: string, price: number): string {
   return `${instrumentOrderKey(exchange, symbol)}@${price}`;
@@ -307,7 +309,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid
         className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-loss/15",
           level.bidQty ? "text-profit" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : `SELL ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `SELL ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.bidQty ? `Sell ${qty} at ${fmtPrice(level.price)}: ${level.bidQty} bids` : `Place sell at ${fmtPrice(level.price)}`}>
         {!!level.bidQty && <div className="absolute right-0 inset-y-0 bg-profit/15" style={{ width: barW(level.bidQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.bidQty)}</span>
@@ -346,7 +348,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid
         className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-profit/15",
           level.askQty ? "text-loss" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : `BUY ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `BUY ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.askQty ? `Buy ${qty} at ${fmtPrice(level.price)}: ${level.askQty} asks` : `Place buy at ${fmtPrice(level.price)}`}>
         {!!level.askQty && <div className="absolute left-0 inset-y-0 bg-loss/15" style={{ width: barW(level.askQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.askQty)}</span>
@@ -562,7 +564,16 @@ function OrderLadderWidget(props: Props) {
 
   // One place request per price at a time; a lost reply locks that price.
   const { submit: submitOnce, isLocked, unknown: unknownSubmits } = useOrderSubmitGuard();
-  const ladderStatusUnknown = unknownSubmits.some((record) => record.key.startsWith(`${instrumentOrderKey(exchange, symbol)}@`));
+  const contractKey = instrumentOrderKey(exchange, symbol);
+  const contractPrefix = `${contractKey}@`;
+  const unknownForContract = unknownSubmits.filter((record) => record.key === contractKey || record.key.startsWith(contractPrefix));
+  const ladderStatusUnknown = unknownForContract.length > 0;
+  const lockedPrice = unknownForContract.map((record) => {
+    const at = record.key.lastIndexOf("@");
+    if (at < 0) return null;
+    const price = Number(record.key.slice(at + 1));
+    return Number.isFinite(price) ? price : null;
+  }).find((price): price is number => price != null);
 
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
     const modeRefusal = checkOrderEntryMode(mode);
@@ -729,7 +740,6 @@ function OrderLadderWidget(props: Props) {
         </div>
       )}
 
-      {ladderStatusUnknown && <OrderStatusUnknownLine className="flex-none px-2.5 py-1 border-b border-border-subtle" />}
       {statusMsg && (
         <div role="status" aria-live="polite"
           className="flex-none px-2.5 py-1 text-xxs text-center text-text-secondary bg-surface-elevated border-b border-border-subtle">
@@ -739,15 +749,31 @@ function OrderLadderWidget(props: Props) {
 
       <div className="flex-1 min-h-0 overflow-y-auto" aria-label="Price ladder">
         {hasUsablePrice ? (
-          levels.map((level, idx) => (
-            <LevelRow key={level.price} level={level} isCenter={idx === LEVELS_ABOVE}
-              order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
-              disabled={!hasUsablePrice}
-              locked={isLocked(ladderOrderKey(exchange, symbol, level.price))}
-              onBid={(p) => { void sendOrder("SELL", p); }}
-              onAsk={(p) => { void sendOrder("BUY", p); }}
-              onCancel={cancelPending} />
-          ))
+          levels.map((level, idx) => {
+            const isCenter = idx === LEVELS_ABOVE;
+            const contractLocked = ladderStatusUnknown
+              || isLocked(contractKey)
+              || levels.some((candidate) => isLocked(ladderOrderKey(exchange, symbol, candidate.price)));
+            const showUnknownSlot = lockedPrice != null
+              ? level.price === lockedPrice
+              : isCenter;
+            return (
+              <div key={level.price}>
+                <LevelRow level={level} isCenter={isCenter}
+                  order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
+                  disabled={!hasUsablePrice}
+                  locked={contractLocked}
+                  onBid={(p) => { void sendOrder("SELL", p); }}
+                  onAsk={(p) => { void sendOrder("BUY", p); }}
+                  onCancel={cancelPending} />
+                {showUnknownSlot ? (
+                  <div className="h-7 flex items-center px-2.5" data-testid="ladder-status-unknown">
+                    {ladderStatusUnknown ? <OrderStatusUnknownLine /> : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
         ) : (
           <div className="h-full flex flex-col items-center justify-center gap-1.5 px-4 text-center text-text-muted">
             <ArrowUpDown size={26} className="opacity-20" aria-hidden="true" />

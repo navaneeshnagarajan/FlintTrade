@@ -348,11 +348,18 @@ describe("OrderLadderWidget live cancel", () => {
 
     expect(await screen.findByRole("button", { name: "Open Orders" })).toBeInTheDocument();
     expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+    expect(screen.getByTestId("ladder-status-unknown")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
-    for (const side of ["BUY", "SELL"]) {
-      const level = screen.getAllByRole("button").find((b) => b.getAttribute("title")?.startsWith(side));
+    const placeButtons = screen.getAllByRole("button").filter((button) => {
+      const name = button.getAttribute("aria-label") ?? "";
+      return /^(Buy |Sell |Place buy |Place sell )/i.test(name);
+    });
+    expect(placeButtons.length).toBeGreaterThan(2);
+    for (const level of placeButtons) {
       expect(level).toBeDisabled();
-      fireEvent.click(level as HTMLElement);
+      expect(level).toHaveAttribute("title", "Order status unknown. Check Orders before trying again.");
+      expect(level.getAttribute("title") ?? "").not.toMatch(/^BUY |^SELL /);
+      fireEvent.click(level);
     }
     await act(async () => {});
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
