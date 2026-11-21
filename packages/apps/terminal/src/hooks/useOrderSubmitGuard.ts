@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import { useOrders } from "@/hooks/useOrders";
 import {
@@ -13,7 +12,6 @@ import {
   type UnknownOrderSubmit,
 } from "@/lib/orderSubmitGuard";
 import { pendingOrderScope } from "@/lib/pendingOrderStore";
-import { queryKeys } from "@/services/queryKeys";
 
 /** Lost submits for one account scope, re-read whenever the guard changes. */
 export function useUnknownOrderSubmits(scope: string): UnknownOrderSubmit[] {
@@ -31,8 +29,6 @@ export function useOrderSubmitGuard() {
   const context = useAccountReadContext();
   const scope = pendingOrderScope(context.identity);
   const unknown = useUnknownOrderSubmits(scope);
-  const queryClient = useQueryClient();
-  const scopeKey = context.identity.scopeKey;
   const orders = useOrders({ enabled: unknown.length > 0, context });
   const listComplete = orders.data !== undefined && !orders.isError && !orders.isFetching;
 
@@ -50,14 +46,18 @@ export function useOrderSubmitGuard() {
     [unknown],
   );
   const submit = useCallback(
-    <T,>(intent: OrderSubmitIntent, send: () => Promise<T>) => submitOrderOnce(
+    <T,>(intent: OrderSubmitIntent, send: () => Promise<T>, isLost?: (error: unknown) => boolean) => submitOrderOnce(
       scope,
       intent,
       send,
-      queryClient.getQueryState(queryKeys.orders.list(scopeKey))?.dataUpdatedAt ?? 0,
+      // The cached order list is readable even while polling is off.
+      orders.dataUpdatedAt ?? 0,
+      isLost,
     ),
-    [scope, queryClient, scopeKey],
+    [scope, orders.dataUpdatedAt],
   );
 
   return { scope, unknown, isLocked, isUnknown, submit };
 }
+
+export type OrderSubmitGuard = ReturnType<typeof useOrderSubmitGuard>;

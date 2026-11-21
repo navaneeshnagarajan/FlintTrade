@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { cancelAllOrders, exitAllPositions } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
+import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
+import { CANCELLATION_REQUESTED } from "@/lib/operatorIncident";
 
 interface GlobalKeyHandlers {
   tradingHotkeysEnabled?: boolean;
@@ -27,12 +29,37 @@ interface GlobalKeyHandlers {
  */
 const handledTradingKeyEvents = new WeakSet<KeyboardEvent>();
 
+/** One exit-all request at a time: a second X press while it is in flight sends nothing. */
+let exitAllInFlight = false;
+
 function reportTradingActionFailure(title: string, err: unknown): void {
   const body = err instanceof Error ? err.message : "Unknown error — check the broker connection.";
   console.error(`[GlobalKeys] ${title}:`, err);
   // Surface the failure to the operator — a silent failed emergency exit is
   // worse than no hotkey at all (the trader believes they are flat).
   emitNotification({ category: "order", title, body });
+}
+
+/** A lost exit-all reply may follow a broker accept: unknown, never "failed". */
+function reportExitAllError(err: unknown): void {
+  const outcome = presentSubmitError(err);
+  if (outcome.kind !== "unknown") {
+    reportTradingActionFailure("Exit all positions failed", err);
+    return;
+  }
+  console.error("[GlobalKeys] Exit all positions status unknown:", err);
+  emitNotification({ category: "order", title: "Exit all positions: status unknown", body: outcome.message });
+}
+
+/** A lost cancel-all reply is a cancellation request, never a cancel. */
+function reportCancelAllError(err: unknown): void {
+  const outcome = presentCancelResult(undefined, err, CANCELLATION_REQUESTED);
+  if (outcome.kind !== "unknown") {
+    reportTradingActionFailure("Cancel all orders failed", err);
+    return;
+  }
+  console.error("[GlobalKeys] Cancel all orders reply lost:", err);
+  emitNotification({ category: "order", title: "Cancel all orders requested", body: outcome.message });
 }
 
 /**
@@ -112,17 +139,22 @@ export default function useGlobalKeys({
       if ((e.key === "x" || e.key === "X") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (handledTradingKeyEvents.has(e)) return;
         handledTradingKeyEvents.add(e);
+        if (exitAllInFlight) return;
         if (window.confirm("Close ALL open positions? This cannot be undone.")) {
           try {
+            exitAllInFlight = true;
             void exitAllPositions().then(() =>
               emitNotification({
                 category: "order",
                 title: "Exit all positions requested",
                 body: "Close request sent for all open positions.",
               }),
-            ).catch((err) => reportTradingActionFailure("Exit all positions failed", err));
+            ).catch(reportExitAllError).finally(() => {
+              exitAllInFlight = false;
+            });
           } catch (err) {
-            reportTradingActionFailure("Exit all positions failed", err);
+            exitAllInFlight = false;
+            reportExitAllError(err);
           }
         }
         return;
@@ -141,9 +173,9 @@ export default function useGlobalKeys({
                   title: "Cancel all orders requested",
                   body: "Cancel request sent for all open orders.",
                 }),
-              ).catch((err) => reportTradingActionFailure("Cancel all orders failed", err));
+              ).catch(reportCancelAllError);
             } catch (err) {
-              reportTradingActionFailure("Cancel all orders failed", err);
+              reportCancelAllError(err);
             }
           }
           return;

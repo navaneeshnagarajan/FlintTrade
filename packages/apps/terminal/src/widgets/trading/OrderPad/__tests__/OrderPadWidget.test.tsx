@@ -60,6 +60,7 @@ vi.mock("@/hooks/usePositions", () => ({
 }));
 
 const mockOpenOrders = vi.hoisted(() => ({
+  updatedAt: 0,
   rows: [] as Array<{
     symbol: string;
     exchange: string;
@@ -70,7 +71,7 @@ const mockOpenOrders = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useOrders", () => ({
-  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false }),
+  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false, isError: false, dataUpdatedAt: mockOpenOrders.updatedAt }),
 }));
 
 // Setup imports the real account/incident scope readers. Keep their mode and
@@ -107,6 +108,7 @@ import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/a
 import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 
 const mockPlaceOrder = vi.mocked(placeOrder);
 const mockGetSymbol = vi.mocked(getSymbol);
@@ -145,6 +147,8 @@ describe("OrderPadWidget", () => {
     selectedMode.current = "practice";
     mockOpenPositions.rows = [];
     mockOpenOrders.rows = [];
+    mockOpenOrders.updatedAt = 0;
+    clearPendingOrderOutcomes();
     useOperatorSignalStore.setState({ decisionStatus: "ready", layaPracticeStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -746,17 +750,13 @@ describe("OrderPadWidget", () => {
       { mode: "live" },
       { exit: true },
     );
-    expect(await screen.findByRole("status")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(await screen.findByTestId("order-pad-outcome")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
-    // A new explicit operator action retains the original reducing path; a
-    // connection error no longer supplies a blind duplicate-write shortcut.
+    // The contract stays locked until a newer order read settles the lost exit.
+    expect(screen.getByTestId("orderpad-close")).toBeDisabled();
     fireEvent.click(screen.getByTestId("orderpad-close"));
-    expect(mockPlaceOrder).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: "SELL", quantity: 4 }),
-      { mode: "live" },
-      { exit: true },
-    );
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
   it("tells Practice a dropped submit is unknown and does not offer Retry", async () => {
@@ -776,7 +776,7 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot 1 · Max 1,800 per order");
     fireEvent.click(screen.getByTestId("orderpad-close"));
 
-    const outcome = await screen.findByRole("status");
+    const outcome = await screen.findByTestId("order-pad-outcome");
     expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(outcome.className).not.toMatch(/text-loss/);
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -805,7 +805,7 @@ describe("OrderPadWidget", () => {
     await screen.findByText("Lot 1 · Max 1,800 per order");
     fireEvent.click(screen.getByTestId("orderpad-close"));
 
-    const outcome = await screen.findByRole("status");
+    const outcome = await screen.findByTestId("order-pad-outcome");
     expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -837,6 +837,81 @@ describe("OrderPadWidget", () => {
     expect(outcome).toHaveTextContent("Practice order rejected");
     expect(outcome).not.toHaveTextContent("Order status unknown. Check Orders before trying again.");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  // ── Lost submits: one request per intent, locked until a read settles it ──
+
+  const LOST_SUBMITS: [string, () => Error][] = [
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["a hang that ends in a timeout", () => new OrderApiError("Request timed out", 408, null)],
+    ["an HTTP 500 after the broker accepted it", () => new OrderApiError("Internal Server Error", 500, null)],
+  ];
+
+  it.each(LOST_SUBMITS)("keeps Buy locked beside the unknown line after a Practice submit lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValueOnce(lost());
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    await reviewAndConfirmPractice();
+
+    const line = await screen.findByTestId("order-pad-status-unknown");
+    expect(line).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    const buy = screen.getByRole("button", { name: /practice buy/i });
+    expect(buy).toBeDisabled();
+    fireEvent.click(buy);
+    fireEvent.submit(buy.closest("form")!);
+    await act(async () => {});
+    expect(screen.queryByRole("dialog", { name: "Review Practice order" })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one Live place request for a fast double submit", async () => {
+    selectedMode.current = "live";
+    let release!: (value: { orderId: string }) => void;
+    mockPlaceOrder.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    const place = screen.getByRole("button", { name: "Place BUY Order" });
+    const form = place.closest("form")!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    fireEvent.submit(form);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    await act(async () => release({ orderId: "ONE" }));
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlocks only after a newer order read settles a lost submit", async () => {
+    selectedMode.current = "live";
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Internal Server Error", 500, null));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    fireEvent.click(screen.getByRole("button", { name: "Place BUY Order" }));
+    await screen.findByTestId("order-pad-status-unknown");
+    expect(screen.getByRole("button", { name: "Place BUY Order" })).toBeDisabled();
+
+    // A newer complete order read arrives; any re-render picks it up.
+    mockOpenOrders.updatedAt = Date.now() + 1_000;
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    await waitFor(() => expect(screen.queryByTestId("order-pad-status-unknown")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Place BUY Order" })).not.toBeDisabled();
+  });
+
+  it("does not lock after a definite refusal", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Practice order rejected",
+      400,
+      { status: "error", message: "Practice order rejected", order_outcome: "rejected", reason: "broker_rejected" },
+    ));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    await reviewAndConfirmPractice();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Practice order rejected");
+    expect(screen.queryByTestId("order-pad-status-unknown")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).not.toBeDisabled();
   });
 
   it("keeps GTT visible and disabled", async () => {

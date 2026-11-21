@@ -42,6 +42,16 @@ export interface OrderSubmitIntent {
   quantity?: number;
 }
 
+/** Lock key for one instrument. Every ticket for the same contract shares it. */
+export function instrumentOrderKey(exchange: string, symbol: string): string {
+  return `${exchange}:${symbol}`;
+}
+
+/** A dropped, timed-out, or server-failed reply: the broker may hold the order. */
+export function submitReplyWasLost(error: unknown): boolean {
+  return presentSubmitError(error).kind === "unknown";
+}
+
 export type SubmitOnceResult<T> = { sent: false } | { sent: true; value: T };
 
 const store = createPendingOrderStore(UNKNOWN_SUBMITS_PREFIX, unknownSubmitSchema);
@@ -96,13 +106,14 @@ export function orderSubmitLocked(scope: string, key: string): boolean {
  * Send at most one place request for this instrument at a time. Returns
  * `{ sent: false }` without calling `send` while a request is in flight or
  * the outcome of an earlier one is unknown. Errors are rethrown for the
- * caller's own message.
+ * caller's own message. `isLost` must match the caller's own unknown copy.
  */
 export async function submitOrderOnce<T>(
   scope: string,
   intent: OrderSubmitIntent,
   send: () => Promise<T>,
   listUpdatedAt = 0,
+  isLost: (error: unknown) => boolean = submitReplyWasLost,
 ): Promise<SubmitOnceResult<T>> {
   if (orderSubmitLocked(scope, intent.key)) return { sent: false };
   const flightKey = `${scope}|${intent.key}`;
@@ -111,7 +122,7 @@ export async function submitOrderOnce<T>(
   try {
     return { sent: true, value: await send() };
   } catch (error) {
-    if (presentSubmitError(error).kind === "unknown") {
+    if (isLost(error)) {
       writeLocks(scope, [
         ...readLocks(scope).filter((record) => record.key !== intent.key),
         { ...intent, receivedAt: Date.now(), listUpdatedAt },
