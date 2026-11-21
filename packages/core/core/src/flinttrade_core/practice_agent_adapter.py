@@ -100,6 +100,11 @@ class PracticeDecision:
     order_response: PracticeOrderResponse | None
     response: dict[str, Any]
 
+    @property
+    def outcome_uncertain(self) -> bool:
+        """The order was sent and its result is unknown. Never send it again."""
+        return self.response.get("order_outcome") == "unknown"
+
 
 # A configured quote read blocks until this age bound. The practice worker
 # publishes its cycle only after that read returns.

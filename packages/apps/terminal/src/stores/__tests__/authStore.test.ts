@@ -259,6 +259,16 @@ describe("authStore", () => {
       expect(Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:forever-pending-cancels:"))).toEqual([]);
     });
 
+    it("clears pending order cancels and lost-submit locks on sign-out", () => {
+      useAuthStore.getState().setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      sessionStorage.setItem("flinttrade:order-pending-cancels:user:live%3Adhan%3AA", "[]");
+      sessionStorage.setItem("flinttrade:order-unknown-submits:user:live%3Adhan%3AA", "[]");
+      useAuthStore.getState().setLoggedOut();
+      expect(Object.keys(sessionStorage).filter((key) => (
+        key.startsWith("flinttrade:order-pending-cancels:") || key.startsWith("flinttrade:order-unknown-submits:")
+      ))).toEqual([]);
+    });
+
     it("does not reset mode on logout (mode is managed separately)", () => {
       // Set mode to live, then log out — mode should remain unchanged
       useModeStore.setState({ mode: "live" });

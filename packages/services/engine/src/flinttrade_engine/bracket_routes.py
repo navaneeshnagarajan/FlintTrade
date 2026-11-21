@@ -33,6 +33,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, jsonify
 
 from flinttrade_core.order_input import json_object_body, normalise_order_type_fields
+from flinttrade_core.order_outcome import cancel_acknowledgement
 from flinttrade_core.rate_limiter import rate_limit
 
 from .bracket_order import BracketOrderError, BracketPrincipal
@@ -400,7 +401,9 @@ def cancel_bracket(bracket_id: str) -> Response:
         bracket_id: UUID of the bracket to cancel.
 
     Returns:
-        200 on success (with ``data.warnings``); 401/403 from the mode guard;
+        200 once every leg cancel is requested (``order_outcome`` is
+        ``cancel_requested`` until the order book confirms it; ``data.warnings``
+        carries the caveats); 401/403 from the mode guard;
         404 if the bracket is unknown; 409 if it is already
         completed/cancelled; 503 when the service or the gated cancel path is
         unavailable or every leg cancel failed.
@@ -450,13 +453,18 @@ def cancel_bracket(bracket_id: str) -> Response:
             409,
         )
 
+    # A swept leg cancel is the broker's acknowledgement. It is not a confirmed
+    # cancel, so the response says a cancellation was requested.
+    acknowledgement = cancel_acknowledgement({})
     warnings = list(bracket.cancel_warnings)
-    message = f"Bracket '{bracket_id}' cancelled"
+    message = str(acknowledgement["message"])
     if warnings:
         message += " — " + " ".join(warnings)
     return jsonify(
         {
             "status": "success",
+            **acknowledgement,
+            "retry_safe": False,
             "message": message,
             "data": {"warnings": warnings},
         }

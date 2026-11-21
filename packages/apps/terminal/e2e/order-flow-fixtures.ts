@@ -218,7 +218,7 @@ export function deferredResponse() {
   return { promise, release };
 }
 
-export async function mountWidget(page: Page, component: "foreverorders" | "positions" | "scalper", narrowSibling = false): Promise<void> {
+export async function mountWidget(page: Page, component: "foreverorders" | "orders" | "positions" | "scalper", narrowSibling = false): Promise<void> {
   await page.clock.install({ time: FIXED_TIME });
   await page.clock.pauseAt(FIXED_TIME);
   await page.addInitScript(({ widget, sibling }) => {
@@ -229,7 +229,7 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: sibling ? 60 : 100, children: [{
             type: "tab", id: "synthetic-order-flow-widget", component: widget,
-            name: widget === "foreverorders" ? "Forever (GTT) Orders" : widget === "scalper" ? "Scalper" : "Positions",
+            name: widget === "foreverorders" ? "Forever (GTT) Orders" : widget === "scalper" ? "Scalper" : widget === "orders" ? "Orders" : "Positions",
           }],
         }, ...(sibling ? [{
           type: "tabset", weight: 40, children: [{ type: "tab", id: "synthetic-narrow-sibling", component: widget, name: "Narrow Positions" }],
@@ -278,14 +278,16 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
         ? "/src/widgets/orders/ForeverOrdersWidget.tsx"
         : widget === "scalper"
           ? "/src/widgets/trading/Scalper/ScalperWidget.tsx"
-          : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
+          : widget === "orders"
+            ? "/src/widgets/trading/Orders/OrdersWidget.tsx"
+            : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
     ]);
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: component });
   await expect(page).toHaveURL(/\/terminal$/);
   const initialControl = page.getByRole("button", {
-    name: component === "foreverorders" ? "Refresh forever orders" : "Table", exact: true,
+    name: component === "foreverorders" ? "Refresh forever orders" : component === "orders" ? "Refresh orders" : "Table", exact: true,
   }).first();
   if (component === "scalper") {
     await tickUntil(page, page.getByRole("button", { name: /Buy CE/ }).first());
@@ -330,6 +332,20 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     await page.mouse.up();
     await page.clock.runFor(50);
   }
+}
+
+/** Names of every element Tab reaches, so a Retry cannot hide off-screen. */
+export async function tabStopNames(page: Page, stops = 60): Promise<string[]> {
+  const names: string[] = [];
+  for (let i = 0; i < stops; i += 1) {
+    await page.keyboard.press("Tab");
+    names.push(await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return "";
+      return [el.getAttribute("aria-label"), el.getAttribute("title"), el.textContent].filter(Boolean).join(" ").trim();
+    }));
+  }
+  return names;
 }
 
 export async function tickUntil(page: Page, locator: Locator): Promise<void> {

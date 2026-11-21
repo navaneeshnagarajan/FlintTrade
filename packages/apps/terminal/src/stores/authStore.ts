@@ -12,7 +12,7 @@ import {
   clearPersistedAuthSession,
   writePersistedAuthSession,
 } from "@/lib/homeEntry";
-import { clearForeverPendingCancels } from "@/widgets/orders/foreverPendingCancel";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import { purgeAuthenticatedQueryCache } from "@/lib/authenticatedQueryCache";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -175,7 +175,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     if (installed) {
       const nextPrincipal = normalisePrincipal(username);
       if (previousPrincipal && nextPrincipal && previousPrincipal !== nextPrincipal) {
-        clearForeverPendingCancels();
+        clearPendingOrderOutcomes();
       }
       writePersistedAuthSession({ token, username, expiresAt });
       get().startExpiryTimer();
@@ -220,7 +220,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (existing !== null) clearTimeout(existing);
       clearDemoSession();
       clearPersistedAuthSession();
-      clearForeverPendingCancels();
+      clearPendingOrderOutcomes();
       set((state) => ({
         logoutResult: state.token || state.reauthToken ? { state: "local-only" as const } : state.logoutResult,
         status: "logged-out", token: null, reauthToken: null, username: null,
@@ -246,7 +246,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     setSetupRequired: () => {
       clearPersistedAuthSession();
-      clearForeverPendingCancels();
+      clearPendingOrderOutcomes();
       set((state) => ({
         status: "setup-required",
         token: null,

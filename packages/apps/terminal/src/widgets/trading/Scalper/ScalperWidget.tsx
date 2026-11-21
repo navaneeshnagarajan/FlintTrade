@@ -25,7 +25,8 @@ import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hook
 import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
-import { EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { CANCELLATION_REQUESTED, EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
@@ -151,6 +152,8 @@ function ScalperWidget(props: WidgetProps) {
   const [unprotectedBracket, setUnprotectedBracket] = useState<{
     data: BracketOrderData;
     message: string;
+    /** Set once a cancel was acknowledged or its reply was lost. Never resent. */
+    cancelRequested?: { warnings: string[] };
   } | null>(null);
   const [cancellingBracket, setCancellingBracket] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
@@ -450,6 +453,12 @@ function ScalperWidget(props: WidgetProps) {
             announceOrder(action, sym, qty);
             return;
           }
+          if (presentSubmitError(err).kind === "unknown") {
+            // The broker may hold the entry. The contract stays locked and the
+            // unknown line beside its buttons carries the message.
+            setStatus({ message: "", type: "idle" });
+            throw err;
+          }
           // Practice/Explore JWTs are refused server-side — tell the user
           // why, alongside the backend's own message.
           if (code === "practice_unsupported" || code === "mode_blocked") {
@@ -480,7 +489,13 @@ function ScalperWidget(props: WidgetProps) {
         announceOrder(action, sym, qty);
       } catch (err) {
         const outcome = presentSubmitError(err);
-        showStatus(outcome.message, outcome.kind === "unknown" ? "unknown" : "error");
+        if (outcome.kind === "unknown") {
+          // The broker may hold the order. The contract stays locked and the
+          // unknown line beside its buttons carries the message.
+          setStatus({ message: "", type: "idle" });
+          throw err;
+        }
+        showStatus(outcome.message, "error");
       }
     },
     // `mode` is load-bearing: `checkOrderEntryMode(mode)` above is this widget's
@@ -491,27 +506,48 @@ function ScalperWidget(props: WidgetProps) {
     [mode, ordersArmed, orderBlockCopy, lots, resolvedLot, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, note],
   );
 
+  // One place request per contract at a time; a lost reply locks the contract
+  // until a newer order read settles it. Clicks and hotkeys share this path.
+  const submitGuard = useOrderSubmitGuard();
+  const { submit: submitOnce, isLocked: contractLocked, isUnknown: contractUnknown } = submitGuard;
+  const sendGuarded = useCallback(
+    (sym: string | null, exch: string, action: OrderAction) => {
+      if (!sym) {
+        void executeOrder(sym, exch, action);
+        return;
+      }
+      void submitOnce(
+        { key: `${exch}:${sym}`, symbol: sym, exchange: exch, action },
+        () => executeOrder(sym, exch, action),
+      ).catch(() => {
+        // The unknown line is on screen and the contract is locked.
+      });
+    },
+    [executeOrder, submitOnce],
+  );
+
   const handleOrder = useCallback(
     (sym: string | null, exch: string, action: OrderAction) => {
       if (!ordersArmed) {
         showStatus(orderBlockCopy ?? "", "error");
         return;
       }
+      if (sym && contractLocked(`${exch}:${sym}`)) return;
       if (oneClick) {
-        void executeOrder(sym, exch, action);
+        sendGuarded(sym, exch, action);
       } else {
         if (sym) setPendingOrder({ sym, exch, action });
       }
     },
-    [ordersArmed, orderBlockCopy, oneClick, executeOrder, showStatus],
+    [ordersArmed, orderBlockCopy, oneClick, sendGuarded, contractLocked, showStatus],
   );
 
   const confirmOrder = useCallback(() => {
     if (pendingOrder) {
-      void executeOrder(pendingOrder.sym, pendingOrder.exch, pendingOrder.action);
+      sendGuarded(pendingOrder.sym, pendingOrder.exch, pendingOrder.action);
       setPendingOrder(null);
     }
-  }, [pendingOrder, executeOrder]);
+  }, [pendingOrder, sendGuarded]);
 
   // Cancel the entry leg of an unprotected (partial) bracket via the gated
   // DELETE route. On success the banner clears; any honest caveat the backend
@@ -521,19 +557,35 @@ function ScalperWidget(props: WidgetProps) {
     if (!unprotectedBracket || cancellingBracket) return;
     setCancellingBracket(true);
     try {
-      const { warnings } = await cancelBracket(unprotectedBracket.data.bracket_id);
-      setUnprotectedBracket(null);
-      showStatus(
-        warnings.length ? warnings.join(" ") : "Bracket cancelled",
-        warnings.length ? "error" : "success",
-        warnings.length ? 12000 : 4000,
-      );
+      const result = await cancelBracket(unprotectedBracket.data.bracket_id);
+      const outcome = presentCancelResult(result);
+      if (outcome.kind === "cancelled") {
+        setUnprotectedBracket(null);
+        showStatus(
+          [outcome.message, ...result.warnings].join(" "),
+          result.warnings.length ? "error" : "success",
+          result.warnings.length ? 12000 : 4000,
+        );
+      } else if (outcome.kind === "rejected") {
+        showStatus(outcome.message, "error", 10000);
+      } else {
+        // An acknowledgement is a request. The banner stays until the operator
+        // has checked Orders, and the cancel is not offered again.
+        setUnprotectedBracket((current) => current && {
+          ...current,
+          cancelRequested: { warnings: result.warnings },
+        });
+        setStatus({ message: "", type: "idle" });
+      }
     } catch (err) {
-      showStatus(
-        err instanceof Error ? err.message : "Bracket cancel failed — square off from Positions",
-        "error",
-        10000,
-      );
+      const outcome = presentCancelResult(undefined, err, CANCELLATION_REQUESTED);
+      if (outcome.kind === "unknown") {
+        // The DELETE may have reached the broker. Same state as an acknowledgement.
+        setUnprotectedBracket((current) => current && { ...current, cancelRequested: { warnings: [] } });
+        setStatus({ message: "", type: "idle" });
+      } else {
+        showStatus(outcome.message, "error", 10000);
+      }
     } finally {
       setCancellingBracket(false);
     }
@@ -632,17 +684,24 @@ function ScalperWidget(props: WidgetProps) {
               Cancel the bracket or square off from Positions. Bracket{" "}
               <span className="font-mono">{unprotectedBracket.data.bracket_id}</span>.
             </p>
+            {unprotectedBracket.cancelRequested?.warnings.map((warning) => (
+              <p key={warning} className="mt-0.5 text-text-secondary">{warning}</p>
+            ))}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-6 px-2 text-[11px]"
-              disabled={cancellingBracket}
-              onClick={() => void cancelUnprotectedBracket()}
-            >
-              {cancellingBracket ? <Loader2 size={11} className="animate-spin" /> : "Cancel bracket"}
-            </Button>
+            {unprotectedBracket.cancelRequested ? (
+              <span role="status" className="font-semibold text-warning">{CANCELLATION_REQUESTED}</span>
+            ) : (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-6 px-2 text-[11px]"
+                disabled={cancellingBracket}
+                onClick={() => void cancelUnprotectedBracket()}
+              >
+                {cancellingBracket ? <Loader2 size={11} className="animate-spin" /> : "Cancel bracket"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -717,6 +776,10 @@ function ScalperWidget(props: WidgetProps) {
         onCancelAll={() => setCancelAllOpen(true)}
         ordersArmed={ordersArmed}
         orderBlockCopy={orderBlockCopy}
+        ceLocked={ceSymbol != null && contractLocked(`${optExch}:${ceSymbol}`)}
+        peLocked={peSymbol != null && contractLocked(`${optExch}:${peSymbol}`)}
+        ceStatusUnknown={ceSymbol != null && contractUnknown(`${optExch}:${ceSymbol}`)}
+        peStatusUnknown={peSymbol != null && contractUnknown(`${optExch}:${peSymbol}`)}
       />
 
       <OrderConfirmModal

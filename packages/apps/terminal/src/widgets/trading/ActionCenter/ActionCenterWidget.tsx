@@ -37,6 +37,8 @@ import {
   type PendingOrder,
 } from "@/services/ftApi";
 import type { WidgetProps } from "@/types/widgets";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { presentSubmitError } from "@/lib/orderOutcome";
 
 // ---------------------------------------------------------------------------
 // Action badge colour for BUY / SELL
@@ -135,17 +137,21 @@ function OrderRow({ order, onApprove, onReject, disabled }: OrderRowProps) {
 // Widget
 // ---------------------------------------------------------------------------
 
-/** A failed approve/reject action, surfaced with a one-click retry. */
+/**
+ * A failed approve/reject action. `retry` is absent when an approval may have
+ * reached the broker: the operator checks Orders instead of sending it again.
+ */
 interface ActionFailure {
   message: string;
-  retry: () => void;
+  retry?: () => void;
 }
 
 function ActionCenterWidget(_props: WidgetProps) {
   const queryClient = useQueryClient();
   // A failed approval/rejection must never snap back silently — the operator
   // believes the order was actioned when it is still pending. Surface the
-  // server message with a retry affordance instead.
+  // server message with a retry affordance instead. An approval whose outcome
+  // is unknown may already be at the broker, so it gets no retry.
   const [actionFailure, setActionFailure] = useState<ActionFailure | null>(null);
 
   const { data: orders, isLoading, isError } = useQuery({
@@ -167,10 +173,14 @@ function ActionCenterWidget(_props: WidgetProps) {
     mutationFn: (id: string) => approveOrder(id),
     onMutate: () => setActionFailure(null),
     onError: (err, id) =>
-      setActionFailure({
-        message: failureMessage("Approval failed — the order is still pending", err),
-        retry: () => approveMutation.mutate(id),
-      }),
+      setActionFailure(
+        presentSubmitError(err).kind === "unknown"
+          ? { message: ORDER_STATUS_UNKNOWN }
+          : {
+              message: failureMessage("Approval failed — the order is still pending", err),
+              retry: () => approveMutation.mutate(id),
+            },
+      ),
     onSettled: invalidate,
   });
 
@@ -208,7 +218,7 @@ function ActionCenterWidget(_props: WidgetProps) {
 
       </div>
 
-      {/* Mutation failure banner — server message + retry affordance */}
+      {/* Mutation failure banner. Retry only when no order can have been sent. */}
       {actionFailure && (
         <div
           role="alert"
@@ -218,16 +228,18 @@ function ActionCenterWidget(_props: WidgetProps) {
           <span className="flex-1 text-xs text-loss leading-tight" title={actionFailure.message}>
             {actionFailure.message}
           </span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={anyPending}
-            onClick={() => actionFailure.retry()}
-            className="h-5 px-2 text-xxs border-loss/30 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
-            aria-label="Retry failed action"
-          >
-            Retry
-          </Button>
+          {actionFailure.retry && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={anyPending}
+              onClick={actionFailure.retry}
+              className="h-5 px-2 text-xxs border-loss/30 text-loss hover:bg-loss/10 hover:text-loss shrink-0"
+              aria-label="Retry failed action"
+            >
+              Retry
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"

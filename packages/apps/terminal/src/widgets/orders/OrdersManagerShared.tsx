@@ -35,6 +35,8 @@ import {
 import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { pickNativeBrokerOrderTargetFromState } from "@/services/brokerTargets";
+import { presentSubmitError } from "@/lib/orderOutcome";
+import { CANCELLATION_REQUESTED } from "@/lib/operatorIncident";
 import {
   isUnsupportedForBroker,
   type BrokerOrderRow,
@@ -134,17 +136,32 @@ export function LiveModeNotice({ feature }: { feature: string }) {
 // Error surface — honest, with the 501 broker-capability mapping
 // ---------------------------------------------------------------------------
 
-export function brokerOrdersErrorMessage(error: unknown): string {
+/** A place or modify, or a cancel, whose reply may matter more than its transport. */
+export type BrokerOrderWrite = "submit" | "cancel";
+
+/**
+ * Operator copy for a broker-orders error. A write whose response was lost
+ * may have reached the broker: a place or modify uses the shared
+ * unknown-status sentence, and a cancel is a cancellation request. Neither
+ * offers another attempt.
+ */
+export function brokerOrdersErrorMessage(error: unknown, options: { write?: BrokerOrderWrite } = {}): string {
   if (isUnsupportedForBroker(error)) return "Not available for this broker.";
+  if (options.write) {
+    const outcome = presentSubmitError(error);
+    if (outcome.kind === "unknown") {
+      return options.write === "cancel" ? CANCELLATION_REQUESTED : outcome.message;
+    }
+  }
   if (error instanceof Error && error.message) return error.message;
   return "Request failed.";
 }
 
-export function BrokerOrdersErrorNotice({ error }: { error: unknown }) {
+export function BrokerOrdersErrorNotice({ error, write }: { error: unknown; write?: BrokerOrderWrite }) {
   if (error === null || error === undefined) return null;
   return (
     <p role="alert" className="text-xs text-loss bg-loss/10 border border-loss/20 rounded px-2.5 py-1.5">
-      {brokerOrdersErrorMessage(error)}
+      {brokerOrdersErrorMessage(error, { write })}
     </p>
   );
 }

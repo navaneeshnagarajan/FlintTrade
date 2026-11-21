@@ -209,6 +209,30 @@ describe("post — HTTP error handling", () => {
     expect(error).toMatchObject({ status: 503, data: pending });
   });
 
+  it("keeps the full error body so an order outcome stays readable", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse(
+        {
+          status: "error",
+          message: "Order status unknown. Check Orders before trying again.",
+          order_outcome: "unknown",
+          retry_safe: false,
+        },
+        503,
+      ),
+    );
+
+    const error = await postWithMode("action-center/approve/a-1", {}, "live").catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(FtApiError);
+    expect(error).toMatchObject({
+      status: 503,
+      body: { order_outcome: "unknown", retry_safe: false },
+    });
+  });
+
   it("sends Content-Type application/json", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeJsonResponse({ data: { ok: true } }),
