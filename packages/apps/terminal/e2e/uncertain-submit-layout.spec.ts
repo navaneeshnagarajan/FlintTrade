@@ -118,6 +118,26 @@ async function expectOnScreenAndUncovered(page: Page, locator: Locator, label: s
   return box;
 }
 
+/** The line fits its reserved slot: Open Orders stays on one line and nothing is clipped. */
+async function expectLineFits(slot: Locator, label: string): Promise<void> {
+  const fit = await slot.evaluate((node) => {
+    const button = Array.from(node.querySelectorAll("button")).find((el) => el.textContent?.trim() === "Open Orders");
+    const lineHeight = button ? parseFloat(getComputedStyle(button).lineHeight) || 0 : 0;
+    const rect = button?.getBoundingClientRect();
+    const slotRect = node.getBoundingClientRect();
+    return {
+      buttonHeight: rect?.height ?? -1,
+      lineHeight,
+      clipped: node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1,
+      inside: rect ? rect.top >= slotRect.top - 0.5 && rect.bottom <= slotRect.bottom + 0.5 && rect.right <= slotRect.right + 0.5 : false,
+    };
+  });
+  expect(fit.buttonHeight, `${label} Open Orders exists`).toBeGreaterThan(0);
+  expect(fit.buttonHeight, `${label} Open Orders wraps`).toBeLessThanOrEqual(Math.max(fit.lineHeight, 16) + 2);
+  expect(fit.clipped, `${label} slot clips the line`).toBe(false);
+  expect(fit.inside, `${label} Open Orders sits inside the slot`).toBe(true);
+}
+
 async function expectLockHeld(page: Page, buy: Locator, line: Locator, ms = 3_000): Promise<void> {
   const started = Date.now();
   await expect(line).toBeVisible();
@@ -541,6 +561,7 @@ for (const viewport of VIEWPORTS) {
         return line.isVisible();
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
       expectUnmoved(before, await collectBoxes(controls), `scalper ${viewport.width}`);
+      await expectLineFits(page.getByTestId("scalper-ce-status-slot"), `scalper ${viewport.width}`);
     });
 
     test("Ladder Buy/Sell and price rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {
