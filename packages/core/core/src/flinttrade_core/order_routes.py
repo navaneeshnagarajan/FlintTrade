@@ -55,6 +55,7 @@ from .order_outcome import (
     REASON_RESPONSE_UNCONFIRMED,
     annotate,
     cancel_acknowledgement,
+    single_leg_outcomes,
 )
 from .rate_limiter import rate_limit
 
@@ -211,6 +212,7 @@ def _live_write_error(
     if unknown:
         response["order_outcome"] = "unknown"
         response["reason"] = REASON_RESPONSE_UNCONFIRMED
+        response["leg_outcomes"] = single_leg_outcomes("unknown")
     return jsonify(response), (502 if http_status == 502 else 500) if unknown else http_status
 
 
@@ -3716,6 +3718,7 @@ def _cancel_outcome_fields(result: object) -> dict[str, Any]:
                 "order_outcome": "rejected",
                 "reason": REASON_BROKER_REJECTED,
                 "retry_safe": False,
+                "leg_outcomes": single_leg_outcomes("rejected"),
             }
             if isinstance(message, str) and message:
                 fields["message"] = message

@@ -609,6 +609,7 @@ class TestPracticeMode:
             "order_outcome": "rejected",
             "reason": "broker_rejected",
             "retry_safe": False,
+            "leg_outcomes": {"entry": "absent"},
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):

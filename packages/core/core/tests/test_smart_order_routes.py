@@ -1215,6 +1215,7 @@ def test_job_snapshot_marks_an_unknown_child_outcome():
     view = mod._snapshot(job)
 
     assert view["order_outcome"] == "unknown"
+    assert view["leg_outcomes"] == {"entry": "unknown"}
     assert view["retry_safe"] is False
     assert view["error"] == ORDER_STATUS_UNKNOWN
     assert view["child_orders"][0]["status"] == "unknown"

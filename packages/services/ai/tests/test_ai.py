@@ -499,6 +499,8 @@ class TestMCPBridge:
         result = bridge.execute("Buy RELIANCE 100 shares")
         assert not result.success
         assert "Order-capable tools are unavailable" in result.error
+        assert result.result["order_outcome"] == "rejected"
+        assert result.result["leg_outcomes"] == {"entry": "absent"}
 
     def test_bridge_available_tools(self):
         from flinttrade_ai.mcp_bridge import MCPBridge

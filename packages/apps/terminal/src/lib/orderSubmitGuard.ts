@@ -11,6 +11,12 @@
  *
  * Locks live in the shared pending-order store, so they survive a reload,
  * are hidden by a mode or account switch, and clear on sign-out.
+ *
+ * Each record carries one outcome per leg (entry, and target and stop_loss
+ * when the order has them), matching the API's `leg_outcomes`, and a client
+ * key generated for that intent. No broker adapter has a free per-order tag
+ * on the place path today (the tag slots carry the exchange algo id), so the
+ * key is not sent and a newer complete order read settles the lock.
  */
 
 import { z } from "zod";
@@ -21,6 +27,10 @@ import {
   UNKNOWN_SUBMITS_PREFIX,
 } from "@/lib/pendingOrderStore";
 
+const legOutcomeSchema = z.enum(["unknown", "confirmed", "absent"]);
+
+const CLIENT_REF_PATTERN = /^[0-9a-f]{16}$/;
+
 const unknownSubmitSchema = z.object({
   key: z.string().min(1),
   symbol: z.string().min(1),
@@ -29,6 +39,12 @@ const unknownSubmitSchema = z.object({
   quantity: z.number().finite().optional(),
   receivedAt: z.number().finite(),
   listUpdatedAt: z.number().finite(),
+  clientRef: z.string().regex(CLIENT_REF_PATTERN),
+  legs: z.object({
+    entry: legOutcomeSchema,
+    target: legOutcomeSchema.optional(),
+    stop_loss: legOutcomeSchema.optional(),
+  }).strict(),
 });
 
 export type UnknownOrderSubmit = z.infer<typeof unknownSubmitSchema>;
@@ -50,6 +66,17 @@ export function instrumentOrderKey(exchange: string, symbol: string): string {
 /** A dropped, timed-out, or server-failed reply: the broker may hold the order. */
 export function submitReplyWasLost(error: unknown): boolean {
   return presentSubmitError(error).kind === "unknown";
+}
+
+/** 16 hex characters: within every broker tag limit (Upstox 20, Groww 8-20, Delta 32). */
+export function newClientRef(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function hasUnknownLeg(record: UnknownOrderSubmit): boolean {
+  return Object.values(record.legs).includes("unknown");
 }
 
 export type SubmitOnceResult<T> = { sent: false } | { sent: true; value: T };
@@ -99,7 +126,7 @@ export function orderSubmitInFlight(scope: string, key: string): boolean {
 }
 
 export function orderSubmitLocked(scope: string, key: string): boolean {
-  return orderSubmitInFlight(scope, key) || readLocks(scope).some((record) => record.key === key);
+  return orderSubmitInFlight(scope, key) || readLocks(scope).some((record) => record.key === key && hasUnknownLeg(record));
 }
 
 /**
@@ -117,6 +144,7 @@ export async function submitOrderOnce<T>(
 ): Promise<SubmitOnceResult<T>> {
   if (orderSubmitLocked(scope, intent.key)) return { sent: false };
   const flightKey = `${scope}|${intent.key}`;
+  const clientRef = newClientRef();
   inFlight.add(flightKey);
   notify();
   try {
@@ -125,7 +153,7 @@ export async function submitOrderOnce<T>(
     if (isLost(error)) {
       writeLocks(scope, [
         ...readLocks(scope).filter((record) => record.key !== intent.key),
-        { ...intent, receivedAt: Date.now(), listUpdatedAt },
+        { ...intent, receivedAt: Date.now(), listUpdatedAt, clientRef, legs: { entry: "unknown" } },
       ]);
     }
     throw error;

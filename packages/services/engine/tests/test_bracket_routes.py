@@ -707,10 +707,34 @@ class TestCancelBracket:
         body = resp.get_json()
         assert body["order_outcome"] == "cancel_requested"
         assert body["reason"] == "awaiting_confirmation"
+
         assert body["retry_safe"] is False
         assert body["message"] == "Cancellation requested"
         assert "Order cancelled" not in body["message"]
         assert "cancelled" not in body["message"].lower()
+
+    @pytest.mark.parametrize(
+        ("sl_order_id", "target_order_id", "stop_loss", "target"),
+        [("SL-1", "TG-1", "confirmed", "confirmed"), ("SL-1", None, "confirmed", "absent"), (None, None, "absent", "absent")],
+    )
+    def test_cancel_reports_each_bracket_leg_separately(
+        self, service, sl_order_id, target_order_id, stop_loss, target,
+    ) -> None:
+        """A leg that was never placed is absent; a placed leg is confirmed.
+
+        Args:
+            service: Mock service backing the client.
+            sl_order_id: Stop-loss leg order id, or None.
+            target_order_id: Target leg order id, or None.
+            stop_loss: Expected stop-loss leg outcome.
+            target: Expected target leg outcome.
+        """
+        service.get_bracket.return_value.sl_order_id = sl_order_id
+        service.get_bracket.return_value.target_order_id = target_order_id
+        with _make_app(service).test_client() as client:
+            body = client.delete("/api/v1/orders/bracket/br-001").get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["leg_outcomes"] == {"entry": "confirmed", "target": target, "stop_loss": stop_loss}
 
     def test_cancel_request_keeps_sweep_warnings_after_the_request_copy(self, service) -> None:
         """Warnings follow the shared request sentence instead of a cancel claim.
