@@ -37,11 +37,27 @@ async function rearmPageLoadReads(syntheticApi: SyntheticPhasedFixtureRegistry):
   });
 }
 
-function orderRow(status: string) {
+function orderRow(status: string, orderid = "SYNTHETIC-ORDER-1") {
   return {
-    orderid: "SYNTHETIC-ORDER-1", symbol: "SYNTHETIC-ALPHA", exchange: "NSE", action: "BUY",
+    orderid, symbol: "SYNTHETIC-ALPHA", exchange: "NSE", action: "BUY",
     quantity: 10, price: 99, pricetype: "LIMIT", product: "CNC", order_status: status, strategy: "Flint",
   };
+}
+
+/** The account-scoped safety read some cancel flows make; it is optional. */
+function registerAccountSafetyRead(syntheticApi: SyntheticPhasedFixtureRegistry): void {
+  registerRead(syntheticApi, `/ft-api/api/v1/safety/config?broker=dhan&account_id=${ACCOUNT_A}`, {
+    json: { status: "success", data: { l1_order: {}, l2_position: {}, l3_portfolio: {}, l4_pnl: {}, l5_kill: {} } },
+  }, { minimum: 0, maximum: 4 });
+}
+
+async function requestCancel(page: import("@playwright/test").Page, orderId: string): Promise<void> {
+  const cancelButton = page.getByRole("button", { name: `Cancel order ${orderId}`, exact: true });
+  await tickUntil(page, cancelButton);
+  await cancelButton.click();
+  await page.getByRole("dialog", { name: "Confirm order cancellation" })
+    .getByRole("button", { name: "Cancel Order", exact: true }).click();
+  await tickUntil(page, page.locator(`[data-pending-cancel="${orderId}"]`));
 }
 
 type LostCancel = {
@@ -125,5 +141,87 @@ for (const lost of LOST_CANCELS) test.describe(`lost Orders cancel: ${lost.name}
     await expect(page.getByRole("status").filter({ hasText: REQUESTED })).toHaveCount(0);
     expect(cancels).toBe(1);
     expect(syntheticApi.callCount("GET", nativePath("orders", ACCOUNT_A))).toBeGreaterThan(1);
+  });
+});
+
+test.describe("lost Orders cancels settle one order at a time", () => {
+  test.use({
+    benignConsoleErrors: [{
+      text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+      url: `http://localhost:5173${CANCEL}`,
+      expectedCalls: 2,
+    }],
+  });
+
+  test("confirming one of two pending cancels leaves the other Cancellation requested", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    let book = [orderRow("open", "SYNTHETIC-ORDER-A"), orderRow("open", "SYNTHETIC-ORDER-B")];
+    registerDeskReads(syntheticApi, false, { marketScopeVisits: 12 });
+    registerAccountBooks(syntheticApi, {
+      positionCalls: { minimum: 0, maximum: 8 },
+      orders: () => ({ json: { status: "success", data: book } }),
+      orderCalls: { minimum: 1, maximum: 24 },
+    });
+    registerAccountSafetyRead(syntheticApi);
+    let cancels = 0;
+    await page.route(`**${CANCEL}`, async (route) => {
+      cancels += 1;
+      await route.abort("connectionreset");
+    });
+
+    await mountWidget(page, "orders");
+    await requestCancel(page, "SYNTHETIC-ORDER-A");
+    await requestCancel(page, "SYNTHETIC-ORDER-B");
+
+    book = [orderRow("cancelled", "SYNTHETIC-ORDER-A"), orderRow("open", "SYNTHETIC-ORDER-B")];
+    await page.clock.runFor(10_000);
+    await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
+    await tickUntil(page, page.locator('[data-cancelled-order="SYNTHETIC-ORDER-A"]'));
+    await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-A"]')).toHaveCount(0);
+    await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-B"]')).toHaveText(/Cancellation requested/);
+    await expect(page.locator('[data-cancelled-order="SYNTHETIC-ORDER-B"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel order SYNTHETIC-ORDER-B", exact: true })).toBeDisabled();
+    expect(cancels).toBe(2);
+  });
+});
+
+test.describe("a lost Orders cancel whose order leaves the list", () => {
+  test.use({
+    benignConsoleErrors: [{
+      text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+      url: `http://localhost:5173${CANCEL}`,
+      expectedCalls: 1,
+    }],
+  });
+
+  test("clears the pending line without saying Order cancelled", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    let book = [orderRow("open")];
+    registerDeskReads(syntheticApi, false, { marketScopeVisits: 12 });
+    registerAccountBooks(syntheticApi, {
+      positionCalls: { minimum: 0, maximum: 8 },
+      orders: () => ({ json: { status: "success", data: book } }),
+      orderCalls: { minimum: 1, maximum: 24 },
+    });
+    registerAccountSafetyRead(syntheticApi);
+    let cancels = 0;
+    await page.route(`**${CANCEL}`, async (route) => {
+      cancels += 1;
+      await route.abort("connectionreset");
+    });
+
+    await mountWidget(page, "orders");
+    await requestCancel(page, "SYNTHETIC-ORDER-1");
+
+    // A complete, newer list without the order settles the request without a cancel claim.
+    book = [];
+    await page.clock.runFor(10_000);
+    await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
+    await expect.poll(async () => {
+      await page.clock.runFor(100);
+      return page.locator('[data-pending-cancel="SYNTHETIC-ORDER-1"]').count();
+    }).toBe(0);
+    await expect(page.getByText(/Order cancelled/)).toHaveCount(0);
+    expect(cancels).toBe(1);
   });
 });
