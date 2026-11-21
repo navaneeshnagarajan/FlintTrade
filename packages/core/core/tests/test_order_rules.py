@@ -450,3 +450,10 @@ def test_a_name_ending_in_ce_is_not_an_option() -> None:
     assert instrument_kind("RELIANCE", "NSE") == "equity"
     assert instrument_kind("NIFTY-Nov2026-24000-CE", "NFO") == "option"
     assert evaluate_order({"symbol": "RELIANCE", "exchange": "MCX", "pricetype": "MARKET"}, broker="kotakneo") == []
+
+
+def test_docs_page_carries_the_current_rules_table() -> None:
+    from pathlib import Path
+
+    page = Path(__file__).resolve().parents[4] / "docs" / "BROKER_AND_EXCHANGE_RULES.md"
+    assert rules_markdown() in page.read_text(encoding="utf-8")
