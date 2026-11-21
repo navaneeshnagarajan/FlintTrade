@@ -882,13 +882,17 @@ describe("PositionsWidget", () => {
       fireEvent.click(confirm);
       fireEvent.click(confirm);
 
-      expect(await screen.findByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
       expect(confirm).toBeDisabled();
       fireEvent.click(confirm);
       await act(async () => {});
       expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole("button", { name: "Square off RELIANCE", hidden: true })).toBeDisabled();
+      const squareOff = screen.getByRole("button", { name: "Square off RELIANCE", hidden: true });
+      expect(squareOff).toBeDisabled();
+      expect(squareOff).toHaveAttribute("title", "Order status unknown. Check Orders before trying again.");
+      expect(squareOff.getAttribute("title") ?? "").not.toMatch(/Wait for it to fill, or cancel it and try again/);
     });
 
     it("unlocks a square-off only after a newer order read settles the lost exit", async () => {
@@ -897,15 +901,21 @@ describe("PositionsWidget", () => {
       const { rerender } = render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
-      await screen.findByText("Order status unknown. Check Orders before trying again.");
+      await screen.findAllByText("Order status unknown. Check Orders before trying again.");
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
       await waitFor(() => expect(screen.queryByText("Square off position?")).not.toBeInTheDocument());
       expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+      expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
 
-      mockUseOrders.mockReturnValue(queryResult({ data: [], dataUpdatedAt: Date.now() + 1_000 }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+      mockUseOrders.mockReturnValue(queryResult({ data: [], isFetching: true, dataUpdatedAt: 0 }));
       rerender(<PositionsWidget {...defaultProps} params={{ nonce: 2 }} />);
+      await act(async () => {});
+      mockUseOrders.mockReturnValue(queryResult({ data: [], isFetching: false, dataUpdatedAt: Date.now() }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 3 }} />);
       await waitFor(() => expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeEnabled());
-    });
+    }, 15_000);
 
     it.each(LOST_EXITS)("does not resend a Practice exit-all row lost to %s", async (_label, lost) => {
       mockModeState.mode = "practice";
@@ -919,7 +929,7 @@ describe("PositionsWidget", () => {
       const confirm = screen.getByRole("button", { name: "Confirm exit all positions" });
       fireEvent.click(confirm);
 
-      expect(await screen.findByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
       fireEvent.click(confirm);
       await act(async () => {});
@@ -940,7 +950,7 @@ describe("PositionsWidget", () => {
       fireEvent.click(confirm);
       fireEvent.click(confirm);
 
-      expect(await screen.findByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
       expect(confirm).toBeDisabled();
       fireEvent.click(confirm);
@@ -1007,8 +1017,8 @@ describe("PositionsWidget", () => {
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
-      expect(await screen.findByText("Order status unknown. Check Orders before trying again."))
-        .toBeInTheDocument();
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length)
+        .toBeGreaterThanOrEqual(1);
     });
 
     it.each(["acknowledged", "lost response"])(
