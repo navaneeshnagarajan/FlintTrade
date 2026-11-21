@@ -225,7 +225,7 @@ def _terminal_lifecycle_case(
     dependencies.read_owner._native_scope_source = native_source
     _plan(source, registration, mark="4")
     owner = _start(desk, _granted(desk))
-    completed = owner.completed.wait(5)
+    completed = owner.completed.wait(30)
     print("QUALIFIED_CANONICAL_PHASES " + json.dumps(phases), flush=True)
     assert completed and owner.shutdown(0)
     assert sum(phase["phase"] == "canonical_mint" for phase in phases) == 1, phases

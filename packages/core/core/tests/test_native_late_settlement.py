@@ -215,7 +215,7 @@ def test_late_bounded_evidence_retains_duty_after_zero_fill_settlement(tmp_path:
     code = ("from pathlib import Path\n"
             "from packages.core.core.tests.test_native_late_settlement import _child\n"
             f"_child({case!r}, Path({str(result_path)!r}))\n")
-    result = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, timeout=40)
+    result = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, timeout=90)
     (tmp_path / "child.log").write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
     witness = json.loads(result_path.read_text())

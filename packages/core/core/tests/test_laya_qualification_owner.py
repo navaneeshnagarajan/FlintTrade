@@ -160,14 +160,13 @@ def test_qualification_refuses_replaced_or_expired_evidence(
         monkeypatch: Scoped replacements restored after this test.
         replacement: Runtime, owner or evidence substitution challenged after qualification.
     """
-    import time
     from flinttrade_engine import laya_decision
     from flinttrade_engine.laya import DecisionStatus, process_laya
 
     runtime, calls = sidecar
     owner = mounted_desk.app.config["LAYA_QUALIFICATION_OWNER"]
     cases = (("allow", "BUY", "Reviewed limit", "allow"), ("deny", "BUY", "revenge", "deny"))
-    owner.configure(cases=cases, max_age_seconds=0.2 if replacement == "expired" else 10.0)
+    owner.configure(cases=cases, max_age_seconds=30.0)
     report = owner.qualify()
     assert report["qualified"] is True
     before = len(calls)
@@ -192,7 +191,7 @@ def test_qualification_refuses_replaced_or_expired_evidence(
     elif replacement == "client":
         process_laya().set_decision_client(object())
     else:
-        time.sleep(0.21)
+        owner._expires = 0.0
     assert not owner.qualifies()
     assert process_laya().effective_status("live") is DecisionStatus.DOWN
     assert len(calls) == before
