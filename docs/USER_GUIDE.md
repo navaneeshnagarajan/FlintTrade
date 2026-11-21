@@ -242,7 +242,10 @@ one.
 
 Changing the registered IP is limited to once every 7 days.
 
-A static IP may only be shared with immediate family members.
+Where your broker allows it, a static IP may be shared with family members
+as defined for this purpose (your spouse, dependent children and dependent
+parents). Some brokers require each person to register their own IP, so you
+should check with your broker.
 
 On Kotak Neo, the API sign-in itself must happen from the machine with the
 registered static IP, not only orders.
@@ -1676,13 +1679,13 @@ run hosted execution, offer strategies or signals as a service, or help you
 obtain a static IP. See [Broker static IP](#broker-static-ip).
 
 Brokers may ask clients who write their own algorithms to sign an undertaking
-with them. Losses caused by the logic of your own strategy or automation
-cannot be taken to the exchange's investor grievance process.
+with them. Under that undertaking, losses caused by the logic of your own
+strategy or automation cannot be taken to the exchange's investor grievance
+process. Problems on the broker's side are not covered by this.
 
-Chat does not place Live orders — Live place stays fail-closed. An order
-request can produce a proposal for review. Approve uses the existing Practice
-order path and safety admission. Native Live execution remains unavailable
-until the native cutover; speech does not unlock it.
+Chat does not place Live orders — Live place stays fail-closed; a spoken
+order request is reviewed as set out in
+[Speaking with the AI assistant](#speaking-with-the-ai-assistant).
 
 ### Cron
 
@@ -1738,8 +1741,7 @@ flashes the outage copy.
 ## 9. AI Centre walkthrough
 
 Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
-`packages/services/ai`. The Signals panel shows analysis to you. It does not
-provide signals, and it does not recommend that you act on them. Suggest is a local filter UI over an
+`packages/services/ai`. The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order. Suggest is a local filter UI over an
 illustrative strategy list — not a live AI fetch. Suggest stays
 labelled illustrative. See
 [Your automation, your responsibility](#self-run-automation).
@@ -1869,10 +1871,10 @@ card.
 
 ### Signals
 
-The **Signals** panel shows rule-based and ML-derived analysis inside your
-own app. An executor runs multiple generators in parallel and aggregates
-diagnostics for that view. Those figures are analysis shown to you. They are
-not signals FlintTrade provides, and they are not a recommendation to act.
+The **Signals** panel shows analysis worked out inside your own app from
+market data. An executor runs multiple generators in parallel and aggregates
+diagnostics for that view. It is not a recommendation to trade, and you
+decide whether to place any order.
 
 ### Sentiment
 
