@@ -153,6 +153,14 @@ import {
   type PositionRow,
 } from "./positionBook";
 import { SAMPLE_POSITION_BOOK } from "./sampleBook";
+import {
+  EXIT_NOW,
+  STOP_LOSS_NOT_FILLED,
+  contractKeyOf,
+  exitNowTicket,
+  openExitTicket,
+  stopLossNotFilledKeys,
+} from "@/lib/stopLossState";
 import NetPositionView from "./NetPositionView";
 import HeatMapView, {
   GROUP_LABELS,
@@ -181,6 +189,28 @@ function OutcomeCopy({ message }: { message: string }) {
     <p className={uncertain ? "text-xs text-warning" : "text-xs text-loss"} role={uncertain ? "status" : "alert"}>
       {message}
     </p>
+  );
+}
+
+/** Reserved status slot: the stop triggered but did not fill. */
+function StopLossNotFilledChip({ position }: { position: PositionRow }) {
+  const ticket = exitNowTicket(position, { ltp: position.ltp });
+  return (
+    <span className="inline-flex items-center gap-1" data-testid="stop-loss-not-filled" role="status">
+      <span className="text-xxs text-loss">{STOP_LOSS_NOT_FILLED}</span>
+      {ticket ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-5 px-1.5 text-xxs text-text-primary hover:bg-surface-hover"
+          aria-label={`${EXIT_NOW} ${position.symbol}`}
+          onClick={() => openExitTicket(ticket)}
+        >
+          {EXIT_NOW}
+        </Button>
+      ) : null}
+    </span>
   );
 }
 
@@ -848,6 +878,9 @@ function PositionsWidget(props: WidgetProps) {
     return keys;
   }, [orders, rows]);
 
+  // A triggered stop-limit that has not filled leaves the position open.
+  const stopNotFilledKeys = useMemo(() => stopLossNotFilledKeys(orders), [orders]);
+
   const cancelPendingExitKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const row of rows) {
@@ -1212,10 +1245,15 @@ function PositionsWidget(props: WidgetProps) {
         pnl: fmtPnl(row.mtm),
         pnlPercent: fmtPnlPct(row.pnlPercent),
         pnlPositive: row.mtm >= 0,
-        actions: renderRowActions(row),
+        actions: row.quantity !== 0 && stopNotFilledKeys.has(contractKeyOf(row)) ? (
+          <span className="inline-flex flex-wrap items-center gap-1">
+            <StopLossNotFilledChip position={row} />
+            {renderRowActions(row)}
+          </span>
+        ) : renderRowActions(row),
       };
     }),
-    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows],
+    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows, stopNotFilledKeys],
   );
 
   const columns = useMemo<ColumnDef<SortedTableFeatures, PositionRow>[]>(
@@ -1238,6 +1276,9 @@ function PositionsWidget(props: WidgetProps) {
               ) : null}
               {unexpected ? (
                 <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
+              ) : null}
+              {row.original.quantity !== 0 && stopNotFilledKeys.has(contractKeyOf(row.original)) ? (
+                <StopLossNotFilledChip position={row.original} />
               ) : null}
               {row.original.restored ? <RestoredFillTag /> : null}
             </span>
@@ -1314,7 +1355,7 @@ function PositionsWidget(props: WidgetProps) {
         cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, unexpectedKeys],
+    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, stopNotFilledKeys, unexpectedKeys],
   );
 
   const table = useTable({

@@ -336,6 +336,50 @@ describe("PositionsWidget", () => {
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
+  it("shows the stop-loss not-filled chip with Exit now at the last price for the full quantity", async () => {
+    mockUsePositions.mockReturnValue(queryResult({
+      data: [{ symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "MIS", quantity: 150, ltp: 41.3, pnl: -900, average_price: 47.3 }],
+    }));
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        orderId: "SL1", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", quantity: 150,
+        price: 40, triggerPrice: 45, orderType: "SL", status: "PENDING", stop_triggered: true, product: "MIS",
+      }],
+    }));
+    const opened: unknown[] = [];
+    const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+    window.addEventListener("flinttrade:addWidget", listener);
+    try {
+      render(<PositionsWidget {...defaultProps} />);
+      const chips = await screen.findAllByTestId("stop-loss-not-filled");
+      expect(chips[0]).toHaveTextContent("Stop-loss triggered · not filled");
+      fireEvent.click(screen.getAllByRole("button", { name: "Exit now NIFTY24APR24000CE" })[0]);
+      expect(opened[0]).toEqual({
+        widgetId: "orderpad",
+        props: {
+          symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 150, product: "MIS", price: 41.3,
+        },
+      });
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("flinttrade:addWidget", listener);
+    }
+  });
+
+  it("clears the chip once the stop fills", () => {
+    mockUsePositions.mockReturnValue(queryResult({
+      data: [{ symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "MIS", quantity: 150, ltp: 41.3, pnl: -900 }],
+    }));
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        orderId: "SL1", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", quantity: 150,
+        orderType: "SL", status: "COMPLETE", stop_triggered: true, product: "MIS",
+      }],
+    }));
+    render(<PositionsWidget {...defaultProps} />);
+    expect(screen.queryByTestId("stop-loss-not-filled")).not.toBeInTheDocument();
+  });
+
   it("renders without crashing", () => {
     const { container } = render(<PositionsWidget {...defaultProps} />);
     expect(container.querySelector("[data-tour-target='positions']")).toBeInTheDocument();

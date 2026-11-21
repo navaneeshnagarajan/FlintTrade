@@ -24,6 +24,17 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/services/queryKeys";
+import type { Position } from "@/types/api";
+import {
+  EXIT_NOW,
+  STOP_LOSS_NOT_FILLED,
+  contractKeyOf,
+  exitNowTicket,
+  isStopLossTriggeredNotFilled,
+  openExitTicket,
+} from "@/lib/stopLossState";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
@@ -77,6 +88,8 @@ interface OrderRow {
   strategy: string;
   orderStatus: string;
   isOpen: boolean;
+  /** The stop triggered and its limit has not filled. */
+  stopNotFilled: boolean;
 }
 
 interface OrderActionIntent {
@@ -158,6 +171,7 @@ export function toOrderRow(o: RawOrderRecord): OrderRow {
     strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
     orderStatus: status,
     isOpen: isOpenOrderStatus(status),
+    stopNotFilled: isStopLossTriggeredNotFilled(o),
   };
 }
 
@@ -434,6 +448,13 @@ function OrdersWidget(_props: WidgetProps) {
     isLoading,
     fetchStatus,
   } = useOrders({ enabled: accountReadsEnabled, context: accountReadContext });
+  // Read the position book already cached for this account; the Orders
+  // widget does not fetch it.
+  const queryClient = useQueryClient();
+  const cachedPositions = useCallback(
+    (): Position[] => queryClient.getQueryData<Position[]>(queryKeys.positions.list(currentIdentity.scopeKey)) ?? [],
+    [currentIdentity.scopeKey, queryClient],
+  );
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
 
@@ -686,14 +707,58 @@ function OrdersWidget(_props: WidgetProps) {
       {
         accessorKey: "orderStatus",
         header: "Status",
-        cell: ({ row }) => (
-          <Badge
-            variant={statusVariant(row.original.orderStatus)}
-            className="text-xs font-medium"
-          >
-            {row.original.orderStatus}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const r = row.original;
+          if (!r.stopNotFilled) {
+            return (
+              <Badge
+                variant={statusVariant(r.orderStatus)}
+                className="text-xs font-medium"
+              >
+                {r.orderStatus}
+              </Badge>
+            );
+          }
+          // Full open quantity from the position book; without it, the
+          // quantity this stop was protecting.
+          const exitTicket = () => {
+            const position = cachedPositions().find(
+              (item) => contractKeyOf(item) === contractKeyOf(r) && item.quantity !== 0,
+            );
+            return position
+              ? exitNowTicket(position, { ltp: position.ltp })
+              : exitNowTicket(
+                {
+                  symbol: r.symbol,
+                  exchange: r.exchange,
+                  quantity: r.action === "SELL" ? r.quantityNum : -r.quantityNum,
+                  product: r.product || undefined,
+                },
+                null,
+              );
+          };
+          const ticket = r.quantityNum > 0;
+          return (
+            <span className="inline-flex items-center gap-1" data-testid="stop-loss-not-filled" role="status">
+              <span className="text-xs font-medium text-loss">{STOP_LOSS_NOT_FILLED}</span>
+              {ticket ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-xs"
+                  aria-label={`${EXIT_NOW} ${r.symbol}`}
+                  onClick={() => {
+                    const next = exitTicket();
+                    if (next) openExitTicket(next);
+                  }}
+                >
+                  {EXIT_NOW}
+                </Button>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         id: "actions",
@@ -758,7 +823,7 @@ function OrdersWidget(_props: WidgetProps) {
         },
       },
     ],
-    [canManageOrders, isExplore, actionPending, currentIdentity],
+    [canManageOrders, isExplore, actionPending, currentIdentity, cachedPositions],
   );
 
   const table = useTable({
