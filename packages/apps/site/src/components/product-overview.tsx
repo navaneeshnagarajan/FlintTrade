@@ -50,12 +50,12 @@ export function ProductOverview() {
         <figure className="product-figure">
           <Image
             src="/product/studio.webp"
-            alt="FlintTrade Testing strategy research configuration before a run, using example data"
+            alt="FlintTrade Studio strategy research configuration before a run, using example data"
             width={1600}
             height={900}
             sizes="(max-width: 768px) 100vw, 720px"
           />
-          <figcaption>Strategy research in Testing, before a run, with example data. Prices and results shown are not live market data or trading performance.</figcaption>
+          <figcaption>Strategy research in Studio, before a run, with example data. Prices and results shown are not live market data or trading performance.</figcaption>
         </figure>
       </section>
 

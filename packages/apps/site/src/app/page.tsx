@@ -3,7 +3,6 @@ import { ArrowRight, Bot, ExternalLink, ShieldCheck, TerminalSquare } from 'luci
 import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
-import { ProductIntroduction } from '@/components/product-introduction';
 import { ProductOverview } from '@/components/product-overview';
 import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
@@ -161,7 +160,6 @@ export default async function HomePage() {
         ))}
       </section>
 
-      <ProductIntroduction />
       <ProductOverview />
 
       <section className="section">
@@ -185,7 +183,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section section-enter">
+      <section className="section">
         <div className="section-heading">
           <h2>Built for people who read the source.</h2>
           <p>
@@ -207,7 +205,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column section-enter">
+      <section className="section two-column">
         <div className="section-heading">
           <h2>Docs, API, and contribution paths in one flow.</h2>
           <p>
@@ -225,7 +223,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column section-enter" data-scroll-chapter="4">
+      <section className="section two-column" data-scroll-chapter="4">
         <div className="code-panel">
           <header>
             <span>Contributor MCP</span>
@@ -257,7 +255,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="5">
+      <section className="section" data-scroll-chapter="5">
         <div className="section-heading">
           <h2>Package map at contributor speed.</h2>
           <p>

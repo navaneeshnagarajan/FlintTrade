@@ -48,13 +48,12 @@ describe('site sandbox demo routing', () => {
     expect(siteHeader).toContain("href: '/demo-app/welcome'");
     expect(siteHeader).toContain("target={item.newWindow ? '_blank' : undefined}");
     expect(demoPage).toContain("permanentRedirect('/demo-app/welcome')");
-    expect(explorePage).toContain('<ProductIntroduction');
-    expect(explorePage).not.toContain("permanentRedirect('/demo-app/welcome')");
+    expect(explorePage).toContain("permanentRedirect('/demo-app/welcome')");
     expect(demoPage).not.toContain('<iframe');
     expect(explorePage).not.toContain('<iframe');
   });
 
-  it('redirects /demo and serves the real /explore entry from next start', async () => {
+  it('redirects /demo and /explore with HTTP 308 from next start', async () => {
     const siteRoot = process.cwd();
     const nextBin = path.join(siteRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
     await runProcess(process.execPath, [nextBin, 'build', '--webpack'], siteRoot);
@@ -85,7 +84,7 @@ describe('site sandbox demo routing', () => {
       }
       if (!ready) throw new Error(`next start did not become ready\n${output}`);
 
-      for (const route of ['/demo']) {
+      for (const route of ['/demo', '/explore']) {
         const response = await fetch(`http://127.0.0.1:${port}${route}`, {
           method: 'HEAD',
           redirect: 'manual',
@@ -94,9 +93,6 @@ describe('site sandbox demo routing', () => {
         const location = response.headers.get('location') ?? '';
         expect(new URL(location, `http://127.0.0.1:${port}`).pathname, route).toBe('/demo-app/welcome');
       }
-      const explore = await fetch(`http://127.0.0.1:${port}/explore`);
-      expect(explore.status).toBe(200);
-      expect(await explore.text()).toContain('Choose your layout.');
     } finally {
       child.kill('SIGTERM');
     }

@@ -23,7 +23,7 @@ const nextConfig = {
         search: '?v=20260613',
       },
       {
-        // Product screenshots shown on the homepage and /explore.
+        // Product screenshots shown on the homepage.
         pathname: '/product/**',
       },
     ],

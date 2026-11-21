@@ -43,7 +43,13 @@ it('pairs every product view with a fresh public-demo image and an accessible ex
       expect(link?.textContent).toContain('example data');
       expect(link?.getAttribute('rel')).toContain('noopener');
       expect(link?.getAttribute('target')).toBe('_blank');
+      expect(`${image?.getAttribute('alt') ?? ''} ${caption?.textContent ?? ''}`).not.toMatch(/\bTesting\b/);
+      if (view.name === 'Studio') {
+        expect(image?.getAttribute('alt')).toContain('Studio');
+        expect(caption?.textContent).toMatch(/Strategy research in Studio/);
+      }
     }
+    expect(container.querySelectorAll('.product-note')).toHaveLength(1);
     expect(container.textContent).toContain('A conversation is not trading permission.');
     expect(container.textContent).toContain('Live execution needs explicit account permissions and qualification');
     expect(container.textContent).toContain('No broker is connected and no orders are sent.');

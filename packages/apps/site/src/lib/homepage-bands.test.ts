@@ -18,7 +18,6 @@ const pageSource = readSite('src/app/page.tsx');
 const productSource = readSite('src/components/product-overview.tsx');
 const cssSource = readSite('src/app/globals.css');
 const nextConfigSource = readSite('next.config.mjs');
-const controllerSource = readSite('src/components/section-enter-controller.tsx');
 const wrapperSource = readSite('src/components/site-scroll-world.tsx');
 const webglSource = readSite('src/components/site-scroll-world-webgl.tsx');
 const capabilitySource = readSite('src/lib/site-scroll-world-capability.ts');
@@ -32,6 +31,7 @@ describe('product-led homepage with the preserved signature', () => {
   it('keeps product navigation separate from unavailable desktop-install claims', () => {
     expect(pageSource).toContain('section className="section hero"');
     expect(pageSource).toContain('<ProductOverview />');
+    expect(pageSource).not.toContain('ProductIntroduction');
     expect(pageSource).toContain('MCP for development, not trading.');
     expect(pageSource).not.toContain('Evaluate and install');
     expect(pageSource).not.toContain('Start exploring — no install needed');
@@ -113,37 +113,22 @@ describe('product-led homepage with the preserved signature', () => {
     expect(pageSource).not.toContain('matchMedia');
   });
 
-  it('leaves the legacy section controller intact but does not hide the new product sections', () => {
-    expect(pageSource).not.toContain('<SectionEnterController');
+  it('removes the unused section-enter controller, asset helper and hero visual', () => {
+    expect(existsSync(resolve(process.cwd(), 'src/components/section-enter-controller.tsx'))).toBe(false);
+    expect(existsSync(resolve(process.cwd(), 'src/lib/site-assets.ts'))).toBe(false);
+    expect(existsSync(resolve(process.cwd(), 'src/components/product-introduction.tsx'))).toBe(false);
+    expect(pageSource).not.toContain('SectionEnterController');
+    expect(pageSource).not.toContain('section-enter');
+    expect(pageSource).not.toContain('flinttradeAsset');
+    expect(pageSource).not.toContain('hero-visual');
     expect(productSource).not.toContain('section-enter');
-    expect(controllerSource).toContain('SectionEnterController');
-    expect(controllerSource).toContain('useEffect');
-    expect(controllerSource).toContain('js-motion-enabled');
-    expect(controllerSource).toContain('visible');
-  });
-
-  it('controller implements correct order and cleanup', () => {
-    const markIdx = controllerSource.indexOf('Mark initially visible sections BEFORE adding root activation class');
-    const addClassIdx = controllerSource.indexOf("html.classList.add('js-motion-enabled')");
-    expect(markIdx).toBeGreaterThan(-1);
-    expect(addClassIdx).toBeGreaterThan(-1);
-    expect(markIdx).toBeLessThan(addClassIdx);
-    expect(controllerSource).toContain('new IntersectionObserver');
-    const disconnectIdx = controllerSource.indexOf('observer.disconnect()');
-    const cleanupIdx = controllerSource.indexOf("html.classList.remove('js-motion-enabled')");
-    expect(disconnectIdx).toBeGreaterThan(-1);
-    expect(cleanupIdx).toBeGreaterThan(-1);
-    expect(disconnectIdx).toBeLessThan(cleanupIdx);
-    expect(controllerSource).toContain('return () => {');
-  });
-
-  it('CSS has real fail-open observed reveal contract', () => {
-    expect(cssSource).toMatch(/\.section-enter\s*\{[^}]*opacity:\s*1/);
-    expect(cssSource).toMatch(/\.js-motion-enabled\s+\.section-enter\s*\{[^}]*opacity:\s*0/);
-    expect(cssSource).toMatch(/\.js-motion-enabled\s+\.section-enter\s*\{[^}]*transition:/);
-    expect(cssSource).not.toMatch(/\.js-motion-enabled\s+\.section-enter\s*\{[^}]*animation:/);
-    expect(cssSource).toMatch(/\.js-motion-enabled\s+\.section-enter\.visible\s*\{[^}]*opacity:\s*1/);
-    expect(controllerSource).toContain('js-motion-enabled');
+    expect(productSource).not.toMatch(/\bTesting\b/);
+    expect(cssSource).not.toContain('section-enter');
+    expect(cssSource).not.toContain('js-motion-enabled');
+    expect(cssSource).not.toContain('screenshotFloat');
+    expect(cssSource).not.toContain('hero-visual');
+    expect(cssSource).not.toContain('screenshot-stack');
+    expect(cssSource).not.toContain('screen-frame');
   });
 
   it('mobile (max-width: 620px) freezes essential hero content including the honest install block', () => {
