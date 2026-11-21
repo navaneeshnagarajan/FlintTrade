@@ -20,6 +20,7 @@ import { registerExploreAdvisorStatusProbe, registerOperatorStatusProbes } from 
 const UNKNOWN = "Order status unknown. Check Orders before trying again.";
 const CE = "NIFTY27AUG26100CE";
 const PLACE = "/ft-api/api/v1/orders/place";
+const LIVE_PLACE = "/ft-api/api/v1/orders/dhan/place";
 const VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 2560, height: 1440 },
@@ -371,6 +372,34 @@ function registerQuickTradeReads(syntheticApi: Parameters<typeof registerDeskRea
   }, { minimum: 0, maximum: 8 });
 }
 
+function registerOptionChainReads(syntheticApi: Parameters<typeof registerDeskReads>[0]): void {
+  registerDeskReads(syntheticApi, false, { marketScopeVisits: 8 });
+  registerAccountBooks(syntheticApi, {
+    positionCalls: { minimum: 0, maximum: 8 },
+    orderCalls: { minimum: 0, maximum: 16 },
+  });
+  const strikes = [];
+  for (let strike = 24_800; strike <= 25_200; strike += 50) {
+    strikes.push({
+      strike_price: strike,
+      ce_ltp: Math.max(5, 25_000 - strike + 120), ce_bid: 1, ce_ask: 2, ce_oi: 1_000, ce_volume: 100,
+      pe_ltp: Math.max(5, strike - 25_000 + 120), pe_bid: 1, pe_ask: 2, pe_oi: 1_000, pe_volume: 100,
+    });
+  }
+  const chain = { json: { status: "success", data: { underlying_ltp: 25_000, atm_strike: 25_000, expiry: "27AUG26", strikes } } };
+  registerRead(syntheticApi, `${nativePath("optionchain")}?underlying=NIFTY&exchange=NFO`, chain, { minimum: 0, maximum: 8 });
+  registerRead(syntheticApi, `${nativePath("optionchain")}?underlying=NIFTY&exchange=NFO&expiry=27AUG26`, chain, { minimum: 0, maximum: 8 });
+  registerRead(syntheticApi, nativePath("scrip_master"), { json: { status: "success", data: [] } }, { minimum: 0, maximum: 4 });
+  registerRead(syntheticApi, `${nativePath("search")}?query=NIFTY&exchange=NFO`, {
+    json: { status: "success", data: [{ symbol: "NIFTY", exchange: "NFO", lotsize: 65, tick_size: 0.05, name: "NIFTY" }] },
+  }, { minimum: 0, maximum: 8 });
+  syntheticApi.register({
+    name: "Option Chain max pain", method: "POST", path: "/ft-api/api/v1/maxpain",
+    expectedCalls: { minimum: 0, maximum: 8 },
+    handler: () => ({ json: { status: "success", data: { max_pain_strike: 25_000, total_loss_at_max_pain: 0, strike_losses: [] } } }),
+  });
+}
+
 function registerLadderReads(syntheticApi: Parameters<typeof registerDeskReads>[0]): void {
   registerDeskReads(syntheticApi, false, { marketScopeVisits: 12 });
   registerAccountBooks(syntheticApi, {
@@ -708,6 +737,53 @@ for (const viewport of VIEWPORTS) {
       expect(lineBox.y + lineBox.height, "line sits above BUY/SELL").toBeLessThanOrEqual(buyBox.y + 0.5);
       expect(buyBox.y - (lineBox.y + lineBox.height), "line sits directly above BUY/SELL").toBeLessThanOrEqual(16);
       await expectLineFits(slot, `quick trade ${viewport.width}`);
+    });
+
+    test.describe("lost Option Chain basket order", () => {
+      test.use({
+        benignConsoleErrors: [{
+          text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+          url: `http://localhost:5173${LIVE_PLACE}`,
+          expectedCalls: 1,
+        }],
+      });
+
+      test("shows no red strip, and Buy All and the grid stay put when the unknown line appears", async ({ page, syntheticApi }) => {
+        test.setTimeout(60_000);
+        registerOptionChainReads(syntheticApi);
+        let posts = 0;
+        await page.route(`**${LIVE_PLACE}`, async (route) => {
+          posts += 1;
+          await route.abort("connectionreset");
+        });
+        await mountWidget(page, "optionchain");
+        const panel = page.getByRole("tabpanel", { name: "Option Chain" });
+        const canvas = panel.getByTestId("data-grid-canvas");
+        await tickUntil(page, panel.getByRole("status").filter({ hasText: /strikes loaded/ }));
+        await page.clock.runFor(200);
+        // The CALL action column of the first visible strike.
+        const callColumn = { x: 38 + 52 + 60 + 54 + 26, y: 26 + 12 };
+        const grid = (await canvas.boundingBox())!;
+        await page.mouse.move(grid.x + callColumn.x, grid.y + callColumn.y);
+        await page.clock.runFor(50);
+        await page.mouse.down();
+        await page.clock.runFor(50);
+        await page.mouse.up();
+        await page.clock.runFor(100);
+        const buyAll = panel.getByRole("button", { name: "Buy All", exact: true });
+        await tickUntil(page, buyAll);
+        await page.clock.runFor(200);
+        const before = await collectBoxes([buyAll, canvas]);
+        await buyAll.click();
+        const slot = panel.getByTestId("basket-status-slot");
+        await tickUntil(page, slot.getByText(UNKNOWN));
+        await page.clock.runFor(200);
+        await expect(buyAll).toBeDisabled();
+        await expect(panel.getByText(UNKNOWN)).toHaveCount(1);
+        expectUnmoved(before, await collectBoxes([buyAll, canvas]), `option chain ${viewport.width}`);
+        await expectLineFits(slot, `option chain ${viewport.width}`);
+        expect(posts).toBe(1);
+      });
     });
 
     test("Orders table rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {
