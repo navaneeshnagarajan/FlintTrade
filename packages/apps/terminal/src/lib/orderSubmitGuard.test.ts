@@ -69,17 +69,9 @@ describe("order submit guard", () => {
     expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
   });
 
-  it("records one unknown entry leg and a fresh client key per lost intent", async () => {
+  it("records one unknown entry leg for a lost submit", async () => {
     await expect(submitOrderOnce(SCOPE, INTENT, lost)).rejects.toThrow();
-    const [first] = readUnknownOrderSubmits(SCOPE);
-    expect(first.legs).toEqual({ entry: "unknown" });
-    expect(first.clientRef).toMatch(/^[0-9a-f]{16}$/);
-    reconcileUnknownOrderSubmits(SCOPE, first.receivedAt + 1);
-    await expect(submitOrderOnce(SCOPE, INTENT, lost)).rejects.toThrow();
-    const [second] = readUnknownOrderSubmits(SCOPE);
-    expect(second.clientRef).toMatch(/^[0-9a-f]{16}$/);
-    expect(second.clientRef).not.toBe(first.clientRef);
-    expect(sessionStorage.getItem(STORAGE_KEY)).toContain(second.clientRef);
+    expect(readUnknownOrderSubmits(SCOPE)[0].legs).toEqual({ entry: "unknown" });
   });
 
   it("records the per-leg outcomes a lost bracket reply reports", async () => {
@@ -103,7 +95,7 @@ describe("order submit guard", () => {
 
   it("discards a stored lock whose leg outcome is not unknown, confirmed or absent", () => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify([{
-      ...INTENT, receivedAt: 1, listUpdatedAt: 0, clientRef: "0123456789abcdef", legs: { entry: "filled" },
+      ...INTENT, receivedAt: 1, listUpdatedAt: 0, legs: { entry: "filled" },
     }]));
     expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
