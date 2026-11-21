@@ -641,7 +641,10 @@ describe("OrdersWidget pending cancels", () => {
     newerRead([{ ...OPEN_ORDER, order_status: "cancelled" }, SECOND_ORDER]);
     view.rerender(ui());
     await waitFor(() => expect(document.querySelector('[data-cancelled-order="ORD123"]')).not.toBeNull());
-    expect(screen.getByRole("status")).toHaveTextContent("Order cancelled");
+    const cancelled = document.querySelector('[data-cancelled-order="ORD123"]') as HTMLElement;
+    expect(cancelled).toHaveTextContent("Order cancelled");
+    expect(cancelled.className).not.toMatch(/warning/);
+    expect(cancelled.className).not.toMatch(/bg-warning/);
     expect(document.querySelector('[data-pending-cancel="ORD123"]')).toBeNull();
   });
 
@@ -679,6 +682,8 @@ describe("OrdersWidget pending cancels", () => {
     newerRead([SECOND_ORDER]);
     view.rerender(ui());
     await waitFor(() => expect(document.querySelector('[data-pending-cancel="ORD123"]')).toBeNull());
+    expect(screen.getByText("No longer in Orders. Check order history.")).toBeInTheDocument();
+    expect(document.querySelector('[data-left-order="ORD123"]')).toHaveTextContent("No longer in Orders. Check order history.");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
     expect(sessionStorage.getItem(pendingKey(LIVE_SCOPE))).toBeNull();
@@ -746,9 +751,29 @@ describe("OrdersWidget pending cancels", () => {
     expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
     expect(line).toHaveTextContent("Order status unknown. Check Orders before trying again.");
 
-    newerRead([OPEN_ORDER, SECOND_ORDER]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], isFetching: true, dataUpdatedAt: 0 }));
+    view.rerender(ui());
+    await act(async () => {});
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], isFetching: false, dataUpdatedAt: Date.now() }));
     view.rerender(ui());
     await waitFor(() => expect(document.querySelector('[data-unknown-submit]')).toBeNull());
+  }, 15_000);
+
+  it("shows a confirmed entry and unknown stop-loss on that order", async () => {
+    const bracketLost = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    await expect(submitOrderOnce(
+      LIVE_SCOPE,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(bracketLost),
+    )).rejects.toBe(bracketLost);
+    render(ui());
+    const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
+    expect(line).toHaveTextContent("Entry filled · Stop-loss status unknown");
+    expect(screen.getByText("Entry filled · Stop-loss status unknown")).toBeInTheDocument();
   });
 });
 

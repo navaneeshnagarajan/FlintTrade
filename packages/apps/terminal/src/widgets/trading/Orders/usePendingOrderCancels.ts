@@ -46,13 +46,16 @@ export function usePendingOrderCancels<Row>({
 }: Options<Row>) {
   const [state, setState] = useState(() => ({ scope, pending: store.read(scope) }));
   const [confirmed, setConfirmed] = useState<{ scope: string; ids: string[] }>({ scope, ids: [] });
+  const [left, setLeft] = useState<{ scope: string; ids: string[] }>({ scope, ids: [] });
 
   if (state.scope !== scope) setState({ scope, pending: store.read(scope) });
   if (confirmed.scope !== scope) setConfirmed({ scope, ids: [] });
+  if (left.scope !== scope) setLeft({ scope, ids: [] });
 
   useEffect(() => onPendingOrderOutcomesCleared(() => {
     setState((current) => ({ scope: current.scope, pending: [] }));
     setConfirmed((current) => ({ scope: current.scope, ids: [] }));
+    setLeft((current) => ({ scope: current.scope, ids: [] }));
   }), []);
 
   const update = useCallback((next: (pending: PendingOrderCancel[]) => PendingOrderCancel[]) => {
@@ -70,6 +73,7 @@ export function usePendingOrderCancels<Row>({
       { orderId: id, receivedAt, listUpdatedAt },
     ]);
     setConfirmed((current) => ({ scope: current.scope, ids: current.ids.filter((item) => item !== id) }));
+    setLeft((current) => ({ scope: current.scope, ids: current.ids.filter((item) => item !== id) }));
   }, [update]);
 
   const confirm = useCallback((id: string) => {
@@ -85,14 +89,15 @@ export function usePendingOrderCancels<Row>({
   useEffect(() => {
     if (!rows || state.scope !== scope || state.pending.length === 0) return;
     const settledCancelled: string[] = [];
+    const settledLeft: string[] = [];
     let changed = false;
     const next = state.pending.filter((record) => {
       if (!(dataUpdatedAt > record.receivedAt) || !(dataUpdatedAt > record.listUpdatedAt)) return true;
       const row = rows.find((candidate) => orderId(candidate) === record.orderId);
-      // A newer complete list without the order ends the pending line. It
-      // does not say the order was cancelled.
+      // A newer complete list without the order does not say it was cancelled.
       if (!row) {
         changed = true;
+        settledLeft.push(record.orderId);
         return false;
       }
       const settlement = settle(row);
@@ -110,11 +115,18 @@ export function usePendingOrderCancels<Row>({
       }));
       settledCancelled.forEach(onConfirmed);
     }
+    if (settledLeft.length > 0) {
+      setLeft((current) => ({
+        scope: current.scope,
+        ids: [...current.ids.filter((id) => !settledLeft.includes(id)), ...settledLeft],
+      }));
+    }
   }, [rows, dataUpdatedAt, scope, state, orderId, settle, onConfirmed, update]);
 
   return {
     pending: state.scope === scope ? state.pending : [],
     confirmed: confirmed.scope === scope ? confirmed.ids : [],
+    left: left.scope === scope ? left.ids : [],
     request,
     confirm,
   };

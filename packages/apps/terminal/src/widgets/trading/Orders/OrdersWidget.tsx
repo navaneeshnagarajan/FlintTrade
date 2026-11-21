@@ -35,10 +35,11 @@ import {
   runWithMatchingAccountAuthority,
 } from "@/lib/accountQueryState";
 import { cancelOrder, modifyOrder } from "@/services/api";
-import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_NO_LONGER_IN_ORDERS, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentCancelResult } from "@/lib/orderOutcome";
 import { pendingOrderScope } from "@/lib/pendingOrderStore";
 import { useSettleUnknownSubmits, useUnknownOrderSubmits } from "@/hooks/useOrderSubmitGuard";
+import { unknownSubmitSentence } from "@/lib/orderSubmitGuard";
 import { usePendingOrderCancels, type PendingCancelSettlement } from "./usePendingOrderCancels";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
@@ -715,14 +716,23 @@ function OrdersWidget(_props: WidgetProps) {
       {
         accessorKey: "orderStatus",
         header: "Status",
-        cell: ({ row }) => (
-          <Badge
-            variant={statusVariant(row.original.orderStatus)}
-            className="text-xs font-medium"
-          >
-            {row.original.orderStatus}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const legLine = unknownSubmits
+            .filter((record) => record.symbol === row.original.symbol && record.exchange === row.original.exchange)
+            .map(unknownSubmitSentence)
+            .find((sentence) => sentence !== ORDER_STATUS_UNKNOWN);
+          return (
+            <span className="inline-flex flex-col gap-0.5">
+              <Badge
+                variant={statusVariant(row.original.orderStatus)}
+                className="text-xs font-medium"
+              >
+                {row.original.orderStatus}
+              </Badge>
+              {legLine ? <span className="text-xs text-warning">{legLine}</span> : null}
+            </span>
+          );
+        },
       },
       {
         id: "actions",
@@ -791,7 +801,7 @@ function OrdersWidget(_props: WidgetProps) {
         },
       },
     ],
-    [canManageOrders, isExplore, actionPending, currentIdentity, pendingCancelIds],
+    [canManageOrders, isExplore, actionPending, currentIdentity, pendingCancelIds, unknownSubmits],
   );
 
   const table = useTable({
@@ -893,38 +903,55 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       )}
 
-      {(actionNotice
-        || unknownSubmits.length > 0
-        || pendingCancels.pending.length > 0
-        || pendingCancels.confirmed.length > 0) && (
-        <div
-          role="status"
-          className="px-3 py-2 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning"
-        >
-          {actionNotice && <p>{actionNotice}</p>}
-          {unknownSubmits.map((record) => (
-            <p key={`unknown-${record.key}`} data-unknown-submit={record.key}>
-              <span className="font-mono">
-                {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
-              </span>
-              {" · "}
-              {ORDER_STATUS_UNKNOWN}
-            </p>
-          ))}
-          {pendingCancels.pending.map((record) => (
-            <p key={`pending-${record.orderId}`} data-pending-cancel={record.orderId}>
-              {CANCELLATION_REQUESTED}
-              <span className="text-text-muted"> · Order ID {record.orderId}</span>
-            </p>
-          ))}
-          {pendingCancels.confirmed.map((orderId) => (
-            <p key={`cancelled-${orderId}`} data-cancelled-order={orderId}>
-              {ORDER_CANCELLED}
-              <span className="text-text-muted"> · Order ID {orderId}</span>
-            </p>
-          ))}
-        </div>
-      )}
+      <div className="mx-3 mt-2 min-h-[2.75rem] space-y-2" data-testid="orders-notice-slot">
+        {(actionNotice
+          || unknownSubmits.length > 0
+          || pendingCancels.pending.length > 0) && (
+          <div
+            role="status"
+            className="px-3 py-2 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning"
+          >
+            {actionNotice && <p>{actionNotice}</p>}
+            {unknownSubmits.map((record) => (
+              <p key={`unknown-${record.key}`} data-unknown-submit={record.key}>
+                <span className="font-mono">
+                  {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
+                </span>
+                {" · "}
+                {unknownSubmitSentence(record)}
+              </p>
+            ))}
+            {pendingCancels.pending.map((record) => (
+              <p key={`pending-${record.orderId}`} data-pending-cancel={record.orderId}>
+                {CANCELLATION_REQUESTED}
+                <span className="text-text-secondary"> · Order ID {record.orderId}</span>
+              </p>
+            ))}
+          </div>
+        )}
+        {pendingCancels.confirmed.map((orderId) => (
+          <p
+            key={`cancelled-${orderId}`}
+            role="status"
+            data-cancelled-order={orderId}
+            className="px-3 py-2 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default"
+          >
+            {ORDER_CANCELLED}
+            <span className="text-text-secondary"> · Order ID {orderId}</span>
+          </p>
+        ))}
+        {pendingCancels.left.map((orderId) => (
+          <p
+            key={`left-${orderId}`}
+            role="status"
+            data-left-order={orderId}
+            className="px-3 py-2 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default"
+          >
+            {ORDER_NO_LONGER_IN_ORDERS}
+            <span className="text-text-secondary"> · Order ID {orderId}</span>
+          </p>
+        ))}
+      </div>
 
       {/* Cancel/modify failure banner */}
       {actionError && (
