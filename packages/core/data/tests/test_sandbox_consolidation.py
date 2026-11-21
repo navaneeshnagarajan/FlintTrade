@@ -389,7 +389,9 @@ def test_futures_and_option_buys_use_their_configured_leverage() -> None:
         engine.place_order("NIFTY26JULFUT", "NFO", "BUY", 10, 20_000.0, product="NRML")
         assert engine.get_capital()["used_margin"] == pytest.approx(40_000.0)
 
-        engine.place_order("NIFTY26JUL25000CE", "NFO", "BUY", 50, 100.0, product="NRML")
+        # Options never take a market order; a limit at the touch fills on the next tick.
+        engine.place_order("NIFTY26JUL25000CE", "NFO", "BUY", 50, 100.0, product="NRML", order_type="LIMIT")
+        engine.check_pending_fills({"NFO:NIFTY26JUL25000CE": 100.0})
         assert engine.get_capital()["used_margin"] == pytest.approx(42_500.0)
     finally:
         engine.close()

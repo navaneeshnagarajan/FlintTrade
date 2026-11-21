@@ -50,3 +50,43 @@ def broker_service_descriptors() -> tuple[ProviderDescriptor, ...]:
             )
         )
     return tuple(descriptors)
+
+
+# ---------------------------------------------------------------------------
+# Order-entry profile: how each broker places a stop-loss and target
+# ---------------------------------------------------------------------------
+
+STOP_LOSS_TARGET_ATTACHED = "attached"
+STOP_LOSS_TARGET_SEPARATE = "separate"
+
+# A broker that attaches the stop-loss and target to the entry as one order.
+# Every other broker, and Practice, places them as separate orders. Real
+# placement of an attached order still goes through its own gated verb; this
+# profile only describes the broker, it does not enable anything.
+_ATTACHED_STOP_LOSS_TARGET_BROKERS = frozenset({"dhan"})
+
+
+def stop_loss_target_placement(broker_id: str) -> str:
+    """Return ``attached`` or ``separate`` for a broker id from the catalogue."""
+    key = str(broker_id or "").strip().lower()
+    return STOP_LOSS_TARGET_ATTACHED if key in _ATTACHED_STOP_LOSS_TARGET_BROKERS else STOP_LOSS_TARGET_SEPARATE
+
+
+def broker_display_name(broker_id: str) -> str:
+    """Catalogue display name, ``Practice`` for the sandbox, else the id."""
+    key = str(broker_id or "").strip().lower()
+    if key in {"practice", "sandbox"}:
+        return "Practice"
+    info = BROKER_CATALOG.get(key)
+    return info.display_name if info is not None else key
+
+
+def order_entry_profile(broker_id: str) -> dict[str, str]:
+    """Facts the order rules need about one broker."""
+    key = str(broker_id or "").strip().lower()
+    rules_broker = "practice" if key in {"practice", "sandbox"} else key
+    return {
+        "broker": rules_broker,
+        "broker_name": broker_display_name(key),
+        "stop_loss_target_placement": stop_loss_target_placement(key),
+    }

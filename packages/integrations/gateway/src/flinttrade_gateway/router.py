@@ -15,6 +15,13 @@ from typing import Any, Callable, ContextManager
 
 from flinttrade_core.backend_instance import BackendLeaseProof
 from flinttrade_core.exceptions import UnsupportedCapabilityError
+from flinttrade_core.order_rules import (
+    OrderBudget,
+    OrderBudgetExceeded,
+    OrderRuleRefused,
+    blocking,
+    evaluate_order,
+)
 from flinttrade_engine.request_context import RequestContext, parse_selector
 from flinttrade_engine.safety import (
     EMERGENCY_INTENT_SOURCE,
@@ -491,6 +498,9 @@ class BrokerRouter:
         # the gate (after verify + gate-consume), so it can only delay a dispatch,
         # never bypass safety. None → no throttle (unchanged behaviour).
         self._rate_limiter = rate_limiter
+        # Broker order budgets and modification caps from the order rules
+        # table. Below the gate like the throttle: it can only refuse.
+        self._order_budget = OrderBudget()
         # Optional algo-tag guard (flinttrade_engine.algo_tag_guard.AlgoTagGuard).
         # For adapters advertising required or optional algo-tag support it
         # relays the operator's trusted configured id onto the dispatch session
@@ -908,6 +918,46 @@ class BrokerRouter:
                         break
         return str(exchange) if exchange else ""
 
+    def _admit_order_rules(
+        self,
+        adapter_id: str,
+        order: Any,
+        *,
+        modify_order_id: str | None = None,
+    ) -> None:
+        """Refuse a write that breaks a block-level order rule, at the adapter boundary.
+
+        Runs after ``_verify_safety`` and before any adapter call, for every
+        place and modify whatever its caller (ticket, Scalper, Automate, AI or
+        webhook). The checks that need no market data (order type on options,
+        stop-loss limit gap) and the broker's order budget are decided here; the
+        price-band warnings need the desk's last price and stay with the caller.
+
+        Raises:
+            OrderRuleRefused: A block-level rule applies to the order.
+            OrderBudgetExceeded: The broker's order budget or modification cap
+                would be exceeded.
+        """
+        from .service_profiles import order_entry_profile
+
+        profile = order_entry_profile(adapter_id)
+        results = evaluate_order(
+            order,
+            broker=profile["broker"],
+            broker_name=profile["broker_name"],
+            stop_loss_target_placement=profile["stop_loss_target_placement"],
+        )
+        if blocking(results):
+            raise OrderRuleRefused(results)
+        budget = self._order_budget.check_and_record(
+            profile["broker"],
+            now=time.monotonic(),
+            modify_order_id=modify_order_id,
+            broker_name=profile["broker_name"],
+        )
+        if budget is not None:
+            raise OrderBudgetExceeded([budget])
+
     def _algo_tag(self, adapter_id: str, session: AdapterSessionView, order: Any) -> None:
         """Relay the configured algo_id and count this write for algo-tag brokers.
 
@@ -1026,6 +1076,7 @@ class BrokerRouter:
                 if session.is_read_only:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                self._admit_order_rules(adapter_id, signed_order)
                 self._algo_tag(adapter_id, session, signed_order)
                 await self._throttle(adapter_id, "order")
                 attempt_id = self._prepare_lifecycle(
@@ -1111,6 +1162,7 @@ class BrokerRouter:
                 if session.is_read_only:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                self._admit_order_rules(adapter_id, signed_order, modify_order_id=signed_order_id)
                 self._algo_tag(adapter_id, session, signed_order)
                 await self._throttle(adapter_id, "order")
                 attempt_id = self._prepare_lifecycle(
@@ -1212,6 +1264,9 @@ class BrokerRouter:
                 if session.is_read_only:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                # A cancel only reduces risk, so it is counted against the
+                # broker budget but never refused by it.
+                self._order_budget.record(adapter_id, now=time.monotonic())
                 if emergency_intent:
                     session.algo_id = ""
                 else:

@@ -160,6 +160,7 @@ class EngineOrder:
     submitted_at: datetime | None = None
     filled_at: datetime | None = None
     stop_triggered: bool = False
+    rule_results: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def remaining_quantity(self) -> int:
@@ -635,6 +636,11 @@ class BacktestEngine:
             self._all_orders.append(order)
             return False
 
+        if not self._apply_order_rules(order):
+            order.status = OrderStatus.REJECTED
+            self._all_orders.append(order)
+            return False
+
         if order.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and order.limit_price <= 0:
             logger.warning("Order rejected: LIMIT/STOP_LIMIT with no limit_price")
             order.status = OrderStatus.REJECTED
@@ -671,6 +677,69 @@ class BacktestEngine:
             order.limit_price, order.stop_price,
         )
         return True
+
+    def _apply_order_rules(self, order: EngineOrder) -> bool:
+        """Apply the shared order rules the way a broker would.
+
+        The backtest reads the same rule rows as the ticket, Practice and the
+        order API. A market order on an option is never assumed to fill at any
+        price: it becomes a limit at the Practice price cap from the last price,
+        so a bar that gaps past the cap leaves it unfilled. A stop-market on an
+        option becomes a stop-limit capped the same way from its trigger. Any
+        other block (for example a stop-loss limit too far from its trigger)
+        rejects the order. Every result is kept on ``order.rule_results``.
+
+        Returns:
+            False when the order must be rejected.
+        """
+        from flinttrade_core.order_rules import (  # noqa: PLC0415
+            blocking,
+            evaluate_order,
+            market_price_cap,
+            results_payload,
+        )
+
+        type_names = {
+            OrderType.MARKET: "MARKET",
+            OrderType.LIMIT: "LIMIT",
+            OrderType.STOP: "SL-M",
+            OrderType.STOP_LIMIT: "SL",
+        }
+        on = self._current_time.date() if self._current_time is not None else None
+        results = evaluate_order(
+            {
+                "symbol": order.symbol or self.config.symbol,
+                "exchange": self.config.exchange,
+                "action": order.side.value,
+                "pricetype": type_names.get(order.order_type, ""),
+                "price": str(order.limit_price),
+                "trigger_price": str(order.stop_price),
+            },
+            on=on,
+            broker="practice",
+            broker_name="Practice",
+        )
+        order.rule_results = results_payload(results)
+        blocks = blocking(results)
+        if not blocks:
+            return True
+        rule_ids = {result.rule_id for result in blocks}
+        market_rules = {"options-market-order-not-sent"}
+        stop_market_rules = {"sl-m-not-allowed-options", "options-stop-market-not-sent"}
+        side = order.side.value
+        if rule_ids <= market_rules and order.order_type == OrderType.MARKET:
+            reference = self._last_price(order.symbol or self.config.symbol)
+            if reference <= 0:
+                return False
+            order.order_type = OrderType.LIMIT
+            order.limit_price = market_price_cap(reference, side, on)
+            return True
+        if rule_ids <= stop_market_rules and order.order_type == OrderType.STOP:
+            order.order_type = OrderType.STOP_LIMIT
+            order.limit_price = market_price_cap(order.stop_price, side, on)
+            return True
+        logger.warning("Order rejected by order rule: %s", ", ".join(sorted(rule_ids)))
+        return False
 
     # ------------------------------------------------------------------
     # Order processing

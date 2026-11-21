@@ -1,0 +1,507 @@
+{
+  "version": 1,
+  "notes": "One dated table of order rules for Indian markets. Rows are data: the evaluator in flinttrade_core.order_rules applies them the same way for the order ticket, Practice, backtests and the order API. authority orders the rows (regulatory, exchange, broker, then FlintTrade's own product rules). level is what the operator sees: block refuses the order, warn lets it through with a note, info explains what will happen. message is shown verbatim after its placeholders are filled. Rows that share a family are alternatives: the first matching row in file order wins. A rule that is not confirmed is not listed here, or is listed as info. Lot sizes stay in the instrument master and charges stay in indian_charges.json. How a broker attaches a stop-loss and target is the broker capability profile.",
+  "rules": [
+    {
+      "id": "sl-m-not-allowed-options",
+      "authority": "exchange",
+      "level": "block",
+      "source": "Exchange",
+      "description": "The exchange does not accept stop-loss market orders on options. Use a stop-loss limit order.",
+      "check": "order_type_not_allowed",
+      "scope": {
+        "exchange": "NSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "SL-M"
+        ]
+      },
+      "effective_from": "2026-04-28",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Stop-market isn't available for options; use stop-limit.",
+      "family": "option_stop_market"
+    },
+    {
+      "id": "options-stop-market-not-sent",
+      "authority": "product",
+      "level": "block",
+      "source": "FlintTrade",
+      "description": "FlintTrade never sends a stop-loss market order on an option, on any exchange.",
+      "check": "order_type_not_allowed",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "SL-M"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Stop-market isn't available for options; use stop-limit.",
+      "family": "option_stop_market"
+    },
+    {
+      "id": "options-market-order-not-sent",
+      "authority": "product",
+      "level": "block",
+      "source": "FlintTrade",
+      "description": "FlintTrade never sends a plain market order on an option. Every option order carries a limit price.",
+      "check": "order_type_not_allowed",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "MARKET"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Market orders aren't accepted on options. Use a limit price."
+    },
+    {
+      "id": "algo-market-orders-fo-rejected",
+      "authority": "regulatory",
+      "level": "block",
+      "source": "Regulation",
+      "description": "The exchange rejects plain market orders in F&O sent through an API. Brokers that turn a market order into a capped limit order are exempt.",
+      "check": "note",
+      "scope": {
+        "exchange": "NSE",
+        "broker": "all",
+        "instrument": "future",
+        "order_types": [
+          "MARKET",
+          "SL-M"
+        ],
+        "unless_broker": [
+          "dhan",
+          "kotakneo",
+          "practice"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Market orders in F&O are not accepted — use a limit price."
+    },
+    {
+      "id": "market-order-needs-trade-today",
+      "authority": "exchange",
+      "level": "block",
+      "source": "Exchange",
+      "description": "A market order is refused on a contract that has not traded yet today.",
+      "check": "needs_trade_today",
+      "scope": {
+        "exchange": "NSE",
+        "broker": "all",
+        "instrument": "derivative",
+        "order_types": [
+          "MARKET",
+          "SL-M"
+        ]
+      },
+      "effective_from": "2026-04-28",
+      "effective_to": null,
+      "parameters": {},
+      "message": "This contract hasn't traded today — use a limit price.",
+      "family": "no_trade_today"
+    },
+    {
+      "id": "bse-stop-limit-gap",
+      "authority": "exchange",
+      "level": "block",
+      "source": "Exchange",
+      "description": "On BSE options, the stop-loss limit must be within ₹10 of the trigger when the trigger is ₹50 or less, and within 20% of the trigger above that.",
+      "check": "stop_limit_gap",
+      "scope": {
+        "exchange": "BSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "SL"
+        ]
+      },
+      "effective_from": "2026-02-09",
+      "effective_to": null,
+      "parameters": {
+        "max_gap_pct": 20,
+        "min_gap_inr": 10,
+        "flat_gap_up_to_trigger_inr": 50
+      },
+      "message": "Stop-loss limit must be within ₹{max_gap} of trigger."
+    },
+    {
+      "id": "nse-options-operating-range",
+      "authority": "exchange",
+      "level": "block",
+      "source": "Exchange",
+      "description": "When the broker quote carries the contract's exact price limits, a limit price outside them is refused.",
+      "check": "circuit_band",
+      "scope": {
+        "exchange": "NSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "LIMIT",
+          "SL"
+        ]
+      },
+      "effective_from": "2026-04-28",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Enter a price within ₹{low}–₹{high}."
+    },
+    {
+      "id": "bse-lpp-sensex-expiry-day",
+      "authority": "exchange",
+      "level": "warn",
+      "source": "Exchange",
+      "description": "On SENSEX expiry day, BSE option limit prices are expected within 40% of the last price, with a ₹10 minimum range.",
+      "check": "price_band",
+      "scope": {
+        "exchange": "BSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "LIMIT",
+          "SL"
+        ],
+        "underlying": "SENSEX",
+        "expiry_day": true
+      },
+      "effective_from": "2026-03-12",
+      "effective_to": null,
+      "parameters": {
+        "band_pct": 40,
+        "min_band_inr": 10
+      },
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "family": "option_price_band"
+    },
+    {
+      "id": "bse-limit-price-protection",
+      "authority": "exchange",
+      "level": "warn",
+      "source": "Exchange",
+      "description": "BSE option limit prices are expected within 40% of the last price, with a ₹20 minimum range. FlintTrade warns and still lets the order go.",
+      "check": "price_band",
+      "scope": {
+        "exchange": "BSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "LIMIT",
+          "SL"
+        ]
+      },
+      "effective_from": "2025-12-01",
+      "effective_to": null,
+      "parameters": {
+        "band_pct": 40,
+        "min_band_inr": 20
+      },
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "family": "option_price_band"
+    },
+    {
+      "id": "nse-limit-price-protection-options",
+      "authority": "exchange",
+      "level": "warn",
+      "source": "Exchange",
+      "description": "NSE option limit prices are expected within 40% of the last price, with a ₹20 minimum range. FlintTrade warns and still lets the order go.",
+      "check": "price_band",
+      "scope": {
+        "exchange": "NSE",
+        "broker": "all",
+        "instrument": "option",
+        "order_types": [
+          "LIMIT",
+          "SL"
+        ]
+      },
+      "effective_from": "2026-04-28",
+      "effective_to": null,
+      "parameters": {
+        "band_pct": 40,
+        "min_band_inr": 20
+      },
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "family": "option_price_band"
+    },
+    {
+      "id": "order-rate-threshold",
+      "authority": "regulatory",
+      "level": "block",
+      "source": "Regulation",
+      "description": "Live orders, changes and cancels are limited to 10 per second for each exchange.",
+      "check": "order_rate",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {
+        "max_per_second": 10
+      },
+      "message": "Wait a moment — the limit is {max_per_second} orders per second per exchange."
+    },
+    {
+      "id": "self-built-algo-undertaking",
+      "authority": "regulatory",
+      "level": "warn",
+      "source": "Regulation",
+      "description": "A one-time acknowledgement when Live is turned on. It never blocks an individual order.",
+      "check": "live_acknowledgement",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2026-11-20",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Orders will be sent from this computer through your broker account. Losses from your own strategy or automation aren't covered by the exchange grievance process."
+    },
+    {
+      "id": "kotak-market-order-no-ltp",
+      "authority": "broker",
+      "level": "block",
+      "source": "Kotak Neo",
+      "description": "Kotak Neo refuses a market order on an option that has not traded yet today.",
+      "check": "needs_trade_today",
+      "scope": {
+        "exchange": "all",
+        "broker": "kotakneo",
+        "instrument": "option",
+        "order_types": [
+          "MARKET"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {},
+      "message": "This contract hasn't traded today — use a limit price.",
+      "family": "no_trade_today"
+    },
+    {
+      "id": "dhan-order-rate-limits",
+      "authority": "broker",
+      "level": "block",
+      "source": "Dhan",
+      "description": "Dhan accepts at most 10 orders a second, 250 a minute, 1,000 an hour and 7,000 a day.",
+      "check": "order_budget",
+      "scope": {
+        "exchange": "all",
+        "broker": "dhan",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {
+        "per_second": 10,
+        "per_minute": 250,
+        "per_hour": 1000,
+        "per_day": 7000
+      },
+      "message": "Wait {secs} seconds — the limit is {limit} orders per {window}."
+    },
+    {
+      "id": "dhan-modifications-per-order",
+      "authority": "broker",
+      "level": "block",
+      "source": "Dhan",
+      "description": "Dhan accepts at most 25 changes to one order.",
+      "check": "modification_cap",
+      "scope": {
+        "exchange": "all",
+        "broker": "dhan",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {
+        "max_modifications": 25
+      },
+      "message": "This order has already been modified {limit} times — place a new order."
+    },
+    {
+      "id": "dhan-market-price-protection",
+      "authority": "broker",
+      "level": "info",
+      "source": "Dhan",
+      "description": "Dhan sends a market order as a limit order capped near the last price.",
+      "check": "note",
+      "scope": {
+        "exchange": "all",
+        "broker": "dhan",
+        "instrument": "derivative",
+        "order_types": [
+          "MARKET",
+          "SL-M"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Market orders are sent as limits near the last price and may not fill."
+    },
+    {
+      "id": "kotak-market-price-protection",
+      "authority": "broker",
+      "level": "warn",
+      "source": "Kotak Neo",
+      "description": "Kotak Neo sends a market order as a limit order within a band that depends on the price.",
+      "check": "market_band",
+      "scope": {
+        "exchange": "all",
+        "broker": "kotakneo",
+        "instrument": "all",
+        "order_types": [
+          "MARKET",
+          "SL-M"
+        ]
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {
+        "option_tiers": [
+          [
+            1,
+            "0.10",
+            "inr"
+          ],
+          [
+            5,
+            "10",
+            "pct"
+          ],
+          [
+            10,
+            "5",
+            "pct"
+          ],
+          [
+            100,
+            "3",
+            "pct"
+          ],
+          [
+            500,
+            "2",
+            "pct"
+          ],
+          [
+            null,
+            "1",
+            "pct"
+          ]
+        ],
+        "other_tiers": [
+          [
+            100,
+            "2",
+            "pct"
+          ],
+          [
+            500,
+            "1",
+            "pct"
+          ],
+          [
+            null,
+            "0.5",
+            "pct"
+          ]
+        ]
+      },
+      "message": "Market orders are sent as limits within about {band} of the last price and may not fill."
+    },
+    {
+      "id": "dhan-intraday-square-off",
+      "authority": "broker",
+      "level": "warn",
+      "source": "Dhan",
+      "description": "Dhan closes intraday F&O positions from 15:25.",
+      "check": "square_off",
+      "scope": {
+        "exchange": "all",
+        "broker": "dhan",
+        "instrument": "derivative",
+        "order_types": [
+          "all"
+        ],
+        "product": "MIS"
+      },
+      "effective_from": "2026-04-01",
+      "effective_to": null,
+      "parameters": {
+        "square_off_from": "15:25",
+        "warn_minutes_before": 5
+      },
+      "message": "Intraday F&O positions are closed from {square_off_from} — exit before then."
+    },
+    {
+      "id": "practice-market-price-cap",
+      "authority": "broker",
+      "level": "info",
+      "source": "Practice",
+      "description": "Practice and backtests fill a market order only within 3% of the last price. A market order on an option in a backtest becomes a limit at that cap.",
+      "check": "market_price_cap",
+      "scope": {
+        "exchange": "all",
+        "broker": "practice",
+        "instrument": "all",
+        "order_types": [
+          "MARKET",
+          "SL-M"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {
+        "cap_pct": 3
+      },
+      "message": "Practice fills a market order only within {cap_pct}% of the last price."
+    },
+    {
+      "id": "broker-separate-stop-loss-target",
+      "authority": "broker",
+      "level": "info",
+      "source": "{broker_name}",
+      "description": "Brokers without attached orders get the stop-loss and target as separate orders.",
+      "check": "separate_stop_loss_target",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Stop-loss and target are placed as separate orders with this broker."
+    }
+  ]
+}

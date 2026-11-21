@@ -175,7 +175,11 @@ def _live_write_error_status(
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     # Match the real inheritance used by except, not a duck-typed __class__.
+    from flinttrade_core.order_rules import OrderRuleRefused  # noqa: PLC0415
+
     error_type = type(exc)
+    if issubclass(error_type, OrderRuleRefused):
+        return int(error_type.http_status)
     if issubclass(error_type, SafetyBypassError):
         return 403
     disconnected = issubclass(error_type, (BrokerNotFoundError, KeyError))
@@ -211,6 +215,13 @@ def _live_write_error(
     if unknown:
         response["order_outcome"] = "unknown"
         response["reason"] = REASON_RESPONSE_UNCONFIRMED
+    else:
+        from flinttrade_core.order_rules import OrderRuleRefused, results_payload  # noqa: PLC0415
+
+        if isinstance(exc, OrderRuleRefused):
+            response["message"] = str(exc)
+            response["code"] = "order_rule_blocked"
+            response["rule_results"] = results_payload(exc.results)
     return jsonify(response), (502 if http_status == 502 else 500) if unknown else http_status
 
 
@@ -3032,6 +3043,71 @@ def _gtt_contract_refusal(body: Mapping[str, Any]) -> tuple[Any, int] | None:
     ), 422
 
 
+def _order_rule_results(body: Mapping[str, Any], *, broker: str) -> list[Any]:
+    """Evaluate the shared order rules for one request body.
+
+    The API, MCP tools, the ticket, Practice and backtests read the same rows,
+    so a refusal here carries the same level, source and message the ticket
+    shows. ``last_price`` is optional; without it the price-band warning is
+    skipped and the exchange decides.
+    """
+    from flinttrade_core.order_rules import evaluate_order  # noqa: PLC0415
+    from flinttrade_gateway.service_profiles import order_entry_profile  # noqa: PLC0415
+
+    profile = order_entry_profile(broker)
+    try:
+        normalised = normalise_order_type_fields(body)
+    except ValueError:
+        normalised = dict(body)
+    return evaluate_order(
+        normalised,
+        broker=profile["broker"],
+        broker_name=profile["broker_name"],
+        stop_loss_target_placement=profile["stop_loss_target_placement"],
+        last_price=body.get("last_price"),
+    )
+
+
+def _order_rule_refusal(results: list[Any]) -> tuple[Any, int] | None:
+    """Return the 400 refusal for a block-level result, else None."""
+    from flinttrade_core.order_rules import blocking, headline, results_payload  # noqa: PLC0415
+
+    blocks = blocking(results)
+    if not blocks:
+        return None
+    return jsonify(
+        {
+            "status": "error",
+            "message": headline(blocks),
+            "code": "order_rule_blocked",
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
+            "rule_results": results_payload(results),
+        }
+    ), 400
+
+
+def _with_rule_results(response: tuple[Any, int], results: list[Any]) -> tuple[Any, int]:
+    """Attach warn and info results to a JSON order response."""
+    from flinttrade_core.order_rules import results_payload  # noqa: PLC0415
+
+    if not results:
+        return response
+    resp, status = response
+    try:
+        data = resp.get_json(silent=True)
+    except AttributeError:
+        return response
+    if not isinstance(data, dict) or "rule_results" in data:
+        return response
+    data["rule_results"] = results_payload(results)
+    new_resp = jsonify(data)
+    for header, value in resp.headers.items():
+        if header.lower() not in {"content-length", "content-type"}:
+            new_resp.headers[header] = value
+    return new_resp, status
+
+
 def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tuple[Any, int]:
     """Admit one live or Practice place, then SafetySystem or the sandbox.
 
@@ -3069,7 +3145,11 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
             }
         ), 403
     if mode == _MODE_PRACTICE:
-        return _dispatch_practice_place(payload_body)
+        practice_results = _order_rule_results(payload_body, broker="practice")
+        practice_refusal = _order_rule_refusal(practice_results)
+        if practice_refusal is not None:
+            return practice_refusal
+        return _with_rule_results(_dispatch_practice_place(payload_body), practice_results)
     if not _is_live_mode_unlocked():
         return jsonify(
             {
@@ -3086,14 +3166,21 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
             }
         ), 401
     adapter_id, account_id = _gated_target(payload_body)
+    rule_results = _order_rule_results(payload_body, broker=adapter_id)
+    rule_refusal = _order_rule_refusal(rule_results)
+    if rule_refusal is not None:
+        return rule_refusal
     variety = _variety_from_body(payload_body)
-    return _dispatch_live_order(
-        "place",
-        payload_body,
-        live_payload,
-        adapter_id=adapter_id,
-        account_id=account_id,
-        variety=variety,
+    return _with_rule_results(
+        _dispatch_live_order(
+            "place",
+            payload_body,
+            live_payload,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            variety=variety,
+        ),
+        rule_results,
     )
 
 
@@ -3277,13 +3364,20 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
     payload, error = _decode_routed_live_payload()
     if error is not None:
         return error
+    rule_results = _order_rule_results(body, broker=broker)
+    rule_refusal = _order_rule_refusal(rule_results)
+    if rule_refusal is not None:
+        return rule_refusal
 
-    return _dispatch_live_order(
-        "place",
-        body,
-        payload,
-        adapter_id=broker,
-        variety=_variety_from_body(body),
+    return _with_rule_results(
+        _dispatch_live_order(
+            "place",
+            body,
+            payload,
+            adapter_id=broker,
+            variety=_variety_from_body(body),
+        ),
+        rule_results,
     )
 
 

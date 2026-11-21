@@ -751,7 +751,8 @@ class TestNetWorthLedger:
     """Practice funds expose ledger cash and do not settle futures MTM."""
 
     def test_long_option_premium_is_in_the_ledger_and_margin_stays_inside_current(self, engine: SandboxEngine) -> None:
-        engine.place_order("NIFTY24APR25500CE", "NFO", "BUY", 10, 20.0)
+        engine.place_order("NIFTY24APR25500CE", "NFO", "BUY", 10, 20.0, order_type="LIMIT")
+        engine.check_pending_fills({"NFO:NIFTY24APR25500CE": 20.0})
         capital = engine.get_capital()
         funds = engine.get_funds()
 
