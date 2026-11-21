@@ -63,7 +63,7 @@ STOP_LOSS_TARGET_SEPARATE = "separate"
 # Every other broker, and Practice, places them as separate orders. Real
 # placement of an attached order still goes through its own gated verb; this
 # profile only describes the broker, it does not enable anything.
-_ATTACHED_STOP_LOSS_TARGET_BROKERS = frozenset({"dhan"})
+_ATTACHED_STOP_LOSS_TARGET_BROKERS = frozenset({"dhan", "practice", "sandbox"})
 
 
 def stop_loss_target_placement(broker_id: str) -> str:

@@ -1325,13 +1325,110 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "150" } });
+    // Options open as a limit ticket, so the order needs a price.
+    fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "100" } });
     await reviewAndConfirmPractice(/practice buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: "NIFTY28MAR2422000CE", exchange: "NFO", quantity: 150 }),
+      expect.objectContaining({
+        symbol: "NIFTY28MAR2422000CE", exchange: "NFO", quantity: 150, orderType: "LIMIT", price: 100,
+      }),
       { mode: "practice" },
     );
+  });
+
+  it("opens an option ticket as a limit order and refuses market on the reserved line", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot 75 · Max 1,800 per order");
+    expect(screen.getByRole("radio", { name: "LIMIT" })).toBeChecked();
+    const place = screen.getByRole("button", { name: /practice buy/i });
+    expect(place).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("radio", { name: "MARKET" }));
+    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    await waitFor(() => expect(line).toHaveTextContent(
+      "FlintTrade · Market orders aren't accepted on options. Use a limit price.",
+    ));
+    expect(line).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("radio", { name: "SL-M" }));
+    await waitFor(() => expect(line).toHaveTextContent(
+      "Exchange · Stop-market isn't available for options; use stop-limit.",
+    ));
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("refuses a BSE stop-loss limit too far from its trigger without changing the price", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "SENSEX27NOV2680000CE", name: "SENSEX", exchange: "BFO",
+      instrumenttype: "OPTIDX", lotsize: 20, tick_size: 0.05,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "SENSEX27NOV2680000CE", exchange: "BFO" },
+    })} />);
+    fireEvent.click(screen.getByRole("radio", { name: "SL" }));
+    const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
+    fireEvent.change(priceInput, { target: { value: "39.95" } });
+    fireEvent.change(document.getElementById("orderpad-trig-price") as HTMLInputElement, { target: { value: "50" } });
+    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    await waitFor(() => expect(line).toHaveTextContent("Exchange · Stop-loss limit must be within ₹10 of trigger."));
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
+    expect(priceInput.value).toBe("39.95");
+
+    fireEvent.change(priceInput, { target: { value: "40" } });
+    await waitFor(() => expect(line).not.toHaveTextContent("Stop-loss limit"));
+  });
+
+  it("warns about a price outside the band but leaves Place enabled", async () => {
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 100 });
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot 75 · Max 1,800 per order");
+    const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
+    fireEvent.change(priceInput, { target: { value: "200" } });
+    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    await waitFor(() => expect(line).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140)."));
+    expect(line).toHaveAttribute("data-level", "warn");
+    expect(line).not.toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
+    expect(priceInput.value).toBe("200");
+  });
+
+  it("shows a server rule refusal on the reserved line", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
+      "Exchange · Enter a price within ₹0.05–₹250.",
+      400,
+      {
+        code: "order_rule_blocked",
+        message: "Exchange · Enter a price within ₹0.05–₹250.",
+        rule_results: [
+          { level: "block", source: "Exchange", rule_id: "nse-options-operating-range", message: "Enter a price within ₹0.05–₹250." },
+          { level: "warn", source: "Exchange", rule_id: "nse-limit-price-protection-options", message: "Price may be outside the exchange band (₹60–₹140)." },
+        ],
+      },
+    ));
+    renderNfoPad();
+    await screen.findByText("Lot 75 · Max 1,800 per order");
+    fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "300" } });
+    await reviewAndConfirmPractice(/practice buy/i);
+    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    await waitFor(() => expect(line).toHaveTextContent("Exchange · Enter a price within ₹0.05–₹250."));
+    fireEvent.click(screen.getByTestId("order-rule-more"));
+    expect(screen.getByTestId("order-rule-list")).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140).");
   });
 
   it("refuses NIFTY 1801 and a pasted 1800 with the lot-aligned cap only", async () => {

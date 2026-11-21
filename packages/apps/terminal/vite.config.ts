@@ -72,6 +72,14 @@ export default defineConfig({
         import.meta.dirname,
         "../../core/core/src/flinttrade_core/data/indian_charges.json",
       ),
+      "@flinttrade/order-rules": path.resolve(
+        import.meta.dirname,
+        "../../core/core/src/flinttrade_core/data/order_rules.json",
+      ),
+      "@flinttrade/order-rules-cases": path.resolve(
+        import.meta.dirname,
+        "../../core/core/tests/fixtures/order_rules_cases.json",
+      ),
       "@flinttrade/instrument-lots": path.resolve(
         import.meta.dirname,
         "../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json",

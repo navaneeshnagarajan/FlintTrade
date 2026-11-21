@@ -85,7 +85,7 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
     lines = table.strip().splitlines()
     assert lines[0] == "| Rule id | Scope | Effective from | Description | Message |"
     assert len(lines) == len(load_rules()) + 2
-    assert "| `bse-stop-limit-gap` | BSE · all brokers · options · SL | 2026-02-09 | On BSE options" in table
+    assert "| `bse-stop-limit-gap` | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price" in table
     # Parameters already known from the row are filled in; sources are not listed.
     assert "Intraday F&O positions are closed from 15:25 — exit before then." in table
     assert "Regulation" not in table

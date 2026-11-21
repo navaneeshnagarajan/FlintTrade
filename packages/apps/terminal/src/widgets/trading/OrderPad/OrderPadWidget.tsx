@@ -23,7 +23,7 @@
  *     same way until the operator changes the symbol or closes the pad.
  */
 
-import { useState, useEffect, useRef, useCallback, memo, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo, type KeyboardEvent } from "react";
 import { useForm, Controller, type SubmitHandler, type Resolver } from "react-hook-form";
 import { useAtomValue } from "jotai";
 import { useModeStore } from "@/stores/modeStore";
@@ -75,6 +75,15 @@ import {
   OPTIONS_EXCHANGES,
 } from "@/lib/orderGuards";
 import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
+import { OrderRuleLine } from "@/components/orders/OrderRuleLine";
+import {
+  brokerDisplayName,
+  evaluateOrderRules,
+  hasBlockingRule,
+  isOptionContract,
+  ruleResultsFrom,
+  type RuleResult,
+} from "@/lib/orderRules";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import {
@@ -419,11 +428,16 @@ interface OrderPadPrefill {
   symbol?: string;
   exchange?: string;
   action?: "BUY" | "SELL";
+  /** A quick-trade or "Exit now" opens a priced ticket; the user still presses Place. */
+  orderType?: "LIMIT" | "SL";
+  price?: number;
+  qty?: number;
+  product?: string;
 }
 
 /** Symbol, exchange, and action used to ignore a repeated props sync. */
 function prefillTargetKey(next: OrderPadPrefill): string {
-  return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}`;
+  return `${next.symbol ?? ""}|${next.exchange ?? ""}|${next.action ?? ""}|${next.orderType ?? ""}|${next.price ?? ""}|${next.qty ?? ""}`;
 }
 
 /** Place-response fields the Practice fill sentence reads.
@@ -563,6 +577,9 @@ function OrderPadWidget(props: WidgetProps) {
   });
 
   const appliedTargetRef = useRef("");
+  // Contract whose order type came from a prefill, so the option default below
+  // leaves it alone.
+  const prefilledOrderTypeRef = useRef("");
   const appliedNonceRef = useRef("");
   const applyPrefill = useCallback((
     next: OrderPadPrefill,
@@ -585,6 +602,15 @@ function OrderPadWidget(props: WidgetProps) {
     setValue("symbol", next.symbol);
     if (next.exchange) setValue("exchange", next.exchange);
     if (next.action === "BUY" || next.action === "SELL") setValue("action", next.action);
+    if (next.orderType === "LIMIT" || next.orderType === "SL") {
+      prefilledOrderTypeRef.current = `${next.exchange ?? ""}:${next.symbol}`;
+      setValue("orderType", next.orderType);
+    }
+    if (typeof next.price === "number" && Number.isFinite(next.price) && next.price > 0) {
+      setValue("price", next.price);
+    }
+    if (typeof next.qty === "number" && Number.isInteger(next.qty) && next.qty > 0) setValue("qty", next.qty);
+    if (next.product === "MIS" || next.product === "NRML" || next.product === "CNC") setValue("product", next.product);
     setQuery(next.symbol);
     setSearchMiss(null);
     setSearchOpen(false);
@@ -593,9 +619,21 @@ function OrderPadWidget(props: WidgetProps) {
   const prefillSymbol = prefill.symbol;
   const prefillExchange = prefill.exchange;
   const prefillAction = prefill.action;
+  const prefillOrderType = prefill.orderType;
+  const prefillPrice = prefill.price;
+  const prefillQty = prefill.qty;
+  const prefillProduct = prefill.product;
   useEffect(() => {
-    applyPrefill({ symbol: prefillSymbol, exchange: prefillExchange, action: prefillAction });
-  }, [applyPrefill, prefillSymbol, prefillExchange, prefillAction]);
+    applyPrefill({
+      symbol: prefillSymbol,
+      exchange: prefillExchange,
+      action: prefillAction,
+      orderType: prefillOrderType,
+      price: prefillPrice,
+      qty: prefillQty,
+      product: prefillProduct,
+    });
+  }, [applyPrefill, prefillSymbol, prefillExchange, prefillAction, prefillOrderType, prefillPrice, prefillQty, prefillProduct]);
 
   // Fired by retargetOrderPad. The docking library does not re-render a tab
   // whose node object is unchanged, so props.params stay stale. The nonce is
@@ -702,6 +740,45 @@ function OrderPadWidget(props: WidgetProps) {
 
   // Options-specific: the tick for an NFO/BFO contract IS the option premium.
   const isOptionsExchange = OPTIONS_EXCHANGES.has(exchange);
+
+  // Options are never sent at market. Picking an option contract moves a
+  // market or stop-market ticket to its limit form once per contract; choosing
+  // MARKET again afterwards shows the refusal instead of changing it back.
+  const optionDefaultKeyRef = useRef("");
+  useEffect(() => {
+    if (!isOptionContract(symbol, exchange)) return;
+    const key = `${exchange}:${symbol}`;
+    if (optionDefaultKeyRef.current === key) return;
+    optionDefaultKeyRef.current = key;
+    if (prefilledOrderTypeRef.current === key) return;
+    const current = getValues("orderType");
+    if (current === "MARKET") setValue("orderType", "LIMIT");
+    else if (current === "SL-M") setValue("orderType", "SL");
+  }, [exchange, getValues, setValue, symbol]);
+
+  const ruleBroker = useBrokerStore((s) => (
+    appMode === "live" ? resolveAccountAuthorityIdentity({ ...s, mode: appMode }).brokerType : "practice"
+  ));
+  const ruleResults = useMemo<RuleResult[]>(() => evaluateOrderRules({
+    symbol,
+    exchange,
+    orderType,
+    action,
+    price: PRICE_ENABLED.has(orderType) ? (price ?? null) : null,
+    triggerPrice: TRIGGER_ENABLED.has(orderType) ? (trigPrice ?? null) : null,
+    lastPrice: ltp > 0 ? ltp : null,
+    broker: ruleBroker,
+    brokerName: brokerDisplayName(ruleBroker),
+    product,
+  }), [action, exchange, ltp, orderType, price, product, ruleBroker, symbol, trigPrice]);
+  const ruleBlocked = hasBlockingRule(ruleResults);
+  // A server or broker refusal of the last press, shown on the same line until
+  // the order changes.
+  const [submitRefusal, setSubmitRefusal] = useState<{ results: RuleResult[]; text: string } | null>(null);
+  useEffect(() => {
+    setSubmitRefusal(null);
+  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice]);
+  const lineResults = submitRefusal?.results.length ? submitRefusal.results : ruleResults;
 
   // Follow the joined channel: a fresh broadcast retargets the pad exactly
   // like picking the instrument from the search dropdown. The effect keys on
@@ -1060,6 +1137,10 @@ function OrderPadWidget(props: WidgetProps) {
         // copy as a broker outage or change readiness from its wording.
         const unknown = presentation.body === ORDER_STATUS_UNKNOWN;
         if (unknown) setPracticeReview(null);
+        if (!unknown) {
+          const rejected = ruleResultsFrom(err instanceof OrderApiError ? err.body : null);
+          setSubmitRefusal({ results: rejected, text: presentation.body });
+        }
         showToast(unknown ? "unknown" : "error", presentation.body, 6000, false);
         emitNotification({ category: "order", accountScopeKey: submissionScope, skipAccountRefresh: true, ...presentation });
         return false;
@@ -1108,6 +1189,9 @@ function OrderPadWidget(props: WidgetProps) {
         getValues("symbol"),
         err instanceof Error ? err.message : "Order failed",
       ), getValues("symbol"));
+      if (code !== "quantity_admission") {
+        setSubmitRefusal({ results: ruleResultsFrom(err instanceof OrderApiError ? err.body : null), text: msg });
+      }
       if (httpStatus === 403 || /mode changed/i.test(msg) || code === "quantity_admission") {
         setPracticeReview(null);
         if (code === "quantity_admission") {
@@ -1187,6 +1271,8 @@ function OrderPadWidget(props: WidgetProps) {
       setError("qty", { type: QUANTITY_CHECK_ERROR, message: qtyRefusal });
       return;
     }
+    // A block-level rule keeps Place disabled; a keyboard submit stops here too.
+    if (ruleBlocked) return;
 
     // Live-intent surfaces still use checkOrderEntryMode to refuse Explore.
     // Order Pad's Practice Buy is the paper path: Explore records a sample
@@ -1732,13 +1818,13 @@ function OrderPadWidget(props: WidgetProps) {
                     <p id="orderpad-qty-hint" className="min-h-4 text-xs leading-4 text-text-muted">
                       {quantityHint || "\u00a0"}
                     </p>
-                    <p
+                    <OrderRuleLine
                       id="orderpad-qty-error"
-                      role={errors.qty ? "alert" : undefined}
-                      className="min-h-4 text-xs leading-4 text-loss"
-                    >
-                      {errors.qty?.message || "\u00a0"}
-                    </p>
+                      refusal={errors.qty?.message}
+                      results={lineResults}
+                      fallback={submitRefusal && submitRefusal.results.length === 0 ? submitRefusal.text : undefined}
+                      announce={submitRefusal == null}
+                    />
                   </div>
                 );
               }}
@@ -1855,6 +1941,13 @@ function OrderPadWidget(props: WidgetProps) {
                   placeholder={priceEnabled ? "0.00" : "N/A"}
                 />
               )}
+            />
+            <OrderRuleLine
+              id="orderpad-qty-error"
+              refusal={errors.qty?.message}
+              results={lineResults}
+              fallback={submitRefusal && submitRefusal.results.length === 0 ? submitRefusal.text : undefined}
+              announce={submitRefusal == null}
             />
           </div>
         )}
@@ -1998,7 +2091,7 @@ function OrderPadWidget(props: WidgetProps) {
         ) : null}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny" || admission?.kind === "clamp"}
+          disabled={loading || !symbol || !qty || liveMuted || ruleBlocked || admission?.kind === "deny" || admission?.kind === "clamp"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}

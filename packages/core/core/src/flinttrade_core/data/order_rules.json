@@ -7,7 +7,7 @@
       "authority": "exchange",
       "level": "block",
       "source": "Exchange",
-      "description": "The exchange does not accept stop-loss market orders on options. Use a stop-loss limit order.",
+      "description": "Stop-loss market orders are not allowed on options. Use stop-loss limit.",
       "check": "order_type_not_allowed",
       "scope": {
         "exchange": "NSE",
@@ -69,7 +69,7 @@
       "authority": "regulatory",
       "level": "block",
       "source": "Regulation",
-      "description": "The exchange rejects plain market orders in F&O sent through an API. Brokers that turn a market order into a capped limit order are exempt.",
+      "description": "API market orders in F&O are sent as limit orders with price protection and may not fill in a fast market.",
       "check": "note",
       "scope": {
         "exchange": "NSE",
@@ -95,7 +95,7 @@
       "authority": "exchange",
       "level": "block",
       "source": "Exchange",
-      "description": "A market order is refused on a contract that has not traded yet today.",
+      "description": "Market orders are allowed only on contracts that have traded during the day.",
       "check": "needs_trade_today",
       "scope": {
         "exchange": "NSE",
@@ -117,7 +117,7 @@
       "authority": "exchange",
       "level": "block",
       "source": "Exchange",
-      "description": "On BSE options, the stop-loss limit must be within ₹10 of the trigger when the trigger is ₹50 or less, and within 20% of the trigger above that.",
+      "description": "On BSE the stop-loss limit price must be within a set gap of the trigger price.",
       "check": "stop_limit_gap",
       "scope": {
         "exchange": "BSE",
@@ -141,7 +141,7 @@
       "authority": "exchange",
       "level": "block",
       "source": "Exchange",
-      "description": "When the broker quote carries the contract's exact price limits, a limit price outside them is refused.",
+      "description": "NSE options trade within a daily operating range. Prices outside it are rejected.",
       "check": "circuit_band",
       "scope": {
         "exchange": "NSE",
@@ -162,7 +162,7 @@
       "authority": "exchange",
       "level": "warn",
       "source": "Exchange",
-      "description": "On SENSEX expiry day, BSE option limit prices are expected within 40% of the last price, with a ₹10 minimum range.",
+      "description": "On SENSEX expiry day the price protection range for low-priced options narrows to ₹10.",
       "check": "price_band",
       "scope": {
         "exchange": "BSE",
@@ -189,7 +189,7 @@
       "authority": "exchange",
       "level": "warn",
       "source": "Exchange",
-      "description": "BSE option limit prices are expected within 40% of the last price, with a ₹20 minimum range. FlintTrade warns and still lets the order go.",
+      "description": "BSE rejects limit orders outside its price protection range.",
       "check": "price_band",
       "scope": {
         "exchange": "BSE",
@@ -214,7 +214,7 @@
       "authority": "exchange",
       "level": "warn",
       "source": "Exchange",
-      "description": "NSE option limit prices are expected within 40% of the last price, with a ₹20 minimum range. FlintTrade warns and still lets the order go.",
+      "description": "NSE rejects option limit orders priced too far from the last traded price.",
       "check": "price_band",
       "scope": {
         "exchange": "NSE",
@@ -239,7 +239,7 @@
       "authority": "regulatory",
       "level": "block",
       "source": "Regulation",
-      "description": "Live orders, changes and cancels are limited to 10 per second for each exchange.",
+      "description": "Up to 10 orders per second per exchange. Higher rates need exchange registration.",
       "check": "order_rate",
       "scope": {
         "exchange": "all",
@@ -261,7 +261,7 @@
       "authority": "regulatory",
       "level": "warn",
       "source": "Regulation",
-      "description": "A one-time acknowledgement when Live is turned on. It never blocks an individual order.",
+      "description": "Live API trading requires a client undertaking to the broker that the strategy is self-built. Losses from its logic are outside the exchange grievance process.",
       "check": "live_acknowledgement",
       "scope": {
         "exchange": "all",
@@ -281,7 +281,7 @@
       "authority": "broker",
       "level": "block",
       "source": "Kotak Neo",
-      "description": "Kotak Neo refuses a market order on an option that has not traded yet today.",
+      "description": "Kotak rejects market orders on contracts with no traded price for the day.",
       "check": "needs_trade_today",
       "scope": {
         "exchange": "all",
@@ -302,7 +302,7 @@
       "authority": "broker",
       "level": "block",
       "source": "Dhan",
-      "description": "Dhan accepts at most 10 orders a second, 250 a minute, 1,000 an hour and 7,000 a day.",
+      "description": "Dhan limits orders to 10 per second, 250 per minute, 1,000 per hour and 7,000 per day, with 25 modifications per order.",
       "check": "order_budget",
       "scope": {
         "exchange": "all",
@@ -349,7 +349,7 @@
       "authority": "broker",
       "level": "info",
       "source": "Dhan",
-      "description": "Dhan sends a market order as a limit order capped near the last price.",
+      "description": "Dhan sends market orders, including triggered Super Order legs, as limit orders within about 10% of the last price.",
       "check": "note",
       "scope": {
         "exchange": "all",
@@ -370,7 +370,7 @@
       "authority": "broker",
       "level": "warn",
       "source": "Kotak Neo",
-      "description": "Kotak Neo sends a market order as a limit order within a band that depends on the price.",
+      "description": "Kotak sends market orders as limit orders within a protection band of the last price.",
       "check": "market_band",
       "scope": {
         "exchange": "all",
@@ -441,7 +441,7 @@
       "authority": "broker",
       "level": "warn",
       "source": "Dhan",
-      "description": "Dhan closes intraday F&O positions from 15:25.",
+      "description": "Dhan squares off open intraday F&O positions from 15:25.",
       "check": "square_off",
       "scope": {
         "exchange": "all",
