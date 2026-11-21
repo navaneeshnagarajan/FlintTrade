@@ -142,7 +142,7 @@ import {
 } from "./positionReconcile";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
-import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { OrderStatusUnknownLine, OrderStatusUnknownLink } from "@/components/orders/OrderStatusUnknownLine";
 import type { WidgetProps } from "@/types/widgets";
 import {
   countSymbolClasses,
@@ -524,11 +524,14 @@ function SquareOffDialog({
           </p>
         )}
         <LayaAdmissionNotice notice={layaNotice} />
-        {submitGuard.isUnknown(exitIntent(position).key) ? (
-          <OrderStatusUnknownLine />
-        ) : errorMsg ? (
-          <OutcomeCopy message={errorMsg} />
-        ) : null}
+        {/* Reserved for the unknown line, so the dialog does not grow or jump. */}
+        <div className="min-h-9" data-testid="square-off-outcome-slot">
+          {submitGuard.isUnknown(exitIntent(position).key) ? (
+            <OrderStatusUnknownLine />
+          ) : errorMsg ? (
+            <OutcomeCopy message={errorMsg} />
+          ) : null}
+        </div>
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
@@ -1263,8 +1266,8 @@ function PositionsWidget(props: WidgetProps) {
         pnlPercent: fmtPnlPct(row.pnlPercent),
         pnlPositive: row.mtm >= 0,
         actions: (
-          <span className="inline-flex flex-col items-end gap-0.5">
-            {submitGuard.isUnknown(exitIntent(row).key) ? <OrderStatusUnknownLine /> : null}
+          <span className="inline-flex items-center gap-1">
+            {submitGuard.isUnknown(exitIntent(row).key) ? <OrderStatusUnknownLink /> : null}
             {renderRowActions(row)}
           </span>
         ),
@@ -1284,7 +1287,6 @@ function PositionsWidget(props: WidgetProps) {
           const unexpected = unexpectedKeys.has(key);
           const exitUnknown = submitGuard.isUnknown(exitIntent(row.original).key);
           return (
-            <span className="inline-flex flex-col items-start gap-0.5">
             <span className="inline-flex items-center gap-1">
               <span className="font-mono font-medium">{row.original.symbol}</span>
               {exitPending ? (
@@ -1297,8 +1299,7 @@ function PositionsWidget(props: WidgetProps) {
                 <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
               ) : null}
               {row.original.restored ? <RestoredFillTag /> : null}
-            </span>
-              {exitUnknown ? <OrderStatusUnknownLine /> : null}
+              {exitUnknown ? <OrderStatusUnknownLink /> : null}
             </span>
           );
         },
