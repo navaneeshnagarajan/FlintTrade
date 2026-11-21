@@ -2032,7 +2032,7 @@ function OrderPadWidget(props: WidgetProps) {
         </Button>
         {padStatusUnknown ? (
           <div data-testid="order-pad-status-unknown">
-            <OrderStatusUnknownLine />
+            <OrderStatusUnknownLine linkOnly={toast?.type === "unknown" && toast.scopeKey === dataScope} />
           </div>
         ) : null}
         {showPracticeLayaDown ? (

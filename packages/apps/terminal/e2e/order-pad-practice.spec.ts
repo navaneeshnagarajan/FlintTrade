@@ -590,10 +590,10 @@ for (const lost of LOST_SUBMITS) test.describe(`lost Practice order response: ${
   const outcome = page.getByTestId("order-pad-outcome");
   await expect(outcome).toHaveText("Order status unknown. Check Orders before trying again.");
   await expect(outcome).not.toContainText(/rejected|order failed/i);
-  // The pad keeps the sentence and an Orders link beside a locked Buy, not
-  // only in the transient outcome line.
+  // The outcome line says the sentence once; the lock adds an Orders link
+  // beside a locked Buy.
   const unknownLine = page.getByTestId("order-pad-status-unknown");
-  await expect(unknownLine).toContainText("Order status unknown. Check Orders before trying again.");
+  await expect(page.getByText("Order status unknown. Check Orders before trying again.", { exact: true })).toHaveCount(1);
   await expect(unknownLine.getByRole("button", { name: "Open Orders" })).toBeVisible();
   const buy = page.getByRole("button", { name: "Practice Buy" });
   await expect(buy).toBeDisabled();

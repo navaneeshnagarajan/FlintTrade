@@ -854,7 +854,11 @@ describe("OrderPadWidget", () => {
     await reviewAndConfirmPractice();
 
     const line = await screen.findByTestId("order-pad-status-unknown");
-    expect(line).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    // The outcome line says the sentence once; the lock adds only the link.
+    const statuses = screen.getAllByRole("status").filter((el) => el.textContent?.includes("Order status unknown"));
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveTextContent(/^Order status unknown\. Check Orders before trying again\.$/);
+    expect(line).not.toHaveTextContent("Order status unknown");
     expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     const buy = screen.getByRole("button", { name: /practice buy/i });
@@ -864,6 +868,25 @@ describe("OrderPadWidget", () => {
     await act(async () => {});
     expect(screen.queryByRole("dialog", { name: "Review Practice order" })).not.toBeInTheDocument();
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the unknown sentence and Open Orders beside a locked Buy after the outcome line clears", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot 1 · Max 1,800 per order");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      await reviewAndConfirmPractice();
+      expect(await screen.findByTestId("order-pad-outcome")).toHaveTextContent("Order status unknown");
+      await act(async () => { vi.advanceTimersByTime(6_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.queryByTestId("order-pad-outcome")).not.toBeInTheDocument();
+    const line = screen.getByTestId("order-pad-status-unknown");
+    expect(within(line).getByRole("status")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(within(line).getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
   });
 
   it("sends one Live place request for a fast double submit", async () => {
