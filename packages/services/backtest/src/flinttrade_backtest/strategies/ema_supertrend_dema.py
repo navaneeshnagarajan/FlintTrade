@@ -21,11 +21,8 @@ Target logic:
     - Target is placed AFTER the 5th candle close, if Supertrend is still stable
       (direction unchanged) and unbroken
 
-Exchange lot sizes:
-    - NIFTY:      25
-    - BANKNIFTY:  15
-    - FINNIFTY:   25
-    - MIDCPNIFTY: 50
+Exchange lot sizes come from the shared lot lookup
+(``flinttrade_screener.lot_sizes``), not from this module.
 
 This module is a backtest-engine strategy. It extends BaseStrategy via the
 _BacktestStrategyMixin and processes bars sequentially through on_bar().
@@ -50,10 +47,9 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 # Lot-size registry
 # ---------------------------------------------------------------------------
 
-# Contract sizes come from the instrument master (this file's private copy
-# pre-dated the 2024 SEBI lot revisions, when its NIFTY figure was 25).
-# Historical backtests over pre-revision periods should override per run.
-LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
+# Contract sizes come from the shared lot table (seeded from the instrument
+# master). This module keeps no copy. Historical backtests over earlier
+# contract sizes should override per run.
 
 DEFAULT_LOT_SIZE: int = 1
 
@@ -68,7 +64,7 @@ def lot_size_for(symbol: str) -> int:
         Lot size integer. Falls back to 1 for unknown symbols.
     """
     upper = symbol.upper()
-    for key, size in LOT_SIZES.items():
+    for key, size in FALLBACK_LOT_SIZES.items():
         if upper.startswith(key):
             return size
     return DEFAULT_LOT_SIZE
@@ -86,7 +82,7 @@ class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
     Stop-loss: Static at Supertrend value at entry; becomes dynamic (trailing)
                after price exceeds entry; triggered on candle close below ST.
     Target: DEMA 15 level at entry bar, placed after 5th candle if ST stable.
-    Lots: NIFTY 25, BANKNIFTY 15, FINNIFTY 25, MIDCPNIFTY 50.
+    Lots: from the shared lot lookup.
 
     Usage in backtest::
 

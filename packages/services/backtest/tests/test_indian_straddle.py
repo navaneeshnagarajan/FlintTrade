@@ -123,7 +123,7 @@ class TestLotSizeLookup:
 
     def test_finnifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("FINNIFTY") == 65
+        assert lot_size_for("FINNIFTY") == 60
 
     def test_sensex_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()

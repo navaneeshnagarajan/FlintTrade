@@ -43,13 +43,13 @@ _MASTER_UNDERLYINGS: tuple[str, ...] = ("NIFTY", "BANKNIFTY", "SENSEX")
 
 # Single source of truth for the built-in fallback — the union of the former
 # ``sample_data_routes._LOT_SIZE_TABLE`` (which now delegates here) and this
-# table, keeping the freshest value wherever the two diverged (FINNIFTY 65,
-# MIDCPNIFTY 120 per the current contract specifications).
+# table, keeping the freshest value wherever the two diverged. This is the
+# only lot table: the option chain, Greeks and analysis routes all read it.
 #
 # Nifty, Bank Nifty, and Sensex are filled below from the instrument master.
 FALLBACK_LOT_SIZES: dict[str, int] = {
     # NFO — Index derivatives (Nifty and Bank Nifty come from the master)
-    "FINNIFTY": 65,
+    "FINNIFTY": 60,
     "MIDCPNIFTY": 120,
     "NIFTYNXT50": 25,
     # BFO — BSE derivatives (Sensex comes from the master)

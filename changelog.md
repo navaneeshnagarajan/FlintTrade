@@ -89,6 +89,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **One lot table.** The option chain no longer keeps its own lot table, which had stale values and fed the Greeks. The option chain, Greeks, analysis routes, Ditto mirror sizing and backtests all read the single lot lookup: the instrument master where it lists a contract, otherwise the built-in fallback. The fallback FINNIFTY lot is 60. A test fails if a second lot table is added.
+
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 
 - **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.

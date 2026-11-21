@@ -64,10 +64,8 @@ class TestFallbackTable:
     def test_banknifty_lot_size_is_30(self):
         assert FALLBACK_LOT_SIZES["BANKNIFTY"] == 30
 
-    def test_finnifty_lot_size_is_65(self):
-        # Freshest value from the (formerly diverging) route table — the old
-        # 40 here was stale.
-        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 65
+    def test_finnifty_lot_size_is_60(self):
+        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 60
 
     def test_midcpnifty_lot_size_is_120(self):
         # Freshest value from the (formerly diverging) route table — the old
@@ -89,7 +87,7 @@ class TestFallbackTable:
         old_route_table = {
             "NIFTY": lot_size_from_master("NIFTY"),
             "BANKNIFTY": lot_size_from_master("BANKNIFTY"),
-            "FINNIFTY": 65,
+            "FINNIFTY": 60,
             "MIDCPNIFTY": 120,
             "SENSEX": lot_size_from_master("SENSEX"),
             "BANKEX": 30,

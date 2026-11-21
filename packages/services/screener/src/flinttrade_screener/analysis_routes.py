@@ -39,7 +39,7 @@ from .iv_smile import calculate_iv_smile
 from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver
 from .oi_analysis import OIAnalysis
 from .oi_profile import calculate_oi_profile
-from .option_chain import LOT_SIZES, OptionChainSnapshot, StrikeData
+from .option_chain import OptionChainSnapshot, StrikeData
 from .rrg import (
     BENCHMARK_EXCHANGE,
     BENCHMARK_SYMBOL,
@@ -1507,7 +1507,7 @@ def straddle_pnl_endpoint() -> Any:
         adjustment_legs = _parse_adjustment_legs(body)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
-    lot_size = LOT_SIZES.get(symbol.upper(), 50)
+    lot_size = FALLBACK_LOT_SIZES.get(symbol.strip().upper(), 50)
     spot = 24000.0
     candles: list[dict[str, Any]] = []
 

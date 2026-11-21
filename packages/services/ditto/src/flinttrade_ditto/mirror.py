@@ -55,12 +55,9 @@ class MirrorRiskError(RuntimeError):
     """Raised when authoritative target-account risk cannot admit a mirror write."""
 
 
-# Lot sizes for F&O instruments — single source of truth is the screener's
-# contract-size table (union-merged 2026-07-07; live symbol-master values are
-# served by flinttrade_screener.lot_sizes.LotSizeResolver). This module held
-# its own badly stale copy (BANKNIFTY 15, FINNIFTY 25) that mis-sized mirror
-# quantities.
-LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
+# Lot sizes for F&O instruments come from the screener's shared lot table
+# (live symbol-master values are served by
+# flinttrade_screener.lot_sizes.LotSizeResolver). This module keeps no copy.
 
 
 @dataclass
@@ -169,9 +166,9 @@ def _get_lot_size(symbol: str) -> int:
     for every *NIFTY contract) depending on dict order.
     """
     sym = symbol.upper()
-    matches = [key for key in LOT_SIZES if key in sym]
+    matches = [key for key in FALLBACK_LOT_SIZES if key in sym]
     if matches:
-        return LOT_SIZES[max(matches, key=len)]
+        return FALLBACK_LOT_SIZES[max(matches, key=len)]
     return 1
 
 
