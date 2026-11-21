@@ -56,6 +56,31 @@ describe("BrokerRateLimitsPanel", () => {
     expect(await screen.findByText(/No rate-limited brokers connected/i)).toBeInTheDocument();
   });
 
+  it("states the exchange order limit", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    expect(screen.getByText("Exchange limit: 10 orders per second.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/dhan order rate/i)).toHaveAccessibleDescription(
+      "Exchange limit: 10 orders per second.",
+    );
+  });
+
+  it.each(["20", "10.5", "0"])("blocks saving an order rate of %s", async (value) => {
+    renderPanel();
+    await screen.findByText("dhan");
+    fireEvent.change(screen.getByLabelText(/dhan order rate/i), { target: { value } });
+    expect(screen.getByLabelText(/dhan order rate/i)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: /save dhan rate limits/i })).toBeDisabled();
+  });
+
+  it("still allows unlimited data", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    fireEvent.change(screen.getByLabelText(/dhan data rate/i), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /save dhan rate limits/i }));
+    await waitFor(() => expect(mockSet).toHaveBeenCalledWith("dhan", 10, 0));
+  });
+
   it("blocks saving a negative rate", async () => {
     renderPanel();
     await screen.findByText("dhan");

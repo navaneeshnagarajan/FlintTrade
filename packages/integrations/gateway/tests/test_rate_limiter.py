@@ -6,7 +6,7 @@ import pytest
 
 from types import SimpleNamespace
 
-from flinttrade_gateway.rate_limiter import BrokerRateLimiter
+from flinttrade_gateway.rate_limiter import EXCHANGE_ORDER_RATE_LIMIT, BrokerRateLimiter
 
 pytestmark = pytest.mark.unit
 
@@ -32,12 +32,56 @@ class _FakeClock:
 
 
 @pytest.mark.asyncio
-async def test_unlimited_when_no_limit_configured():
+async def test_data_is_unlimited_when_no_limit_configured():
     clock = _FakeClock()
     rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
     for _ in range(100):
+        await rl.acquire("dhan", "data")
+    assert clock.slept == []
+
+
+@pytest.mark.asyncio
+async def test_orders_are_held_to_ten_per_second_without_configured_limits():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(10):
         await rl.acquire("dhan", "order")
-    assert clock.slept == []  # never throttled
+    assert clock.slept == []
+    await rl.acquire("dhan", "order")
+    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+
+
+@pytest.mark.parametrize("configured", [20, 0, -1])
+def test_order_override_above_the_limit_or_disabled_is_clamped(configured, caplog):
+    with caplog.at_level("WARNING", logger="flinttrade.gateway.rate_limiter"):
+        rl = BrokerRateLimiter.from_capabilities(
+            {"dhan": _cap(order=10, data=5)}, overrides={"dhan": {"order": configured}},
+        )
+    assert rl._rate("dhan", "order") == EXCHANGE_ORDER_RATE_LIMIT == 10.0
+    assert "clamped to the exchange limit" in caplog.text
+
+
+def test_capability_order_rate_above_the_limit_is_clamped():
+    rl = BrokerRateLimiter.from_capabilities({"fast": _cap(order=25)})
+    assert rl.snapshot()["fast"]["order"] == 10.0
+
+
+@pytest.mark.parametrize("configured", [20.0, 0.0])
+def test_settings_change_cannot_raise_or_disable_the_order_limit(configured):
+    rl = BrokerRateLimiter({"dhan": {"order": 5.0}})
+    rl.apply_override("dhan", order=configured)
+    assert rl._rate("dhan", "order") == 10.0
+    rl.apply_override("dhan", order=3.0)
+    assert rl._rate("dhan", "order") == 3.0
+
+
+@pytest.mark.asyncio
+async def test_override_of_twenty_still_admits_ten_orders_per_second():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({"dhan": {"order": 20.0}}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(20):
+        await rl.acquire("dhan", "order")
+    assert clock.now == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.asyncio
@@ -94,7 +138,7 @@ def test_from_capabilities_tolerates_comment_keys():
     }
     rl = BrokerRateLimiter.from_capabilities(caps, overrides=overrides)
     assert rl._rate("dhan", "order") == 5.0  # real override still applied
-    assert rl._rate("_comment", "order") == 0.0  # comment key ignored, no crash
+    assert "_comment" not in rl.snapshot()  # comment key ignored, no crash
 
 
 def test_snapshot_returns_a_deep_copy():
@@ -113,7 +157,7 @@ def test_apply_override_updates_only_specified_kinds():
     # A previously-unknown broker can be configured too.
     rl.apply_override("newbroker", data=3.0)
     assert rl._rate("newbroker", "data") == 3.0
-    assert rl._rate("newbroker", "order") == 0.0  # unset → unlimited
+    assert rl._rate("newbroker", "order") == 10.0  # unset orders still get the exchange limit
 
 
 @pytest.mark.asyncio
@@ -331,4 +375,4 @@ def test_invalid_persisted_override_keeps_capability_caps_and_other_overrides(in
         overrides={"dhan": {"data": invalid, "order": 2}, "custom": {"data": 3, "quote": invalid}},
     )
     assert limiter.snapshot()["dhan"] == {"order": 2, "data": 5, "quote": 1}
-    assert limiter.snapshot()["custom"] == {"order": 0, "data": 3, "quote": 0}
+    assert limiter.snapshot()["custom"] == {"order": 10, "data": 3, "quote": 0}

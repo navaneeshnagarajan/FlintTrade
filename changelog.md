@@ -89,6 +89,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Order rate capped at 10 per second.** Place, modify and cancel share one order budget per broker, held to the exchange limit of 10 orders per second. A broker default, workspace override or settings change can lower it but cannot raise it or switch it off: a higher value or 0 is saved and applied as 10, with a warning in the log. The API Rate Limits panel accepts 1 to 10 for Orders/s and shows "Exchange limit: 10 orders per second." Data limits still accept 0 for unlimited.
+
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 
 - **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.

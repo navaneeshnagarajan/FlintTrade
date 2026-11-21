@@ -13,17 +13,52 @@ Quote admission also consumes the generic data budget atomically. The
 a purely throttling step that sits *below* the gate, so it can only slow a call,
 never skip the safety gate. The clock and sleep are injectable, so the buckets
 are tested deterministically without real time.
+
+Order writes (place, modify and cancel share one ``"order"`` budget) are always
+held to the exchange limit of :data:`EXCHANGE_ORDER_RATE_LIMIT` per second. A
+capability default, workspace override or settings change can lower it but can
+never raise it or switch it off: a higher value, ``0`` or a missing value is
+clamped to the limit with a warning.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import threading
 import time
 from typing import Any, Awaitable, Callable
 
 from .capabilities import Capabilities
+
+logger = logging.getLogger("flinttrade.gateway.rate_limiter")
+
+#: Exchange limit on order writes per second, per broker connection. Place,
+#: modify and cancel share it. Not configurable above this value.
+EXCHANGE_ORDER_RATE_LIMIT: float = 10.0
+
+# Floating-point refill can land a hair under a whole token. Without slack a
+# waiter sleeps for a rounding error, and with a coarse clock it spins.
+_TOKEN_EPSILON = 1e-9
+
+
+def cap_order_rate(rate: float, *, broker_id: str = "") -> float:
+    """Clamp an order rate to the exchange limit.
+
+    Rates above the limit, and ``0`` or negative values (which would switch the
+    throttle off), become :data:`EXCHANGE_ORDER_RATE_LIMIT` with a warning. A
+    positive rate at or below the limit is kept.
+    """
+    if 0 < rate <= EXCHANGE_ORDER_RATE_LIMIT:
+        return rate
+    logger.warning(
+        "Order rate %s/s for %s clamped to the exchange limit of %s orders per second",
+        "unlimited" if rate <= 0 else f"{rate:g}",
+        broker_id or "broker",
+        f"{EXCHANGE_ORDER_RATE_LIMIT:g}",
+    )
+    return EXCHANGE_ORDER_RATE_LIMIT
 
 
 class _Bucket:
@@ -52,8 +87,10 @@ class BrokerRateLimiter:
     """Enforces per-broker order/data/quote API rate limits via async token buckets.
 
     Args:
-        limits: ``{broker_id: {"order": per_sec, "data": per_sec, "quote": per_sec}}``. A broker or
-            kind with no positive limit is treated as unlimited (no throttle).
+        limits: ``{broker_id: {"order": per_sec, "data": per_sec, "quote": per_sec}}``. A data or
+            quote kind with no positive limit is treated as unlimited (no throttle). Order
+            limits are always clamped to :data:`EXCHANGE_ORDER_RATE_LIMIT`, and a broker
+            with no order limit gets that limit.
         clock: ``() -> float`` monotonic seconds (injected in tests).
         sleep: ``(seconds) -> Awaitable`` (injected in tests).
     """
@@ -66,7 +103,14 @@ class BrokerRateLimiter:
         sleep: Callable[[float], Awaitable[Any]] | None = None,
     ) -> None:
         self._limits = {
-            broker_id: {kind: self._finite_rate(rate) for kind, rate in kinds.items()}
+            broker_id: {
+                kind: (
+                    cap_order_rate(self._finite_rate(rate), broker_id=broker_id)
+                    if kind == "order"
+                    else self._finite_rate(rate)
+                )
+                for kind, rate in kinds.items()
+            }
             for broker_id, kinds in limits.items()
         }
         self._clock = clock or time.monotonic
@@ -101,7 +145,10 @@ class BrokerRateLimiter:
         for broker_id, cap in capabilities.items():
             ov_raw = overrides.get(broker_id, {})
             ov = ov_raw if isinstance(ov_raw, dict) else {}
-            defaults = {"order": cap.rate_limit_orders_per_sec, "data": cap.rate_limit_data_per_sec}
+            defaults = {
+                "order": cap.rate_limit_orders_per_sec or EXCHANGE_ORDER_RATE_LIMIT,
+                "data": cap.rate_limit_data_per_sec,
+            }
             quote = getattr(cap, "rate_limit_quote_per_sec", None)
             if quote is not None or "quote" in ov:
                 defaults["quote"] = quote
@@ -116,7 +163,8 @@ class BrokerRateLimiter:
             if not isinstance(ov, dict):
                 continue
             limits.setdefault(broker_id, {
-                kind: cls._override_rate(ov.get(kind, 0), 0) for kind in ("order", "data", "quote")
+                "order": cls._override_rate(ov.get("order", EXCHANGE_ORDER_RATE_LIMIT), EXCHANGE_ORDER_RATE_LIMIT),
+                **{kind: cls._override_rate(ov.get(kind, 0), 0) for kind in ("data", "quote")},
             })
         return cls(limits, **kwargs)
 
@@ -128,6 +176,10 @@ class BrokerRateLimiter:
             return cls._finite_rate(default or 0)
 
     def _rate(self, broker_id: str, kind: str) -> float:
+        if kind == "order":
+            # Every broker is held to the exchange order limit, including one
+            # that has no configured limits at all.
+            return float(self._limits.get(broker_id, {}).get(kind, EXCHANGE_ORDER_RATE_LIMIT))
         return float(self._limits.get(broker_id, {}).get(kind, 0) or 0)
 
     @staticmethod
@@ -174,7 +226,7 @@ class BrokerRateLimiter:
                     bucket.refill(now)
                     buckets.append(bucket)
                     wait = max(wait, (1.0 - bucket.tokens) / rate)
-                if wait <= 0:
+                if wait <= _TOKEN_EPSILON:
                     for bucket in buckets:
                         bucket.tokens -= 1.0
                     return
@@ -199,7 +251,11 @@ class BrokerRateLimiter:
         data: float | None = None,
         quote: float | None = None,
     ) -> None:
-        """Update selected limits at runtime (0 = unlimited), preserving credit.
+        """Update selected limits at runtime, preserving credit.
+
+        ``0`` means unlimited for data and quote. An order rate is clamped to
+        :data:`EXCHANGE_ORDER_RATE_LIMIT`, so it can be lowered but never raised
+        above that or switched off.
 
         Refill existing buckets at their old rates before applying new rates.
         Waiters recheck the updated limits after waking; changing a positive
@@ -210,6 +266,8 @@ class BrokerRateLimiter:
             for kind, rate in (("order", order), ("data", data), ("quote", quote))
             if rate is not None
         }
+        if "order" in updates:
+            updates["order"] = cap_order_rate(updates["order"], broker_id=broker_id)
         with self._lock:
             now = self._clock()
             current = dict(self._limits.get(broker_id, {}))

@@ -105,7 +105,8 @@ apps = ["terminal", "site", "desktop"]
 openclaw = { path = ".local/external/openclaw", type = "external-test-dep", upstream = "https://github.com/openclaw/openclaw.git" }
 
 [safety]
-# Self-imposed rate limit to stay within broker throttles.
+# Exchange limit on order writes (place, modify, cancel). The gateway clamps
+# any broker override above 10, or 0, back to 10.
 max_orders_per_second = 10
 audit_log_retention_years = 5
 kill_switch_mandatory = true

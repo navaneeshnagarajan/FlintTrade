@@ -2,10 +2,11 @@
  * BrokerRateLimitsPanel — per-broker API rate-limit controls.
  *
  * Reads the live effective limits from the gateway (GET /ft-api/v1/rate-limits)
- * and lets the operator tune each broker's order/data throttle (requests/sec,
- * 0 = unlimited). A save applies live to the running limiter and persists to
- * workspace.json. The limiter sits BELOW the safety gate — it can only delay a
- * dispatch, never bypass safety — so this never affects order validation.
+ * and lets the operator tune each broker's order/data throttle (requests/sec).
+ * Data accepts 0 for unlimited. Orders are held to the exchange limit of 10 per
+ * second and cannot be switched off. A save applies live to the running
+ * limiter and persists to workspace.json. The limiter sits below the safety
+ * gate, so it can only delay a dispatch and never affects order validation.
  */
 
 import { useEffect, useState } from "react";
@@ -20,9 +21,17 @@ interface RowState {
   data: string;
 }
 
+/** Exchange limit on order writes per second. The gateway clamps to it too. */
+export const EXCHANGE_ORDER_RATE_LIMIT = 10;
+
 function isValidRate(v: string): boolean {
   const n = Number(v);
   return v.trim() !== "" && !Number.isNaN(n) && n >= 0;
+}
+
+function isValidOrderRate(v: string): boolean {
+  const n = Number(v);
+  return isValidRate(v) && n > 0 && n <= EXCHANGE_ORDER_RATE_LIMIT;
 }
 
 export function BrokerRateLimitsPanel() {
@@ -72,7 +81,8 @@ export function BrokerRateLimitsPanel() {
         <ul className="space-y-2" aria-label="Per-broker rate limits">
           {brokers.map((broker) => {
             const row = edits[broker] ?? { order: "", data: "" };
-            const valid = isValidRate(row.order) && isValidRate(row.data);
+            const orderValid = isValidOrderRate(row.order);
+            const valid = orderValid && isValidRate(row.data);
             const setRow = (patch: Partial<RowState>) =>
               setEdits((prev) => ({ ...prev, [broker]: { ...row, ...patch } }));
             return (
@@ -87,6 +97,8 @@ export function BrokerRateLimitsPanel() {
                     value={row.order}
                     onChange={(e) => setRow({ order: e.target.value })}
                     aria-label={`${broker} order rate per second`}
+                    aria-describedby="order-rate-limit-help"
+                    aria-invalid={!orderValid}
                     className="h-6 w-16 text-xs font-mono"
                     inputMode="decimal"
                   />
@@ -119,9 +131,13 @@ export function BrokerRateLimitsPanel() {
         </ul>
       )}
 
-      <p className="text-xxs text-text-muted mt-3">
-        Requests per second; <span className="font-mono">0</span> = unlimited. Changes apply
-        live and are saved to <span className="font-mono">workspace.json</span> for the next restart.
+      <p id="order-rate-limit-help" className="text-xxs text-text-secondary mt-3">
+        Exchange limit: {EXCHANGE_ORDER_RATE_LIMIT} orders per second.
+      </p>
+      <p className="text-xxs text-text-muted mt-1">
+        Requests per second. Orders/s can be 1 to {EXCHANGE_ORDER_RATE_LIMIT}; Data/s{" "}
+        <span className="font-mono">0</span> = unlimited. Changes apply live and are saved to{" "}
+        <span className="font-mono">workspace.json</span> for the next restart.
       </p>
       {save.isError && (
         <p className="text-xxs text-loss mt-1">Could not save — {(save.error as Error).message}</p>

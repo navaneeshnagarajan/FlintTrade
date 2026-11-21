@@ -21,7 +21,7 @@ async function gateway<T>(request: Promise<T>): Promise<T> {
   }
 }
 
-/** Per-broker API rate limits in requests/sec (0 = unlimited). */
+/** Per-broker API rate limits in requests/sec. Data 0 = unlimited; orders are capped at 10. */
 export type BrokerRateLimits = Record<string, { order: number; data: number }>;
 
 export const gatewayApi = {
