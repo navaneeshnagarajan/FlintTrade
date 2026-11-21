@@ -238,6 +238,11 @@ html {
   gap: 16px;
 }
 
+.install-commands > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .site-shell .code-panel {
   min-width: 0;
   background: var(--site-surface-card);
@@ -341,6 +346,11 @@ html {
 
   .review-topics {
     gap: 24px;
+  }
+
+  .install-commands code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 }
 

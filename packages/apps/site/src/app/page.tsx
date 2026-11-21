@@ -133,9 +133,9 @@ export default async function HomePage() {
               href="/demo-app/welcome"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Open Demo (example data) in a new window"
+              aria-label="Open the demo (example data) in a new window"
             >
-              Demo (example data) <ExternalLink aria-hidden="true" size={17} />
+              Open the demo (example data) <ExternalLink aria-hidden="true" size={17} />
             </Link>
           </div>
           <p className="hero-electron-note">
