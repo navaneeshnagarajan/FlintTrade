@@ -1,6 +1,8 @@
 """Successful synthetic native lifecycle through the ordinary application factory."""
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -146,3 +148,24 @@ def test_real_strategy_proposal_reserves_durably_before_canonical_refusal(mounte
     assert financial["reservations"]["producer-entry"]["state"] == "released"
     assert financial["reservations"]["producer-entry"]["command_id"] == "decision-0"
     assert desk.calls == []
+
+
+def test_finished_producer_is_not_retained_while_its_thread_leaves() -> None:
+    """A completed duty is finished even if the thread has not been reaped."""
+    from flinttrade_core.native_producer_v2 import NativeProducerOwner
+
+    owner = NativeProducerOwner.__new__(NativeProducerOwner)
+    owner.stop = threading.Event()
+    owner.completed = threading.Event()
+    owner.completed.set()
+    entered = threading.Event()
+
+    def linger() -> None:
+        entered.set()
+        time.sleep(0.3)
+
+    owner.thread = threading.Thread(target=linger, daemon=True)
+    owner.thread.start()
+    assert entered.wait(1)
+    assert owner.shutdown(0) is True
+

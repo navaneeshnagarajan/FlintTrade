@@ -201,10 +201,14 @@ class NativeProducerOwner:
     def shutdown(self, timeout: float) -> bool:
         """Retry only this owner; an external call remains owned until it returns."""
         self.stop.set()
-        if self.thread is not None:
-            self.thread.join(max(0, timeout))
-            return not self.thread.is_alive() and self.completed.is_set()
-        return True
+        if self.thread is None:
+            return True
+        self.thread.join(max(0, timeout))
+        # completed is set only after the external call returns. The thread
+        # object can still be alive for the brief exit that follows.
+        if self.completed.is_set():
+            return True
+        return not self.thread.is_alive()
 
     def snapshot(self) -> dict[str, Any]:
         """Read actual worker activity, independently of persistent entry state."""
