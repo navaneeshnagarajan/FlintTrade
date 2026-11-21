@@ -27,14 +27,8 @@ import { useOrders } from "@/hooks/useOrders";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/services/queryKeys";
 import type { Position } from "@/types/api";
-import {
-  EXIT_NOW,
-  STOP_LOSS_NOT_FILLED,
-  contractKeyOf,
-  exitNowTicket,
-  isStopLossTriggeredNotFilled,
-  openExitTicket,
-} from "@/lib/stopLossState";
+import { StopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
+import { contractKeyOf, exitNowTicket, isStopLossTriggeredNotFilled } from "@/lib/stopLossState";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
@@ -737,27 +731,7 @@ function OrdersWidget(_props: WidgetProps) {
                 null,
               );
           };
-          const ticket = r.quantityNum > 0;
-          return (
-            <span className="inline-flex items-center gap-1" data-testid="stop-loss-not-filled" role="status">
-              <span className="text-xs font-medium text-loss">{STOP_LOSS_NOT_FILLED}</span>
-              {ticket ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 px-1.5 text-xs"
-                  aria-label={`${EXIT_NOW} ${r.symbol}`}
-                  onClick={() => {
-                    const next = exitTicket();
-                    if (next) openExitTicket(next);
-                  }}
-                >
-                  {EXIT_NOW}
-                </Button>
-              ) : null}
-            </span>
-          );
+          return <StopLossNotFilledChip symbol={r.symbol} ticket={exitTicket} textClassName="text-xs" />;
         },
       },
       {

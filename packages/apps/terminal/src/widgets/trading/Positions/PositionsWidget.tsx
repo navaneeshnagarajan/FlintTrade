@@ -153,14 +153,8 @@ import {
   type PositionRow,
 } from "./positionBook";
 import { SAMPLE_POSITION_BOOK } from "./sampleBook";
-import {
-  EXIT_NOW,
-  STOP_LOSS_NOT_FILLED,
-  contractKeyOf,
-  exitNowTicket,
-  openExitTicket,
-  stopLossNotFilledKeys,
-} from "@/lib/stopLossState";
+import { StopLossNotFilledChip as SharedStopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
+import { contractKeyOf, exitNowTicket, stopLossNotFilledKeys } from "@/lib/stopLossState";
 import NetPositionView from "./NetPositionView";
 import HeatMapView, {
   GROUP_LABELS,
@@ -194,23 +188,11 @@ function OutcomeCopy({ message }: { message: string }) {
 
 /** Reserved status slot: the stop triggered but did not fill. */
 function StopLossNotFilledChip({ position }: { position: PositionRow }) {
-  const ticket = exitNowTicket(position, { ltp: position.ltp });
   return (
-    <span className="inline-flex items-center gap-1" data-testid="stop-loss-not-filled" role="status">
-      <span className="text-xxs text-loss">{STOP_LOSS_NOT_FILLED}</span>
-      {ticket ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-5 px-1.5 text-xxs text-text-primary hover:bg-surface-hover"
-          aria-label={`${EXIT_NOW} ${position.symbol}`}
-          onClick={() => openExitTicket(ticket)}
-        >
-          {EXIT_NOW}
-        </Button>
-      ) : null}
-    </span>
+    <SharedStopLossNotFilledChip
+      symbol={position.symbol}
+      ticket={() => exitNowTicket(position, { ltp: position.ltp })}
+    />
   );
 }
 

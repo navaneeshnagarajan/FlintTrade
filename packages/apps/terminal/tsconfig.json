@@ -37,6 +37,7 @@
     "e2e/service-oauth-handoff.entry.ts",
     "src",
     "e2e/about-versions.fixture.tsx",
+    "e2e/order-safety.fixture.tsx",
     "e2e/foundation-truth.fixture.tsx",
     "vite-env.d.ts",
     "vite.reticleConnectGate.ts",
