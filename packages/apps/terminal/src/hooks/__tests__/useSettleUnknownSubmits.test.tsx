@@ -58,4 +58,21 @@ describe("useSettleUnknownSubmits", () => {
     expect(screen.getByText("locked")).toBeInTheDocument();
     expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
   }, 10_000);
+
+  it("unlocks on a complete read that started after the settle delay", async () => {
+    await expect(submitOrderOnce(SCOPE, INTENT, lost)).rejects.toThrow();
+    const receivedAt = Date.now();
+    const view = render(<Probe isFetching={false} dataUpdatedAt={0} listComplete={false} />);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, UNKNOWN_SUBMIT_SETTLE_MS + 50)); });
+    expect(screen.getByText("locked")).toBeInTheDocument();
+    await act(async () => {
+      view.rerender(<Probe isFetching={true} dataUpdatedAt={0} listComplete={false} />);
+    });
+    expect(Date.now()).toBeGreaterThanOrEqual(receivedAt + UNKNOWN_SUBMIT_SETTLE_MS);
+    await act(async () => {
+      view.rerender(<Probe isFetching={false} dataUpdatedAt={Date.now()} listComplete={true} />);
+    });
+    expect(screen.getByText("open")).toBeInTheDocument();
+    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
+  }, 15_000);
 });
