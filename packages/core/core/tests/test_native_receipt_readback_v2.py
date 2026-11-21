@@ -65,9 +65,11 @@ def test_complete_receipt_readback_preserves_current_and_historical_acceptance(
     assert historical["effective_authority"] == "none"
     if not options:
         assert historical["duty"]["receiving_acceptance_ref"] is None
-        from packages.core.core.tests.test_native_financial_owner import _settle_cash
+        from packages.core.core.tests.test_native_financial_owner import _financial, _settle_cash
 
         _settle_cash(desk, source, facts)
+        financial = _financial(desk)
+        assert financial.get("unresolved_entry_ids") == [], financial.get("assessment")
     assert desk.calls == []
 
 
