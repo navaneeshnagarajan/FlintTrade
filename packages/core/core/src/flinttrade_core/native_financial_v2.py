@@ -248,22 +248,37 @@ def _generation_only_move(pinned: str, snapshot: Any) -> bool:
     return False
 
 
-def _snapshot_has_no_new_financial_evidence(snapshot: Any) -> bool:
-    """Whether a moved canonical generation adds no fill, conflict or unallocated trade."""
-    return not (
-        getattr(snapshot, "conflicts", ())
-        or getattr(snapshot, "fills", ())
-        or getattr(snapshot, "order_fills", ())
-        or getattr(snapshot, "unallocated_trades", ())
-    )
+def _snapshot_fills_are_already_published(snapshot: Any, published: Any) -> bool:
+    """True when this snapshot adds no fill the publication has not already admitted."""
+    if getattr(snapshot, "conflicts", ()) or getattr(snapshot, "unallocated_trades", ()) or getattr(snapshot, "order_fills", ()):
+        return False
+    from collections import Counter
+
+    admitted: Counter[tuple[str, str]] = Counter()
+    entries = published.get("entries") if type(published) is dict else None
+    if type(entries) is not list:
+        return not getattr(snapshot, "fills", ())
+    for entry in entries:
+        if type(entry) is not dict:
+            continue
+        for fill in entry.get("fills") or []:
+            if type(fill) is dict:
+                admitted[(str(fill.get("quantity")), str(fill.get("price")))] += 1
+    for fill in snapshot.fills:
+        trade = fill.trade
+        key = (str(trade.quantity), str(trade.price))
+        if admitted[key] <= 0:
+            return False
+        admitted[key] -= 1
+    return True
 
 
 def _resolve_published_facts(issuer: PrimitiveFixtureSource, row: dict[str, Any], snapshot: Any) -> dict[str, Any]:
-    """Resolve the current publication after a generation-only move.
+    """Resolve the current publication after a generation move that adds no new fill.
 
-    The same evidence at a later generation is resolved again. A book that
-    gained a fill, conflict or unallocated trade is not rebound, and that
-    refusal is not stored as an unresolved entry.
+    The same evidence, or a snapshot whose fills are already in the publication,
+    is resolved again. A book that gained a fill, conflict or unallocated trade
+    is not rebound, and that refusal is not stored as an unresolved entry.
     """
     try:
         return issuer.resolve(row, snapshot)
@@ -274,7 +289,7 @@ def _resolve_published_facts(issuer: PrimitiveFixtureSource, row: dict[str, Any]
         revision, pinned, published = issuer.records[identity]
         if revision != row["revision"]:
             raise
-        if not (_generation_only_move(pinned, snapshot) or _snapshot_has_no_new_financial_evidence(snapshot)):
+        if not (_generation_only_move(pinned, snapshot) or _snapshot_fills_are_already_published(snapshot, published)):
             raise
         row["_generation_recovered"] = True
         issuer.records[identity] = (revision, _digest([snapshot.generation, snapshot.evidence_json]), published)
