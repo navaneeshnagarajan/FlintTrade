@@ -477,7 +477,14 @@ for (const viewport of VIEWPORTS) {
       registerOrdersReads(syntheticApi);
       await mountWidget(page, "orders");
       const table = page.getByRole("tabpanel", { name: "Orders" }).getByRole("table");
-      await expect(table).toBeVisible({ timeout: 15_000 });
+      let advanced = 0;
+      await expect.poll(async () => {
+        if (advanced < 5_000) {
+          await page.clock.runFor(50);
+          advanced += 50;
+        }
+        return table.isVisible();
+      }, { timeout: 15_000, intervals: [50] }).toBe(true);
       const rows = table.getByRole("row");
       await expect(rows.nth(1)).toBeVisible();
       const before = await collectBoxes(await rows.all());
@@ -489,11 +496,11 @@ for (const viewport of VIEWPORTS) {
         quantity: 75,
       });
       const line = page.getByTestId("orders-notice-slot").getByText(UNKNOWN);
-      let advanced = 0;
+      let lineAdvanced = 0;
       await expect.poll(async () => {
-        if (advanced < 2_000) {
+        if (lineAdvanced < 2_000) {
           await page.clock.runFor(25);
-          advanced += 25;
+          lineAdvanced += 25;
         }
         return line.isVisible();
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
