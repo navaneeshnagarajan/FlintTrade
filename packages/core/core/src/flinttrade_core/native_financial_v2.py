@@ -236,6 +236,35 @@ class PrimitiveFixtureSource:
         return primitive_copy(facts)
 
 
+def _snapshot_has_no_new_financial_evidence(snapshot: Any) -> bool:
+    """Whether a moved canonical generation adds no fill, conflict or unallocated trade."""
+    return not (
+        getattr(snapshot, "conflicts", ())
+        or getattr(snapshot, "fills", ())
+        or getattr(snapshot, "order_fills", ())
+        or getattr(snapshot, "unallocated_trades", ())
+    )
+
+
+def _resolve_published_facts(issuer: PrimitiveFixtureSource, row: dict[str, Any], snapshot: Any) -> dict[str, Any]:
+    """Resolve the current publication, retrying only a financially quiet generation move.
+
+    A generation move with no new fill or conflict is not a duty. Conflicting or
+    filled evidence is not rebound; that failure must not be stored as an entry.
+    """
+    try:
+        return issuer.resolve(row, snapshot)
+    except ValueError as exc:
+        if str(exc) != "primitive source generation changed" or not _snapshot_has_no_new_financial_evidence(snapshot):
+            raise
+        identity = row["binding"]["run_id"]
+        revision, _pinned, published = issuer.records[identity]
+        if revision != row["revision"]:
+            raise
+        issuer.records[identity] = (revision, _digest([snapshot.generation, snapshot.evidence_json]), published)
+        return issuer.resolve(row, snapshot)
+
+
 def initial_financial() -> dict[str, Any]:
     """Initialise counters only for a newly configured run, without evidence."""
     return {"revision": 0, "floors": {}, "history": {}, "reservations": {},
@@ -423,7 +452,7 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
         if type(issuer) is not PrimitiveFixtureSource:
             raise ValueError("primitive_source_unavailable")
         row["_evaluated_primitive_generation"] = issuer.generations[row["binding"]["run_id"]]
-        facts = issuer.resolve(row, snapshot)
+        facts = _resolve_published_facts(issuer, row, snapshot)
         row["_evaluated_primitive_digest"] = _digest(facts)
         if prospective is not None:
             # The command owner passes the actual source-issued plan, before
@@ -629,8 +658,10 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
                     row["grant"]["revoked"] = True
         state["assessment"] = result
         state["source_ref"] = source.model_dump()
-    except (ValueError, TypeError, KeyError, ArithmeticError):
-        if type(facts) is dict and type(facts.get("entries")) is list:
+    except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
+        # A moved primitive pin is refused, not stored as an entry. A real
+        # missing source still retains the entries it could not evaluate.
+        if str(exc) != "primitive source generation changed" and type(facts) is dict and type(facts.get("entries")) is list:
             identities = set(state.get("unresolved_entry_ids", ()))
             for entry in facts["entries"]:
                 if type(entry) is dict and type(entry.get("entry_ref")) is dict:

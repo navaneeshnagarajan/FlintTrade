@@ -69,3 +69,32 @@ def test_complete_receipt_readback_preserves_current_and_historical_acceptance(
 
         _settle_cash(desk, source, facts)
     assert desk.calls == []
+
+
+def test_generation_move_after_unadmitted_prepare_is_not_an_unresolved_duty(mounted_desk: MountedDesk) -> None:
+    """A prepare that has not been admitted must not pin a duty onto a moved generation."""
+    from dataclasses import replace
+
+    from packages.core.core.tests.test_native_financial_owner import _financial
+
+    test_complete_receipt_readback_preserves_current_and_historical_acceptance(mounted_desk, False)
+    ledger = mounted_desk.app.extensions["flinttrade_broker_dependencies"].lifecycle_store
+    before = ledger.latest_snapshot_generation(adapter_id="dhan", account_id="Mounted")
+    with ledger._connection(write=True) as connection:
+        ledger._append_native_writer_manifest(
+            connection, "dhan", "Mounted", "2026-01-01T00:00:00+00:00",
+            {"kind": "prepared", "attempt_id": "unadmitted-race", "facts": {"source": "unadmitted"}},
+        )
+    assert ledger.latest_snapshot_generation(adapter_id="dhan", account_id="Mounted") == before
+    original = ledger.observation_snapshot
+
+    def moved(selector: object, **kwargs: object) -> object:
+        snapshot = original(selector, **kwargs)
+        return replace(snapshot, generation=snapshot.generation + 1)
+
+    ledger.observation_snapshot = moved
+    try:
+        _qualify(mounted_desk)
+    finally:
+        ledger.observation_snapshot = original
+    assert _financial(mounted_desk).get("unresolved_entry_ids") == []

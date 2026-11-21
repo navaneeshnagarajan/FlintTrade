@@ -274,6 +274,16 @@ CREATE TABLE IF NOT EXISTS snapshot_generation_manifests (
     PRIMARY KEY (adapter_id, account_id, generation)
 );
 
+CREATE TABLE IF NOT EXISTS pending_native_writer_manifests (
+    adapter_id          TEXT NOT NULL,
+    account_id          TEXT NOT NULL,
+    attempt_id          TEXT NOT NULL,
+    observed_at         TEXT NOT NULL,
+    content_digest      TEXT NOT NULL,
+    evidence_json       TEXT NOT NULL,
+    PRIMARY KEY (adapter_id, account_id, attempt_id)
+);
+
 CREATE TABLE IF NOT EXISTS position_generation_observations (
     adapter_id          TEXT NOT NULL,
     account_id          TEXT NOT NULL,
@@ -1443,6 +1453,18 @@ class OrderLifecycleLedger:
     ) -> None:
         """Append immutable writer facts in the existing generation transaction."""
         payload = {"schema": "flinttrade.native-writer.v1", **facts}
+        # A prepared writer is retained for the admission check, but it is not
+        # yet canonical evidence. Only an admitted acknowledgement advances the
+        # generation a primitive publication is pinned to.
+        if facts.get("kind") == "prepared":
+            encoded = _canonical_json(payload)
+            connection.execute(
+                """INSERT INTO pending_native_writer_manifests (
+                       adapter_id, account_id, attempt_id, observed_at, content_digest, evidence_json
+                   ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (adapter, account, str(facts.get("attempt_id") or ""), observed, _fingerprint(payload), encoded),
+            )
+            return
         previous = connection.execute(
             "SELECT generation, observed_at FROM snapshot_generations WHERE adapter_id=? AND account_id=?",
             (adapter, account),
@@ -1490,6 +1512,22 @@ class OrderLifecycleLedger:
         connection: sqlite3.Connection, adapter: str, account: str, attempt_id: str | None = None,
     ) -> list[dict[str, Any]]:
         result = []
+        pending = []
+        for row in connection.execute(
+            """SELECT evidence_json, content_digest FROM pending_native_writer_manifests
+               WHERE adapter_id=? AND account_id=? ORDER BY attempt_id""",
+            (adapter, account),
+        ):
+            try:
+                payload = json.loads(row["evidence_json"])
+                if (type(payload) is not dict or _canonical_json(payload) != row["evidence_json"]
+                        or _fingerprint(payload) != row["content_digest"]):
+                    raise ValueError
+            except (ValueError, TypeError) as exc:
+                raise LifecycleStateError("native writer manifest integrity failure") from exc
+            if (payload.get("schema") == "flinttrade.native-writer.v1"
+                    and (attempt_id is None or payload.get("attempt_id") == attempt_id)):
+                pending.append(payload)
         for row in connection.execute(
             "SELECT generation, evidence_json, content_digest FROM snapshot_generation_manifests "
             "WHERE adapter_id=? AND account_id=? ORDER BY generation", (adapter, account),
@@ -1510,6 +1548,7 @@ class OrderLifecycleLedger:
             if (payload.get("schema") == "flinttrade.native-writer.v1"
                     and (attempt_id is None or payload.get("attempt_id") == attempt_id)):
                 result.append(payload)
+        result = pending + result
         return result
 
     def record_native_acknowledgement(self, attempt_id: str, result: Any, *, native_source: object) -> None:
