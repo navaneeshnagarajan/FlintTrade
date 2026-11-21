@@ -37,6 +37,10 @@ import {
 import { cancelOrder, modifyOrder } from "@/services/api";
 import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentCancelResult } from "@/lib/orderOutcome";
+import { pendingOrderScope } from "@/lib/pendingOrderStore";
+import { reconcileUnknownOrderSubmits } from "@/lib/orderSubmitGuard";
+import { useUnknownOrderSubmits } from "@/hooks/useOrderSubmitGuard";
+import { usePendingOrderCancels, type PendingCancelSettlement } from "./usePendingOrderCancels";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -106,6 +110,15 @@ function confirmedCancelled(status: unknown): boolean {
 export function isOpenOrderStatus(status: string): boolean {
   const s = status.toLowerCase();
   return s.includes("open") || s.includes("pending");
+}
+
+function pendingCancelSettlement(row: { orderStatus: string }): PendingCancelSettlement {
+  if (confirmedCancelled(row.orderStatus)) return "cancelled";
+  return isOpenOrderStatus(row.orderStatus) || !row.orderStatus.trim() ? "open" : "ended";
+}
+
+function rowOrderId(row: { orderId: string | null }): string | null {
+  return row.orderId;
 }
 
 function extractOrderId(o: RawOrderRecord): string | null {
@@ -433,6 +446,7 @@ function OrdersWidget(_props: WidgetProps) {
     error,
     isLoading,
     fetchStatus,
+    dataUpdatedAt,
   } = useOrders({ enabled: accountReadsEnabled, context: accountReadContext });
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
@@ -442,25 +456,43 @@ function OrdersWidget(_props: WidgetProps) {
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [awaitingCancelId, setAwaitingCancelId] = useState<string | null>(null);
 
   const rows = useMemo<OrderRow[]>(() => {
     const raw = (ordersData ?? []) as RawOrderRecord[];
     return raw.map(toOrderRow);
   }, [ordersData]);
 
-  useEffect(() => {
-    if (!awaitingCancelId) return;
-    const row = rows.find((item) => item.orderId === awaitingCancelId);
-    if (!row || !confirmedCancelled(row.orderStatus)) return;
-    setAwaitingCancelId(null);
-    setActionNotice(ORDER_CANCELLED);
+  const onCancelConfirmed = useCallback((orderId: string) => {
     emitNotification({
       category: "order",
       title: ORDER_CANCELLED,
-      body: `Order ID ${awaitingCancelId}`,
+      body: `Order ID ${orderId}`,
     });
-  }, [awaitingCancelId, rows]);
+  }, []);
+  const ordersDataUpdatedAt = dataUpdatedAt ?? 0;
+  const listComplete = ordersData !== undefined && !isError && !isFetching;
+  const pendingScope = pendingOrderScope(currentIdentity);
+  // Lost fast-path submits show here until a newer complete read settles them.
+  const unknownSubmits = useUnknownOrderSubmits(pendingScope);
+  useEffect(() => {
+    if (!listComplete || unknownSubmits.length === 0) return;
+    reconcileUnknownOrderSubmits(pendingScope, ordersDataUpdatedAt);
+  }, [listComplete, unknownSubmits, pendingScope, ordersDataUpdatedAt]);
+  const pendingCancels = usePendingOrderCancels({
+    scope: pendingScope,
+    rows: listComplete ? rows : null,
+    dataUpdatedAt: ordersDataUpdatedAt,
+    orderId: rowOrderId,
+    settle: pendingCancelSettlement,
+    onConfirmed: onCancelConfirmed,
+  });
+  const { request: requestPendingCancel, confirm: confirmCancel } = pendingCancels;
+  const pendingCancelIds = useMemo(
+    () => new Set(pendingCancels.pending.map((record) => record.orderId)),
+    [pendingCancels.pending],
+  );
+  const ordersDataUpdatedAtRef = useRef(ordersDataUpdatedAt);
+  ordersDataUpdatedAtRef.current = ordersDataUpdatedAt;
 
   const queryUi = resolveAccountQueryUi({
     accountReadsEnabled,
@@ -536,9 +568,9 @@ function OrdersWidget(_props: WidgetProps) {
       if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
         const presented = presentCancelResult(result);
         if (presented.kind === "cancelled") {
-          setAwaitingCancelId(null);
           setActionError(null);
-          setActionNotice(ORDER_CANCELLED);
+          setActionNotice(null);
+          confirmCancel(row.orderId!);
           emitNotification({
             category: "order",
             title: ORDER_CANCELLED,
@@ -547,17 +579,14 @@ function OrdersWidget(_props: WidgetProps) {
             skipAccountRefresh: true,
           });
         } else if (presented.kind === "rejected") {
-          setAwaitingCancelId(null);
           setActionNotice(null);
           setActionError(presented.message);
-        } else if (presented.kind === "unknown") {
-          setAwaitingCancelId(null);
-          setActionError(null);
-          setActionNotice(ORDER_STATUS_UNKNOWN);
         } else {
+          // An acknowledgement, or a reply that does not settle the cancel,
+          // is a cancellation request until a newer order read confirms it.
           setActionError(null);
-          setActionNotice(CANCELLATION_REQUESTED);
-          setAwaitingCancelId(row.orderId ?? null);
+          setActionNotice(null);
+          requestPendingCancel(row.orderId!, Date.now(), ordersDataUpdatedAtRef.current);
           emitNotification({
             category: "order",
             title: CANCELLATION_REQUESTED,
@@ -574,8 +603,12 @@ function OrdersWidget(_props: WidgetProps) {
         const presented = presentCancelResult(undefined, err);
         setCancelIntent(null);
         if (presented.kind === "unknown") {
+          // The DELETE may have reached the broker. Never offer another cancel
+          // here; the order read settles it.
           setActionError(null);
-          setActionNotice(presented.message);
+          setActionNotice(null);
+          requestPendingCancel(row.orderId!, Date.now(), ordersDataUpdatedAtRef.current);
+          refreshOrders(mutationIdentity);
         } else {
           setActionNotice(null);
           setActionError(presented.message);
@@ -584,7 +617,7 @@ function OrdersWidget(_props: WidgetProps) {
     } finally {
       setActionPending(false);
     }
-  }, [cancelIntent, refreshOrders]);
+  }, [cancelIntent, refreshOrders, requestPendingCancel, confirmCancel]);
 
   const handleModifySubmit = useCallback(
     async (qty: number, price: number, triggerPrice: number, disclosedQuantity?: number) => {
@@ -703,13 +736,17 @@ function OrdersWidget(_props: WidgetProps) {
           const r = row.original;
           if (!r.isOpen) return null;
           const idMissing = r.orderId == null;
+          // A requested cancel is settled by the order read, not by another write.
+          const cancelPending = r.orderId != null && pendingCancelIds.has(r.orderId);
           const disabledReason = !canManageOrders
             ? isExplore
               ? "Connect a broker to manage orders"
               : "Order data is unavailable or frozen"
             : idMissing
               ? "Broker did not return an order id"
-              : undefined;
+              : cancelPending
+                ? CANCELLATION_REQUESTED
+                : undefined;
           return (
             <span className="flex items-center gap-1.5 justify-end">
               <Button
@@ -724,7 +761,7 @@ function OrdersWidget(_props: WidgetProps) {
                     identity: captureAccountAuthority(currentIdentity),
                   });
                 }}
-                disabled={!canManageOrders || actionPending || !canModify(r, currentIdentity)}
+                disabled={!canManageOrders || actionPending || cancelPending || !canModify(r, currentIdentity)}
                 title={
                   disabledReason ??
                   (!canModify(r, currentIdentity) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
@@ -746,7 +783,7 @@ function OrdersWidget(_props: WidgetProps) {
                     identity: captureAccountAuthority(currentIdentity),
                   });
                 }}
-                disabled={!canManageOrders || actionPending || idMissing}
+                disabled={!canManageOrders || actionPending || idMissing || cancelPending}
                 title={disabledReason ?? `Cancel order ${r.orderId}`}
                 aria-label={`Cancel order ${r.orderId ?? r.symbol}`}
                 className="h-auto w-auto p-0.5 text-text-muted hover:text-loss disabled:opacity-40"
@@ -758,7 +795,7 @@ function OrdersWidget(_props: WidgetProps) {
         },
       },
     ],
-    [canManageOrders, isExplore, actionPending, currentIdentity],
+    [canManageOrders, isExplore, actionPending, currentIdentity, pendingCancelIds],
   );
 
   const table = useTable({
@@ -860,12 +897,36 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       )}
 
-      {actionNotice && (
+      {(actionNotice
+        || unknownSubmits.length > 0
+        || pendingCancels.pending.length > 0
+        || pendingCancels.confirmed.length > 0) && (
         <div
           role="status"
           className="px-3 py-2 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning"
         >
-          {actionNotice}
+          {actionNotice && <p>{actionNotice}</p>}
+          {unknownSubmits.map((record) => (
+            <p key={`unknown-${record.key}`} data-unknown-submit={record.key}>
+              <span className="font-mono">
+                {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
+              </span>
+              {" · "}
+              {ORDER_STATUS_UNKNOWN}
+            </p>
+          ))}
+          {pendingCancels.pending.map((record) => (
+            <p key={`pending-${record.orderId}`} data-pending-cancel={record.orderId}>
+              {CANCELLATION_REQUESTED}
+              <span className="text-text-muted"> · Order ID {record.orderId}</span>
+            </p>
+          ))}
+          {pendingCancels.confirmed.map((orderId) => (
+            <p key={`cancelled-${orderId}`} data-cancelled-order={orderId}>
+              {ORDER_CANCELLED}
+              <span className="text-text-muted"> · Order ID {orderId}</span>
+            </p>
+          ))}
         </div>
       )}
 

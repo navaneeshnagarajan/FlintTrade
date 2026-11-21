@@ -3682,13 +3682,23 @@ def _gated_verb_write(
     response: dict[str, Any] = {"status": "success", "data": result}
     if ref:
         response["orderid"] = ref
-    if verb == "cancel_forever":
-        response.update(_forever_cancel_fields(result))
+    if verb in _CANCEL_VERBS:
+        response.update(_cancel_outcome_fields(result))
     return jsonify(response), 200
 
 
-def _forever_cancel_fields(result: object) -> dict[str, Any]:
-    """Label a forever-order cancel without turning an acknowledgement into a fill."""
+# Cancel verbs whose 200 is a broker acknowledgement. Each one says
+# "Cancellation requested" until the returned status itself says cancelled.
+_CANCEL_VERBS = frozenset({
+    "cancel_forever",
+    "cancel_super_order",
+    "cancel_conditional_trigger",
+    "cancel_smart_order",
+})
+
+
+def _cancel_outcome_fields(result: object) -> dict[str, Any]:
+    """Label a cancel without turning an acknowledgement into a confirmed cancel."""
     if isinstance(result, dict):
         token = ""
         for key in ("status", "order_status", "orderStatus", "attempt_state"):

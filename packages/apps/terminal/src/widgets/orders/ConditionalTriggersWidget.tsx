@@ -552,15 +552,15 @@ export default function ConditionalTriggersWidget() {
           </div>
         </form>
 
-        {placeMutation.isError && <BrokerOrdersErrorNotice error={placeMutation.error} />}
+        {placeMutation.isError && <BrokerOrdersErrorNotice error={placeMutation.error} write="submit" />}
         {placeMutation.isSuccess && (
           <p className="text-xs text-profit">
             Conditional trigger placed — the broker watches the condition and
             places the order when it is met.
           </p>
         )}
-        {modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} />}
-        {cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} />}
+        {modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} write="submit" />}
+        {cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} write="cancel" />}
 
         {/* Listing */}
         {listQuery.isError && <BrokerOrdersErrorNotice error={listQuery.error} />}

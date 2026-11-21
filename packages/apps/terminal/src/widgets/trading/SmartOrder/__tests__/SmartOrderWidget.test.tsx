@@ -247,6 +247,52 @@ describe("SmartOrderWidget", () => {
     );
   });
 
+  it("says the order status is unknown when the start reply is lost", async () => {
+    vi.mocked(startSmartRoute).mockRejectedValue(
+      Object.assign(new Error("Smart route failed (HTTP 502)"), { status: 502, body: null }),
+    );
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), { target: { value: "RELIANCE" } });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(startSmartRoute).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an unknown child slice as a warning, not a failure", async () => {
+    const unknownJob = {
+      ...DONE_JOB,
+      status: "error" as const,
+      error: "Order status unknown. Check Orders before trying again.",
+      order_outcome: "unknown" as const,
+      retry_safe: false,
+      child_orders: [{
+        ...DONE_JOB.child_orders[0],
+        status: "unknown" as const,
+        order_id: "",
+        error: "Order status unknown. Check Orders before trying again.",
+      }],
+    };
+    vi.mocked(startSmartRoute).mockResolvedValue({ ...DONE_JOB, status: "running" });
+    vi.mocked(getSmartRouteJob).mockResolvedValue(unknownJob);
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("Smart order symbol"), { target: { value: "RELIANCE" } });
+    fireEvent.change(screen.getByLabelText("Smart order quantity"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /route order/i }));
+
+    const cell = await screen.findByText("unknown");
+    expect(cell.className).toContain("text-warning");
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toBe("Order status unknown. Check Orders before trying again.");
+    expect(alert.className).toContain("text-warning");
+    expect(startSmartRoute).toHaveBeenCalledTimes(1);
+  });
+
   it("toggles BUY/SELL side", () => {
     renderWidget();
     const sell = screen.getByRole("button", { name: "SELL" });

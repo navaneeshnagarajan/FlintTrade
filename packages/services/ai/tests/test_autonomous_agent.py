@@ -1822,3 +1822,87 @@ async def test_skill_registry_failure_never_breaks_a_decision() -> None:
 
     signal = await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
     assert signal in ("BUY", "SELL", "HOLD")
+
+
+# ---------------------------------------------------------------------------
+# Unknown order outcome: sent, result lost. Never send it again automatically.
+# ---------------------------------------------------------------------------
+
+
+def _unknown_outcome_executor() -> MagicMock:
+    from types import SimpleNamespace
+
+    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+    executor = MagicMock()
+    executor.route_order = AsyncMock(
+        return_value=SimpleNamespace(
+            passed=False,
+            error=ORDER_STATUS_UNKNOWN,
+            order_response=None,
+            outcome_uncertain=True,
+        )
+    )
+    return executor
+
+
+@pytest.mark.asyncio
+async def test_execute_unknown_outcome_is_reported_and_never_resubmitted() -> None:
+    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+    agent = make_agent()
+    agent.order_executor = _unknown_outcome_executor()
+    risk = RiskAssessment(allowed=True, position_qty=1)
+
+    first = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
+    second = await agent.execute(TradeSignal.BUY, "RELIANCE", risk)
+
+    assert first["status"] == "error"
+    assert first["order_outcome"] == "unknown"
+    assert first["retry_safe"] is False
+    assert first["message"] == ORDER_STATUS_UNKNOWN
+    assert second["status"] == "blocked"
+    assert second["order_outcome"] == "unknown"
+    agent.order_executor.route_order.assert_awaited_once()
+    assert "RELIANCE" not in agent.state.active_positions
+
+
+@pytest.mark.asyncio
+async def test_monitor_unknown_exit_outcome_is_not_sent_again() -> None:
+    agent = make_agent(quotes_ltp=90.0)
+    agent.order_executor = _unknown_outcome_executor()
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+
+    await agent.monitor(position)
+    await agent.monitor(position)
+
+    agent.order_executor.route_order.assert_awaited_once()
+    # The exit may or may not have filled. The position stays visible and the
+    # P&L is not invented from a result nobody saw.
+    assert "RELIANCE" in agent.state.active_positions
+    assert agent.state.daily_pnl == 0.0
+
+
+@pytest.mark.asyncio
+async def test_square_off_all_does_not_resend_an_unknown_exit() -> None:
+    agent = make_agent()
+    agent.order_executor = _unknown_outcome_executor()
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "entry_price": 100.0, "stop_loss": 95.0, "take_profit": 110.0,
+        "action": "BUY", "quantity": 1,
+    }
+
+    assert await agent._square_off_all() is False
+    assert await agent._square_off_all() is False
+
+    agent.order_executor.route_order.assert_awaited_once()
+    assert "RELIANCE" in agent.state.active_positions

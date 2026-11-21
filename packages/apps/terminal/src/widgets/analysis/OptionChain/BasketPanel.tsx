@@ -6,12 +6,17 @@
 import { ShoppingBasket, X } from "lucide-react";
 import type { BasketItem, OrderParams } from "./types";
 import { NUM0, fmtLtp } from "./formatters";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 
 interface BasketPanelProps {
   basket: BasketItem[];
   onRemove: (item: BasketItem) => void;
   onClear: () => void;
   onOrder: (params: OrderParams) => void;
+  /** A place request is in flight, or a lost one is not settled yet. */
+  locked?: boolean;
+  /** A lost place request in this basket is not settled yet. */
+  statusUnknown?: boolean;
 }
 
 export default function BasketPanel({
@@ -19,6 +24,8 @@ export default function BasketPanel({
   onRemove,
   onClear,
   onOrder,
+  locked = false,
+  statusUnknown = false,
 }: BasketPanelProps) {
   return (
     <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
@@ -68,8 +75,9 @@ export default function BasketPanel({
             ))}
           </div>
 
-          <div className="flex gap-1.5 pt-1 border-t border-border-default">
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border-default">
             <button
+              disabled={locked}
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
@@ -83,11 +91,12 @@ export default function BasketPanel({
                   })
                 )
               }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
+              className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               Buy All
             </button>
             <button
+              disabled={locked}
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
@@ -101,10 +110,11 @@ export default function BasketPanel({
                   })
                 )
               }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
+              className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               Sell All
             </button>
+            {statusUnknown && <OrderStatusUnknownLine />}
           </div>
         </>
       )}

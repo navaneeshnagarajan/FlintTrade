@@ -50,6 +50,7 @@ from datetime import UTC, datetime
 from typing import Callable, Literal
 
 from flinttrade_core.models import Action, Exchange, Order, PriceType
+from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
 
 logger = logging.getLogger("flinttrade.engine.smart_router")
 
@@ -61,6 +62,10 @@ class SmartRouteAbort(Exception):
     abort stops the route immediately — no further children are attempted.
     Used for mid-flight session revocation and operator cancellation.
     """
+
+
+class _ChildOutcomeUnknown(Exception):
+    """A child was sent and its result never came back. Stop the route."""
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +80,8 @@ class ChildOrderResult:
     Attributes:
         quantity: Quantity placed in this child.
         price_type: MARKET or LIMIT used for this leg.
-        status: "placed", "skipped", or "failed".
+        status: "placed", "skipped", "failed", or "unknown" (sent, result
+            not confirmed; check the order book before placing again).
         order_id: Broker order ID if placed successfully.
         error: Error message if placement failed.
         slippage_bps: Estimated slippage in basis points.
@@ -84,7 +90,7 @@ class ChildOrderResult:
 
     quantity: int
     price_type: str
-    status: str  # "placed" | "skipped" | "failed"
+    status: str  # "placed" | "skipped" | "failed" | "unknown"
     order_id: str = ""
     error: str = ""
     slippage_bps: float = 0.0
@@ -313,6 +319,12 @@ class SmartOrderRouter:
                 action, symbol, len(result.child_orders), exc,
             )
             result.error = f"aborted: {exc}"
+        except _ChildOutcomeUnknown:
+            logger.warning(
+                "SmartOrderRouter.route stopped for %s %s: child outcome unknown after %d children",
+                action, symbol, len(result.child_orders),
+            )
+            result.error = ORDER_STATUS_UNKNOWN
         except Exception as exc:
             logger.error(
                 "SmartOrderRouter.route failed for %s %s: %s",
@@ -346,7 +358,7 @@ class SmartOrderRouter:
             product=product,
             slippage_bps=0.0,
         )
-        result.add_child(child)
+        self._record_child(result, child)
 
     async def _route_medium(self, result: SmartRouteResult, product: str) -> None:
         """Medium urgency: depth-aware splitting with inter-order delay.
@@ -418,7 +430,7 @@ class SmartOrderRouter:
                 product=product,
                 slippage_bps=slippage_bps,
             )
-            result.add_child(child)
+            self._record_child(result, child)
         else:
             # Split into chunks that fit within available depth
             remaining = result.total_quantity
@@ -436,7 +448,7 @@ class SmartOrderRouter:
                     product=product,
                     slippage_bps=slippage_bps,
                 )
-                result.add_child(child)
+                self._record_child(result, child)
                 remaining -= qty
                 first = False
 
@@ -471,11 +483,18 @@ class SmartOrderRouter:
                 product=product,
                 slippage_bps=0.0,
             )
-            result.add_child(child)
+            self._record_child(result, child)
 
     # ------------------------------------------------------------------
     # Child order placement
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _record_child(result: SmartRouteResult, child: ChildOrderResult) -> None:
+        """Record a child. An unknown outcome stops every later child."""
+        result.add_child(child)
+        if child.status == "unknown":
+            raise _ChildOutcomeUnknown
 
     async def _place_child(
         self,
@@ -520,6 +539,14 @@ class SmartOrderRouter:
                     price_type=price_type.value if hasattr(price_type, "value") else str(price_type),
                     status="placed",
                     order_id=decision.order_response.orderid,
+                    slippage_bps=slippage_bps,
+                )
+            if getattr(decision, "outcome_uncertain", False) is True:
+                return ChildOrderResult(
+                    quantity=quantity,
+                    price_type=price_type.value if hasattr(price_type, "value") else str(price_type),
+                    status="unknown",
+                    error=ORDER_STATUS_UNKNOWN,
                     slippage_bps=slippage_bps,
                 )
             err = decision.error or "safety block"

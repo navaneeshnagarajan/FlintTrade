@@ -110,6 +110,7 @@ vi.mock("@/services/api", () => ({
   placeOrder: vi.fn().mockResolvedValue({}),
   getMaxPain: vi.fn().mockResolvedValue({}),
   basketOrder: vi.fn().mockResolvedValue({}),
+  getOrderbook: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -153,6 +154,7 @@ import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { useModeStore } from "@/stores/modeStore";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -187,6 +189,7 @@ describe("OptionChainWidget", () => {
     vi.mocked(getSymbol).mockReset().mockResolvedValue({} as never);
     vi.mocked(getMaxPain).mockReset().mockResolvedValue({} as never);
     vi.mocked(placeOrder).mockReset().mockResolvedValue({} as never);
+    clearPendingOrderOutcomes();
   });
 
   it("renders without crashing", () => {
@@ -850,6 +853,76 @@ describe("OptionChainWidget", () => {
     await user.click(btn);
     expect(screen.queryByRole("region", { name: "Strategy leg builder" })).toBeNull();
     expect(btn).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // ── Lost submits: one request per intent, locked until a read settles it ──
+
+  const LOST_SUBMITS: [string, () => Error][] = [
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["a hang that ends in a gateway timeout", () => Object.assign(new Error("Gateway Timeout"), { status: 504, body: null })],
+    ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+  ];
+
+  async function renderChainWithBasket() {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockResolvedValue({ symbol: "NIFTY10APR2625000CE", exchange: "NFO" });
+    useModeStore.setState({ mode: "live" });
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+  }
+
+  it.each(LOST_SUBMITS)("locks Buy/Sell beside the unknown line after a submit lost to %s", async (_label, lost) => {
+    vi.mocked(placeOrder).mockRejectedValue(lost());
+    await renderChainWithBasket();
+
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument());
+    expect(screen.getAllByText("Order status unknown. Check Orders before trying again.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Buy All" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sell All" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sell All" }));
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one place request for a double-click on Buy All", async () => {
+    const pending = deferred<never>();
+    vi.mocked(placeOrder).mockReturnValue(pending.promise);
+    await renderChainWithBasket();
+
+    const buy = screen.getByRole("button", { name: "Buy All" });
+    fireEvent.click(buy);
+    fireEvent.click(buy);
+    fireEvent.doubleClick(buy);
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledTimes(1));
+    await act(async () => pending.resolve({} as never));
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not lock after a definite refusal", async () => {
+    vi.mocked(placeOrder).mockRejectedValue(
+      Object.assign(new Error("Quantity exceeds the freeze limit"), { status: 400, body: { message: "Quantity exceeds the freeze limit" } }),
+    );
+    await renderChainWithBasket();
+
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await screen.findByText("Quantity exceeds the freeze limit");
+    expect(screen.getByRole("button", { name: "Buy All" })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Open Orders" })).not.toBeInTheDocument();
   });
 });
 

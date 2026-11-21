@@ -54,6 +54,7 @@ vi.mock("@/stores/brokerStore", () => ({
 import {
   approveOrder,
   BracketApiError,
+  cancelBracket,
   getSafetyConfigForTarget,
   placeBracketOrder,
   resetDailyPnLState,
@@ -64,6 +65,7 @@ import {
   type SmartRouteJob,
   type SmartRouteParams,
 } from "../ftApi.trading";
+import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 
 function mockBrokerAccountMatch(
   account: { account_id: string; broker: string; source?: "gateway" | "native" },
@@ -237,6 +239,17 @@ describe("startSmartRoute", () => {
     await expect(startSmartRoute(BASE_PARAMS)).rejects.toThrow(/not available for live writes/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it("keeps the status and body so a 5xx start reads as unknown, not refused", async () => {
+    fetchMock.mockResolvedValue(new Response("upstream", { status: 502 }));
+    const err = await startSmartRoute(BASE_PARAMS).catch((e: unknown) => e);
+    expect(presentSubmitError(err).kind).toBe("unknown");
+  });
+
+  it("keeps a 4xx start a refusal", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "error", message: "Smart routing is disabled." }, 403));
+    const err = await startSmartRoute(BASE_PARAMS).catch((e: unknown) => e);
+    expect(presentSubmitError(err)).toEqual({ kind: "rejected", message: "Smart routing is disabled." });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -393,6 +406,55 @@ describe("placeBracketOrder", () => {
     await expect(placeBracketOrder(BRACKET_PARAMS)).rejects.toThrow(
       /Bracket order failed \(HTTP 500\)/,
     );
+  });
+  it("reads a 5xx bracket submit as unknown so the contract locks", async () => {
+    fetchMock.mockResolvedValue(new Response("boom", { status: 500 }));
+    const err = await placeBracketOrder(BRACKET_PARAMS).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BracketApiError);
+    expect((err as BracketApiError).status).toBe(500);
+    expect(presentSubmitError(err).kind).toBe("unknown");
+  });
+});
+
+describe("cancelBracket", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    storeState.mode = "live";
+    storeState.apiKey = "";
+    storeState.token = "";
+    storeState.brokerState = { accounts: [{ account_id: "U1", broker: "upstox", source: "native", status: "connected" }], activeAccountId: "native:upstox:U1" };
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the acknowledgement as a cancellation request", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      status: "success",
+      order_outcome: "cancel_requested",
+      message: "Cancellation requested",
+      data: { warnings: [] },
+    }));
+    const result = await cancelBracket("b-1");
+    expect(result.order_outcome).toBe("cancel_requested");
+    expect(presentCancelResult(result).kind).toBe("cancel_requested");
+  });
+
+  it("never calls a reply without an outcome cancelled", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "success", data: { warnings: [] } }));
+    const result = await cancelBracket("b-1");
+    expect(result.message).toBe("Cancellation requested");
+    expect(presentCancelResult(result).kind).toBe("cancel_requested");
+  });
+
+  it("reads a 5xx cancel reply as unknown", async () => {
+    fetchMock.mockResolvedValue(new Response("boom", { status: 503 }));
+    const err = await cancelBracket("b-1").catch((e: unknown) => e);
+    expect(presentCancelResult(undefined, err).kind).toBe("unknown");
   });
 });
 

@@ -1220,6 +1220,39 @@ def test_super_cancel_with_leg_query(*, backend_lease_factory) -> None:
     assert kw["payload"]["leg"] == "TARGET_LEG"  # normalised + signed in the payload
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/orders/super/SUP-1?broker=dhan",
+        "/api/v1/orders/triggers/AL-1?broker=dhan",
+        "/api/v1/orders/smart/DRV-1?segment=DERIVATIVE&broker=indmoney",
+    ],
+)
+def test_cancel_acknowledgement_is_a_cancellation_request(path, *, backend_lease_factory) -> None:
+    """A broker accepting a cancel is not the order being cancelled."""
+    router = _gated_router(result={"status": "PENDING", "orderId": "SUP-1"})
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete(path, headers=_live_headers())
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["order_outcome"] == "cancel_requested"
+    assert body["reason"] == "awaiting_confirmation"
+    assert body["message"] == "Cancellation requested"
+    assert body["retry_safe"] is False
+
+
+def test_super_cancel_confirmed_status_is_cancelled(*, backend_lease_factory) -> None:
+    router = _gated_router(result={"status": "CANCELLED", "orderId": "SUP-1"})
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    body = client.delete("/api/v1/orders/super/SUP-1?broker=dhan", headers=_live_headers()).get_json()
+    assert body["order_outcome"] == "cancelled"
+    assert body["message"] == "Order cancelled"
+
+
 def test_super_cancel_without_leg_omits_field(*, backend_lease_factory) -> None:
     """No ?leg= → the field stays out of the signed payload (adapter defaults ENTRY_LEG)."""
     router = _gated_router(result=None)

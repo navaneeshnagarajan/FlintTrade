@@ -2,6 +2,7 @@
 
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
 import { fmtInt } from "./helpers";
 import type { IntervalValue, OrderAction, TickMap } from "./types";
@@ -25,6 +26,12 @@ export interface ScalperChartPanelProps {
   ordersArmed: boolean;
   /** Why orders stay blocked. Null when Practice or Live may place. */
   orderBlockCopy: string | null;
+  /** A place request is in flight, or a lost one is not settled yet. */
+  ceLocked?: boolean;
+  peLocked?: boolean;
+  /** A lost place request for this contract is not settled yet. */
+  ceStatusUnknown?: boolean;
+  peStatusUnknown?: boolean;
 }
 
 export function ScalperChartPanel({
@@ -44,6 +51,10 @@ export function ScalperChartPanel({
   onCancelAll,
   ordersArmed,
   orderBlockCopy,
+  ceLocked = false,
+  peLocked = false,
+  ceStatusUnknown = false,
+  peStatusUnknown = false,
 }: ScalperChartPanelProps) {
   const chartHeight = 120;
 
@@ -91,7 +102,7 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={() => onOrder(ceSymbol, optExch, "SELL")}
-            disabled={!ordersArmed || !ceSymbol}
+            disabled={!ordersArmed || !ceSymbol || ceLocked}
             title={ordersArmed ? "Sell CE (Shift+←)" : orderBlockCopy ?? ""}
             variant="sell"
             icon={<TrendingDown size={14} />}
@@ -101,7 +112,7 @@ export function ScalperChartPanel({
           />
           <ActionButton
             onClick={() => onOrder(ceSymbol, optExch, "BUY")}
-            disabled={!ordersArmed || !ceSymbol}
+            disabled={!ordersArmed || !ceSymbol || ceLocked}
             title={ordersArmed ? "Buy CE (Shift+↑)" : orderBlockCopy ?? ""}
             variant="buy"
             icon={<TrendingUp size={14} />}
@@ -110,6 +121,7 @@ export function ScalperChartPanel({
             aria-label={`Buy CE ${ceSymbol ?? symbol} ${ceStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
+        {ceStatusUnknown && <OrderStatusUnknownLine className="shrink-0 px-2 py-1 border-t border-warning/30 bg-warning/10" />}
       </div>
 
       {/* SPOT PANEL */}
@@ -210,7 +222,7 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={() => onOrder(peSymbol, optExch, "BUY")}
-            disabled={!ordersArmed || !peSymbol}
+            disabled={!ordersArmed || !peSymbol || peLocked}
             title={ordersArmed ? "Buy Put (Shift+↓)" : orderBlockCopy ?? ""}
             variant="buy"
             icon={<TrendingUp size={14} />}
@@ -220,7 +232,7 @@ export function ScalperChartPanel({
           />
           <ActionButton
             onClick={() => onOrder(peSymbol, optExch, "SELL")}
-            disabled={!ordersArmed || !peSymbol}
+            disabled={!ordersArmed || !peSymbol || peLocked}
             title={ordersArmed ? "Sell Put (Shift+→)" : orderBlockCopy ?? ""}
             variant="sell"
             icon={<TrendingDown size={14} />}
@@ -229,6 +241,7 @@ export function ScalperChartPanel({
             aria-label={`Sell PE ${peSymbol ?? symbol} ${peStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
+        {peStatusUnknown && <OrderStatusUnknownLine className="shrink-0 px-2 py-1 border-t border-warning/30 bg-warning/10" />}
       </div>
     </div>
   );

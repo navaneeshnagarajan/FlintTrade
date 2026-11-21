@@ -696,6 +696,35 @@ class TestCancelBracket:
         ]
         assert "remains open" in body["message"]
 
+    def test_cancel_acknowledgement_is_only_a_cancellation_request(self, client) -> None:
+        """A swept leg cancel is a broker acknowledgement, not a confirmed cancel.
+
+        Args:
+            client: Flask test client.
+        """
+        resp = client.delete("/api/v1/orders/bracket/br-001")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["reason"] == "awaiting_confirmation"
+        assert body["retry_safe"] is False
+        assert body["message"] == "Cancellation requested"
+        assert "Order cancelled" not in body["message"]
+        assert "cancelled" not in body["message"].lower()
+
+    def test_cancel_request_keeps_sweep_warnings_after_the_request_copy(self, service) -> None:
+        """Warnings follow the shared request sentence instead of a cancel claim.
+
+        Args:
+            service: Mock service backing the client.
+        """
+        service.get_bracket.return_value.cancel_warnings = ["The entry position remains open."]
+        with _make_app(service).test_client() as client:
+            resp = client.delete("/api/v1/orders/bracket/br-001")
+        body = resp.get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["message"] == "Cancellation requested — The entry position remains open."
+
     def test_cancel_nonexistent_bracket_returns_404(self) -> None:
         """Cancel of a non-existent bracket returns HTTP 404."""
         svc = MagicMock()

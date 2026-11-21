@@ -136,6 +136,8 @@ def approve_order(order_id: str) -> tuple[Any, int]:
         return jsonify({
             "status": "error",
             "message": "Approval dispatch runtime unavailable; the intent remains pending.",
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
         }), 503
 
     queue = _get_queue()
@@ -194,7 +196,10 @@ def approve_order(order_id: str) -> tuple[Any, int]:
         }
     else:
         message = f"Order was not dispatched: {detail}. This intent will not be replayed."
-        extra = {}
+        extra = {
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
+        }
     failed = queue.mark_failed(
         order_id,
         reason=ORDER_STATUS_UNKNOWN if result.outcome_uncertain else detail,

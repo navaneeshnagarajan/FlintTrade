@@ -1,7 +1,8 @@
-import { buildHeaders, get, getBase, isDemoAuthSession, post, postWithMode, del } from "./ftApi.helpers";
+import { FtApiError, buildHeaders, get, getBase, isDemoAuthSession, post, postWithMode, del } from "./ftApi.helpers";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
+import { CANCELLATION_REQUESTED } from "@/lib/operatorIncident";
 
 export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
@@ -237,7 +238,8 @@ export const rejectOrder = (id: string) =>
 export interface SmartRouteChild {
   quantity: number;
   price_type: string;
-  status: "placed" | "skipped" | "failed";
+  /** `unknown`: the broker may hold this slice; routing stopped after it. */
+  status: "placed" | "skipped" | "failed" | "unknown";
   order_id: string;
   error: string;
   slippage_bps: number;
@@ -260,6 +262,9 @@ export interface SmartRouteJob {
   average_slippage_bps: number;
   completed: boolean;
   child_orders: SmartRouteChild[];
+  /** Present when a slice's outcome is unknown. Never retry the job. */
+  order_outcome?: "unknown";
+  retry_safe?: boolean;
 }
 
 export interface SmartRouteParams {
@@ -312,7 +317,8 @@ export async function startSmartRoute(params: SmartRouteParams): Promise<SmartRo
     | { data?: SmartRouteJob; message?: string }
     | null;
   if (!resp.ok || !json?.data) {
-    throw new Error(json?.message ?? `Smart route failed (HTTP ${resp.status})`);
+    // Status and body travel so a lost or 5xx reply reads as unknown, not refused.
+    throw new FtApiError(json?.message ?? `Smart route failed (HTTP ${resp.status})`, resp.status, undefined, json);
   }
   return json.data;
 }
@@ -401,12 +407,17 @@ export class BracketApiError extends Error {
   readonly code?: string;
   /** Partial bracket state (entry live but unprotected) when the exit leg failed. */
   readonly data?: BracketOrderData;
+  /** HTTP status and parsed body, so a lost reply reads as unknown. */
+  readonly status?: number;
+  readonly body?: unknown;
 
-  constructor(message: string, code?: string, data?: BracketOrderData) {
+  constructor(message: string, code?: string, data?: BracketOrderData, status?: number, body?: unknown) {
     super(message);
     this.name = "BracketApiError";
     this.code = code;
     this.data = data;
+    this.status = status;
+    this.body = body;
   }
 }
 
@@ -457,6 +468,8 @@ export async function placeBracketOrder(params: PlaceBracketParams): Promise<Pla
       json?.error ? `${message}: ${json.error}` : message,
       json?.code,
       json?.data,
+      resp.status,
+      json,
     );
   }
   return { message: json.message ?? "Bracket placed", data: json.data ?? null };
@@ -467,6 +480,8 @@ export interface CancelBracketResult {
   message: string;
   /** Caveats such as a filled MARKET entry position this cancel does NOT close. */
   warnings: string[];
+  /** `cancel_requested` until a later order read confirms the cancel. */
+  order_outcome?: string;
 }
 
 /**
@@ -489,11 +504,28 @@ export async function cancelBracket(bracketId: string): Promise<CancelBracketRes
     body: JSON.stringify(target),
   });
   const json = (await resp.json().catch(() => null)) as
-    | { status?: string; message?: string; code?: string; error?: string; data?: { warnings?: string[] } }
+    | {
+      status?: string;
+      message?: string;
+      code?: string;
+      error?: string;
+      order_outcome?: string;
+      data?: { warnings?: string[] };
+    }
     | null;
   if (!resp.ok || json?.status !== "success") {
     const message = json?.message ?? `Bracket cancel failed (HTTP ${resp.status})`;
-    throw new BracketApiError(json?.error ? `${message}: ${json.error}` : message, json?.code);
+    throw new BracketApiError(
+      json?.error ? `${message}: ${json.error}` : message,
+      json?.code,
+      undefined,
+      resp.status,
+      json,
+    );
   }
-  return { message: json.message ?? "Bracket cancelled", warnings: json.data?.warnings ?? [] };
+  return {
+    message: json.message ?? CANCELLATION_REQUESTED,
+    warnings: json.data?.warnings ?? [],
+    order_outcome: json.order_outcome,
+  };
 }
