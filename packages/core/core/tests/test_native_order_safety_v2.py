@@ -124,8 +124,9 @@ def _terminal_lifecycle_case(
     monkeypatch.setattr(safety_module, "datetime", SessionClock)
     desk = mounted_desk
     qualifier = desk.app.config["LAYA_QUALIFICATION_OWNER"]
+    # The lifetime has to cover the canonical reads that precede the write.
     qualifier.configure(cases=(("positive", "BUY", "Reviewed limit", "allow"),
-                               ("negative", "BUY", "revenge", "deny")), max_age_seconds=10.0)
+                               ("negative", "BUY", "revenge", "deny")), max_age_seconds=30.0)
     order = {"symbol": "SYNTH", "exchange": "NSE", "product": "CNC", "action": "BUY",
              "quantity": "1", "price": "4", "pricetype": "LIMIT", "admission_note": "Reviewed limit"}
     phases: list[dict[str, Any]] = []
