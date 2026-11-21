@@ -606,6 +606,33 @@ for (const viewport of VIEWPORTS) {
       await expectLineFits(page.getByTestId("scalper-ce-status-slot"), `scalper ${viewport.width}`);
     });
 
+    test("Scalper's unknown line fits a 280px panel without clipping", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerScalperReads(syntheticApi);
+      await mountWidget(page, "scalper");
+      await page.clock.runFor(5_000);
+      await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+      const slot = page.getByTestId("scalper-ce-status-slot");
+      await slot.evaluate((node) => {
+        const panel = node.parentElement as HTMLElement;
+        panel.style.width = "280px";
+        panel.style.maxWidth = "280px";
+        panel.style.flex = "0 0 280px";
+      });
+      await recordLostSubmit(page, { key: `NFO:${CE}`, symbol: CE, exchange: "NFO", action: "BUY", quantity: 65 });
+      const line = slot.getByText(UNKNOWN);
+      let advanced = 0;
+      await expect.poll(async () => {
+        if (advanced < 2_000) {
+          await page.clock.runFor(25);
+          advanced += 25;
+        }
+        return line.isVisible();
+      }, { timeout: 15_000, intervals: [50] }).toBe(true);
+      expect(await slot.evaluate((node) => Math.round(node.getBoundingClientRect().width)), "panel is 280px").toBeLessThanOrEqual(280);
+      await expectLineFits(slot, `scalper 280px panel at ${viewport.width}`);
+    });
+
     test("Ladder Buy/Sell and price rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {
       test.setTimeout(60_000);
       registerLadderReads(syntheticApi);
