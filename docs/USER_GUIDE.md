@@ -229,16 +229,15 @@ interchangeable, and the venue has no default. Setup → Brokers still fails on 
 uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
-API orders must come from a static IP you register yourself. See
+You register a static IP with your broker before API orders are sent. See
 [Broker static IP](#broker-static-ip).
 
 <a id="broker-static-ip"></a>
 
 ### Broker static IP
 
-Brokers require API orders to come from a static IP you register with the
-broker. You get that IP and register it yourself. FlintTrade does not provide
-one.
+Brokers require API orders to come from a static IP. You get that IP and
+register it with your broker.
 
 Changing the registered IP is limited to once every 7 days.
 
@@ -1007,8 +1006,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
 
-- [ ] API orders must come from a static IP you register with the broker.
-      FlintTrade does not provide one. See
+- [ ] You get a static IP and register it with your broker. See
       [Broker static IP](#broker-static-ip).
 
 Operator and automate Live place run Mode guard → Laya.admit →
@@ -1673,18 +1671,17 @@ your own automation. See
 
 ### Your automation, your responsibility
 
-FlintTrade is software you run yourself on your own computer, through your
-own broker account and API, under your own settings and limits. It does not
-run hosted execution, offer strategies or signals as a service, or help you
-obtain a static IP. See [Broker static IP](#broker-static-ip).
+You run FlintTrade on your own computer, through your own broker account and
+API, under your own settings and limits. You run the strategies and read the
+analysis there. You register your own static IP. See
+[Broker static IP](#broker-static-ip).
 
 Brokers may ask clients who write their own algorithms to sign an undertaking
 with them. Under that undertaking, losses caused by the logic of your own
 strategy or automation cannot be taken to the exchange's investor grievance
 process. Problems on the broker's side are not covered by this.
 
-Chat does not place Live orders — Live place stays fail-closed; a spoken
-order request is reviewed as set out in
+Chat cannot place Live orders. A spoken order request is reviewed in
 [Speaking with the AI assistant](#speaking-with-the-ai-assistant).
 
 ### Cron
@@ -1872,9 +1869,9 @@ card.
 ### Signals
 
 The **Signals** panel shows analysis worked out inside your own app from
-market data. An executor runs multiple generators in parallel and aggregates
-diagnostics for that view. It is not a recommendation to trade, and you
-decide whether to place any order.
+market data. Several checks run at the same time, and the panel combines
+their results. It is not a recommendation to trade, and you decide whether
+to place any order.
 
 ### Sentiment
 
