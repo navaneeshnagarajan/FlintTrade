@@ -229,6 +229,27 @@ interchangeable, and the venue has no default. Setup → Brokers still fails on 
 uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
+API orders must come from a static IP you register yourself. See
+[Broker static IP](#broker-static-ip).
+
+<a id="broker-static-ip"></a>
+
+### Broker static IP
+
+Brokers require API orders to come from a static IP you register with the
+broker. You get that IP and register it yourself. FlintTrade does not provide
+one.
+
+Changing the registered IP is limited to once every 7 days.
+
+A static IP may only be shared with immediate family members.
+
+On Kotak Neo, the API sign-in itself must happen from the machine with the
+registered static IP, not only orders.
+
+If the broker refuses a request because it did not come from the registered
+IP, check that you are running FlintTrade on that machine and network.
+
 ### Why two layers?
 
 ---
@@ -983,6 +1004,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
 
+- [ ] API orders must come from a static IP you register with the broker.
+      FlintTrade does not provide one. See
+      [Broker static IP](#broker-static-ip).
+
 Operator and automate Live place run Mode guard → Laya.admit →
 SafetySystem → gate_order → BrokerRouter. Laya does not place the
 order. A refusal or a quantity clamp stops before SafetySystem.
@@ -1637,7 +1662,27 @@ two unlabelled ₹ on mixed bases.
 Open Automation (`/automation`). A bookmark of `/automate` opens the same screen. An Automation place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
-quantity on its own. The hub has three sub-tools:
+quantity on its own. The hub has three sub-tools. What you run here is
+your own automation. See
+[Your automation, your responsibility](#self-run-automation).
+
+<a id="self-run-automation"></a>
+
+### Your automation, your responsibility
+
+FlintTrade is software you run yourself on your own computer, through your
+own broker account and API, under your own settings and limits. It does not
+run hosted execution, offer strategies or signals as a service, or help you
+obtain a static IP. See [Broker static IP](#broker-static-ip).
+
+Brokers may ask clients who write their own algorithms to sign an undertaking
+with them. Losses caused by the logic of your own strategy or automation
+cannot be taken to the exchange's investor grievance process.
+
+Chat does not place Live orders — Live place stays fail-closed. An order
+request can produce a proposal for review. Approve uses the existing Practice
+order path and safety admission. Native Live execution remains unavailable
+until the native cutover; speech does not unlock it.
 
 ### Cron
 
@@ -1692,10 +1737,12 @@ flashes the outage copy.
 
 ## 9. AI Centre walkthrough
 
-Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG are backed by
-`packages/services/ai`. Suggest is a local filter UI over an
+Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
+`packages/services/ai`. The Signals panel shows analysis to you. It does not
+provide signals, and it does not recommend that you act on them. Suggest is a local filter UI over an
 illustrative strategy list — not a live AI fetch. Suggest stays
-labelled illustrative.
+labelled illustrative. See
+[Your automation, your responsibility](#self-run-automation).
 
 ### Chat
 
@@ -1822,9 +1869,10 @@ card.
 
 ### Signals
 
-Rule-based and ML-derived software outputs. Includes an executor that runs
-multiple generators in parallel and aggregates diagnostics. These outputs are
-and are not financial advice.
+The **Signals** panel shows rule-based and ML-derived analysis inside your
+own app. An executor runs multiple generators in parallel and aggregates
+diagnostics for that view. Those figures are analysis shown to you. They are
+not signals FlintTrade provides, and they are not a recommendation to act.
 
 ### Sentiment
 
