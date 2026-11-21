@@ -48,7 +48,7 @@ test.describe('Explore mode', () => {
     // /home now opens Terminal. The same overview cards remain available
     // from its public catalogue rather than mounting in the default preset.
     await expect(page).toHaveURL(/\/terminal$/);
-    const terminal = page.getByRole('region', { name: 'Terminal app', exact: true });
+    const terminal = page.locator('[data-app-chrome="terminal"]');
     await terminal.getByRole('button', { name: 'Add widget', exact: true }).click();
     await page.getByRole('button', { name: 'Add Recent Orders overview', exact: true }).click();
     const orders = page.getByTestId('orders-card');
@@ -76,7 +76,8 @@ test.describe('Explore mode', () => {
     // Wait for the main landmark — it is always present once AppLayout mounts
     const main = page.getByRole('main', { name: 'Terminal', exact: true });
     await expect(main).toBeVisible({ timeout: 10_000 });
-    await expect(main.getByRole('region', { name: 'Terminal app', exact: true })
+    await page.getByRole('button', { name: 'Use Watchlist driven layout', exact: true }).click();
+    await expect(page.locator('[data-app-chrome="terminal"]')
       .getByRole('button', { name: 'Add widget', exact: true })).toBeVisible();
     await expect(main.getByTestId('app-layout')).toBeVisible();
   });

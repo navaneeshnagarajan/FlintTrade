@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import type { Dispatch, SetStateAction } from "react";
 import type { WidgetProps } from "@/types/widgets";
+import type * as ChartTheme from "@/hooks/useChartTheme";
 import { ohlcvCacheKey } from "@/lib/chartCache";
 
 type TestLegendState = {
@@ -247,7 +248,8 @@ vi.mock("@/lib/optionLegSymbols", () => ({
   resolveOptionLeg: optionLegMocks.resolveOptionLeg,
 }));
 
-vi.mock("@/hooks/useChartTheme", () => ({
+vi.mock("@/hooks/useChartTheme", async (importOriginal: () => Promise<typeof ChartTheme>) => ({
+  ...(await importOriginal()),
   useLightweightChartTheme: () => ({
     candle: {
       borderDownColor: "#ef4444",

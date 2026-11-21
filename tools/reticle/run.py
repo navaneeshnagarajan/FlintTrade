@@ -5,9 +5,11 @@ import importlib.util
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
-from validate_results import validate_original
+import time
+from validate_results import validate_original, validate_cases
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parents[1]
@@ -38,7 +40,7 @@ def main():
         env['PYTHONPATH']=os.pathsep.join(map(str,paths))
         (OUT/'python-selection.json').write_text(json.dumps({'python':str(args.python),'version':version,'pythonpath':list(map(str,paths))},indent=2))
     commands=[]
-    def run(cmd,name,timeout=900):
+    def run(cmd,name,timeout: float = 900):
         # Toolkit controls historically run outside app project registration.
         # Explicit --dir/config select the current app for its actual journeys.
         with (OUT/(name+'.log')).open('w') as log:
@@ -61,6 +63,34 @@ def main():
             if args.mode=='collect':
                 code=run(cmd+['--list'],'collect',90)
             else:
+                # Repeated source compilation is preparation, not a protocol
+                # body. Keep it inside the existing prerequisite budget and
+                # retain a fresh normal factory and cleanup for every case.
+                prerequisite_deadline = time.monotonic() + 180
+                if run([str(args.python), "-B", str(HERE / "prepare_python.py")], "python-bytecode", 180):
+                    raise RuntimeError("Static Python preparation failed")
+                env["PYTHONPYCACHEPREFIX"] = "/run/test/cache/reticle-python"
+                remaining = prerequisite_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Normal-factory prerequisite budget expired")
+                if run([str(args.python),str(HERE/'tests/core_lifecycle.py')],'core-lifecycle',remaining):
+                    raise RuntimeError('Normal-factory fixture lifecycle controls failed')
+                controls = [
+                    'pnpm', '--dir', str(terminal), 'exec', 'playwright', 'test',
+                    '--config=' + str(terminal / 'playwright.incident-protocol.config.ts'),
+                    '--project=chromium', '--workers=1', '--retries=0',
+                ]
+                if run(controls, 'incident-protocol-controls', 300):
+                    raise RuntimeError('Incident protocol controls failed')
+                expected = json.loads((HERE / 'incident-protocol-cases.json').read_text())
+                validate_cases(
+                    OUT / 'incident-protocol-results.xml',
+                    [('incident-delivery-protocol.control.ts', title) for title in expected],
+                )
+                shutil.move(OUT/'playwright/incident-protocol-controls', OUT/'incident-protocol-controls')
+                # This preparation belongs only to the protocol prerequisite;
+                # do not change the separately owned browser startup seam.
+                env.pop("PYTHONPYCACHEPREFIX")
                 for port in [4400,5173,5100]:
                     with socket.socket() as listener:listener.bind(('127.0.0.1',port))
                 env.update(RETICLE_CAPTURE_RETENTION=json.dumps({'maxEvents':10000,'maxAgeMs':120000,'maxBytes':33554432}),RETICLE_JOURNAL='1',CHOKIDAR_USEPOLLING='1')

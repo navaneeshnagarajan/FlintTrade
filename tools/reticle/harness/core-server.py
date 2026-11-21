@@ -9,6 +9,7 @@ from pathlib import Path
 import secrets
 import socket
 import threading
+import time
 import uuid
 
 OUT = Path('/run/test/artifacts')
@@ -61,6 +62,8 @@ class CoreServer:
         from flask import request
 
         self.app = app = create_flask_app()
+        from flinttrade_core.desktop import _DesktopShutdownRecoveryOwner
+        self.recovery = _DesktopShutdownRecoveryOwner(app)
         source_root = Path(os.environ.get('FLINTTRADE_E2E_SOURCE_ROOT', Path(__file__).resolve().parents[3])).resolve()
         origins = {name: str(getattr(mod, '__file__', '')) for name, mod in sys.modules.items() if name.startswith(('flinttrade_', 'packages.')) and getattr(mod, '__file__', None)}
         (OUT / 'python-source-origins.json').write_text(json.dumps(origins, indent=2))
@@ -77,7 +80,6 @@ class CoreServer:
         self.token = token
         self.credential = secrets.token_urlsafe(32)
 
-        @app.after_request
         def record(response):
             if not request.path.startswith(('/v1/', '/api/', '/health')):
                 return response
@@ -89,11 +91,17 @@ class CoreServer:
                    'if_match': request.headers.get('If-Match'), 'idempotency_key': request.headers.get('Idempotency-Key'),
                    'status': response.status_code, 'response_sha256': digest(response_body),
                    'response': redact(response.get_json(silent=True)) if not response.is_streamed else None,
+                   'diagnostic_request_id': response.headers.get('X-Diagnostic-Request-ID'),
                    'etag': response.headers.get('ETag'), 'trial': response.headers.get('X-Trial-Id'), 'experiment': response.headers.get('X-Experiment-Id')}
             with self.lock:
                 self.rows.append(row)
                 (OUT / 'core-http-ledger.json').write_text(json.dumps(self.rows, indent=2))
             return response
+
+        # Flask runs app after-request hooks in reverse registration order.
+        # Observe the final producer response, after diagnostics has supplied
+        # its real correlation header; never generate or infer a substitute.
+        app.after_request_funcs.setdefault(None, []).insert(0, record)
 
         def external_transport(request):
             assert request.method == 'POST'
@@ -175,18 +183,22 @@ class CoreServer:
             self.client.close()
         stopped = self.owner.stop(timeout=10) if hasattr(self, 'owner') else True
         result = {'admission_drained': drained, 'listener_stopped': stopped, 'owners': {}}
-        for key in ('EXECUTION_SESSION_MANAGER', 'MODEL_RUN_SERVICES', 'DATA_RUNTIME', 'LEARNING_CONSENT_LEDGER', 'KNOWLEDGE_RUNTIME', 'SERVICE_TASK_DISPATCHER'):
-            owner = self.app.config.get(key)
-            if owner is not None:
-                try:
-                    answer = owner.close()
-                    result['owners'][key] = {'closed': answer is not False}
-                except Exception as exc:
-                    result['owners'][key] = {'closed': False, 'error': type(exc).__name__}
-        result['remaining_threads'] = [t.name for t in threading.enumerate() if t.ident not in self.initial_threads]
-        with socket.socket() as check:
-            result['listener_closed_probe'] = check.connect_ex(('127.0.0.1', self.port)) != 0
-        (OUT / 'shutdown.json').write_text(json.dumps(result, indent=2))
+        from flinttrade_core.factory_lifecycle import FACTORY_STORES
+        # Census for evidence only; the existing factory lifecycle owns release.
+        owned = {key: self.app.config[key] for key in (
+            'EXECUTION_SESSIONS', 'PROTECTION_SERVICES', 'MODEL_RUN_SERVICES',
+            'DATA_RUNTIME', 'LEARNING_CONSENT_LEDGER', 'KNOWLEDGE_RUNTIME',
+            'SERVICE_TASK_DISPATCHER', *FACTORY_STORES,
+        ) if self.app.config.get(key) is not None}
+        result['lifecycle'] = '_DesktopShutdownRecoveryOwner.release'
+        try:
+            self.recovery.release(deadline=time.monotonic() + 10)
+        finally:
+            result['owners'] = {key: {'closed': self.app.config.get(key) is None} for key in owned}
+            result['remaining_threads'] = [t.name for t in threading.enumerate() if t.ident not in self.initial_threads]
+            with socket.socket() as check:
+                result['listener_closed_probe'] = check.connect_ex(('127.0.0.1', self.port)) != 0
+            (OUT / 'shutdown.json').write_text(json.dumps(result, indent=2))
         assert result['admission_drained'] and result['listener_stopped'] and result['listener_closed_probe']
         assert not result['remaining_threads'], result
         assert all(row['closed'] for row in result['owners'].values()), result

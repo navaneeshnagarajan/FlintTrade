@@ -25,7 +25,7 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react";
-import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
+import { Plus, Search, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { instrumentContext } from "@/services/fdc3/contexts";
@@ -314,14 +314,84 @@ function WatchlistWidget({ params, api }: WidgetProps) {
 
   return (
     <div
-      className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
+      className="ft-watchlist h-full flex flex-col bg-surface-base text-text-primary overflow-hidden relative"
       data-tour-target="watchlist"
     >
+      {/* TAB BAR */}
+      <div
+        className="ft-watchlist-tabs flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
+      >
+        <div role="tablist" aria-label="Watchlist tabs" className="contents">
+        {tabs.map((tab, idx) => renamingIdx === idx ? null : (
+          <div key={tab.id} className="shrink-0 flex items-center" style={{ order: idx }}>
+              <button
+                type="button"
+                id={tabId(tab.id)}
+                ref={(element) => { if (element) tabRefs.current.set(tab.id, element); else tabRefs.current.delete(tab.id); }}
+                role="tab"
+                aria-selected={idx === activeTabIdx}
+                aria-controls={panelId}
+                tabIndex={idx === activeTabIdx ? 0 : -1}
+                onClick={() => setActiveTabIdx(idx)}
+                onContextMenu={(e) => openTabCtxMenu(e, idx)}
+                onKeyDown={(e) => {
+                  const next = e.key === "ArrowRight" ? (idx + 1) % tabs.length
+                    : e.key === "ArrowLeft" ? (idx + tabs.length - 1) % tabs.length
+                    : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
+                  if (next !== null) {
+                    e.preventDefault();
+                    tabRefs.current.get(tabs[next].id)?.focus();
+                  } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTabCtxMenu({ x: rect.left, y: rect.bottom, idx });
+                  }
+                }}
+                className={`h-6 text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
+                  idx === activeTabIdx
+                    ? "bg-accent/20 text-accent border border-accent/40"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover border border-transparent"
+                }`}
+                title="Right-click for options"
+              >
+                {tab.name}
+              </button>
+          </div>
+        ))}
+        </div>
+
+        {/* Match the tab's 24px slot so its 16px editor has an exact centre,
+            including when it replaces the only tab in the strip. */}
+        {renamingIdx !== null && tabs[renamingIdx] && (
+          <div className="h-6 shrink-0 flex items-center" style={{ order: renamingIdx }}>
+          <RenameInput
+            label={`Rename ${tabs[renamingIdx].name}`}
+            initialValue={tabs[renamingIdx].name}
+            onConfirm={(name) => handleRenameTab(renamingIdx, name)}
+            onCancel={() => setRenamingIdx(null)}
+          />
+          </div>
+        )}
+
+        {tabs.length < MAX_TABS && (
+          <button
+            onClick={handleAddTab}
+            title="New watchlist"
+            aria-label="Add watchlist tab"
+            style={{ order: tabs.length }}
+            className="shrink-0 h-7 px-2 gap-1 flex items-center justify-center text-text-muted hover:text-accent hover:bg-surface-hover rounded transition-colors border border-transparent hover:border-accent/30"
+          >
+            <Plus size={10} /><span className="text-xs">Add watchlist</span>
+          </button>
+        )}
+      </div>
+
       {/* HEADER */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
-        <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
-          Watchlist
-        </span>
+      <div className="ft-watchlist-header flex items-center gap-1.5 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
+        <h2 className="sr-only">Watchlist</h2>
+        <Button variant="ghost" className="ft-watchlist-search" onClick={() => setShowSearch(true)} aria-label="Add symbol" title="Add symbol">
+          <Search size={14} aria-hidden="true" /><span>Search &amp; add items</span>
+        </Button>
 
         {count > 0 && (
           <span className="text-xxs font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1 leading-4">
@@ -334,19 +404,6 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         {fetchError && (
           <span title={fetchError} className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
         )}
-
-        <div className="flex-1" />
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowSearch(true)}
-          className="h-5 w-5 p-0 text-text-muted hover:text-text-primary hover:bg-surface-hover"
-          aria-label="Add symbol"
-          title="Add symbol"
-        >
-          <Plus size={11} />
-        </Button>
 
         <div className="relative" ref={menuRef}>
           <Button
@@ -466,72 +523,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         </div>
       )}
 
-      {/* TAB BAR */}
-      <div
-        className="flex items-center gap-1 px-2 py-1 border-b border-border-default bg-surface-card shrink-0 overflow-x-auto scrollbar-none"
-      >
-        <div role="tablist" aria-label="Watchlist tabs" className="contents">
-        {tabs.map((tab, idx) => renamingIdx === idx ? null : (
-          <div key={tab.id} className="shrink-0 flex items-center" style={{ order: idx }}>
-              <button
-                type="button"
-                id={tabId(tab.id)}
-                ref={(element) => { if (element) tabRefs.current.set(tab.id, element); else tabRefs.current.delete(tab.id); }}
-                role="tab"
-                aria-selected={idx === activeTabIdx}
-                aria-controls={panelId}
-                tabIndex={idx === activeTabIdx ? 0 : -1}
-                onClick={() => setActiveTabIdx(idx)}
-                onContextMenu={(e) => openTabCtxMenu(e, idx)}
-                onKeyDown={(e) => {
-                  const next = e.key === "ArrowRight" ? (idx + 1) % tabs.length
-                    : e.key === "ArrowLeft" ? (idx + tabs.length - 1) % tabs.length
-                    : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
-                  if (next !== null) {
-                    e.preventDefault();
-                    tabRefs.current.get(tabs[next].id)?.focus();
-                  } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setTabCtxMenu({ x: rect.left, y: rect.bottom, idx });
-                  }
-                }}
-                className={`text-xs px-2 py-0.5 rounded transition-colors whitespace-nowrap ${
-                  idx === activeTabIdx
-                    ? "bg-accent/20 text-accent border border-accent/40"
-                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover border border-transparent"
-                }`}
-                title="Right-click for options"
-              >
-                {tab.name}
-              </button>
-          </div>
-        ))}
-        </div>
 
-        {renamingIdx !== null && tabs[renamingIdx] && (
-          <div className="shrink-0 flex items-center" style={{ order: renamingIdx }}>
-          <RenameInput
-            label={`Rename ${tabs[renamingIdx].name}`}
-            initialValue={tabs[renamingIdx].name}
-            onConfirm={(name) => handleRenameTab(renamingIdx, name)}
-            onCancel={() => setRenamingIdx(null)}
-          />
-          </div>
-        )}
-
-        {tabs.length < MAX_TABS && (
-          <button
-            onClick={handleAddTab}
-            title="New watchlist"
-            aria-label="Add watchlist tab"
-            style={{ order: tabs.length }}
-            className="shrink-0 w-5 h-5 flex items-center justify-center text-text-muted hover:text-accent hover:bg-surface-hover rounded transition-colors border border-transparent hover:border-accent/30"
-          >
-            <Plus size={10} />
-          </button>
-        )}
-      </div>
 
       {/* SYMBOL LIST */}
       <div className="flex-1 overflow-auto" role="tabpanel" id={panelId} aria-labelledby={activeTab ? tabId(activeTab.id) : undefined}>

@@ -218,7 +218,8 @@ jobs:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    # The locked install plus the shard does not finish inside 30 minutes.
+    timeout-minutes: 45
     env:
       OMP_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -235,6 +236,13 @@ jobs:
         with: { python-version: '3.14' }
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv sync --frozen --extra ml
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - name: Run Python package shard
         run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=4 -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
       - name: Upload Python timing and failure evidence
@@ -313,7 +321,7 @@ jobs:
       - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
         run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/ src/generated/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check (strict TypeScript check already passed)

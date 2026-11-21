@@ -87,7 +87,7 @@ test("Historical Chain captures and renders the latest snapshot in a narrow pane
   await page.goto("/trade");
   await page.getByRole("main", { name: "Terminal", exact: true }).waitFor({ timeout: 15_000 });
   // The canonical app landmark mounts before its widget listener.
-  await page.getByRole("region", { name: "Terminal app", exact: true })
+  await page.locator('[data-app-chrome="terminal"]')
     .getByRole("button", { name: "Add widget", exact: true }).waitFor({ timeout: 15_000 });
 
   await page.evaluate(() => {

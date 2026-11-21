@@ -7,6 +7,8 @@
  */
 
 import { useState } from "react";
+import { useAccountResultFence } from "@/hooks/useAccountResultFence";
+import { accountResultPresentation } from "@/services/nativeAccountResult";
 import { Trash2, RefreshCw, Star } from "lucide-react";
 import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
@@ -57,6 +59,8 @@ export function ConnectedAccounts() {
   const accountsQuery = useBrokerAccounts();
   const accounts = useBrokerStore((s) => s.accounts);
   const [error, setError] = useState<string | null>(null);
+  const captureResultFence = useAccountResultFence();
+  const [resultNotice, setResultNotice] = useState<{ current: () => boolean; message: string } | null>(null);
 
   if (accounts.length === 0) {
     return (
@@ -84,12 +88,20 @@ export function ConnectedAccounts() {
   };
 
   const handleReconnect = async (account: BrokerAccount) => {
+    const current = captureResultFence();
+    setResultNotice(null);
     try {
       setError(null);
-      await runAccountAction(`${brokerAccountKey(account)}:reconnect`, (key) => reconnectBrokerAccount(account, key));
+      const result = await runAccountAction(`${brokerAccountKey(account)}:reconnect`, (key) => {
+        if (!current()) throw new Error("Account action retired before dispatch.");
+        return reconnectBrokerAccount(account, key);
+      });
+      if (!current()) return;
+      setResultNotice({ current, message: accountResultPresentation(result).message });
       await refreshAccounts();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to reconnect account");
+      if (!current()) return;
+      setResultNotice({ current, message: e instanceof Error ? e.message : "Account outcome unavailable; refresh account status." });
     }
   };
 
@@ -105,6 +117,7 @@ export function ConnectedAccounts() {
 
   return (
     <div className="space-y-2">
+      {resultNotice?.current() && <p role="status" className="text-xs px-1 py-1.5">{resultNotice.message}</p>}
       {error && (
         <p className="text-xs text-red-400 px-1 py-1.5 rounded-md bg-red-500/10 border border-red-500/20">
           {error}

@@ -457,7 +457,7 @@ export async function addWidget(page: Page, name: string) {
   const app = route.charAt(0).toUpperCase() + route.slice(1);
   const region = page.getByRole("region", { name: app + " app", exact: true });
   await expect(region).toBeVisible();
-  await region.getByRole("button", { name: "Add widget", exact: true }).click();
+  await page.locator(`[data-app-chrome="${route}"]`).getByRole("button", { name: "Add widget", exact: true }).click();
   await page.getByRole("button", { name: "Add " + name, exact: true }).click();
 }
 

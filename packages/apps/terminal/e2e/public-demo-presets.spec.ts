@@ -66,7 +66,8 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     await expect.poll(async () => (await layouts())["Current"]).toEqual((await layouts())[name]);
   };
   const anonymous = async () => {
-    await expect(page.getByTestId("public-preview-header")).toHaveText(/Example · frozen simulation.*No accounts, sign-in, provider connections or real orders\./);
+    await expect(page.getByTestId("public-preview-header")).toHaveText(/FlintTradeExample · frozen simulation/);
+    await expect(page.getByText("No accounts, sign-in, provider connections or real orders.", { exact: true })).toBeVisible();
     await expect(app.getByTestId("app-execution-scope")).toHaveText("Example · No execution account selected · Linking changes selections, never execution authority.");
     expect(await page.evaluate(() => ({ session: sessionStorage.getItem("flinttrade:auth-session"), local: localStorage.getItem("flinttrade:auth-session"), mode: JSON.parse(localStorage.getItem("flinttrade:mode") ?? "null") }))).toEqual({ session: null, local: null, mode: { state: { mode: "explore" }, version: 2 } });
     await expect(page.getByRole("dialog", { name: "Manage workspaces", exact: true })).toHaveCount(0);
@@ -85,7 +86,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     // Layout management opens from the app toolbar and stays open until closed.
     await app.getByRole("button", { name: "Layout", exact: true }).click();
     const frozenTime = await page.evaluate(() => Date.now());
-    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
     await app.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(4);
     await expect.poll(chartIds).toHaveLength(4);
@@ -129,7 +130,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     const nonLayouts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     const named = Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"));
     await app.getByRole("button", { name: "Reset app layout", exact: true }).click();
-    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["overview:WelcomeCard", "watchlist", "chart", "positions", "orders"]);
+    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["watchlist", "overview:WelcomeCard", "chart", "positions", "orders"]);
     expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
     const afterReset = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     // Newly mounted default charts may add presentation preferences; the real

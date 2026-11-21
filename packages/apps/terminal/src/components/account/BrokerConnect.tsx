@@ -10,7 +10,7 @@ import { BrokerSummary } from "@/tools/Settings/BrokerSummary";
  * establishes the session.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { useAccountResultFence } from "@/hooks/useAccountResultFence";
 import { clearBrokerFault } from "@/stores/operatorSignalStore";
 import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
@@ -63,6 +64,7 @@ import {
 } from "@/services/ftApi.native";
 import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
 import { cancelAccountAction, runAccountAction } from "@/services/accountMutationActions";
+import { accountResultPresentation, NativeCredentialsRequired } from "@/services/nativeAccountResult";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
@@ -215,6 +217,7 @@ export interface BrokerConnectProps {
 
 export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const qc = useQueryClient();
+  const captureResultFence = useAccountResultFence();
   const mountedRef = useRef(false);
   const delayedRefreshesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const accountRefreshControllersRef = useRef<Set<AbortController>>(new Set());
@@ -251,6 +254,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
+
+  useLayoutEffect(() => {
+    setFields({});
+    return () => { setFields({}); };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -571,8 +579,19 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         },
         }, key));
       if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
+      if ("receipt" in result) {
+        return {
+          oauth: false as const,
+          target: {
+            source: "native" as const,
+            broker: broker.adapter_id,
+            account_id: accountId.trim(),
+          },
+          message: accountResultPresentation(result).message,
+        };
+      }
       // A failed connect is a non-2xx that already threw the backend message
-      // inside connectNativeAccount; a 2xx always carries connected:true.
+      // inside connectNativeAccount; a legacy 2xx always carries connected:true.
       if (!result.connected) throw new Error("Login did not establish a session.");
       return {
         oauth: false as const,
@@ -664,30 +683,36 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const reloginMutation = useMutation({
     // Replay the stored (replayable) material first — a one-click morning
     // re-auth for accounts whose vault token is still valid (G5).
-    mutationFn: (sel: { adapter: string; account: string }) =>
-      runAccountAction(`native:${sel.adapter}:${sel.account}:reconnect`,
-        (key) => reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key)),
-    onSuccess: (_r, sel) => {
+    mutationFn: (sel: { adapter: string; account: string }) => {
+      const current = captureResultFence();
+      return runAccountAction(`native:${sel.adapter}:${sel.account}:reconnect`,
+        (key) => {
+          if (!current()) throw new Error("Account action retired before dispatch.");
+          return reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key);
+        }).then((result) => current() ? result : null);
+    },
+    onSuccess: (r, sel) => {
+      if (!r) return;
       setError("");
-      setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
-      clearBrokerFault();
+      setNotice("receipt" in r
+        ? accountResultPresentation(r).message
+        : `${sel.adapter} account ${sel.account} re-authenticated.`);
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {
-      // Stored material is stale (single-use TOTP/OAuth code, expired token) —
-      // prefill the connect form so the operator only enters what's missing.
-      setSelectedBroker(sel.adapter);
-      const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
-      setSelectedMethodId(first);
-      setFields({});
-      setAccountId(sel.account);
-      setAccountLabel("");
+      if (e instanceof NativeCredentialsRequired) {
+        setSelectedBroker(sel.adapter);
+        const first = brokers.find((b) => b.adapter_id === sel.adapter)?.auth_methods[0]?.id ?? "";
+        setSelectedMethodId(first);
+        setFields({});
+        setAccountId(sel.account);
+        setAccountLabel("");
+        setNotice("");
+        setError(`${e.message} Enter fresh credentials below to re-authenticate.`);
+        return;
+      }
       setNotice("");
-      setError(
-        e instanceof Error
-          ? `${e.message} Enter fresh credentials below to re-authenticate.`
-          : "Re-login failed — enter fresh credentials below.",
-      );
+      setError(e instanceof Error ? e.message : "Re-login failed.");
     },
   });
 
@@ -943,11 +968,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {connectedReadBroker
-                        ? ""
-                        : a.read_only
-                          ? " · read-only"
-                          : ""}
+                      {a.read_only ? " · read-only" : ""}
                       {moneyPathChrome
                         ? ` · ${honest}`
                         : connected && connectedReadChrome(a)

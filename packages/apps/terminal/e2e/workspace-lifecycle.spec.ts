@@ -52,7 +52,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   await expect(workspace).toBeVisible();
   // Layout management opens from the app toolbar and stays open until closed.
   await workspace.getByRole("button", { name: "Layout", exact: true }).click();
-  await expect(preset.locator("option")).toHaveText(["Choose layout", "Overview", "Trader", "Market watch", "Option Scalper", "Multi chart"]);
+  await expect(preset.locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
   await preset.selectOption("trader");
   await workspace.getByRole("button", { name: "Add widget", exact: true }).click();
   const catalogue = page.getByRole("dialog", { name: "Terminal widgets", exact: true });
@@ -82,7 +82,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   }
   await page.reload();
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
   const persisted = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
   expect(Object.keys(persisted).sort()).toEqual(["Current", "Trading Desk", "Trading Desk (Copy)"]);
   expect(persisted["Trading Desk"]).toEqual(original);

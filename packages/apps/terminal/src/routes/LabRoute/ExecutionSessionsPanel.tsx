@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RunPolicyPanel } from "./RunPolicyPanel";
 import { ProtectionPolicyPanel } from "./ProtectionPolicyPanel";
+import { NativeExecutionInspection, NativeV2Studio } from "./NativeExecutionInspection";
 import { captureAuthSessionFence, isAuthSessionFenceCurrent, useAuthStore } from "@/stores/authStore";
 import { isDemoAuthSession } from "@/services/ftApi.helpers";
-import { controlExecutionSession, createPaperSession, listExecutionSessions, readExecutionSession,
+import { controlExecutionSession, createPaperSession, hasRetainedNativeGrant, listExecutionSessions, readExecutionSession,
   type ExecutionSessionRecord, type SessionOperation } from "@/services/executionSessions";
 
 export function ExecutionSessionsPanel() {
@@ -50,10 +51,12 @@ export function ExecutionSessionsPanel() {
     retry: false,
   });
   return <section className="space-y-4 min-w-0" aria-label="Execution sessions">
+    <NativeV2Studio sessions={enabled && !query.isError ? query.data ?? [] : []}
+      census={query.isLoading ? "loading" : !enabled || query.isError ? "unavailable" : "available"} />
     <header>
       <h3 className="text-lg font-semibold">Practice forward runs</h3>
       <p className="text-sm text-text-secondary">Independent run books. Terminal’s Live account and mode remain unchanged.</p>
-      <p className="text-xs text-text-muted">Runs belong to the backend and continue across app switches and UI closure. Logout retires entries; restart requires reconciliation and explicit rearm. Native Live execution remains unavailable.</p>
+      <p className="text-xs text-text-muted">Runs belong to the backend and continue across app switches and UI closure. Logout retires entries; restart requires reconciliation. Native Live execution remains unavailable. Legacy native v1: Inspection and entry retirement are available here; activation, qualification and protection controls are unavailable.</p>
     </header>
     <div className="grid gap-3 sm:grid-cols-2 rounded border border-border-default p-4">
       <div><Label htmlFor="paper-symbols">Symbols</Label><Input id="paper-symbols" value={symbols} onChange={event => setSymbols(event.target.value)} placeholder="Exact symbols, comma-separated" /></div>
@@ -69,9 +72,16 @@ export function ExecutionSessionsPanel() {
     {query.isError ? <p role="alert">Run census unavailable — this is not an empty or stopped book.</p> : null}
     {query.isLoading ? <p role="status">Reading run identities…</p> : null}
     {!query.isError && query.data?.length === 0 ? <p>No registered runs for this operator. Historical custody may still require reconciliation.</p> : null}
-    {(query.data ?? []).map(row => <section key={row.run_id} aria-label={`${row.environment === "paper" ? "Practice" : "Live"} run ${row.run_id}`} className="rounded border border-border-default p-4 space-y-3 min-w-0">
+    {((query.isError ? [] : query.data) ?? []).filter(row => !row.autonomy_v2).map(row => <section key={row.run_id} aria-label={`${row.environment === "paper" ? "Practice" : "Live"} run ${row.run_id}`} className="rounded border border-border-default p-4 space-y-3 min-w-0">
       <div className="flex flex-wrap gap-2 items-center"><h4 className="font-mono break-all">{row.run_id}</h4><span>{row.state}</span></div>
-      <p className="text-xs break-all">{row.account} · {row.environment} · generation {row.generation} · {row.entries_armed ? "Entries armed" : "Entries retired"}</p>
+      <p className="text-xs break-all">{row.account} · {row.environment} · generation {row.generation}{row.environment === "paper" ? ` · ${row.entries_armed ? "Entries armed" : "Entries retired"}` : ""}</p>
+      {row.environment === "live" ? <>
+        <NativeExecutionInspection native={row.autonomy} />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!enabled || command.isPending || !hasRetainedNativeGrant(row)} onClick={() => command.mutate({ target: row, operation: "stop" })}>Stop entries</Button>
+          <Button variant="outline" disabled={!enabled || command.isPending} onClick={() => command.mutate({ read: row.run_id })}>Read exact status</Button>
+        </div>
+      </> : <>
       <p className="text-xs">Protection: {row.protection}. Stop entries does not cancel working orders or close positions.</p>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={!enabled} onClick={() => setPolicyRun(policyRun === row.run_id ? "" : row.run_id)}>{policyRun === row.run_id ? "Hide run policy" : "Configure run policy"}</Button>
@@ -90,6 +100,7 @@ export function ExecutionSessionsPanel() {
       {row.books === null ? <p>Ledger unavailable. Exposure and outstanding orders are unknown.</p> : <>
         <p className="text-sm">{row.books.positions.length} open position rows · {row.books.orders.length} order records · {row.books.trades.length} fill records</p>
         <details><summary>Run ledger and P&amp;L</summary><pre className="text-xs overflow-auto max-h-80 whitespace-pre-wrap break-words">{JSON.stringify(row.books, null, 2)}</pre></details>
+      </>}
       </>}
     </section>)}
   </section>;

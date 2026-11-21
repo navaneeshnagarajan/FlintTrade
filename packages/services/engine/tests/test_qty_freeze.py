@@ -460,7 +460,9 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
     assert quantity_admission_refusal("NIFTYFPI", "NFO", 8500) is None
 
 
+@pytest.mark.unit
 def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
+    """Round the per-order ceiling to complete lots before admitting a quantity."""
     from flinttrade_engine.qty_freeze import max_placeable_quantity, quantity_admission_refusal
 
     assert max_placeable_quantity("NIFTY", 65) == 1755
@@ -479,7 +481,9 @@ def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
     )
 
 
+@pytest.mark.unit
 def test_order_slices_use_each_index_freeze_quantity() -> None:
+    """Respect each index freeze ceiling and lot multiple when slicing quantities."""
     from flinttrade_engine.qty_freeze import slice_order_quantities
 
     published = {

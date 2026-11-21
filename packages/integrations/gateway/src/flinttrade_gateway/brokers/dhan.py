@@ -1,4 +1,4 @@
-"""Dhan v2 native adapter (doc-grounded against dhanhq 2.2.0).
+"""Dhan v2 native adapter (version-bound to dhanhq 2.3.0rc1).
 
 Implements the BrokerAdapter contract for Dhan: auth, the gated write surface
 (place/modify/cancel), and the portfolio reads (order book / trade book /
@@ -7,32 +7,33 @@ positions / holdings / funds). Request/response translation lives in
 the dhanhq SDK on a worker thread (the SDK is synchronous) and normalise results.
 
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8), so
-a bare call raises before any Dhan request. ``build_broker_router``'s
-native-activation factory registers this adapter automatically once its pinned
-SDK (``dhanhq``) is attested AND vault credentials exist; until then it stays
-dormant. Dhan is the one native with a real ``brokers.lock`` pin, so where
-``dhanhq`` is installed at the pinned version it *is* attested — only stored
-credentials + a live login then separate it from going live (verify live order
-placement against the real SDK + a Dhan account).
+a bare call raises before any Dhan request. SDK attestation, credentials and
+read liveness are separate prerequisites; none establishes trading permission.
+Factory/account/read cutover and the canonical risk/gate owners remain the
+sole composition and authority boundaries.
 
-This adapter implements the FULL contract plus the complete Dhan v2.x surface
+Implemented wrappers cover the Dhan v2.x surface
 (through v2.5): auth, gated writes (regular / bracket / cover / iceberg /
 forever / super / conditional-trigger), portfolio reads + convert position,
 market data (quotes / historical / option chain / expired rolling options),
 EDIS, Trader's Control (kill switch + P&L-based exit + Exit All), static-IP
 management, the binary tick stream, the order-update stream and the 20/200-level
-depth streams. v2.5 endpoints absent from the pinned SDK (dhanhq 2.2.0) are
-called through the SDK's own ``DhanHTTP`` transport with doc-grounded paths.
+depth streams. Super/Forever creation remains frozen. SDK presence is not
+account eligibility, options qualification or write authority. Endpoints not
+wrapped by the pin use its ``DhanHTTP`` transport with doc-grounded paths.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import threading
 import time
-from datetime import UTC, datetime
+from dataclasses import dataclass, field as dataclass_field
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from urllib.parse import urlencode
 
@@ -53,10 +54,11 @@ from flinttrade_gateway.capabilities import (
     Segments,
     TickProtocol,
 )
+from flinttrade_gateway.read_frontier import verify_read_invocation
 
 from . import dhan_mapping as M
 from ._balance import _balance_number, _balance_record
-from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+from ._base import AdapterSessionView, BrokerAdapter, Session, run_blocking_sdk_call
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -193,7 +195,7 @@ DHAN_CAPABILITIES = Capabilities(
 
 
 def _build_dhan_client(client_id: str, access_token: str) -> Any:
-    """Construct a live dhanhq 2.2.0 client (lazy import — SDK optional)."""
+    """Construct the pinned dhanhq client (lazy import — SDK optional)."""
     from dhanhq import DhanContext, dhanhq  # noqa: PLC0415
 
     return dhanhq(DhanContext(client_id, access_token))
@@ -268,6 +270,51 @@ def load_scrip_master_rows(mode: str = "compact", *, downloader: Callable[[str],
     return [dict(row) for row in csv.DictReader(io.StringIO(text))]
 
 
+@dataclass(frozen=True)
+class _DhanContractBinding:
+    """Immutable proposal evidence, separate from mutable resolver publication."""
+
+    resolver: object
+    generation: int
+    symbol: str
+    exchange: str
+    contract_json: str
+    terms_json: str
+
+
+@dataclass(frozen=True)
+class DhanOrderPreparation:
+    """Explicit immutable wire/evidence pair, never a financial capability.
+
+    Created by DhanAdapter.prepare_order from one captured resolver read.
+    Native composition must bind its own selector/session and signed intent;
+    serialising sdk_kwargs alone deliberately does not preserve this receipt.
+
+    Attributes:
+        wire_json: Exact pinned SDK kwargs as immutable JSON.
+        intent_json: Complete input terms used for correspondence, not authority.
+        tag: Captured correlation tag; None means no tag.
+    """
+
+    _owner: object = dataclass_field(repr=False, compare=False)
+    wire_json: str
+    intent_json: str
+    tag: str | None
+    _binding: _DhanContractBinding | None = dataclass_field(repr=False)
+
+    def sdk_kwargs(self) -> dict[str, Any]:
+        """Return detached base SDK arguments; full family intent stays captured."""
+        return json.loads(self.wire_json)
+
+    def contract_evidence(self) -> dict[str, Any] | None:
+        """Return the captured listing/tick/source, or None for legacy cash.
+
+        This is a detached read of the receipt, never a resolver lookup. None
+        is not native derivative qualification, readiness or write authority.
+        """
+        return None if self._binding is None else json.loads(self._binding.contract_json)
+
+
 class DhanAdapter(BrokerAdapter):
     """Native Dhan adapter.
 
@@ -332,6 +379,9 @@ class DhanAdapter(BrokerAdapter):
         # session. Serialise every call at the adapter boundary so safety
         # snapshots cannot overlap account-page reads or broker writes.
         self._sdk_transport_lock = threading.Lock()
+        self._contract_lock = threading.RLock()
+        self._contract_generation = 0
+        self._contract_invocations = 0
 
     # ---------- identity + capabilities ----------
 
@@ -346,6 +396,10 @@ class DhanAdapter(BrokerAdapter):
     # ---------- helpers ----------
 
     def _client(self, session: Session) -> Any:
+        if session.extra.get("locally_disposed"):
+            raise BrokerError("Dhan session locally disposed", broker_id="dhan")
+        if session.extra.get("client") is not None:
+            return session.extra["client"]
         if self._client_factory is not None:
             return self._client_factory(session)
         client = session.extra.get("client")
@@ -355,8 +409,8 @@ class DhanAdapter(BrokerAdapter):
 
     def _http(self, session: Session) -> Any:
         """The SDK's ``DhanHTTP`` transport — used for v2.5 endpoints that the
-        pinned SDK (2.2.0) does not wrap (conditional triggers, P&L exit,
-        Exit All). Doc-grounded paths live in ``dhan_mapping``."""
+        pinned SDK does not wrap (conditional triggers, P&L exit), and retained
+        direct-resource callers. Doc-grounded paths live in ``dhan_mapping``."""
         http = getattr(self._client(session), "dhan_http", None)
         if http is None:
             raise BrokerError("Dhan client exposes no DhanHTTP transport (dhan_http)")
@@ -371,12 +425,66 @@ class DhanAdapter(BrokerAdapter):
     def _resolve_security(self, symbol: str, exchange: str) -> str:
         key = str(symbol).upper()
         if key in M.INDEX_SECURITY_IDS:
+            if str(exchange).upper() in {"NFO", "BFO"}:
+                raise M.DhanMappingError("Dhan derivatives require an exact contract, not a bare underlying")
             return M.INDEX_SECURITY_IDS[key][0]
         if self._security_resolver is not None:
             return str(self._security_resolver(symbol, exchange))
         raise BrokerError(
             f"Cannot resolve Dhan security_id for {symbol}/{exchange} — configure a security resolver (scrip master)"
         )
+
+    def install_security_resolver(self, resolver: Callable[[str, str], str]) -> None:
+        """Publish a snapshot without overtaking an admitted native invocation.
+
+        Args:
+            resolver: Factory-owned resolver; this method never fetches a master.
+
+        Raises:
+            DhanMappingError: Invalid resolver or busy publication/invocation.
+                The refresh owner may retry later; a busy refresh never waits on
+                client-loop I/O or changes the currently published snapshot.
+        """
+        if not callable(resolver):
+            raise M.DhanMappingError("Dhan resolver must be callable")
+        if not self._contract_lock.acquire(blocking=False):
+            raise M.DhanMappingError("Dhan contract publication is busy; retry refresh")
+        try:
+            if self._contract_invocations:
+                raise M.DhanMappingError("Dhan contract invocation is active; retry refresh")
+            self._security_resolver = resolver
+            self._contract_generation += 1
+        finally:
+            self._contract_lock.release()
+
+    def resolve_contract(self, symbol: str, exchange: str) -> dict:
+        """Read exact fresh contract/tick evidence without acquiring a master.
+
+        Args:
+            symbol: Exact requested listed contract, not an underlying shortcut.
+            exchange: Canonical venue namespace, retained independently of ID.
+
+        Returns:
+            Detached versioned listing and independently sourced tick evidence.
+
+        Raises:
+            DhanMappingError: Missing, ambiguous, stale or unversioned evidence.
+        """
+        resolver = self._security_resolver
+        contract = getattr(resolver, "contract", None)
+        if not callable(contract):
+            raise M.DhanMappingError("Dhan versioned contract resolver unavailable")
+        return M._response_record(contract(symbol, exchange), field="contract")
+
+    async def instrument_lot_sizes(self, session: Session, request: Any) -> list[dict]:
+        """Existing bound read interface; no fallback lot or network fetch."""
+        if not request.symbols:
+            raise M.DhanMappingError("Dhan lots require exact requested symbols")
+        rows = []
+        for symbol in request.symbols:
+            contract = self.resolve_contract(symbol, request.exchange)
+            rows.append(contract | {"symbol": symbol, "instrument_id": contract["security_id"]})
+        return rows
 
     @staticmethod
     def _split_symbol(s: str) -> tuple[str, str]:
@@ -390,9 +498,142 @@ class DhanAdapter(BrokerAdapter):
         # dhanhq is synchronous — run it off the event loop.
         def locked_call() -> Any:
             with self._sdk_transport_lock:
+                verify_read_invocation()
                 return fn(*args, **kwargs)
 
         return await run_blocking_sdk_call(locked_call)
+
+    @staticmethod
+    def _terms_json(order: Any) -> str:
+        """Detach validated economic terms without another resolver read."""
+        terms: dict[str, Any] = {field: str(getattr(order, field)) for field in
+                                 ("symbol", "exchange", "action", "product", "pricetype")}
+        terms.update(quantity=order.quantity, price=order.price, trigger_price=getattr(order, "trigger_price", 0))
+        return json.dumps(M._response_json_copy(terms), sort_keys=True, allow_nan=False)
+
+    @staticmethod
+    def _intent_json(order: Any) -> str:
+        """Retain all proposal fields, including family, defaults and protection."""
+        try:
+            dump = getattr(order, "model_dump", None)
+            values = dump(mode="json") if callable(dump) else vars(order)
+            return json.dumps(values, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError):
+            raise M.DhanMappingError("Dhan preparation requires serialisable explicit order terms") from None
+
+    def _capture_contract(self, order: Any, evidence: dict | None) -> _DhanContractBinding | None:
+        """Bind already captured evidence inside the publication section."""
+        if evidence is None:
+            return None
+        return _DhanContractBinding(
+            self._security_resolver, self._contract_generation, str(order.symbol), str(order.exchange),
+            json.dumps(M._response_json_copy(evidence), sort_keys=True, allow_nan=False),
+            self._terms_json(order),
+        )
+
+    @classmethod
+    def _snapshot_order(cls, order: Any) -> Order | SimpleNamespace:
+        """Detach caller values before any later family or margin projection."""
+        from flinttrade_core.models import Order as CanonicalOrder  # noqa: PLC0415
+
+        # Preserve the field-specific refusal before generic JSON detachment.
+        M._order_quantity(order.quantity, field="quantity")
+        intent = cls._intent_json(order)
+        if type(order) is CanonicalOrder:
+            snapshot = order.model_copy(deep=True)
+            if cls._intent_json(snapshot) != intent:
+                raise M.DhanMappingError("Dhan order changed while capturing intent")
+            return snapshot
+        return SimpleNamespace(**json.loads(intent))
+
+    def _prepare_order(self, order: Any, *, tag: str | None = None) -> tuple[dict, _DhanContractBinding | None]:
+        """Retain legacy preflight observers with an explicit same-call receipt."""
+        captured: list[DhanOrderPreparation] = []
+        kwargs = self.preflight_order(order, tag=tag, _capture_preparation=captured.append)
+        if len(captured) != 1 or kwargs != captured[0].sdk_kwargs():
+            raise M.DhanMappingError("Dhan preflight did not return its captured preparation")
+        return kwargs, captured[0]._binding
+
+    def _bound_preparation(
+        self, order: Any, tag: str | None, prepared: DhanOrderPreparation,
+    ) -> tuple[dict, _DhanContractBinding | None]:
+        """Retain exact receipt operands without repeating the pure wire builder."""
+        if (type(prepared) is not DhanOrderPreparation or prepared._owner is not self
+                or prepared.tag != tag or prepared.intent_json != self._intent_json(order)):
+            raise M.DhanMappingError("Dhan preparation owner or signed intent changed")
+        binding = prepared._binding
+        derivative = str(order.exchange).upper() in {"NFO", "BFO"}
+        if derivative != (type(binding) is _DhanContractBinding):
+            raise M.DhanMappingError("Dhan preparation contract scope is invalid")
+        if binding is not None and (
+            binding.terms_json != self._terms_json(order)
+            or binding.symbol != str(order.symbol) or binding.exchange != str(order.exchange)
+        ):
+            raise M.DhanMappingError("Dhan preparation contract terms changed")
+        kwargs = prepared.sdk_kwargs()
+        security_id = kwargs.get("security_id")
+        if type(security_id) is not str or not security_id:
+            raise M.DhanMappingError("Dhan preparation security address is invalid")
+        return kwargs, binding
+
+    def _checked_preparation(
+        self, order: Any, tag: str | None, prepared: DhanOrderPreparation,
+    ) -> tuple[dict, _DhanContractBinding | None]:
+        """Validate the retained wire at final invocation, without another listing."""
+        kwargs, binding = self._bound_preparation(order, tag, prepared)
+        expected = M.to_place_order_kwargs(
+            order, kwargs["security_id"], tag=tag, contract=prepared.contract_evidence(),
+        )
+        if kwargs != expected:
+            raise M.DhanMappingError("Dhan preparation wire arguments changed")
+        return kwargs, binding
+
+    def _prepare_margin(self, order: Any) -> tuple[dict, _DhanContractBinding | None]:
+        """Share contract preparation, not single/multi margin response policy."""
+        order = self._snapshot_order(order)
+        binding = None
+        if str(order.exchange).upper() in {"NFO", "BFO"}:
+            prepared, binding = self._prepare_order(order)
+            security_id = prepared["security_id"]
+        else:
+            security_id = self._resolve_security(order.symbol, order.exchange)
+        return M.to_margin_kwargs(order, security_id), binding
+
+    async def _contract_call(
+        self, bindings: tuple[_DhanContractBinding | None, ...], fn: Callable[..., Any],
+        *args: Any, **kwargs: Any,
+    ) -> Any:
+        """Revalidate after the real SDK wait and fence publication until return.
+
+        Only the adapter's short publication critical section is locked. The
+        invocation lease makes concurrent refresh refuse without holding a
+        registry lock or waiting on client-loop I/O. Exceptions after calling
+        the resource remain possible-invocation outcomes, never safe retries.
+        """
+        captured = tuple(binding for binding in bindings if binding is not None)
+        if not captured:
+            return await self._call(fn, *args, **kwargs)
+
+        def checked() -> Any:
+            with self._contract_lock:
+                for binding in captured:
+                    if (self._security_resolver is not binding.resolver
+                            or self._contract_generation != binding.generation):
+                        raise M.DhanMappingError("Dhan contract publication changed; re-propose")
+                    current = self.resolve_contract(binding.symbol, binding.exchange)
+                    if current != json.loads(binding.contract_json):
+                        raise M.DhanMappingError("Dhan contract or tick evidence changed; re-propose")
+                    M.validate_derivative_order(
+                        SimpleNamespace(**json.loads(binding.terms_json)), current["security_id"], current,
+                    )
+                self._contract_invocations += 1
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                with self._contract_lock:
+                    self._contract_invocations -= 1
+
+        return await self._call(checked)
 
     # ---------- auth lifecycle ----------
 
@@ -436,6 +677,21 @@ class DhanAdapter(BrokerAdapter):
         )
 
     async def login(self, credentials: dict) -> Session:
+        """Create a provisional local session for the existing custody owner.
+
+        Args:
+            credentials: Supplied token or supported native authentication inputs.
+
+        Returns:
+            Actual client-owning session with expiry unavailable until strict
+            provider verification. Returning it does not publish a connection.
+
+        Raises:
+            BrokerError: Required authentication inputs or minted token missing.
+        """
+        # Return the actual local resource BEFORE fallible profile validation.
+        # The existing candidate owner takes custody then calls strict liveness.
+        token_response = None
         client_id = str(credentials.get("client_id") or credentials.get("dhan_client_id") or "")
         access_token = str(credentials.get("access_token") or "")
         pin = str(credentials.get("pin") or "")
@@ -449,6 +705,7 @@ class DhanAdapter(BrokerAdapter):
             if not (app_id and app_secret):
                 raise BrokerError("Dhan OAuth login requires app_id and app_secret")
             resp = await self.consume_token_id(client_id, token_id, app_id, app_secret)
+            token_response = resp
             access_token = str(resp.get("accessToken") or resp.get("access_token") or "")
             if not access_token:
                 raise BrokerError("Dhan OAuth token consumption failed")
@@ -460,19 +717,29 @@ class DhanAdapter(BrokerAdapter):
             if not client_id:
                 raise BrokerError("Dhan PIN+TOTP login requires client_id")
             resp = await self.generate_token(client_id, pin, totp)
+            token_response = resp
             access_token = str(resp.get("accessToken") or resp.get("access_token") or "")
             if not access_token:
                 raise BrokerError("Dhan PIN+TOTP token generation failed")
         if not access_token:
             raise BrokerError("Dhan login requires an access_token (or client_id + pin + totp)")
-        client = None if self._client_factory is not None else _build_dhan_client(client_id, access_token)
-        return Session(
+        session = Session(
             access_token=access_token,
-            expires_at=datetime.now(tz=UTC).timestamp() + 24 * 3600,
+            expires_at=0,
             account_id=client_id,
             adapter_id="dhan",
-            extra={"client": client, "client_id": client_id},
+            extra={"client_id": client_id, "provider_verified": False},
         )
+        if token_response is not None:
+            session.extra["token_facts"] = {
+                key: token_response[key] for key in ("dhanClientId", "expiryTime") if key in token_response
+            }
+        session.extra["client"] = (
+            self._client_factory(session)
+            if self._client_factory is not None
+            else _build_dhan_client(client_id, access_token)
+        )
+        return session
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:
         """The replayable vault payload after a successful login (G7).
@@ -492,15 +759,180 @@ class DhanAdapter(BrokerAdapter):
         # until expiry, at which point a fresh login() is required.
         return session
 
+    @staticmethod
+    def _provider_expiry(value: Any, *, profile: bool) -> float:
+        if type(value) is not str or not value.strip():
+            raise BrokerError("Dhan provider token expiry unavailable", broker_id="dhan")
+        try:
+            parsed = datetime.strptime(value, "%d/%m/%Y %H:%M") if profile else datetime.fromisoformat(value)
+        except ValueError:
+            raise BrokerError("Dhan provider token expiry invalid", broker_id="dhan") from None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+        return parsed.timestamp()
+
+    async def liveness(self, session: AdapterSessionView) -> float | None:
+        """Provider identity/expiry read, not JWT decoding or write eligibility.
+
+        A raw supplied token has no trusted TTL until this succeeds. Raw
+        candidate re-observation may shorten, never extend, observed expiry.
+        Sealed continuity returns an observation without mutating the registry.
+        The native-session verifier must consume it through the existing public
+        registry owner and current lookup authority; it is not an alive flag.
+
+        Args:
+            session: Raw candidate Session or an existing sealed registry view.
+
+        Returns:
+            None after verifying a raw candidate, or a sealed expiry observation
+            capped by its existing lifetime. Even an expired observation belongs
+            to the registry owner, which revokes the prior generation on change.
+
+        Raises:
+            BrokerError: Invalid identity, expired raw token or unverified view.
+        """
+        if session.extra.get("locally_disposed"):
+            raise BrokerError("Dhan session locally disposed", broker_id="dhan")
+        profile = await self.user_profile(session)
+        if type(profile) is not dict or profile.get("status", "success") != "success":
+            raise BrokerError("Dhan provider profile invalid", broker_id="dhan")
+        if "data" in profile:
+            profile = profile["data"]
+        if type(profile) is not dict or type(profile.get("dhanClientId")) is not str:
+            raise BrokerError("Dhan provider account identity unavailable", broker_id="dhan")
+        if not session.account_id or profile["dhanClientId"] != session.account_id:
+            raise BrokerError("Dhan provider account identity mismatch", broker_id="dhan")
+        expiry = self._provider_expiry(profile.get("tokenValidity"), profile=True)
+        facts = session.extra.get("token_facts")
+        if facts is not None:
+            if facts.get("dhanClientId") != session.account_id:
+                raise BrokerError("Dhan token response account identity mismatch", broker_id="dhan")
+            expiry = min(expiry, self._provider_expiry(facts.get("expiryTime"), profile=False))
+        if session.extra.get("provider_verified"):
+            expiry = min(expiry, session.expires_at)
+        if type(session) is not Session:
+            from flinttrade_gateway.registry import ConnectedRegistrySession  # noqa: PLC0415
+
+            if type(session) is not ConnectedRegistrySession or session.extra.get("provider_verified") is not True:
+                raise BrokerError("Dhan verified sealed session required", broker_id="dhan")
+            return expiry
+        if expiry <= datetime.now(tz=UTC).timestamp():
+            raise BrokerError("Dhan access token expired", broker_id="dhan")
+        session.expires_at = expiry
+        session.extra["provider_verified"] = True
+        session.extra["provider_profile"] = {"dhanClientId": profile["dhanClientId"],
+                                             "tokenValidity": profile["tokenValidity"]}
+        from flinttrade_gateway.native_login import observe_provider_identity
+        observe_provider_identity(self, session, profile["dhanClientId"])
+        return None
+
+    def dispose_session(self, session: Session) -> None:
+        """Synchronous local-only disposal. Failure retains the exact resource.
+
+        No broker logout/revocation/cancellation is performed. The factory owner
+        bounds its wait and retains this same session if close fails or blocks.
+        """
+        with self._sdk_transport_lock:
+            client = session.extra.get("client")
+            transport = getattr(getattr(client, "dhan_http", None), "session", None)
+            close = getattr(transport, "close", None)
+            if callable(close):
+                close()
+            session.extra.pop("client", None)
+            session.extra["locally_disposed"] = True
+
     async def logout(self, session: Session) -> None:
-        session.extra.pop("client", None)
-        return
+        """Dispose only the local client, retaining custody until close succeeds."""
+        await run_blocking_sdk_call(self.dispose_session, session)
 
     # ---------- trading: writes (router-only) ----------
 
-    async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
+    def prepare_order(self, order: Order, *, tag: str | None = None) -> DhanOrderPreparation:
+        """Capture one wire/listing/tick/source pair for the native proposal owner.
+
+        Args:
+            order: Canonical proposal or explicit equivalent legacy terms.
+            tag: Native correlation tag; None captures its omission.
+
+        Returns:
+            Immutable explicit preparation. The native owner must separately
+            bind account/session and signed authority, then pass this same value
+            as place_order(preparation=...). No later lookup may replace it.
+
+        Raises:
+            DhanMappingError: Invalid terms or unavailable contract evidence.
+
+        Requires an already acquired resolver. No registry lock is held across
+        SDK work; invocation rechecks this exact capture after the actual wait.
+        """
+        order = self._snapshot_order(order)
+        with self._contract_lock:
+            contract = None
+            if str(order.exchange).upper() in {"NFO", "BFO"}:
+                contract = self.resolve_contract(order.symbol, order.exchange)
+                security_id = contract["security_id"]
+            else:
+                security_id = self._resolve_security(order.symbol, order.exchange)
+            kwargs = M.to_place_order_kwargs(order, security_id, tag=tag, contract=contract)
+            return DhanOrderPreparation(
+                self, json.dumps(kwargs, sort_keys=True, allow_nan=False), self._intent_json(order), tag,
+                self._capture_contract(order, contract),
+            )
+
+    def preflight_order(
+        self, order: Order, *, tag: str | None = None,
+        _capture_preparation: Callable[[DhanOrderPreparation], None] | None = None,
+    ) -> dict:
+        """Pure existing-builder hook for raw ingress before reads/mint/consume.
+
+        Parent routes must invoke this on the resolved adapter, not a body
+        broker name. Actual invocation additionally revalidates the captured
+        contract after the SDK queue wait without adopting a new listing.
+
+        Args:
+            order: Exact signed proposal or equivalent explicit ingress terms.
+            tag: Optional native correlation tag; None omits that field.
+            _capture_preparation: Internal synchronous receipt consumer. None
+                keeps the legacy kwargs-only return. Native owners should call
+                prepare_order directly; this callback never performs a lookup.
+
+        Returns:
+            Pinned SDK kwargs. This pure check does not read books, mint or
+            consume authority, fetch a master or establish native eligibility.
+
+        Raises:
+            DhanMappingError: Invalid intent or unavailable exact contract evidence.
+        """
+        prepared = self.prepare_order(order, tag=tag)
+        if _capture_preparation is not None:
+            _capture_preparation(prepared)
+        return prepared.sdk_kwargs()
+
+    async def place_order(
+        self, session: Session, order: Order, *, _router_token: object | None = None,
+        preparation: DhanOrderPreparation | None = None,
+        _verify_session: Callable[[], None] | None = None,
+    ) -> str:
+        """Submit one router-authorised proposal, preserving exact captured intent.
+
+        Args:
+            session: Bound broker session; supplies the native client and tag.
+            order: Signed ordinary, AMO or slice proposal. Smart creation stays frozen.
+            _router_token: Existing process router capability; None always refuses.
+            preparation: Same explicit native capture; None preserves legacy
+                same-call preparation. A supplied receipt is never retargeted
+                and does not replace the existing router/SafetyContext authority.
+
+        Returns:
+            Native acknowledgement ID, not execution, fill or retry authority.
+
+        Raises:
+            BrokerError: Missing router authority, frozen family or uncertain ACK.
+            DhanMappingError: Unqualified proposal or changed invocation evidence.
+        """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        security_id = self._resolve_security(order.symbol, order.exchange)
+        order = self._snapshot_order(order)
+        security_id = self._resolve_security(order.symbol, order.exchange) if preparation is None else ""
         tag = session.algo_id or None
         # Dispatch on order variety. Every variety travels this SAME gated method
         # (the router token is already required above and the variety + leg prices
@@ -521,20 +953,63 @@ class DhanAdapter(BrokerAdapter):
                 "Not placed. Broker-held target and stop orders aren't supported right now.",
                 broker_id="dhan",
             )
+        prepared: dict[str, Any] = {}
+        binding = None
+        if variety in ("regular", "", "amo", "iceberg"):
+            prepared, binding = (
+                self._prepare_order(order, tag=tag) if preparation is None
+                else self._bound_preparation(order, tag, preparation)
+            )
+            security_id = prepared["security_id"]
         client = self._client(session)
+        client_slot, client_factory = session.extra.get("client"), self._client_factory
+        captured_session = (session.account_id, session.algo_id, getattr(session, "version", None))
+
+        async def invoke(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+            def checked() -> Any:
+                import inspect  # noqa: PLC0415
+
+                from flinttrade_gateway.registry import ConnectedRegistrySession  # noqa: PLC0415
+
+                if preparation is not None and type(session) is ConnectedRegistrySession and _verify_session is None:
+                    raise M.DhanMappingError("Dhan managed preparation needs its current owner check")
+                if _verify_session is not None:
+                    result = _verify_session()
+                    if result is not None:
+                        if inspect.iscoroutine(result) and inspect.getcoroutinestate(result) == inspect.CORO_CREATED:
+                            result.close()
+                        raise M.DhanMappingError("Dhan session check must complete synchronously")
+                    if (session.extra.get("client") is not client_slot
+                            or self._client_factory is not client_factory
+                            or client_slot is not None and client_slot is not client
+                            or session.extra.get("locally_disposed") or session.is_read_only
+                            or (session.account_id, session.algo_id, getattr(session, "version", None))
+                            != captured_session):
+                        raise M.DhanMappingError("Dhan retained account or session changed")
+                if preparation is not None:
+                    self._checked_preparation(order, tag, preparation)
+                return fn(*args, **kwargs)
+            return await self._contract_call((binding,), checked)
+
         if variety in ("regular", ""):
-            resp = await self._call(client.place_order, **M.to_place_order_kwargs(order, security_id, tag=tag))
+            resp = await invoke(client.place_order, **prepared)
         elif variety == "amo":
             # After-market order: POST /orders directly via DhanHTTP with the
             # afterMarketOrder flag + amoTime pump window. We bypass the SDK's
-            # place_order because dhanhq 2.2.0 drops amoTime from its payload
-            # (so the pump window would never reach the broker) — see
-            # to_amo_order_payload. Still the SAME gated method/variety dispatch.
-            resp = await self._call(
-                self._http(session).post, M.ORDERS_ENDPOINT, M.to_amo_order_payload(order, security_id, tag=tag)
+            # place_order because the pin still rejects PRE_OPEN. Unlike older
+            # versions it does serialise amoTime; retain our reviewed direct
+            # payload to support the documented full timing enum.
+            http = getattr(client, "dhan_http", None)
+            if http is None:
+                raise BrokerError("Dhan client exposes no DhanHTTP transport (dhan_http)")
+            resp = await invoke(
+                http.post, M.ORDERS_ENDPOINT,
+                M.to_amo_order_payload(order, security_id, tag=tag),
             )
         elif variety == "iceberg":
-            resp = await self._call(client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag))
+            resp = await invoke(
+                client.place_slice_order, **M.to_slice_order_kwargs(order, security_id, tag=tag),
+            )
         else:
             raise BrokerError(f"Dhan does not support order variety {variety!r}")
         if variety == "iceberg":
@@ -550,16 +1025,49 @@ class DhanAdapter(BrokerAdapter):
                 or not data["orderId"].strip()
                 or ("orderStatus" in data and type(data["orderStatus"]) is not str)
             ):
-                raise BrokerError("Dhan slice outcome is unverified after dispatch; reconcile before retry")
+                from flinttrade_gateway.native_acknowledgement import UncertainNativeAcknowledgement
+
+                raise UncertainNativeAcknowledgement(
+                    "Dhan slice outcome is unverified after dispatch; reconcile before retry",
+                    broker_id="dhan", rows=data,
+                )
             return data["orderId"]
         return M.extract_order_id(resp)
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
+        """Replace through the router, qualifying explicit derivative context.
+
+        Versioned resolvers require complete signed context; opaque order IDs
+        cannot supply a contract. Legacy contextless callers retain shape-only
+        compatibility, not native option qualification. No book/master fetch
+        or smart-order creation is introduced by replacement validation.
+        """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if type(changes) is dict:
+            changes = dict(changes)
         kwargs = M.to_modify_order_kwargs(order_id, changes)
-        resp = await self._call(self._client(session).modify_order, **kwargs)
+        binding = None
+        context = ("symbol", "exchange", "action", "product")
+        if any(key in changes and changes[key] is None for key in context):
+            raise M.DhanMappingError("Dhan replacement context cannot be null")
+        versioned = callable(getattr(self._security_resolver, "contract", None))
+        exchange = str(changes.get("exchange", ""))
+        if versioned or exchange in {"NFO", "BFO"}:
+            if any(key not in changes or not str(changes[key]).strip() for key in context):
+                raise M.DhanMappingError("Dhan replacement needs exact signed contract context")
+            if exchange not in M.EXCHANGE_SEGMENT_MAP:
+                raise M.DhanMappingError("Dhan replacement exchange context is invalid")
+        if exchange in {"NFO", "BFO"}:
+            terms = SimpleNamespace(**(changes | {
+                "pricetype": M._norm_pricetype(kwargs["order_type"]),
+                "price": changes.get("price", 0), "trigger_price": changes.get("trigger_price", 0),
+            }))
+            _, binding = self._prepare_order(terms)
+            assert binding is not None  # NFO/BFO preparation always captures a contract.
+            kwargs = M.to_modify_order_kwargs(order_id, changes, contract=json.loads(binding.contract_json))
+        resp = await self._contract_call((binding,), self._client(session).modify_order, **kwargs)
         M.unwrap(resp)
 
     async def cancel_order(self, session: Session, order_id: str, *, _router_token: object | None = None) -> None:
@@ -824,6 +1332,7 @@ class DhanAdapter(BrokerAdapter):
         for native, canonical in (
             ("productType", "broker_product"), ("orderType", "broker_order_type"), ("validity", "validity"),
             ("createTime", "created_at"), ("updateTime", "updated_at"), ("exchangeTime", "exchange_time"),
+            ("dhanClientId", "broker_account_id"), ("exchangeSegment", "broker_exchange_segment"),
         ):
             value = source.get(native)
             if value is None:
@@ -839,6 +1348,11 @@ class DhanAdapter(BrokerAdapter):
                 raise BrokerReadResponseInvalid from exc
             if number is not None:
                 projected[canonical] = number
+        projected["broker_fields"] = M._response_json_copy({key: source[key] for key in (
+            "dhanClientId", "orderId", "exchangeOrderId", "correlationId", "exchangeSegment", "legName",
+            "createTime", "updateTime", "exchangeTime", "afterMarketOrder", "amoTime", "quantity",
+            "filledQty", "tradedQty", "remainingQuantity", "productType", "orderType", "securityId",
+        ) if key in source})
         return projected
 
     @staticmethod
@@ -848,6 +1362,7 @@ class DhanAdapter(BrokerAdapter):
             "broker_product", "broker_order_type", "validity", "created_at", "updated_at", "exchange_time",
             "remaining_quantity", "target_price", "stop_loss_price", "trailing_jump", "average_price",
             "order_flag", "legs", "leg_details_valid",
+            "broker_account_id", "broker_exchange_segment", "correlation_id", "exchange_order_id", "broker_fields",
         ):
             if field in source:
                 safety_row[field] = source[field]
@@ -1777,26 +2292,65 @@ class DhanAdapter(BrokerAdapter):
         rows = self._strict_response_rows(resp)
         return [self._preserve_order_observations(row, M.from_dhan_order(row)) for row in rows]  # type: ignore[misc]
 
-    async def get_order_by_id(self, session: Session, order_id: str) -> dict:
-        """Fetch one order's current status by Dhan order id (``GET /orders/{id}``)."""
+    @staticmethod
+    def _single_order(resp: Any, session: Session, *, order_id: str | None = None,
+                      correlation_id: str | None = None) -> dict | None:
+        data = M.observation_data(resp)
+        if type(data) is list:
+            if not data:
+                return None
+            if len(data) != 1:
+                raise BrokerReadResponseInvalid from None
+            data = data[0]
+        data = M._response_record(data, field="order")
+        native_id = M._response_text(data, "orderId", required=True)
+        if order_id is not None and native_id != order_id:
+            raise BrokerReadResponseInvalid from None
+        if correlation_id is not None and "correlationId" in data and data["correlationId"] != correlation_id:
+            raise BrokerReadResponseInvalid from None
+        if "dhanClientId" in data and data["dhanClientId"] != session.account_id:
+            raise BrokerReadResponseInvalid from None
+        return DhanAdapter._preserve_order_observations(data, M.from_dhan_order(data))
+
+    async def get_order_by_id(self, session: Session, order_id: str) -> dict | None:
+        """Unique order observation; a genuine empty array means absent."""
         resp = await self._call(self._client(session).get_order_by_id, str(order_id))
-        data = M.unwrap(resp)
-        if isinstance(data, list):  # Dhan returns a single-element array for this endpoint
-            data = data[0] if data else {}
-        return M.from_dhan_order(data if isinstance(data, dict) else {})
+        return self._single_order(resp, session, order_id=order_id)
 
-    async def get_order_by_correlation_id(self, session: Session, correlation_id: str) -> dict:
-        """Fetch one order by the caller-supplied correlation id (``GET /orders/external/{id}``)."""
+    async def get_order_by_correlation_id(self, session: Session, correlation_id: str) -> dict | None:
+        """Refuse multiple observations instead of selecting their first row."""
         resp = await self._call(self._client(session).get_order_by_correlationID, str(correlation_id))
-        data = M.unwrap(resp)
-        if isinstance(data, list):
-            data = data[0] if data else {}
-        return M.from_dhan_order(data if isinstance(data, dict) else {})
+        return self._single_order(resp, session, correlation_id=correlation_id)
 
-    async def trade_book(self, session: Session) -> list[Trade]:
-        resp = await self._call(self._client(session).get_trade_book)
-        rows = self._strict_response_rows(resp)
-        return [M.from_dhan_trade(row) for row in rows]  # type: ignore[misc]
+    async def trade_book(self, session: Session, *, order_id: str | None = None) -> list[Trade]:
+        """Read exact native fill observations without inventing lifetime coverage.
+
+        Args:
+            session: Account-bound native read session.
+            order_id: Exact ordinary order address; None selects the day trade book.
+
+        Returns:
+            Legacy-compatible fill dictionaries retaining independent native facts.
+
+        Raises:
+            BrokerReadResponseInvalid: Invalid fill evidence or foreign account.
+        """
+        client = self._client(session)
+        resp = await self._call(client.get_trade_book) if order_id is None else await self._call(
+            client.get_trade_book, order_id=order_id,
+        )
+        if order_id is None:
+            rows = self._strict_response_rows(resp)
+        else:
+            data = M.observation_data(resp)
+            rows = [data] if type(data) is dict else M._response_rows(data, field="trades")
+        trades = [M.from_dhan_trade(row) for row in rows]
+        for trade in trades:
+            if "broker_account_id" in trade and trade["broker_account_id"] != session.account_id:
+                raise BrokerReadResponseInvalid from None
+            if order_id is not None and trade["orderid"] != order_id:
+                raise BrokerReadResponseInvalid from None
+        return trades  # type: ignore[return-value]
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).get_positions)
@@ -2121,10 +2675,48 @@ class DhanAdapter(BrokerAdapter):
 
         A read-only estimate — does NOT place anything, so it needs no gate.
         """
-        security_id = self._resolve_security(order.symbol, order.exchange)
-        kwargs = M.to_margin_kwargs(order, security_id)
-        resp = await self._call(self._client(session).margin_calculator, **kwargs)
+        kwargs, binding = self._prepare_margin(order)
+        resp = await self._contract_call((binding,), self._client(session).margin_calculator, **kwargs)
         return M.from_dhan_margin(resp)
+
+    async def margin_calculator_multi(
+        self, session: Session, orders: list[Order], *, include_position: bool, include_order: bool,
+    ) -> dict:
+        """Indicative current-session estimate; no hedge ownership or write grant.
+
+        Pin 2.3.0rc1 and current operation Markdown serialise includeOrder /
+        scripList. OpenAPI disagrees on names, client-ID placement and response
+        schema. Numeric currency margin is not a currency code. Provider
+        acceptance and standalone no-offset basis remain unverified; neither
+        alternate-name probing, schema aliasing nor automatic retry is used.
+        """
+        if type(include_position) is not bool or type(include_order) is not bool:
+            raise M.DhanMappingError("Dhan multi margin needs explicit boolean inclusion flags")
+        if type(orders) is not list or not orders:
+            raise M.DhanMappingError("Dhan multi margin needs explicit orders")
+        fields = {
+            "security_id": "securityId", "exchange_segment": "exchangeSegment",
+            "transaction_type": "transactionType", "quantity": "quantity",
+            "product_type": "productType", "price": "price", "trigger_price": "triggerPrice",
+        }
+        legs = []
+        bindings = []
+        for order in orders:
+            kwargs, binding = self._prepare_margin(order)
+            bindings.append(binding)
+            legs.append({native: kwargs[key] for key, native in fields.items()})
+        resp = await self._contract_call(
+            tuple(bindings), self._client(session).margin_calculator_multi, scrip_list=legs,
+            include_position=include_position, include_order=include_order,
+        )
+        return M.from_dhan_multi_margin(resp) | {
+            "include_position": include_position, "include_order": include_order,
+            "request_legs": M._response_json_copy(legs),
+            "provider_acceptance": "unverified_request_name_conflict",
+            "provider_contract_uncertainties": [
+                "request_names", "client_id_placement", "response_schema", "standalone_margin_basis",
+            ],
+        }
 
     async def expiry_list(self, session: Session, symbol: str, exchange: str = "NSE_INDEX") -> list[str]:
         """List the available option expiries for an underlying (read)."""
@@ -2133,15 +2725,39 @@ class DhanAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).expiry_list, security_id, segment)
         return M.from_dhan_expiry_list(resp)
 
-    async def trade_history(self, session: Session, from_date: str, to_date: str, page: int = 0) -> list[dict]:
-        """Historical trade statement for a date range (Dhan ``/trades``) — a read."""
-        resp = await self._call(self._client(session).get_trade_history, from_date, to_date, page)
-        return M.from_dhan_statement_list(resp)
+    def _statement_page(self, resp: Any, session: Session, from_date: str, to_date: str,
+                        *, resource: str, page: int | None = None) -> M.DhanStatementPage:
+        rows = M.from_dhan_statement_list(resp, allow_object=resource == "ledger")
+        for row in rows:
+            if "dhanClientId" in row and row["dhanClientId"] != session.account_id:
+                raise BrokerReadResponseInvalid from None
+        return M.DhanStatementPage(rows, resource=resource, from_date=from_date, to_date=to_date,
+                                   account_id=session.account_id, page=page)
 
-    async def ledger(self, session: Session, from_date: str, to_date: str) -> list[dict]:
-        """Ledger / funds statement for a date range (Dhan ledger report) — a read."""
+    async def trade_history(self, session: Session, from_date: str, to_date: str, page: int = 0) -> M.DhanStatementPage:
+        """One observed page only; termination/retention semantics are undocumented."""
+        self._statement_window(from_date, to_date)
+        if type(page) is not int or page < 0:
+            raise M.DhanMappingError("Dhan history page must be a nonnegative integer")
+        resp = await self._call(self._client(session).get_trade_history, from_date, to_date, page)
+        return self._statement_page(resp, session, from_date, to_date, resource="trade_history", page=page)
+
+    async def ledger(self, session: Session, from_date: str, to_date: str) -> M.DhanStatementPage:
+        """Observed postings, not uniquely allocated paid trade fees."""
+        self._statement_window(from_date, to_date)
         resp = await self._call(self._client(session).ledger_report, from_date, to_date)
-        return M.from_dhan_statement_list(resp)
+        return self._statement_page(resp, session, from_date, to_date, resource="ledger")
+
+    @staticmethod
+    def _statement_window(from_date: str, to_date: str) -> None:
+        try:
+            if type(from_date) is not str or type(to_date) is not str:
+                raise ValueError
+            start, end = date.fromisoformat(from_date), date.fromisoformat(to_date)
+            if start.isoformat() != from_date or end.isoformat() != to_date or start > end:
+                raise ValueError
+        except ValueError:
+            raise M.DhanMappingError("Dhan statement needs an exact ordered ISO date window") from None
 
     async def kill_switch(self, session: Session, action: str) -> dict:
         """Toggle Dhan's broker-side kill switch (``ACTIVATE`` disables trading for
@@ -2246,7 +2862,7 @@ class DhanAdapter(BrokerAdapter):
 
     # ---------- auth surface (token + static IP management) ----------
 
-    async def user_profile(self, session: Session) -> dict:
+    async def user_profile(self, session: AdapterSessionView) -> dict:
         """Validate the token / account setup (``GET /profile``) — a read."""
         login = self._login_helper(str(session.extra.get("client_id") or session.account_id))
         resp = await self._call(login.user_profile, session.access_token)
@@ -2331,12 +2947,14 @@ class DhanAdapter(BrokerAdapter):
         (WEEK/MONTH), ``expiry_code``, ``strike`` (e.g. ``"ATM"``),
         ``option_type`` (CALL/PUT), ``required_data``, dates and ``interval``.
         """
-        security_id = str(
-            req.get("security_id")
-            or self._resolve_security(
-                str(req.get("symbol", req.get("underlying", ""))), str(req.get("exchange", "NFO"))
-            )
-        )
+        symbol = str(req.get("symbol", req.get("underlying", "")))
+        exchange = str(req.get("exchange", "NFO"))
+        # Rolling historical options address an underlying, not a listed
+        # executable derivative. Keep this read-only endpoint's old contract
+        # without restoring the underlying shortcut in order resolution.
+        if symbol.upper() in M.INDEX_SECURITY_IDS:
+            exchange = "BSE_INDEX" if exchange.upper() == "BFO" else "NSE_INDEX"
+        security_id = str(req.get("security_id") or self._resolve_security(symbol, exchange))
         kwargs = M.to_expired_options_kwargs(req, security_id)
         resp = await self._call(self._client(session).expired_options_data, **kwargs)
         return M.from_dhan_expired_options(resp)
