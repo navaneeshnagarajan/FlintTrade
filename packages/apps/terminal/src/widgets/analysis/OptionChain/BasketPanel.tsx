@@ -75,7 +75,7 @@ export default function BasketPanel({
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border-default">
+          <div className="flex gap-1.5 pt-1 border-t border-border-default">
             <button
               disabled={locked}
               onClick={() =>
@@ -91,7 +91,7 @@ export default function BasketPanel({
                   })
                 )
               }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
             >
               Buy All
             </button>
@@ -110,12 +110,12 @@ export default function BasketPanel({
                   })
                 )
               }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
             >
               Sell All
             </button>
-            {statusUnknown && <OrderStatusUnknownLine />}
           </div>
+          {statusUnknown && <OrderStatusUnknownLine className="pt-1" />}
         </>
       )}
     </div>
