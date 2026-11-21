@@ -727,6 +727,14 @@ kbd {
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
 }
 
+.install-commands {
+  display: grid;
+  gap: 12px;
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto;
+  text-align: left;
+}
+
 .hero-install > p {
   margin: 0;
   color: var(--site-hero-copy);
