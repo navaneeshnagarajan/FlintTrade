@@ -12,6 +12,7 @@ import {
   quantityCapLabel,
   sliceOrderQuantities,
   NSE_INDEX_FREEZE_QUANTITY,
+  resolveFreezeQuantity,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -322,5 +323,21 @@ describe("needsLargeOrderConfirmation", () => {
   it("stays quiet below the threshold", () => {
     expect(needsLargeOrderConfirmation(1)).toBe(false);
     expect(needsLargeOrderConfirmation(LARGE_ORDER_LOTS - 1)).toBe(false);
+  });
+});
+
+describe("SENSEX options freeze quantity", () => {
+  it("uses the BSE limit for SENSEX options", () => {
+    expect(resolveFreezeQuantity("SENSEX25DEC85000CE")).toBe(1000);
+    expect(resolveFreezeQuantity("SENSEX 85000 PE")).toBe(1000);
+  });
+
+  it("leaves SENSEX futures and SENSEX50 to the broker", () => {
+    expect(resolveFreezeQuantity("SENSEX25DECFUT")).toBeNull();
+    expect(resolveFreezeQuantity("SENSEX5025DEC30000CE")).toBeNull();
+  });
+
+  it("prefers the broker freeze quantity", () => {
+    expect(resolveFreezeQuantity("SENSEX25DEC85000CE", 900)).toBe(900);
   });
 });

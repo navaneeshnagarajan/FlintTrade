@@ -525,3 +525,17 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
         "Quantity must be a multiple of the lot size (65)."
     )
     assert quantity_admission_refusal("SBIN", "NSE", 7) is None
+
+
+@pytest.mark.parametrize("symbol", ["SENSEX25DEC85000CE", "SENSEX 85000 PE"])
+def test_sensex_options_use_the_bse_limit(symbol):
+    assert qty_freeze.resolve_freeze_quantity(symbol) == 1_000
+
+
+@pytest.mark.parametrize("symbol", ["SENSEX25DECFUT", "SENSEX5025DEC30000CE"])
+def test_sensex_futures_and_sensex50_have_no_fallback(symbol):
+    assert qty_freeze.resolve_freeze_quantity(symbol) is None
+
+
+def test_broker_freeze_wins_for_sensex_options():
+    assert qty_freeze.resolve_freeze_quantity("SENSEX25DEC85000CE", 900) == 900

@@ -249,6 +249,28 @@ export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   NIFTYFPI: 8500,
 };
 
+/**
+ * BSE single order limit for SENSEX index options. SENSEX futures have a
+ * different limit, so only option symbols use this, and SENSEX50 is excluded.
+ * Both exchange tables change from time to time; recheck them against the
+ * exchanges' current limits regularly. A broker `freeze_qty` always wins.
+ */
+export const BSE_INDEX_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  SENSEX: 1000,
+};
+
+const BSE_UNLISTED_LONGER_NAMES = ["SENSEX50"];
+
+function bseIndexOptionFreeze(symbol: string): number | null {
+  const compact = symbol.toUpperCase().replace(/\s+/g, "");
+  if (!/(CE|PE)$/.test(compact)) return null;
+  if (BSE_UNLISTED_LONGER_NAMES.some((name) => compact.startsWith(name))) return null;
+  for (const [name, limit] of Object.entries(BSE_INDEX_OPTION_FREEZE_QUANTITY)) {
+    if (compact.startsWith(name)) return limit;
+  }
+  return null;
+}
+
 const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
   (left, right) => right.length - left.length,
 );
@@ -304,7 +326,7 @@ export function quantityCapLabel(lotSize: number, placeable: number): string {
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE/FAOP/77189 index table.
+ * NSE index table, then the BSE SENSEX options limit.
  */
 export function resolveFreezeQuantity(
   symbol: string,
@@ -314,7 +336,7 @@ export function resolveFreezeQuantity(
     return brokerFreezeQty;
   }
   const underlying = indexUnderlying(symbol);
-  if (!underlying) return null;
+  if (!underlying) return bseIndexOptionFreeze(symbol);
   return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
 }
 

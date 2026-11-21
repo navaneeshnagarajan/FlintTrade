@@ -118,6 +118,14 @@ _NSE_INDEX_FREEZE: dict[str, int] = {
     "NIFTYFPI": 8_500,
 }
 
+# BSE single order limit for SENSEX index options. SENSEX futures have a
+# different limit, so only option symbols use this. SENSEX50 starts with the
+# same letters and is excluded. Both exchange tables change from time to time;
+# recheck them against the exchanges' current limits regularly. A broker
+# ``freeze_qty`` always wins.
+_BSE_INDEX_OPTION_FREEZE: dict[str, int] = {"SENSEX": 1_000}
+_BSE_UNLISTED_LONGER_NAMES: tuple[str, ...] = ("SENSEX50",)
+
 # Well-known defaults seeded when no CSV is loaded.
 _NSE_DEFAULTS: dict[tuple[str, str], int] = {
     **{(symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()},
@@ -141,6 +149,16 @@ def index_underlying(symbol: str) -> str | None:
     for name in _INDEX_FREEZE_NAMES:
         if compact == name or compact.startswith(name):
             return name
+    return None
+
+
+def _bse_index_option_freeze(symbol: str) -> int | None:
+    compact = "".join(str(symbol).upper().split())
+    if not compact.endswith(("CE", "PE")) or compact.startswith(_BSE_UNLISTED_LONGER_NAMES):
+        return None
+    for name, limit in _BSE_INDEX_OPTION_FREEZE.items():
+        if compact.startswith(name):
+            return limit
     return None
 
 
@@ -199,7 +217,8 @@ def quantity_cap_label(lot_size: int, placeable: int) -> str:
 
 
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
-    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/77189 index table.
+    """Broker ``freeze_qty`` wins. Otherwise use the NSE index table, then the
+    BSE SENSEX options limit.
 
     Returns:
         The maximum quantity for one order, or ``None`` when no freeze applies.
@@ -209,7 +228,7 @@ def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -
         return supplied
     underlying = index_underlying(symbol)
     if underlying is None:
-        return None
+        return _bse_index_option_freeze(symbol)
     return _NSE_INDEX_FREEZE[underlying]
 
 

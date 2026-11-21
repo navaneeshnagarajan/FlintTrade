@@ -89,6 +89,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **F&O hours in config and a SENSEX options freeze limit.** `flint.toml` records the revised NSE and BSE derivatives close (15:45 from 2026-12-07, 15:30 for an index contract on its expiry day), and a test keeps it in step with the session clock. The deploy freeze now runs to 15:45. When the broker sends no freeze quantity, SENSEX options use the BSE single order limit of 1,000. SENSEX futures and SENSEX50 still rely on the broker. The NSE and BSE freeze tables need rechecking against the exchanges' current limits from time to time.
+
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 
 - **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.
