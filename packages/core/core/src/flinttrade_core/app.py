@@ -3432,18 +3432,32 @@ class _WorkspaceLogFileHandler(logging.handlers.RotatingFileHandler):
                 return False
             raise
         identity = getattr(self, "_log_identity", None)
+        # Unknown ownership must not close the number. A failed stat at open
+        # is not proof this process still owns the descriptor.
         if identity is None:
-            return True
+            return False
         return (current.st_dev, current.st_ino) == identity
 
     def _release_unowned_stream(self) -> None:
         stream = self.stream
-        if stream is None or getattr(stream, "closed", False):
+        if stream is None:
             return
-        if self._stream_still_owns_log(stream):
+        if not getattr(stream, "closed", False) and self._stream_still_owns_log(stream):
             return
         _relinquish_log_stream(stream)
         self.stream = None
+
+    def shouldRollover(self, record: logging.LogRecord) -> bool:
+        self._release_unowned_stream()
+        if self.stream is None:
+            return False
+        try:
+            return bool(super().shouldRollover(record))
+        except OSError as exc:
+            if exc.errno != errno.EBADF:
+                raise
+            self._release_unowned_stream()
+            return False
 
     def close(self) -> None:
         # Another owner may have closed this descriptor, or the kernel may
