@@ -82,6 +82,25 @@ describe("order submit guard", () => {
     expect(sessionStorage.getItem(STORAGE_KEY)).toContain(second.clientRef);
   });
 
+  it("records the per-leg outcomes a lost bracket reply reports", async () => {
+    const bracketLost = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    await expect(submitOrderOnce(SCOPE, INTENT, () => Promise.reject(bracketLost))).rejects.toBe(bracketLost);
+    expect(readUnknownOrderSubmits(SCOPE)[0].legs).toEqual({ entry: "confirmed", stop_loss: "unknown" });
+    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
+  });
+
+  it("keeps an unknown entry leg when a lost reply reports no unknown leg", async () => {
+    const malformed = Object.assign(new Error("x"), {
+      status: 502,
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed" } },
+    });
+    await expect(submitOrderOnce(SCOPE, INTENT, () => Promise.reject(malformed))).rejects.toBe(malformed);
+    expect(readUnknownOrderSubmits(SCOPE)[0].legs).toEqual({ entry: "unknown" });
+  });
+
   it("discards a stored lock whose leg outcome is not unknown, confirmed or absent", () => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify([{
       ...INTENT, receivedAt: 1, listUpdatedAt: 0, clientRef: "0123456789abcdef", legs: { entry: "filled" },
