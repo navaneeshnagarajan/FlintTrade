@@ -218,7 +218,8 @@ def _live_write_error(
     else:
         from flinttrade_core.order_rules import OrderRuleRefused, results_payload  # noqa: PLC0415
 
-        if isinstance(exc, OrderRuleRefused):
+        # Real inheritance only; a duck-typed ``__class__`` is never consulted.
+        if issubclass(type(exc), OrderRuleRefused):
             response["message"] = str(exc)
             response["code"] = "order_rule_blocked"
             response["rule_results"] = results_payload(exc.results)

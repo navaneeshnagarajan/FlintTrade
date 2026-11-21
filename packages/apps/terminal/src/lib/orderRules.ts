@@ -137,7 +137,8 @@ export function instrumentKind(symbol: string, exchange: string): "option" | "fu
   const name = String(symbol ?? "").trim().toUpperCase();
   const venue = String(exchange ?? "").trim().toUpperCase();
   if (DERIVATIVE_VENUES.has(venue)) {
-    return name.endsWith("CE") || name.endsWith("PE") || parseOption(name) ? "option" : "future";
+    // A strike before CE/PE marks an option; RELIANCE ends in CE but is not one.
+    return parseOption(name) || /\d[-_ ]?(CE|PE|CALL|PUT)$/.test(name) ? "option" : "future";
   }
   return "equity";
 }
@@ -388,4 +389,11 @@ const ATTACHED_STOP_LOSS_TARGET = new Set(["dhan", "practice", "sandbox", "mock"
 
 export function stopLossTargetPlacement(broker: string | null | undefined): "attached" | "separate" {
   return ATTACHED_STOP_LOSS_TARGET.has(String(broker ?? "").trim().toLowerCase()) ? "attached" : "separate";
+}
+
+/** A desk premium as a limit price on the 5-paise tick, or null without one. */
+export function optionLimitPrice(premium: number | null | undefined): number | null {
+  if (typeof premium !== "number" || !Number.isFinite(premium) || premium <= 0) return null;
+  const ticks = Math.max(1, Math.round(premium * 20 + 1e-7));
+  return ticks / 20;
 }

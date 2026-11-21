@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { buildCompactOptionSymbol } from '@/lib/optionSymbols';
+import { optionLimitPrice } from '@/lib/orderRules';
 import { builderLegsFor, CUSTOM_TEMPLATE, getStrategyTemplate } from '@/lib/strategyTemplates';
 import { basketOrder, OrderApiError } from '@/services/api';
 import { assertNativeWriteTargetReadyOrThrow } from '@/services/brokerTargets';
@@ -84,10 +85,16 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>((props, ref) =>
     try {
       assertNativeWriteTargetReadyOrThrow(activeMode);
       setBusy(true); setMessage(null);
+      // Options are never sent at market: each leg goes as a limit at its premium.
+      if (legs.some(leg => optionLimitPrice(leg.premium) == null)) {
+        setBusy(false);
+        setMessage({ text: 'A leg has no live premium. Place it from the order ticket with a price.', urgent: true });
+        return;
+      }
       const orders = legs.map(leg => {
         const symbol = buildCompactOptionSymbol(props.symLabel, props.expiry!, leg.strike, leg.optionType);
         if (!symbol) throw new Error('Option contract identity is incomplete');
-        return { symbol, exchange: props.exchange, action: leg.side, quantity: leg.lots * props.lotSize, orderType: 'MARKET' as const, product: 'MIS' as const };
+        return { symbol, exchange: props.exchange, action: leg.side, quantity: leg.lots * props.lotSize, orderType: 'LIMIT' as const, price: optionLimitPrice(leg.premium)!, product: 'MIS' as const };
       });
       const result = await basketOrder({ strategy: 'FlintLegBuilder', orders });
       if (mounted.current && current.current === pinnedIdentity) setMessage(executionMessage(result));

@@ -391,3 +391,12 @@ def test_intraday_square_off_follows_the_broker_profile() -> None:
 def test_shared_cases_match_the_evaluator(case: dict) -> None:
     results = evaluate_order(case["order"], on=date.fromisoformat(case["on"]), **case["context"])
     assert results_payload(results) == case["expected"]
+
+
+def test_a_name_ending_in_ce_is_not_an_option() -> None:
+    from flinttrade_core.order_rules import instrument_kind
+
+    assert instrument_kind("RELIANCE", "MCX") == "future"
+    assert instrument_kind("RELIANCE", "NSE") == "equity"
+    assert instrument_kind("NIFTY-Nov2026-24000-CE", "NFO") == "option"
+    assert evaluate_order({"symbol": "RELIANCE", "exchange": "MCX", "pricetype": "MARKET"}, broker="kotakneo") == []

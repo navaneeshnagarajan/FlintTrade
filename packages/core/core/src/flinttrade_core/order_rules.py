@@ -21,6 +21,7 @@ orders (the broker capability profile). Callers pass those facts in.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
@@ -83,6 +84,7 @@ _ORDER_TYPE_ALIASES = {
     "STOP_LOSS_MARKET": "SL-M",
 }
 _PAISA = Decimal("0.05")
+_STRIKE_THEN_SIDE = re.compile(r"\d[-_ ]?(CE|PE|CALL|PUT)$")
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,8 @@ def instrument_kind(symbol: str, exchange: str) -> str:
     name = str(symbol or "").strip().upper()
     venue = str(exchange or "").strip().upper()
     if venue in _DERIVATIVE_VENUES:
-        if name.endswith(("CE", "PE")) or parse_option_symbol(name) is not None:
+        # A strike before CE/PE marks an option; RELIANCE ends in CE but is not one.
+        if parse_option_symbol(name) is not None or _STRIKE_THEN_SIDE.search(name):
             return "option"
         return "future"
     return "equity"
