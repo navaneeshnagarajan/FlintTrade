@@ -142,6 +142,7 @@ import {
 } from "./positionReconcile";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import type { WidgetProps } from "@/types/widgets";
 import {
   countSymbolClasses,
@@ -523,7 +524,11 @@ function SquareOffDialog({
           </p>
         )}
         <LayaAdmissionNotice notice={layaNotice} />
-        {errorMsg && <OutcomeCopy message={errorMsg} />}
+        {submitGuard.isUnknown(exitIntent(position).key) ? (
+          <OrderStatusUnknownLine />
+        ) : errorMsg ? (
+          <OutcomeCopy message={errorMsg} />
+        ) : null}
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
@@ -1169,6 +1174,8 @@ function PositionsWidget(props: WidgetProps) {
   const renderRowActions = useCallback((position: PositionRow) => {
     const exitPending = pendingExitKeys.has(positionContractKey(position))
       || submitGuard.isLocked(exitIntent(position).key);
+    const exitUnknown = submitGuard.isUnknown(exitIntent(position).key);
+    const pendingTitle = exitUnknown ? ORDER_STATUS_UNKNOWN : exitAlreadyPendingMessage(position.symbol);
     const unexpected = unexpectedKeys.has(positionContractKey(position));
     if (!(canSquareOff || canUseNativePositionVerbs)) {
       // Explore has no book to trade. Practice with a frozen feed omits the hint.
@@ -1187,7 +1194,7 @@ function PositionsWidget(props: WidgetProps) {
               void closeReduced(position);
             }}
             aria-label={`Close ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Close ${position.symbol} at market`}
+            title={exitPending ? pendingTitle : `Close ${position.symbol} at market`}
             className="h-5 px-1.5 text-xxs gap-1 text-text-primary hover:bg-surface-hover"
           >
             Close
@@ -1206,7 +1213,7 @@ function PositionsWidget(props: WidgetProps) {
               });
             }}
             aria-label={`Square off ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Square off ${position.symbol} at market`}
+            title={exitPending ? pendingTitle : `Square off ${position.symbol} at market`}
             className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
           >
             <SquareX size={10} aria-hidden="true" /> Square off
@@ -1255,10 +1262,15 @@ function PositionsWidget(props: WidgetProps) {
         pnl: fmtPnl(row.mtm),
         pnlPercent: fmtPnlPct(row.pnlPercent),
         pnlPositive: row.mtm >= 0,
-        actions: renderRowActions(row),
+        actions: (
+          <span className="inline-flex flex-col items-end gap-0.5">
+            {submitGuard.isUnknown(exitIntent(row).key) ? <OrderStatusUnknownLine /> : null}
+            {renderRowActions(row)}
+          </span>
+        ),
       };
     }),
-    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows],
+    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows, submitGuard],
   );
 
   const columns = useMemo<ColumnDef<SortedTableFeatures, PositionRow>[]>(
@@ -1270,7 +1282,9 @@ function PositionsWidget(props: WidgetProps) {
           const key = positionContractKey(row.original);
           const exitPending = pendingExitKeys.has(key);
           const unexpected = unexpectedKeys.has(key);
+          const exitUnknown = submitGuard.isUnknown(exitIntent(row.original).key);
           return (
+            <span className="inline-flex flex-col items-start gap-0.5">
             <span className="inline-flex items-center gap-1">
               <span className="font-mono font-medium">{row.original.symbol}</span>
               {exitPending ? (
@@ -1283,6 +1297,8 @@ function PositionsWidget(props: WidgetProps) {
                 <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
               ) : null}
               {row.original.restored ? <RestoredFillTag /> : null}
+            </span>
+              {exitUnknown ? <OrderStatusUnknownLine /> : null}
             </span>
           );
         },
@@ -1357,7 +1373,7 @@ function PositionsWidget(props: WidgetProps) {
         cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, unexpectedKeys],
+    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, unexpectedKeys, submitGuard],
   );
 
   const table = useTable({
