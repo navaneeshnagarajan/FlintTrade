@@ -130,7 +130,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     const nonLayouts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     const named = Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"));
     await app.getByRole("button", { name: "Reset app layout", exact: true }).click();
-    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["overview:WelcomeCard", "watchlist", "chart", "positions", "orders"]);
+    await expect.poll(async () => (await currentTabs()).map(tab => tab.component)).toEqual(["watchlist", "overview:WelcomeCard", "chart", "positions", "orders"]);
     expect(Object.fromEntries(Object.entries(await layouts()).filter(([name]) => name !== "Current"))).toEqual(named);
     const afterReset = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => !key.startsWith("flinttrade:app-layouts:v1:"))));
     // Newly mounted default charts may add presentation preferences; the real
