@@ -772,12 +772,19 @@ describe("OrderPadWidget", () => {
       pnlPercent: 1,
     }];
     mockPlaceOrder.mockRejectedValueOnce(new Error("Connection failed. Check FlintTrade backend is running."));
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:notify", listener);
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot 1 · Max 1,800 per order");
     fireEvent.click(screen.getByTestId("orderpad-close"));
 
     const outcome = await screen.findByTestId("order-pad-outcome");
     expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    const unknownNotify = listener.mock.calls
+      .map((call) => (call[0] as CustomEvent).detail)
+      .find((detail) => detail?.title?.startsWith("Order status unknown"));
+    expect(unknownNotify).toMatchObject({ category: "order", skipAccountRefresh: true });
+    window.removeEventListener("flinttrade:notify", listener);
     expect(outcome.className).not.toMatch(/text-loss/);
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(screen.queryByText(/order failed|rejected|try again in a few seconds/i)).not.toBeInTheDocument();

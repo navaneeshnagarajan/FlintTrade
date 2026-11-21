@@ -13,8 +13,10 @@
  * are hidden by a mode or account switch, and clear on sign-out.
  *
  * Each record carries one outcome per leg (entry, and target and stop_loss
- * when the order has them), copied from the API's `leg_outcomes`. A newer
- * complete order read settles the lock.
+ * when the order has them), copied from the API's `leg_outcomes`. A complete
+ * order read that started at least a few seconds after the lost reply
+ * settles the lock. An immediate re-read can complete before the order is
+ * visible, so it does not unlock.
  */
 
 import { z } from "zod";
@@ -47,6 +49,17 @@ const unknownSubmitSchema = z.object({
 });
 
 export type UnknownOrderSubmit = z.infer<typeof unknownSubmitSchema>;
+
+/** A complete order-book read used to settle a lost submit. */
+export type OrderBookRead = {
+  /** When the request left the client. */
+  startedAt: number;
+  /** When the complete result arrived. */
+  completedAt: number;
+};
+
+/** Earliest start time, after the loss, of a read that may settle the lock. */
+export const UNKNOWN_SUBMIT_SETTLE_MS = 5_000;
 
 export interface OrderSubmitIntent {
   /** Instrument key the lock applies to, for example `NFO:NIFTY…CE`. */
@@ -170,13 +183,19 @@ export async function submitOrderOnce<T>(
 }
 
 /**
- * A complete order read newer than the lost reply settles the lock: it
- * either holds the order or it does not. The order book then shows the
- * order itself, so the instrument unlocks.
+ * A complete order read that started at least UNKNOWN_SUBMIT_SETTLE_MS after
+ * the lost reply settles the lock: it either holds the order or it does
+ * not. The order book then shows the order itself, so the instrument unlocks.
+ * Immediate re-reads, including a cached list treated as fresh, stay locked.
  */
-export function reconcileUnknownOrderSubmits(scope: string, dataUpdatedAt: number): void {
+export function reconcileUnknownOrderSubmits(scope: string, read: OrderBookRead): void {
   const records = readLocks(scope);
-  const next = records.filter((record) => !(dataUpdatedAt > record.receivedAt && dataUpdatedAt > record.listUpdatedAt));
+  const next = records.filter((record) => {
+    const earliestStart = record.receivedAt + UNKNOWN_SUBMIT_SETTLE_MS;
+    const startedLateEnough = read.startedAt >= earliestStart;
+    const completedAfterLoss = read.completedAt > record.receivedAt && read.completedAt > record.listUpdatedAt;
+    return !(startedLateEnough && completedAfterLoss);
+  });
   if (next.length === records.length) return;
   writeLocks(scope, next);
   notify();
