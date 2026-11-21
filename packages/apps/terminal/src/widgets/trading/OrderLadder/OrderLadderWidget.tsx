@@ -568,12 +568,6 @@ function OrderLadderWidget(props: Props) {
   const contractPrefix = `${contractKey}@`;
   const unknownForContract = unknownSubmits.filter((record) => record.key === contractKey || record.key.startsWith(contractPrefix));
   const ladderStatusUnknown = unknownForContract.length > 0;
-  const lockedPrice = unknownForContract.map((record) => {
-    const at = record.key.lastIndexOf("@");
-    if (at < 0) return null;
-    const price = Number(record.key.slice(at + 1));
-    return Number.isFinite(price) ? price : null;
-  }).find((price): price is number => price != null);
 
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
     const modeRefusal = checkOrderEntryMode(mode);
@@ -754,24 +748,14 @@ function OrderLadderWidget(props: Props) {
             const contractLocked = ladderStatusUnknown
               || isLocked(contractKey)
               || levels.some((candidate) => isLocked(ladderOrderKey(exchange, symbol, candidate.price)));
-            const showUnknownSlot = lockedPrice != null
-              ? level.price === lockedPrice
-              : isCenter;
             return (
-              <div key={level.price}>
-                <LevelRow level={level} isCenter={isCenter}
-                  order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
-                  disabled={!hasUsablePrice}
-                  locked={contractLocked}
-                  onBid={(p) => { void sendOrder("SELL", p); }}
-                  onAsk={(p) => { void sendOrder("BUY", p); }}
-                  onCancel={cancelPending} />
-                {showUnknownSlot ? (
-                  <div className="h-7 flex items-center px-2.5" data-testid="ladder-status-unknown">
-                    {ladderStatusUnknown ? <OrderStatusUnknownLine /> : null}
-                  </div>
-                ) : null}
-              </div>
+              <LevelRow key={level.price} level={level} isCenter={isCenter}
+                order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
+                disabled={!hasUsablePrice}
+                locked={contractLocked}
+                onBid={(p) => { void sendOrder("SELL", p); }}
+                onAsk={(p) => { void sendOrder("BUY", p); }}
+                onCancel={cancelPending} />
             );
           })
         ) : (
@@ -783,6 +767,14 @@ function OrderLadderWidget(props: Props) {
             </span>
           </div>
         )}
+      </div>
+
+      {/* Fixed strip outside the price list, so no price row ever moves. */}
+      <div
+        data-testid="ladder-status-unknown"
+        className="flex-none h-7 flex items-center overflow-hidden px-2.5 border-t border-border-subtle bg-surface-card"
+      >
+        {ladderStatusUnknown ? <OrderStatusUnknownLine /> : null}
       </div>
 
       {hasBook && (
