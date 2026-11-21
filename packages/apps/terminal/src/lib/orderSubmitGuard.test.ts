@@ -61,35 +61,37 @@ describe("order submit guard", () => {
     expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
   });
 
-  it("keeps the lock when a complete read started immediately after the loss", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = submitOrderOnce(SCOPE, INTENT, lost, 100);
-      await expect(pending).rejects.toThrow();
-      const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
-      const startedAt = receivedAt + 40;
-      reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 10 });
-      expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("keeps the lock on a normal-speed empty read that started immediately", async () => {
+    await expect(submitOrderOnce(SCOPE, INTENT, lost, 100)).rejects.toThrow();
+    const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
+    const startedAt = Date.now();
+    expect(startedAt - receivedAt).toBeLessThan(200);
+    // A newer complete read can be empty: the order is not visible yet.
+    reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 20 });
+    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
   });
 
+  it("keeps the lock when a delayed empty read started before the settle delay", async () => {
+    await expect(submitOrderOnce(SCOPE, INTENT, lost, 100)).rejects.toThrow();
+    const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
+    const startedAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const completedAt = Date.now();
+    expect(completedAt - startedAt).toBeGreaterThanOrEqual(1_800);
+    expect(startedAt).toBeLessThan(receivedAt + UNKNOWN_SUBMIT_SETTLE_MS);
+    reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt });
+    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(true);
+  }, 10_000);
+
   it("unlocks only on a complete read that started after the settle delay", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = submitOrderOnce(SCOPE, INTENT, lost, 100);
-      await expect(pending).rejects.toThrow();
-      const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
-      vi.advanceTimersByTime(UNKNOWN_SUBMIT_SETTLE_MS);
-      const startedAt = Date.now();
-      expect(startedAt).toBeGreaterThanOrEqual(receivedAt + UNKNOWN_SUBMIT_SETTLE_MS);
-      reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 10 });
-      expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    await expect(submitOrderOnce(SCOPE, INTENT, lost, 100)).rejects.toThrow();
+    const receivedAt = readUnknownOrderSubmits(SCOPE)[0].receivedAt;
+    await new Promise((resolve) => setTimeout(resolve, UNKNOWN_SUBMIT_SETTLE_MS));
+    const startedAt = Date.now();
+    expect(startedAt).toBeGreaterThanOrEqual(receivedAt + UNKNOWN_SUBMIT_SETTLE_MS);
+    reconcileUnknownOrderSubmits(SCOPE, { startedAt, completedAt: startedAt + 10 });
+    expect(orderSubmitLocked(SCOPE, INTENT.key)).toBe(false);
+  }, 15_000);
 
   it("records one unknown entry leg for a lost submit", async () => {
     await expect(submitOrderOnce(SCOPE, INTENT, lost)).rejects.toThrow();
