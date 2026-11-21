@@ -14,7 +14,7 @@ ILP wire format per line::
 
 Usage::
 
-    bridge = QuestDBBridge()
+    bridge = QuestDBBridge(allow_writes=True)
     if bridge.check_health():
         inserted = bridge.insert_ticks([
             {"symbol": "NIFTY", "exchange": "NFO", "ltp": 22450.5, "volume": 1234},
@@ -31,6 +31,15 @@ import time
 from typing import Any
 
 import httpx
+
+from .questdb_config import (
+    is_read_only_sql,
+    require_writes,
+    resolve_allow_writes,
+    resolve_host,
+    resolve_http_port,
+    resolve_ilp_port,
+)
 
 logger = logging.getLogger("flinttrade.data.questdb_bridge")
 
@@ -162,33 +171,40 @@ class QuestDBBridge:
     tick-level market data that DuckDB handles less efficiently at scale.
 
     Args:
-        host: QuestDB host (ILP and HTTP). Default ``"127.0.0.1"``.
-        ilp_port: ILP TCP ingestion port. Default ``9009``.
-        http_port: HTTP REST API port. Default ``9000``.
+        host: QuestDB host (ILP and HTTP). Default ``"127.0.0.1"``, or
+            ``QUESTDB_HOST`` when omitted.
+        ilp_port: ILP TCP ingestion port. Default ``9009``, or
+            ``QUESTDB_ILP_PORT`` when omitted.
+        http_port: HTTP REST API port. Default ``9000``, or
+            ``QUESTDB_HTTP_PORT`` when omitted.
         table: ILP table name for ticks. Default ``"ticks"``.
         timeout: HTTP request timeout in seconds.
+        allow_writes: Enable ILP ingest and write SQL. Default is off;
+            pass ``True`` or set ``QUESTDB_WRITE_ENABLED=true`` to enable.
 
     Example::
 
-        bridge = QuestDBBridge()
+        bridge = QuestDBBridge(allow_writes=True)
         bridge.insert_ticks([{"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2980.5}])
         rows = bridge.aggregate_ohlcv("RELIANCE", "1m", "2026-04-08T09:15", "2026-04-08T15:30")
     """
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        ilp_port: int = 9009,
-        http_port: int = 9000,
+        host: str | None = None,
+        ilp_port: int | None = None,
+        http_port: int | None = None,
         table: str = "ticks",
         timeout: float = 10.0,
+        allow_writes: bool | None = None,
     ) -> None:
-        self.host = host
-        self.ilp_port = ilp_port
-        self.http_port = http_port
+        self.host = resolve_host(host)
+        self.ilp_port = resolve_ilp_port(ilp_port)
+        self.http_port = resolve_http_port(http_port)
         self.table = table
+        self.allow_writes = resolve_allow_writes(allow_writes)
         self._http = httpx.Client(
-            base_url=f"http://{host}:{http_port}",
+            base_url=f"http://{self.host}:{self.http_port}",
             timeout=timeout,
         )
 
@@ -237,8 +253,10 @@ class QuestDBBridge:
             Number of ticks successfully sent.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBBridgeError: If the TCP connection fails.
         """
+        require_writes(self.allow_writes, "insert_ticks")
         if not ticks:
             return 0
 
@@ -284,8 +302,12 @@ class QuestDBBridge:
             ``[{"symbol": "NIFTY", "ltp": 22450.5, ...}, ...]``
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled and ``sql`` is
+                not a recognised read-only statement.
             QuestDBBridgeError: If the request fails or QuestDB returns an error.
         """
+        if not self.allow_writes and not is_read_only_sql(sql):
+            require_writes(self.allow_writes, "query")
         try:
             resp = self._http.get(_QUERY_PATH, params={"query": sql})
         except Exception as exc:
