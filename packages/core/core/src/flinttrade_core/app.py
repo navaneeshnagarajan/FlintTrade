@@ -5145,6 +5145,26 @@ def create_flask_app(
         )
         return response
 
+    @app.errorhandler(405)
+    def _unclaimed_api_method_is_not_found(error: Any) -> Any:
+        """An unknown API path is not a known route with the wrong method.
+
+        The SPA catch-all is GET-only. A POST to an unclaimed ``/v1/`` or
+        ``/api/`` path would otherwise become 405 and can echo the raw path.
+        A path owned by a real route keeps method-not-allowed.
+        """
+        path = request.path
+        if not any(path.startswith(prefix) for prefix in spa_api_prefixes):
+            return error
+        adapter = app.url_map.bind("")
+        try:
+            rule, _args = adapter.match(path, method="GET", return_rule=True)
+        except Exception:
+            return error
+        if getattr(rule, "endpoint", None) != "_spa_fallback":
+            return error
+        return jsonify({"status": "error", "message": "Not found"}), 404
+
     @app.before_request
     def _set_csp_nonce() -> None:
         """Mint a fresh per-request CSP nonce for the served HTML + CSP header.
