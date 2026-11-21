@@ -82,7 +82,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   }
   await page.reload();
   await expect(workspace).toBeVisible();
-  await expect(workspace.getByText("Risk", { exact: true }).first()).toBeVisible();
+  await expect(workspace.getByRole("tab", { name: "Risk", exact: true })).toBeVisible();
   const persisted = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), LAYOUT_KEY);
   expect(Object.keys(persisted).sort()).toEqual(["Current", "Trading Desk", "Trading Desk (Copy)"]);
   expect(persisted["Trading Desk"]).toEqual(original);
