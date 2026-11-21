@@ -360,6 +360,17 @@ function registerScalperReads(syntheticApi: Parameters<typeof registerDeskReads>
   }, { minimum: 0, maximum: 4 });
 }
 
+function registerQuickTradeReads(syntheticApi: Parameters<typeof registerDeskReads>[0]): void {
+  registerDeskReads(syntheticApi, false, { marketScopeVisits: 8 });
+  registerAccountBooks(syntheticApi, {
+    positionCalls: { minimum: 0, maximum: 8 },
+    orderCalls: { minimum: 0, maximum: 16 },
+  });
+  registerRead(syntheticApi, `${nativePath("search")}?query=RELIANCE&exchange=NSE`, {
+    json: { status: "success", data: [{ symbol: "RELIANCE", exchange: "NSE", lotsize: 1, tick_size: 0.05, name: "RELIANCE" }] },
+  }, { minimum: 0, maximum: 8 });
+}
+
 function registerLadderReads(syntheticApi: Parameters<typeof registerDeskReads>[0]): void {
   registerDeskReads(syntheticApi, false, { marketScopeVisits: 12 });
   registerAccountBooks(syntheticApi, {
@@ -675,6 +686,28 @@ for (const viewport of VIEWPORTS) {
       await expect(dialog.getByRole("button", { name: "Open Orders" })).toBeVisible();
       await expect(confirm).toBeDisabled();
       expectUnmoved(before, await collectBoxes([dialog, confirm, cancel]), `square off dialog ${viewport.width}`);
+    });
+
+    test("Quick Trade BUY/SELL and the note stay put, with the line in a slot directly above them", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerQuickTradeReads(syntheticApi);
+      await mountWidget(page, "quicktrade", false, { params: { symbol: "RELIANCE", exchange: "NSE" } });
+      const buy = page.getByRole("button", { name: /^Buy .* of RELIANCE$/ });
+      const sell = page.getByRole("button", { name: /^Sell .* of RELIANCE$/ });
+      const note = page.locator("#quicktrade-admission-note");
+      await expect(buy).toBeVisible();
+      await page.clock.runFor(500);
+      const before = await collectBoxes([buy, sell, note]);
+      await recordLostSubmit(page, { key: "NSE:RELIANCE", symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1 });
+      const slot = page.getByTestId("quicktrade-status-slot");
+      await tickUntil(page, slot.getByText(UNKNOWN));
+      await expect(buy).toBeDisabled();
+      expectUnmoved(before, await collectBoxes([buy, sell, note]), `quick trade ${viewport.width}`);
+      const lineBox = (await slot.getByRole("status").boundingBox())!;
+      const buyBox = (await buy.boundingBox())!;
+      expect(lineBox.y + lineBox.height, "line sits above BUY/SELL").toBeLessThanOrEqual(buyBox.y + 0.5);
+      expect(buyBox.y - (lineBox.y + lineBox.height), "line sits directly above BUY/SELL").toBeLessThanOrEqual(16);
+      await expectLineFits(slot, `quick trade ${viewport.width}`);
     });
 
     test("Orders table rows stay put when the unknown line appears", async ({ page, syntheticApi }) => {

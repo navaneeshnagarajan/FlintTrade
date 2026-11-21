@@ -502,7 +502,6 @@ function QuickTradeWidget(props: WidgetProps) {
 
         {/* Status */}
         <StatusBanner status={status} />
-        {statusUnknown && <OrderStatusUnknownLine />}
 
         <AdmissionNoteField id="quicktrade-admission-note" value={note} onChange={setNote} />
 
@@ -513,8 +512,12 @@ function QuickTradeWidget(props: WidgetProps) {
           onCancelClamp={cancelClamp}
         />
 
-        {/* BUY / SELL */}
-        <div className="flex gap-2 mt-auto">
+        {/* BUY / SELL, with a reserved unknown-line slot directly above them */}
+        <div className="mt-auto flex flex-col gap-1">
+        <div data-testid="quicktrade-status-slot" className="min-h-9 flex items-end">
+          {statusUnknown ? <OrderStatusUnknownLine /> : null}
+        </div>
+        <div className="flex gap-2">
           <Button
             onClick={() => handleAction("BUY")}
             disabled={isPending || locked || admission?.kind === "deny" || admission?.kind === "clamp"}
@@ -537,6 +540,7 @@ function QuickTradeWidget(props: WidgetProps) {
             ) : null}
             SELL
           </Button>
+        </div>
         </div>
       </div>
     </div>

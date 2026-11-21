@@ -218,7 +218,7 @@ export function deferredResponse() {
   return { promise, release };
 }
 
-export type MountableWidget = "foreverorders" | "orders" | "positions" | "scalper" | "orderladder" | "orderpad";
+export type MountableWidget = "foreverorders" | "orders" | "positions" | "scalper" | "orderladder" | "orderpad" | "quicktrade" | "optionchain";
 
 function widgetTitle(widget: MountableWidget): string {
   if (widget === "foreverorders") return "Forever (GTT) Orders";
@@ -226,6 +226,8 @@ function widgetTitle(widget: MountableWidget): string {
   if (widget === "orders") return "Orders";
   if (widget === "orderladder") return "DOM / Ladder";
   if (widget === "orderpad") return "Order Pad";
+  if (widget === "quicktrade") return "Quick Trade";
+  if (widget === "optionchain") return "Option Chain";
   return "Positions";
 }
 
@@ -235,6 +237,8 @@ function widgetModule(widget: MountableWidget): string {
   if (widget === "orders") return "/src/widgets/trading/Orders/OrdersWidget.tsx";
   if (widget === "orderladder") return "/src/widgets/trading/OrderLadder/OrderLadderWidget.tsx";
   if (widget === "orderpad") return "/src/widgets/trading/OrderPad/OrderPadWidget.tsx";
+  if (widget === "quicktrade") return "/src/widgets/trading/QuickTrade/QuickTradeWidget.tsx";
+  if (widget === "optionchain") return "/src/widgets/analysis/OptionChain/OptionChainWidget.tsx";
   return "/src/widgets/trading/Positions/PositionsWidget.tsx";
 }
 
@@ -248,7 +252,7 @@ export async function mountWidget(
     await page.clock.install({ time: FIXED_TIME });
     await page.clock.pauseAt(FIXED_TIME);
   }
-  await page.addInitScript(({ widget, sibling, params }) => {
+  await page.addInitScript(({ widget, sibling, params, title }) => {
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
     const initialLayout: IJsonModel = {
@@ -256,7 +260,7 @@ export async function mountWidget(
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: sibling ? 60 : 100, children: [{
             type: "tab", id: "synthetic-order-flow-widget", component: widget,
-            name: widget === "foreverorders" ? "Forever (GTT) Orders" : widget === "scalper" ? "Scalper" : widget === "orders" ? "Orders" : widget === "orderladder" ? "DOM / Ladder" : widget === "orderpad" ? "Order Pad" : "Positions",
+            name: title,
             ...(params ? { config: params } : {}),
           }],
         }, ...(sibling ? [{
@@ -280,7 +284,7 @@ export async function mountWidget(
     window.addEventListener("flinttrade:notify", (event) => {
       observedWindow.__presentationNotifications?.push((event as CustomEvent<unknown>).detail);
     });
-  }, { widget: component, sibling: narrowSibling, params: options.params ?? null });
+  }, { widget: component, sibling: narrowSibling, params: options.params ?? null, title: widgetTitle(component) });
 
   await page.goto("/welcome");
   await page.evaluate(async ({ token, account, widget }) => {
@@ -300,30 +304,23 @@ export async function mountWidget(
     // Selector is an explicit operator choice, not connected-state injection.
     // The existing poll must establish the synthetic session from its API body.
     brokers.useBrokerStore.getState().setActiveAccount(`native:dhan:${account}`);
-    const widgetModule = widget === "foreverorders"
-      ? "/src/widgets/orders/ForeverOrdersWidget.tsx"
-      : widget === "scalper"
-        ? "/src/widgets/trading/Scalper/ScalperWidget.tsx"
-        : widget === "orders"
-          ? "/src/widgets/trading/Orders/OrdersWidget.tsx"
-          : widget === "orderladder"
-            ? "/src/widgets/trading/OrderLadder/OrderLadderWidget.tsx"
-            : widget === "orderpad"
-              ? "/src/widgets/trading/OrderPad/OrderPadWidget.tsx"
-              : "/src/widgets/trading/Positions/PositionsWidget.tsx";
     await Promise.all([
       importModule("/src/routes/UnifiedAppRoute.tsx"),
-      importModule(widgetModule),
+      importModule(widget),
     ]);
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: component });
+  }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: widgetModule(component) });
   await expect(page).toHaveURL(/\/terminal$/);
   const initialControl = component === "orderladder"
     ? page.getByLabel("Price ladder")
     : component === "orderpad"
       ? page.getByRole("button", { name: /Buy|Place BUY/i }).first()
-      : page.getByRole("button", {
+      : component === "quicktrade"
+        ? page.getByRole("button", { name: /^Buy .* of / }).first()
+        : component === "optionchain"
+          ? page.getByRole("button", { name: /Basket/ }).first()
+          : page.getByRole("button", {
           name: component === "foreverorders" ? "Refresh forever orders" : component === "orders" ? "Refresh orders" : "Table", exact: true,
         }).first();
   if (component === "scalper") {
