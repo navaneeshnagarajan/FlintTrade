@@ -791,7 +791,7 @@ class PositionMirror:
 
         lot_unknown = mode_val == AllocationMode.LOT_BASED.value and _get_lot_size(order.symbol) is None
         skip_error = (
-            f"Not placed. The lot size for {order.symbol} isn't known."
+            f"The lot size for {order.symbol} isn't known."
             if lot_unknown
             else "Zero allocation — skipped"
         )
