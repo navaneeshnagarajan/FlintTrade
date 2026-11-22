@@ -1,18 +1,18 @@
 # Indicators
 
-> 110 exported indicator functions and streaming classes — pure-NumPy batch indicators, pure-Python streaming variants (optional Numba acceleration on 3 batch kernels), and Pine Script conversion.
+> 110 exported indicator functions and streaming classes: pure-NumPy batch indicators, pure-Python streaming variants (optional Numba on 3 batch kernels), and Pine Script conversion.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python (optional Numba)
 
 ## Public surface
 
-- `src/flinttrade_indicators/trend.py — SMA, EMA, MACD, ADX`
-- `src/flinttrade_indicators/momentum.py — RSI, Stochastic, ROC, MFI`
-- `src/flinttrade_indicators/oscillators.py — CCI, Williams %R, TRIX`
-- `src/flinttrade_indicators/volatility.py — ATR, Bollinger Bands, Keltner Channels`
-- `src/flinttrade_indicators/volume.py — OBV, Chaikin, VWAP`
+- `src/flinttrade_indicators/trend.py: SMA, EMA, MACD, ADX`
+- `src/flinttrade_indicators/momentum.py: RSI, Stochastic, ROC, MFI`
+- `src/flinttrade_indicators/oscillators.py: CCI, Williams %R, TRIX`
+- `src/flinttrade_indicators/volatility.py: ATR, Bollinger Bands, Keltner Channels`
+- `src/flinttrade_indicators/volume.py: OBV, Chaikin, VWAP`
 
 (See the source for the full surface.)
 
@@ -39,13 +39,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.

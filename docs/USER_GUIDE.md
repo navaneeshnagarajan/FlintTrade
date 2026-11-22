@@ -1,8 +1,8 @@
 # FlintTrade User Guide
 
 This guide walks you from a fresh install to local setup, sandbox workflows,
-and Live-mode safeguard verification. The default reading order is top-to-bottom
-— every section builds on the one before it. If you already have FlintTrade running, jump to the
+and Live-mode safeguard verification. The default reading order is top-to-bottom.
+Every section builds on the one before it. If you already have FlintTrade running, jump to the
 [Workspace tour](#5-workspace-tour) or use the section list in the sidebar.
 
 > **Beta software.** FlintTrade `v0.0.1` is not production ready and
@@ -24,7 +24,9 @@ UI and API on a single origin (port 5100), usable from any browser. The
 desktop apps are convenience wrappers around that same backend for people who
 prefer a one-click install.
 
-### One-line install (recommended — no prerequisites)
+<a id="one-line-install-recommended--no-prerequisites"></a>
+
+### One-line install (recommended: no prerequisites)
 
 The web-app installer runs in the shell your OS already ships (bash or zsh on
 macOS and Linux, built-in PowerShell on Windows) and needs no other toolchain:
@@ -44,12 +46,12 @@ irm https://flinttrade.vercel.app/web-install.ps1 | iex
 It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
-launcher — `~/.local/bin/flinttrade-web` on macOS and Linux,
+launcher: `~/.local/bin/flinttrade-web` on macOS and Linux,
 `%LOCALAPPDATA%\Programs\FlintTradeWeb\flinttrade-web.cmd` plus a **FlintTrade
 Web** Start Menu shortcut on Windows. The Electron desktop shell keeps its own
 launcher, Start Menu entry and source checkout, so the two installs never
-collide and can be run in either order. Open http://127.0.0.1:5100 and follow the first-time Setup flow
-— no `.env` file is required.
+collide and can be run in either order. Open http://127.0.0.1:5100 and follow the first-time Setup flow.
+No `.env` file is required.
 
 Removing it again is covered in [Uninstall](#13-uninstall).
 
@@ -57,7 +59,7 @@ Removing it again is covered in [Uninstall](#13-uninstall).
 
 Use this whenever the command above fails. The hosted URLs are only a redirect
 to the scripts in this repository, so a site outage or a deployment without an
-immutable source commit answers `503` — and piping that error page into a shell
+immutable source commit answers `503`, and piping that error page into a shell
 does nothing useful. These commands fetch the same script straight from GitHub
 and depend on no deployment:
 
@@ -98,7 +100,7 @@ pnpm --filter @flinttrade/terminal build
 python scripts/ft.py start
 ```
 
-The same six lines run unchanged in Windows PowerShell — do not join them with
+The same six lines run unchanged in Windows PowerShell. Do not join them with
 `&&`, which Windows PowerShell 5.1 does not support.
 `python scripts/ft.py <target>` is the cross-platform runner (no make and no
 bash needed); `make <target>` is the POSIX alias.
@@ -107,7 +109,7 @@ The terminal build step is not optional: the backend serves the UI only when
 `packages/apps/terminal/dist/index.html` exists, so skipping it leaves you with
 an API and no interface.
 
-Docker (`make docker-up`) is an advanced, POSIX-only path — it needs make and
+Docker (`make docker-up`) is an advanced, POSIX-only path. It needs make and
 Docker, so it is not a zero-prerequisite way in. A `.env` file is optional:
 the default profile starts the backend, the terminal build and nginx, and the
 UI is served at http://localhost:8080 (override with `FLINTTRADE_HTTP_PORT`).
@@ -136,7 +138,7 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
 
-If the site is unreachable, the same desktop installer runs repo-direct — swap
+If the site is unreachable, the same desktop installer runs repo-direct. Swap
 `flinttrade-web-install` for `flinttrade-install` in the fallback commands under
 [If the site is unreachable](#if-the-site-is-unreachable-repo-direct-fallback).
 
@@ -189,7 +191,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 ![Welcome screen](screenshots/01-welcome.jpg)
-*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with example data opens sample data, labelled Example.*
+*The /welcome route: first-time cinematic introduction. Get Started opens Setup. Try with example data opens sample data, labelled Example.*
 
 ---
 
@@ -211,7 +213,7 @@ control plane only.
 
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
-after persisted REST smoke evidence — never placeable Live;
+after persisted REST smoke evidence, and is never placeable Live;
 Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
 async market and order feeds are wired and locally tested with synthetic SDK
 clients, but no live-account or market-hours stream proof has been recorded.
@@ -241,7 +243,7 @@ Changing the registered IP is limited to once every 7 days.
 
 Where your broker allows it, a static IP may be shared with family members
 (your spouse, dependent children and dependent parents). Some brokers require
-each person to register their own IP, so you should check with your broker.
+each person to register their own IP. Check with your broker.
 
 On Kotak Neo, the API sign-in itself must happen from the machine with the
 registered static IP, not only orders.
@@ -255,7 +257,7 @@ IP, check that you are running FlintTrade on that machine and network.
 
 ## 3. First Practice order
 
-Before enabling any order-capable integration, exercise the order path in
+Before enabling any order-capable integration, place an order in
 **Practice**. A fresh browser with no saved Mode opens in Practice. Password
 sign-in and account setup open in Practice. A fresh login opens Practice.
 Quick Unlock restores the existing session and keeps its Mode. Live is
@@ -298,7 +300,7 @@ Cancel leaves the current Mode.
 **When Live is locked.** The Live item lists every reason that applies, in
 this order:
 
-- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or the
+- `Enrol 2FA and connect a broker`: the authenticator is not enrolled, or the
   desk reports no broker connection. Either gap is enough for this one reason.
   The connect half is the shipped label, not an available connection action.
   A broker session cannot be started from the terminal today. When the
@@ -306,9 +308,9 @@ this order:
   **Two-factor authentication**, **Enrol authenticator in Settings** links
   to Settings → Security (`/settings#security`). The Live switch does not
   ask for an authenticator code.
-- `Create a PIN in Settings` — no PIN exists. Live stays locked, and those
+- `Create a PIN in Settings`: no PIN exists. Live stays locked, and those
   words link to Settings → Security (`/settings#security`).
-- `Not qualified for Live` — only when the place gate reports that this
+- `Not qualified for Live`: only when FlintTrade reports that this
   operator is not qualified. If that report is absent, this reason is not
   shown. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
 
@@ -390,7 +392,7 @@ Info, Degraded, or Blocked. Example-data copy and the Practice Mode line are not
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome normally says **Unavailable** or **Degraded** plus the failure
-in plain words — never **Connected** or **Connected (read)**. Failure class
+in plain words, never **Connected** or **Connected (read)**. Failure class
 Laya is the exception: Broker may stay **Connected** or **Connected (read)**
 while Live place stay muted. Other money-path
 classes mute Live place the same way, with one
@@ -443,21 +445,21 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 
 | Strip | What it means | What to do |
 |---|---|---|
-| Exchange (`exchange`) | Unavailable or Degraded — exchange/session. A broker reject names a halt or circuit. The session clock and CAS chip never raise this. | Wait for the session. Check [NSE circuit breakers](https://www.nseindia.com/products-services/equity-market-circuit-breakers). Manage open risk in the broker app. |
+| Exchange (`exchange`) | Unavailable or Degraded: exchange/session. A broker reject names a halt or circuit. The session clock and CAS chip never raise this. | Wait for the session. Check [NSE circuit breakers](https://www.nseindia.com/products-services/equity-market-circuit-breakers). Manage open risk in the broker app. |
 | edge/CDN | Public site/CDN unreachable. The install/update or public-site fetch failed and the local desk ping (`/api/v1/ping`) still succeeded. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
 | Broker sign-in (`broker_auth`) | The broker session or token failed. Connected (read) only after a read smoke succeeds. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
 | Broker connection (`broker_rest`) | The broker API failed. | Check the broker status page, then retry once. |
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
-| Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
+| Broker rate limit (`broker_rate_limit`) | The broker asked for a slower request rate. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
-| Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
+| Laya (`laya`) | Blocked: Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Chat provider (`llm_provider`) | Info: Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
 | Local network (`network_local`) | The desk process is up and cannot reach the public internet (gateway, DNS, or ping). A site/CDN miss with the desk ping still ok is edge/CDN. A single broker timeout is not this class. | Check the link or switch network, then retry. |
 
 Dispute and status links, if you need them, are the broker's or the
-regulator's — not a FlintTrade claims desk:
+regulator's. They are not a FlintTrade claims desk:
 
 - Dhan support: https://dhan.co/customer-service/ and grievances: https://dhan.co/grievance/
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
@@ -468,7 +470,7 @@ regulator's — not a FlintTrade claims desk:
 ### Start Laya
 
 Laya is opt-in and starts **Down**. The desk does not paint it **Ready**
-until a health probe says so. Admission is fail-closed: while Laya is
+until a health probe says so. While Laya is
 **Down**, including the first load, orders are refused. **Degraded** is
 not Ready, and it is not a refusal of every order: a place inside the
 tighter ceiling can continue. See [Laya on place](#laya-on-place).
@@ -767,7 +769,7 @@ A denial is not a Chat outage: the LLM label stays **Not configured** or
 the allowed one. Nothing is placed until you click. Laya never
 auto-places the reduced quantity. Order Pad and Quick Trade show
 **Not placed. Laya allows up to N.** with **Place N** and **Cancel**.
-**Place N** sends that quantity through the same place path. On Order
+**Place N** sends that quantity through the same order checks. On Order
 Pad, **Review Practice order** then shows that placed quantity. When the
 request is already at the allowed quantity, that place is admitted.
 Place 1 on **Not placed. Laya allows up to 1.** places. Practice still
@@ -814,7 +816,7 @@ with the tooltip `GTT orders aren't supported right now.`
 Mode line. Example data reads **Example**. Practice and Live may read
 **Live**, **Delayed**, muted **Stale** or **Unknown** plus age when known,
 or `No live feed (Practice)`. Silent-stale is a fail. This is provenance,
-not a Mode — Live mode does not imply a Live feed.
+not a Mode. Live mode does not imply a Live feed.
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -825,8 +827,8 @@ remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 **Desk chrome.** The desk uses one TopBar and one scrolling
-ticker strip. TopBar keeps Mode, session/status, and overflow —
-it is not a second quote rail, so dual index slots in TopBar are gone.
+ticker strip. TopBar keeps Mode, session/status, and overflow.
+It is not a second quote rail, so dual index slots in TopBar are gone.
 **Tools → Quick Settings** opens density, theme, and similar controls
 without leaving the desk. **Tools → Settings** opens the full
 `/settings` route for deep pages (Monitoring, brokers, auth). There is
@@ -865,7 +867,7 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity to 1 lot. After you select the future, Order Pad
-   auto-fills Quantity from that instrument's current lot size — do
+   auto-fills Quantity from that instrument's current lot size. Do
    not type a remembered number. Learn Glossary follows the loaded instrument master
    rather than fixed example figures. A quantity that is not a whole number of lots is refused once, inline: `Quantity must be a multiple of the lot size (N).` `N` is that contract's lot. If the lot is not verified, the pad shows one line: `Not placed. The lot size for <name> isn't verified.` `<name>` is the contract's display name. An order over the per-order freeze limit is refused with HTTP 400 and code `quantity_admission`. The message gives the limit, names the instrument, and asks for smaller orders. The order is not split. The limit is the broker freeze field when the order carries one, otherwise the exchange figure. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
@@ -912,10 +914,10 @@ Chain expiry list for that symbol/exchange. When the list is
 non-empty, the expiry control is shown and charts/statistics cover
 only the selected expiry (the chain’s selected expiry when both
 widgets are open; otherwise the nearest listed). Example-data
-expiries stay listed. The Mode honesty line is the disclosure — there
+expiries stay listed. The Mode honesty line is the disclosure. There
 is no second Example chip on the chain. No expiries or no
-OI is an honest empty — `No expiries for this symbol` or
-`No OI for this expiry` — with no bars and no PCR/max-pain stats.
+OI is an honest empty: `No expiries for this symbol` or
+`No OI for this expiry`, with no bars and no PCR/max-pain stats.
 The widget never pairs “No expiries” with generic or sample bars.
 
 With example data, Terminal Watchlist checked LTP and % change columns
@@ -925,13 +927,13 @@ shows `—` after a brief `…`, never a silent blank. Unchecking a
 column hides it.
 
 Selecting a symbol in Terminal Watchlist retargets Chart,
-Option Chain, and Scalper to that symbol — no retype.
+Option Chain, and Scalper to that symbol, with no retype.
 Retarget on example data is allowed.
 An empty watchlist never silently retargets
 .
 
 With example data, Terminal → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
-stay disarmed — the same honesty class as Settings → Telegram
+stay disarmed, in the same honesty class as Settings → Telegram
 **Test Send**. They never open Confirm Order and never place.
 Helper: `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` **1-CLICK**
 stays OFF and disabled; its title is `One-click is unavailable for Example`. Sample quote preview is allowed; there is no Confirm
@@ -960,7 +962,7 @@ example figures are not a substitute for the current master.
 With example data, `/learn` → **Resource Hub** opens project docs from the local
 FlintTrade backend (`USER_GUIDE.md`, `ORDER_SAFETY.md`, and the other
 listed cards). First open shows `Loading document…` while that local
-load settles — it never flashes a red backend error on a cold-start
+load settles. It never flashes a red backend error on a cold-start
 race. A timeout or race is a muted soft fail: `Document isn’t ready
 yet.` plus a primary **Retry** (one automatic retry is allowed). The
 red `Couldn’t load this document from the local backend.` line plus
@@ -978,7 +980,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Pre-flight checklist
 
-- [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
+- [ ] Your FlintTrade JWT is fresh. It expires daily at 8 AM IST.
 
 - [ ] The authenticator is enrolled. After **Later** on the
       **Two-factor authentication** card, the Live menu stays locked and
@@ -1023,7 +1025,7 @@ See [Start Laya](#start-laya) and [Laya on place](#laya-on-place).
    403 `totp_required` until the authenticator is enabled. Quick Unlock
    reopens the same Mode the session already had, with the correct PIN,
    and never changes the Mode. Set the PIN under Settings → Security
-   (`/settings#security`) first if you have not already — see
+   (`/settings#security`) first if you have not already. See
    [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock).
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
@@ -1088,12 +1090,12 @@ the query string, the hash, and any navigation state.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. A signed-in visit leaves Welcome for `/trade`, which opens Terminal. |
+| `/welcome` | First-time cinematic introduction; **Skip intro** ends it early. After the first visit it is also the daily login screen; Enter signs in (password only until an authenticator is enrolled; then password + TOTP). An idle lock returns here. The heading is `Practice desk locked`, `Live desk locked`, or `Locked`. **Quick Unlock** is the small label above the PIN field, and the screen reopens the existing Mode. See [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?**, an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so Example stays reachable if setup is unfinished. `/login` redirects here and opens sign-in. A signed-in visit leaves Welcome for `/trade`, which opens Terminal. |
 | `/explore` | Depends on the build and the session. The public site permanently redirects `/explore` (HTTP 308) to the Demo at `/demo-app/welcome`. The public demo bundle replaces `/explore` with Terminal (`/terminal`). An installed build replaces `/explore` with `/welcome`. If that Welcome screen already has a signed-in session, it continues to `/trade`, and the shell then opens Terminal. A signed-out installed visit stays on `/welcome`. **Try with example data** opens `/home`, which the shell replaces with Terminal. |
 | `/terminal` | Markets, the account overview, and manual trading. FlexLayout canvas, widgets, and presets. Alt+H and Alt+T both finish here. |
 | `/testing` | Strategy research, Practice forward tests, and local datasets. A bookmark of `/lab` opens this app. |
 | `/portfolio` | Investments, holdings, allocation, and goals. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. A bookmark of `/invest`, including `/invest#networth`, opens Portfolio and keeps the hash. |
-| `/learn` | Learning workspace — courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`, which opens Terminal. Choose Practice in the Mode menu before placing a simulated order. |
+| `/learn` | Learning workspace: courses, glossary, examples, and built-in Practice Trading. **Open Trade desk** links to `/trade`, which opens Terminal. Choose Practice in the Mode menu before placing a simulated order. |
 | `/automation` | Schedules, monitors, webhooks, logs, and the AI Centre panel. The on-screen title of that panel is **AI Centre**. The catalogue calls the surface an AI workspace. A bookmark of `/automate` opens run control. A bookmark of `/ai` opens Automation with the AI Centre panel. Kill-switch activate and reset live under Settings → Risk & Safety. |
 | `/reports` | Journal, performance, notes, and coaching. |
 | `/brokers` | Native broker account metadata and connection status. A bookmark of `/ditto` opens Brokers. Mirroring and aggregate broker risk remain unavailable until native cutover. |
@@ -1435,16 +1437,16 @@ Cash on the Net Worth view does not.
 
 ### The widgets (71)
 
-Widgets are organised into three categories — Trading / Analysis / Utility —
+Widgets are organised into three categories: Trading, Analysis, and Utility,
 under `packages/apps/terminal/src/widgets/`. The lists below are generated
 from the widget registry
 (`packages/apps/terminal/src/layout/widgetFactory.tsx`) and are exhaustive:
 
-- **Trading** — Scalper, Positions, Fills, P&L Monitor, Orders, Holdings,
+- **Trading:** Scalper, Positions, Fills, P&L Monitor, Orders, Holdings,
   Order Pad, Action Centre, Trade Copier, Smart Order, Portfolio Allocation,
   Quick Trade, Risk, Strategy Monitor, DOM / Ladder, Forever (GTT) Orders,
   Super Orders, and Conditional Triggers
-- **Analysis** — Chart, Market Overview, Option Chain, Historical Chain, OI
+- **Analysis:** Chart, Market Overview, Option Chain, Historical Chain, OI
   Analytics, Straddle & Implied Move, Greeks, Dealer Gamma, Arbitrage
   Scanner, Pattern Detection, Tape & Microstructure, Vol Surface, IV Smile &
   Skew, Straddle P&L, Order Flow, Portfolio Optimiser, Condition Scanner,
@@ -1452,7 +1454,7 @@ from the widget registry
   Timeframe, PCR Trend, Instrument Compare, Greeks Matrix, Gap Analysis,
   Correlation Matrix, Delivery Data, DOM Heatmap, Portfolio Pivot, and
   Seasonality
-- **Utility** — Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
+- **Utility:** Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
   Advisor, AI Backends, AI Team, Obsidian Vault, Price Alerts,
   Reconciliation, Funding Rates, Currency Converter, Earnings Calendar,
   Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
@@ -1507,19 +1509,19 @@ LiveMint.
 
 ### The 17 workspace presets
 
-A preset is a pre-built layout you can apply instantly from the command
+A preset is a saved layout. Apply it from the command
 palette (Ctrl + K → "preset"). Built-in presets include:
 
-- **Scalper Zone** — chart, order ladder, order pad, positions, scalper panel.
-- **Options Desk** — option chain, chart, Greeks, positions, straddle P&L.
-- **Market Watch** — multi-symbol watchlist, chart, price ticker, indices.
-- **Analysis** — chart with indicators, OI analytics, positions, news.
-- **Risk Monitor** — indices, risk, P&L monitor, positions, orders.
-- **Trading Desk** — indices, positions, risk and orders; the composition that
+- **Scalper Zone:** chart, order ladder, order pad, positions, scalper panel.
+- **Options Desk:** option chain, chart, Greeks, positions, straddle P&L.
+- **Market Watch:** multi-symbol watchlist, chart, price ticker, indices.
+- **Analysis:** chart with indicators, OI analytics, positions, news.
+- **Risk Monitor:** indices, risk, P&L monitor, positions, orders.
+- **Trading Desk:** indices, positions, risk and orders; the composition that
   replaced the old Dashboard widget.
-- **Three Panel** — CE, index and PE charts with synchronised time scales on
+- **Three Panel:** CE, index and PE charts with synchronised time scales on
   the nearest-expiry ATM strikes.
-- **Investor View** — chart, watchlist, holdings, indices (SIPs, net worth
+- **Investor View:** chart, watchlist, holdings, indices (SIPs, net worth
   and mutual funds live on the Invest page).
 - … plus nine more.
 
@@ -1531,7 +1533,7 @@ preset from Settings → Workspace.
 ## 6. Screener walkthrough
 
 The screener lives under the **Analysis** widget category and shares the
-workspace with everything else — no separate route. Headline tools:
+workspace with everything else. There is no separate route. Headline tools:
 
 ### Option Chain
 
@@ -1542,9 +1544,9 @@ Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
 selected expiry and symbol. Example data does not
-invent live OI. The Mode honesty line is the disclosure —
-there is no second Example chip on the chain strip. An empty expiry
-is an honest empty — not zeros-as-data.
+invent live OI. The Mode honesty line is the disclosure.
+There is no second Example chip on the chain strip. An empty expiry
+is an honest empty, not zeros-as-data.
 
 ### OI Analytics
 
@@ -1558,10 +1560,10 @@ OI Chart shares Option Chain expiries for the symbol/exchange. The
 expiry control appears when that list is non-empty; charts and
 statistics cover only the selected expiry (the chain’s selection
 when both widgets are open; otherwise the nearest listed). Example-data
-expiries stay listed. The Mode honesty line is the disclosure
-— expiries and the OI Chart are not badged Sample. Empty states
+expiries stay listed. The Mode honesty line is the disclosure.
+Expiries and the OI Chart are not badged Sample. Empty states
 are honest: `No expiries for this symbol` or `No OI for this expiry`,
-with no bars and no PCR/max-pain stats — never “No expiries” over
+with no bars and no PCR/max-pain stats. They never show “No expiries” over
 fake or generic bars.
 
 ### IV Smile & Skew
@@ -1579,8 +1581,8 @@ and Options Builder.
 ### Backtest
 
 1. **Pick a template.** 94 ready-to-run template modules ship under
-   `packages/services/backtest/src/flinttrade_backtest/strategies/` — ranging
-   from simple EMA crossover to complex options-spreads strategies
+   `packages/services/backtest/src/flinttrade_backtest/strategies/`, from
+   simple EMA crossover to complex options-spreads strategies
    (`_indicators.py` and `_mixin.py` are shared helpers, not templates).
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
@@ -1598,17 +1600,17 @@ and Options Builder.
 After a backtest run on example data in Testing, Review shows labelled dual
 metrics. **Total Return (%)** is initial capital → final equity
 (including a forced last-bar close), with subtitle
-`Initial capital → final equity` — not a sum of trades.
+`Initial capital → final equity`, not a sum of trades.
 **Net trade P&L (₹)** is the Trade Log net-P&L sum when every trade
 has net P&L. If net P&L is missing, the card is labelled **Trade log
-P&L** with subtitle `Gross — net P&L not in result` — never a gross
+P&L** with subtitle `Gross — net P&L not in result`. It is never a gross
 sum called net. The trade table column is `Net P&L` when the basis is
 net, otherwise `P&L`. When the summed trade-log amount matches the
 equity-curve rupee change, a quiet `Reconciles with trade log` note
 appears. When they diverge (fees, open marks, partial fills), both
 numbers stay visible with
 `Trade log sum ≠ equity change — fees / open marks`. The helper
-is omitted when the trade log or equity curve is empty — nothing to
+is omitted when the trade log or equity curve is empty. There is nothing to
 reconcile. Monthly P&L stays labelled
 `Trade-based · sums Trade Log P&L` so the chart matches the log
 on the same basis as the table.
@@ -1642,13 +1644,13 @@ warns `Premium is ₹0 — payoff treats cost as free`.
 Debit/credit and max loss share a position ₹ basis. Net Debit/Credit
 is the signed premium × lots × lot size. Max Loss and Max Profit
 are expiry-payoff results (intrinsic at the strikes, strike width,
-or unlimited) shown on that same position basis — not
+or unlimited) shown on that same position basis, not
 premium × lots × lot size on every card. For a long call, Max Loss
 equals Net Debit. A muted sublabel
 `₹X per lot · N lots · lot size L` sits under those figures and is
 never the only number. Header and Legs chips use the same position
 basis as Payoff. When lots differ and a single per-lot breakdown
-cannot be formed, the primary figure is tagged `position` — never
+cannot be formed, the primary figure is tagged `position`. It is never
 two unlabelled ₹ on mixed bases.
 
 ![Lab](screenshots/06-lab.png)
@@ -1660,8 +1662,8 @@ two unlabelled ₹ on mixed bases.
 Open Automation (`/automation`). A bookmark of `/automate` opens the same screen. An Automation place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
-quantity on its own. The hub has three sub-tools. What you run here is
-your own automation. See
+quantity on its own. The hub has three sub-tools. Execution stays on
+your computer. See
 [Running your own automation](#self-run-automation).
 
 <a id="self-run-automation"></a>
@@ -1695,7 +1697,7 @@ or resumes a job. Custom jobs remain visible by default. Examples:
 Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
 With example data, Automation → Schedules shows one Example marker for
-the view — seeded jobs do not carry a second chip
+the view. Seeded jobs do not carry a second chip
 once Pause is gated. Seeded example jobs show a muted sample status,
 not a production-looking Active badge. **Pause** on
 those jobs is disabled, with title helper `Example schedule — control unavailable`. Practice and Live keep
@@ -1723,7 +1725,7 @@ the muted empty state `No execution logs for Example. Switch to Practice or Live
 load logs. Backend may be offline.` while the app is live and example data
 is showing. In Practice or Live, a successful
 load with no rows for the selected date shows `No execution logs for this
-date.` — not an outage. The red `Failed to load logs. Backend may be
+date.`. That is not an outage. The red `Failed to load logs. Backend may be
 offline.` line (or Retry) is reserved for a real request failure. While
 logs are loading, the view shows a spinner / `Loading logs…` and never
 flashes the outage copy.
@@ -1735,7 +1737,7 @@ flashes the outage copy.
 ## 9. AI Centre walkthrough
 
 Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
-`packages/services/ai`. The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order. Suggest is a local filter UI over an
+`packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list. It is not a live AI fetch. Suggest stays
 labelled illustrative. See
 [Running your own automation](#self-run-automation).
@@ -1792,7 +1794,7 @@ Chat does not show a green **Connected (suggest only)** badge. The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
 Composer input and Send stay disabled until the runtime is installed
-and configured — the same bar as Settings. A provider string of
+and configured, the same bar as Settings. A provider string of
 ollama is not Connected while the managed runtime is absent.
 
 When unconfigured or not installed, the warning badge is **Not configured**
@@ -1808,7 +1810,7 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
-**Retry** — never a green **Connected (suggest only)**. Example data does not show a fake
+**Retry**. It never shows a green **Connected (suggest only)**. Example data does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
@@ -1817,7 +1819,7 @@ AI Chat live-read context: when an LLM is configured, Chat may
 use Practice simulated fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
-does not place Live orders — Live place stays fail-closed. Chat never
+does not place Live orders. Live orders stay refused. Chat never
 shows **Admit** or **Approved by Laya**. This does
 not lift the native broker HTTP freeze and does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
@@ -1825,7 +1827,7 @@ When Chat is connected, the badge reads **Connected (suggest only)**.
 Suggest stays labelled illustrative and is not this live-read path.
 
 On example data, `/settings#llm`, an unconfigured session shows the empty
-state "No LLM provider configured" with **Retry** — not a broken load.
+state "No LLM provider configured" with **Retry**, not a broken load.
 That Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; the two are aligned for readiness, so Chat also looks
 unconfigured when Settings looks empty. Configure a provider in Live or
@@ -1841,7 +1843,7 @@ may send audio to its speech recognition service. Typed conversation remains
 available when speech recognition is unsupported or permission is refused.
 
 An order request can produce a proposal for review. Approve uses the existing
-Practice order path and safety admission. Native Live execution remains
+Practice order checks and safety admission. Native Live execution remains
 unavailable until the native cutover; speech does not unlock it.
 
 ### Suggest
@@ -1853,7 +1855,7 @@ draft and not a live AI fetch. Cards stay labelled illustrative.
 Suggest is not the Chat live-read path and is not a
 profitable-alphas product.
 
-Changing mood — a chip or **Next mood** — immediately replaces the
+Changing mood, a chip or **Next mood**, immediately replaces the
 recommendation cards and clears any previously focused strategy card, so
 chips, cards, and focus share one mood state. Selected mood chips use
 `aria-pressed`.
@@ -1999,15 +2001,15 @@ broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
-shows **Not installed** — that is not a Connected advisor. AI Centre
+shows **Not installed**. That is not a Connected advisor. AI Centre
 `/ai` Chat follows that install state and does not paint
 green **Connected (suggest only)** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
-current margin or leverage figures (read-only — change leverage on the
-broker platform). When leverage cannot be shown — unsupported broker,
-missing snapshot, or load failure — the pane shows
+current margin or leverage figures (read-only: change leverage on the
+broker platform). When leverage cannot be shown (unsupported broker,
+missing snapshot, or load failure), the pane shows
 `Leverage settings unavailable.` plus **Retry**. Selecting the Leverage
 tab never leaves a highlighted tab over a blank content pane.
 
@@ -2023,7 +2025,7 @@ checks use `GET /healthz` and `GET /readyz`, which return status only.
 `GET /health` needs a session.
 
 **Subsystem status** lists **Broker** and **DuckDB** on their own lines.
-Broker shows its note, otherwise its status, otherwise **unknown** — for
+Broker shows its note, otherwise its status, otherwise **unknown**. For
 example **Broker — Example**. DuckDB reads **DuckDB — Healthy** when the
 check passes, and otherwise its note (example data can read **DuckDB — Example**)
 or **Error**. **Example** on a service row is that service's fallback. Monitoring fallback rows are Example. It does not stand
@@ -2044,7 +2046,7 @@ TopBar Broker / Laya / LLM cluster.
 
 A missing host figure says **Unavailable**. So does a zero or absent disk
 or RAM total, a total that is not from this machine, and any sample that
-looks like real capacity — including an example-data disk or RAM total.
+looks like real capacity, including an example-data disk or RAM total.
 The row stays **Unavailable**. It does not show 0/0 or invented gigabytes.
 When the backend returns a real host reading, including a degraded health
 response that still carries those totals, **This host** shows that reading
@@ -2084,7 +2086,7 @@ Native desktop users do not need `.env`. The repo-root `.env.example` exists
 only for Docker/systemd deployments, CI experiments, and contributor fallback
 testing when a setting cannot be supplied through the app UI.
 
-Secrets are stored as `_ref` fields — `secret://` references to hardened
+Secrets are stored as `_ref` fields: `secret://` references to hardened
 files under `<workspace>/secrets/`. They are never written to
 `workspace.json` in clear text.
 
@@ -2238,7 +2240,7 @@ On AI Centre Chat, an unconfigured LLM shows **LLM not configured**
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
 Composer input and Send stay disabled. Example-data and Practice Chat both
 look unconfigured when Settings `#llm` is empty or the stored provider
-is blank — **Connected (suggest only)** must not appear from an env-default advisor
+is blank. **Connected (suggest only)** must not appear from an env-default advisor
 `configured`. If leftover transcript messages hide that empty state, the
 header still offers **Retry** and **Open Settings → AI**.
 The Settings empty-state wording stays distinct from Chat's **LLM not
@@ -2262,7 +2264,7 @@ stuck on an outdated **Not configured**.
 ### "Token expired" when placing an order
 
 FlintTrade JWTs expire daily at 8 AM IST. Refresh the token by signing in
-again — the front-end will redirect you to `/welcome` automatically
+again. FlintTrade redirects you to `/welcome` automatically
 when it detects the 401.
 
 ### Place refused as Laya denied, or quantity reduced
@@ -2271,7 +2273,7 @@ Order Pad and Quick Trade show this under the place controls. Scalper,
 Positions, Order Ladder, and Option Chain may still show a place error
 as a toast.
 
-1. **Laya denied** — read the server reason under the headline. The
+1. **Laya denied.** Read the server reason under the headline. The
    denial is one alert (`role="alert"`), the only live region. The reason
    line is named **Laya decision** and is not its own status. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
@@ -2318,7 +2320,7 @@ as a toast.
    A Laya denial or clamp stops before the safety layers. Order Pad and
    Quick Trade show it under the place control; see
    [Place refused as Laya denied, or quantity reduced](#place-refused-as-laya-denied-or-quantity-reduced).
-3. Check the FlintTrade backend logs — the console where you ran
+3. Check the FlintTrade backend logs, the console where you ran
    `python scripts/ft.py start` (or `make start`). A safety-layer refusal
    is logged with the layer that blocked it. A Laya refusal is not that
    layer.
@@ -2330,7 +2332,7 @@ as a toast.
 The path alias `@` → `packages/apps/terminal/src/` is configured in
 `tsconfig.json` and `vite.config.ts`. If your editor's TypeScript server
 disagrees, restart it. If `vitest` complains, the Vitest config lives
-inside `vite.config.ts` and inherits that alias — there is no separate
+inside `vite.config.ts` and inherits that alias. There is no separate
 `vitest.config.ts`.
 
 ### Settings page won't save
@@ -2344,16 +2346,16 @@ ensure the running user has write access.
 A highlighted Leverage tab on `/settings#leverage` must never sit over a
 blank pane. The pane shows real leverage content, or the honest empty
 `Leverage settings unavailable.` plus **Retry**. Leverage is a read-only
-broker snapshot — change it on the broker platform, not in FlintTrade.
+broker snapshot. Change it on the broker platform, not in FlintTrade.
 
 ### Where to get help
 
-- **Settings → Report Bug** — prepare a bounded issue draft and optional local
+- **Settings → Report Bug:** prepare a bounded issue draft and optional local
   diagnostic bundle from inside FlintTrade.
-- **Question issue template** — for focused usage questions and setup help.
-- **GitHub Issues** — for bugs and feature requests (use the templates in
+- **Question issue template:** for focused usage questions and setup help.
+- **GitHub Issues:** for bugs and feature requests (use the templates in
   `.github/ISSUE_TEMPLATE/`).
-- **security.md** — for security issues (private disclosure via GitHub
+- **security.md:** for security issues (private disclosure via GitHub
   Security Advisories).
 
 If your issue requires a backend log, attach the relevant lines from the
@@ -2382,7 +2384,7 @@ irm https://flinttrade.vercel.app/uninstall.ps1 | iex
 
 ### Removing your data as well
 
-Add the purge flag — `--purge` on macOS/Linux, `-Purge` on Windows — to also
+Add the purge flag (`--purge` on macOS/Linux, `-Purge` on Windows) to also
 delete recognised FlintTrade data (workspace, managed source and tools).
 Purge is irreversible and asks for typed or explicit scripted confirmation.
 
@@ -2397,7 +2399,7 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 ```
 
 Ordinary backup archives bhavcopy CSVs only. It does not capture workspace
-settings or credentials — see [Backup and restore](setup/backup.md).
+settings or credentials. See [Backup and restore](setup/backup.md).
 
 ### If the site is unreachable
 

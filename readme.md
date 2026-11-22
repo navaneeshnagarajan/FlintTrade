@@ -17,19 +17,19 @@ before enabling Live mode.
 
 ## Project scope
 
-- **Terminal app** — React 19, TypeScript, FlexLayout, FDC3, Zustand,
+- **Terminal app:** React 19, TypeScript, FlexLayout, FDC3, Zustand,
   TanStack Query, and shadcn/ui components for a local workspace.
 
-- **Backend services** — Python 3.14 Flask routes for auth, workspace state,
+- **Backend services:** Python 3.14 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 
-- **Safety model** — Practice and Live are session modes. Connected (read) is a broker status. Example is sample data. Server-side checks,
+- **Safety model:** Practice and Live are session modes. Connected (read) is a broker status. Example is sample data. Server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 
-- **Data and simulation** — DuckDB/Parquet storage, indicator packages,
+- **Data and simulation:** DuckDB/Parquet storage, indicator packages,
   backtest services, and a Rust/PyO3 tick-processing engine.
 
-- **Developer tooling** — the cross-platform `scripts/ft.py` runner (with make
+- **Developer tooling:** the cross-platform `scripts/ft.py` runner (with make
   as its POSIX alias), pytest/Vitest/Playwright suites, packaging scripts, CI
   notes, and package-level documentation.
 
@@ -68,12 +68,14 @@ and contributors on every platform.
 
 ## Quickstart
 
-### Install (recommended — no prerequisites)
+<a id="install-recommended--no-prerequisites"></a>
+
+### Install (recommended: no prerequisites)
 
 FlintTrade runs as a self-hosted web app: one backend process serves the
 terminal UI and the API on a single origin, and you use it from any browser.
-The one-line installer runs in the shell your OS already ships — bash or zsh
-on macOS and Linux, built-in PowerShell on Windows — and needs no other
+The one-line installer runs in the shell your OS already ships: bash or zsh
+on macOS and Linux, and built-in PowerShell on Windows. It needs no other
 toolchain: no Python, no Node, no git and no make.
 
 ```bash
@@ -87,14 +89,14 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
-It provisions a pinned, checksum-verified toolchain — `uv`, Python 3.14, Node
-and pnpm — under `~/.flinttrade/tools`, builds FlintTrade from a managed source
+It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.14, Node
+and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
 launcher (`~/.local/bin/flinttrade-web` on macOS and Linux;
 `%LOCALAPPDATA%\Programs\FlintTradeWeb\flinttrade-web.cmd` plus a **FlintTrade
 Web** Start Menu shortcut on Windows). The Electron desktop shell keeps its own
-launcher and source checkout, so the two installs never collide. Open <http://127.0.0.1:5100> and complete the in-app Setup flow —
-no `.env` file is required.
+launcher and source checkout, so the two installs never collide. Open <http://127.0.0.1:5100> and complete the in-app Setup flow.
+No `.env` file is required.
 
 Uninstalling keeps your workspace and data:
 
@@ -108,7 +110,7 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 irm https://flinttrade.vercel.app/uninstall.ps1 | iex
 ```
 
-Add the purge flag — `--purge` on POSIX, `-Purge` on Windows — to delete
+Add the purge flag (`--purge` on POSIX, `-Purge` on Windows) to delete
 recognised FlintTrade data too. Purge is irreversible and asks for explicit
 confirmation:
 
@@ -144,8 +146,7 @@ irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts
 Replace `flinttrade-web-install` with `flinttrade-uninstall` to remove
 FlintTrade the same way. The uninstaller is the script that takes `--purge` /
 `-Purge`; the installer does not (its flags are `--ref`, `--yes`, `--no-launch`
-and `--dry-run`). To read the script before running it — the right instinct for
-anything piped to a shell — clone the repository and run it from the checkout
+and `--dry-run`). To read the script before running it, clone the repository and run it from the checkout
 instead:
 
 ```bash
@@ -238,7 +239,7 @@ python scripts/ft.py start
 ```
 
 The same six lines run unchanged in Windows PowerShell. Do not join them with
-`&&` — Windows PowerShell 5.1 has no `&&` operator; use `;` if you want them on
+`&&`. Windows PowerShell 5.1 has no `&&` operator; use `;` if you want them on
 one line.
 
 Two things that are easy to get wrong:
@@ -247,11 +248,11 @@ Two things that are easy to get wrong:
   `packages/apps/terminal/dist/index.html` exists, so skipping
   `pnpm --filter @flinttrade/terminal build` leaves you with an API and no
   interface.
-- **`python scripts/ft.py <target>` is the cross-platform runner** — it needs
+- **`python scripts/ft.py <target>` is the cross-platform runner.** It needs
   no make and no bash, and behaves identically on Windows, macOS and Linux.
   `make <target>` is the POSIX alias for the same targets.
 
-Then open <http://127.0.0.1:5100> and complete the in-app Setup flow — no
+Then open <http://127.0.0.1:5100> and complete the in-app Setup flow. No
 `.env` file is required.
 
 Docker is an advanced path, not a zero-prerequisite one: `make docker-up`
@@ -307,9 +308,9 @@ each dependency does, exact-version sources, and the terminal's About screen.
 
 ### Three ways in
 
-- **Try it locally** — run the [self-hosted web app or a desktop convenience install](#quickstart) and open Practice.
-- **Build with it** — read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
-- **Contribute** — see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
+- **Try it locally:** run the [self-hosted web app or a desktop convenience install](#quickstart) and open Practice.
+- **Build with it:** read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
+- **Contribute:** see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
 
 ---
 
@@ -329,8 +330,8 @@ each dependency does, exact-version sources, and the terminal's About screen.
 
 ## Community
 
-- [GitHub Issues](https://github.com/navaneeshnagarajan/FlintTrade/issues) — bug reports, feature requests, and usage questions via the repository templates.
-- [contributing.md](contributing.md) — how to propose changes, run tests, and open a PR.
+- [GitHub Issues](https://github.com/navaneeshnagarajan/FlintTrade/issues): bug reports, feature requests, and usage questions via the repository templates.
+- [contributing.md](contributing.md): how to propose changes, run tests, and open a PR.
 
 ## Independence & attribution
 
@@ -348,4 +349,4 @@ This project follows the Contributor Covenant. By participating you agree to abi
 
 ## Contributing
 
-Issues and pull requests are welcome. Please read [contributing.md](contributing.md) before opening a PR — it covers branch naming, commit conventions, testing, and the documentation expectations for every change.
+Issues and pull requests are welcome. Read [contributing.md](contributing.md) before opening a PR. It covers branch naming, commit conventions, testing, and the documentation expectations for every change.

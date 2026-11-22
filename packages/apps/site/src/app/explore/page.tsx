@@ -4,7 +4,7 @@ import { permanentRedirect } from 'next/navigation';
 export const metadata: Metadata = {
   title: 'Demo (example data)',
   description:
-    'Open the FlintTrade terminal demo as a full-page app experience.',
+    'Open Demo (example data): the FlintTrade terminal with sample data.',
 };
 
 export default function ExplorePage() {
