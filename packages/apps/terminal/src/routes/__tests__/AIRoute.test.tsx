@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -418,8 +418,11 @@ describe("AIRoute", () => {
 
     await user.click(screen.getByLabelText("Analysis"));
 
-    expect(await screen.findByText("Trading Signals")).toBeInTheDocument();
-    expect(screen.getByText("Rule")).toBeInTheDocument();
+    const panel = await screen.findByRole("dialog", { name: "Analysis" });
+    expect(within(panel).getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Analysis"]);
+    expect(within(panel).getByRole("heading", { level: 2, name: "Analysis" })).toBeInTheDocument();
+    expect(screen.queryByText("Trading Signals")).not.toBeInTheDocument();
+    expect(await screen.findByText("Rule")).toBeInTheDocument();
     expect(screen.getByText("ML")).toBeInTheDocument();
     expect(screen.getByText("Fallback")).toBeInTheDocument();
     expect(screen.getAllByText("NSE_INDEX")).toHaveLength(3);

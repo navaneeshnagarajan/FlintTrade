@@ -258,10 +258,7 @@ function SignalsSection({ stream }: { stream: SignalStreamState }) {
   return (
     <div className="space-y-4" data-tour-target="ai-signals">
       <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold text-base text-text-primary">
-            Trading Signals
-          </h3>
+        <div className="flex items-center justify-end">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="h-6 gap-1.5 text-xs font-normal">
               <span
