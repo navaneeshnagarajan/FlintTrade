@@ -134,8 +134,9 @@ class PortfolioGreeks:
         return PortfolioGreeksResult(positions=scaled, **totals)
 
     @staticmethod
-    def from_lot_size(underlying: str, lots: int = 1) -> int:
-        return lots * get_lot_size_sync(underlying)
+    def from_lot_size(underlying: str, lots: int = 1) -> int | None:
+        lot = get_lot_size_sync(underlying)
+        return None if lot is None else lots * lot
 
     @staticmethod
     def local_greeks(option_type: str, spot: float, strike: float, time_to_expiry: float,

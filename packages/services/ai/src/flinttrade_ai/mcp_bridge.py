@@ -77,7 +77,9 @@ def parse_order_command(text: str) -> MCPToolCall | None:
             amount = int(token)
             if unit in {"lot", "lots"}:
                 underlying = next((name for name in sorted(_LOT_MAP, key=len, reverse=True) if name in symbol), None)
-                amount *= _LOT_MAP[underlying] if underlying is not None else 1
+                if underlying is None:
+                    return None
+                amount *= _LOT_MAP[underlying]
             quantity = str(amount)
         if token in {"at", "@"} and index + 1 < len(trailing):
             candidate = trailing[index + 1]

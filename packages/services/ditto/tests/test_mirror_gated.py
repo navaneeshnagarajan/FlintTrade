@@ -627,3 +627,25 @@ class TestUngatedFallbackGuard:
                 mode=AllocationMode.EQUAL,
                 allow_ungated_fallback=True,  # type: ignore[call-arg]
             )
+
+
+def test_lot_based_mirror_refuses_when_the_sensex_lot_is_unknown(
+    monkeypatch: pytest.MonkeyPatch, _explode_httpx: None, *, backend_lease_factory
+) -> None:
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+    router = _FakeRouter()
+    mirror = _make_gated_mirror(
+        [_make_account("acc_a"), _make_account("acc_b")],
+        mode=AllocationMode.LOT_BASED,
+        broker_router=router,
+        backend_lease_factory=backend_lease_factory,
+    )
+
+    result = mirror.execute(_make_order(symbol="SENSEX26DEC85000CE", qty="40", exchange="BFO"))
+
+    assert router.calls == []
+    assert result.successful == 0
+    assert result.skipped == 2
+    assert {item.error for item in result.results} == {"Not placed. The lot size for SENSEX26DEC85000CE isn't known."}

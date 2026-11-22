@@ -874,7 +874,7 @@ def _resolve_gex_lot_size(
     resolution = LotSizeResolver(client).resolve(normalised_symbol, exchange)
     return (
         resolution.lot_size
-        if resolution.source == "live" and 0 < resolution.lot_size <= _MAX_LOT_SIZE
+        if resolution.source == "live" and resolution.lot_size is not None and 0 < resolution.lot_size <= _MAX_LOT_SIZE
         else None
     )
 

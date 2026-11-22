@@ -90,3 +90,51 @@ def test_sensex_lot_comes_from_the_master() -> None:
     assert master is not None
     assert OptionChainAnalyzer.get_lot_size("SENSEX") == master
     assert PortfolioGreeks.from_lot_size("SENSEX") == master
+
+
+def test_missing_sensex_master_row_leaves_the_lot_unknown(monkeypatch) -> None:
+    from flinttrade_backtest.strategies.ema_supertrend_dema import lot_size_for as ema_lot_size_for
+    from flinttrade_backtest.strategies.options_short_straddle_indian import lot_size_for
+    from flinttrade_screener.greeks import PortfolioGreeks
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, get_lot_size_sync
+    from flinttrade_screener.option_chain import OptionChainAnalyzer
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+
+    assert get_lot_size_sync("SENSEX") is None
+    assert OptionChainAnalyzer.get_lot_size("SENSEX") is None
+    assert PortfolioGreeks.from_lot_size("SENSEX", lots=2) is None
+    assert lot_size_for("SENSEX") is None
+    assert ema_lot_size_for("SENSEX") is None
+
+
+def test_strategies_refuse_an_unknown_derivatives_lot(monkeypatch) -> None:
+    import pytest
+
+    from flinttrade_backtest.strategies.ema_supertrend_dema import EMASuperTrendDEMA
+    from flinttrade_backtest.strategies.options_short_straddle_indian import IndianShortStraddle
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+
+    with pytest.raises(ValueError, match="The lot size for SENSEX isn't known."):
+        IndianShortStraddle(underlying="SENSEX")
+    with pytest.raises(ValueError, match="The lot size for SENSEX isn't known."):
+        EMASuperTrendDEMA(symbol="SENSEX", exchange="BFO")
+
+
+def test_cash_strategy_keeps_a_one_share_unit() -> None:
+    from flinttrade_backtest.strategies.ema_supertrend_dema import EMASuperTrendDEMA
+
+    strategy = EMASuperTrendDEMA(symbol="RELIANCE", exchange="NSE", lots=3)
+    assert strategy._quantity == "3"
+
+
+def test_order_command_with_lots_refuses_an_unknown_lot(monkeypatch) -> None:
+    from flinttrade_ai.mcp_bridge import parse_order_command
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+
+    assert parse_order_command("Buy SENSEX26DEC85000CE 2 lots") is None
+    assert parse_order_command("Buy RELIANCE 10 shares") is not None

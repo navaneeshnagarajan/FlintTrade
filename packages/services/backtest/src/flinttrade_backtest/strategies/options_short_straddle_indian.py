@@ -112,7 +112,6 @@ UNDERLYING_EXCHANGE: dict[str, str] = {
     "MIDCPNIFTY": "NFO",
 }
 
-DEFAULT_LOT_SIZE: int = 1
 DEFAULT_STRIKE_INTERVAL: int = 50
 
 
@@ -145,17 +144,16 @@ class StraddleState(StrEnum):
 # Pure utility functions (no IO, fully testable)
 # ---------------------------------------------------------------------------
 
-def lot_size_for(underlying: str) -> int:
+def lot_size_for(underlying: str) -> int | None:
     """Return the standard lot size for an F&O underlying.
 
     Args:
         underlying: Underlying symbol name (case-insensitive).
 
     Returns:
-        Lot size integer. Falls back to 1 for unknown underlyings.
+        Lot size integer, or ``None`` for unknown underlyings.
     """
-    key = underlying.strip().upper()
-    return LOT_SIZES.get(key, DEFAULT_LOT_SIZE)
+    return LOT_SIZES.get(underlying.strip().upper())
 
 
 def strike_interval_for(underlying: str) -> int:
@@ -330,7 +328,10 @@ class IndianShortStraddle(BaseStrategy, _BacktestStrategyMixin):
 
         # Underlying configuration
         self._underlying = underlying_upper
-        self._lot_size: int = lot_size_for(underlying_upper)
+        lot_size = lot_size_for(underlying_upper)
+        if lot_size is None:
+            raise ValueError(f"The lot size for {underlying_upper} isn't known.")
+        self._lot_size: int = lot_size
         self._strike_interval: int = strike_interval_for(underlying_upper)
         self._quantity: int = lots * self._lot_size
 

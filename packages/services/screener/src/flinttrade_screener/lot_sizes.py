@@ -13,7 +13,7 @@ Usage::
 
     resolver = LotSizeResolver(client)
     lot = await resolver.get_lot_size("NIFTY", "NFO")   # master, or live value
-    lot = await resolver.get_lot_size("UNKNOWN", "NFO")  # 1 (safe default)
+    lot = await resolver.get_lot_size("UNKNOWN", "NFO")  # None (unknown)
 
     # Or use the convenience module-level function (uses shared instance):
     lot = get_lot_size_sync("BANKNIFTY", "NFO")  # synchronous fallback only
@@ -115,20 +115,20 @@ class LotResolution(NamedTuple):
     """Outcome of a lot-size lookup, carrying provenance.
 
     Attributes:
-        lot_size: Resolved lot size (always >= 1).
+        lot_size: Resolved lot size, or ``None`` when the symbol is unknown.
         source: Where the value came from — ``"live"`` (broker symbol master
             via the broker ``instruments`` endpoint, possibly cache-served
             within TTL), ``"fallback"`` (the built-in table), or
-            ``"default"`` (unknown symbol; the safe placeholder ``1``).
+            ``"default"`` (unknown symbol, no lot size).
             Consumers that size real orders must treat anything other than
             ``"live"`` as unverified.
     """
 
-    lot_size: int
+    lot_size: int | None
     source: str
 
 
-def get_lot_size_sync(symbol: str, exchange: str = "") -> int:  # noqa: ARG001
+def get_lot_size_sync(symbol: str, exchange: str = "") -> int | None:  # noqa: ARG001
     """Return the lot size for a symbol using the built-in fallback table only.
 
     This synchronous function never makes a network call.  Use
@@ -140,9 +140,9 @@ def get_lot_size_sync(symbol: str, exchange: str = "") -> int:  # noqa: ARG001
             exchange-specific overrides).
 
     Returns:
-        Lot size as an integer.  Returns ``1`` for unknown symbols.
+        Lot size as an integer, or ``None`` for unknown symbols.
     """
-    return FALLBACK_LOT_SIZES.get(symbol.upper().strip(), 1)
+    return FALLBACK_LOT_SIZES.get(symbol.upper().strip())
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ class LotSizeResolver:
         self._client = client
         self._cache_ttl = cache_ttl
         # Cache entries: (symbol_upper, exchange_upper) -> (lot_size, fetched_at, source)
-        self._cache: dict[tuple[str, str], tuple[int, float, str]] = {}
+        self._cache: dict[tuple[str, str], tuple[int | None, float, str]] = {}
 
     def _is_fresh(self, key: tuple[str, str]) -> bool:
         """Return True if the cache entry for *key* is still within TTL."""
@@ -259,14 +259,14 @@ class LotSizeResolver:
         2. Live fetch from broker ``/api/v1/instruments`` for the exchange
            (``source="live"``).
         3. Built-in fallback table (``source="fallback"``).
-        4. Default of ``1`` for unknown symbols (``source="default"``).
+        4. ``None`` for unknown symbols (``source="default"``).
 
         Args:
             symbol: Underlying or contract symbol, e.g. ``"NIFTY"``.
             exchange: Exchange code, e.g. ``"NFO"``, ``"MCX"``.
 
         Returns:
-            A :class:`LotResolution` — lot size (always >= 1) plus source.
+            A :class:`LotResolution`: lot size, or ``None``, plus source.
         """
         sym_key = symbol.upper().strip()
         exc_key = exchange.upper().strip()
@@ -286,16 +286,14 @@ class LotSizeResolver:
             lot, _, source = self._cache[cache_key]
             return LotResolution(lot, source)
 
-        # Fall back to built-in table, then the safe default of 1.
-        if sym_key in FALLBACK_LOT_SIZES:
-            lot, source = FALLBACK_LOT_SIZES[sym_key], "fallback"
-        else:
-            lot, source = 1, "default"
+        # Fall back to the built-in table. An unknown symbol has no lot size.
+        table_lot = FALLBACK_LOT_SIZES.get(sym_key)
+        source = "fallback" if table_lot is not None else "default"
         # Cache the result with the same TTL to avoid repeated fetches
-        self._cache[cache_key] = (lot, now, source)
-        return LotResolution(lot, source)
+        self._cache[cache_key] = (table_lot, now, source)
+        return LotResolution(table_lot, source)
 
-    def get_lot_size(self, symbol: str, exchange: str) -> int:
+    def get_lot_size(self, symbol: str, exchange: str) -> int | None:
         """Return the lot size for a symbol, fetching live data if needed.
 
         Thin wrapper over :meth:`resolve` for callers that only need the
@@ -307,7 +305,7 @@ class LotSizeResolver:
             exchange: Exchange code, e.g. ``"NFO"``, ``"MCX"``.
 
         Returns:
-            Lot size as an integer, always >= 1.
+            Lot size as an integer, or ``None`` for unknown symbols.
         """
         return self.resolve(symbol, exchange).lot_size
 

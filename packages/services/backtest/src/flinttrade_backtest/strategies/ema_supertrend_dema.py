@@ -51,23 +51,23 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 # master). This module keeps no copy. Historical backtests over earlier
 # contract sizes should override per run.
 
-DEFAULT_LOT_SIZE: int = 1
+_CASH_EXCHANGES = frozenset({"NSE", "BSE"})
 
 
-def lot_size_for(symbol: str) -> int:
+def lot_size_for(symbol: str) -> int | None:
     """Return the standard lot size for an F&O underlying symbol.
 
     Args:
         symbol: Underlying symbol name (case-insensitive check).
 
     Returns:
-        Lot size integer. Falls back to 1 for unknown symbols.
+        Lot size integer, or ``None`` for unknown symbols.
     """
     upper = symbol.upper()
     for key, size in FALLBACK_LOT_SIZES.items():
         if upper.startswith(key):
             return size
-    return DEFAULT_LOT_SIZE
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,12 @@ class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
         self.dema_period = dema_period
 
         self.lots = lots
-        self._quantity = str(lots * lot_size_for(symbol))
+        lot_size = lot_size_for(symbol)
+        if lot_size is None:
+            if exchange.strip().upper() not in _CASH_EXCHANGES:
+                raise ValueError(f"The lot size for {symbol} isn't known.")
+            lot_size = 1
+        self._quantity = str(lots * lot_size)
 
         # Entry state
         self._entry_price: float = 0.0

@@ -139,13 +139,16 @@ def compute_allocation(
 
     elif mode_val == AllocationMode.LOT_BASED.value:
         lot_size = _get_lot_size(symbol)
+        if lot_size is None:
+            logger.warning("Mirror: no lot size for %s, so no account is allocated", symbol)
+            return result
         total_weight = sum(a.allocation_weight for a in accounts)
         if total_weight <= 0:
             total_weight = len(accounts)
         for acc in accounts:
             frac = acc.allocation_weight / total_weight
             raw_qty = master_qty * frac
-            lots = max(1, round(raw_qty / lot_size)) if lot_size > 0 else max(1, int(raw_qty))
+            lots = max(1, round(raw_qty / lot_size))
             result[acc.account_id] = lots * lot_size
 
     # MULTIPLIER mode is handled by compute_multiplier_allocation; reaching
@@ -158,8 +161,8 @@ def compute_allocation(
     return result
 
 
-def _get_lot_size(symbol: str) -> int:
-    """Determine lot size from symbol name.
+def _get_lot_size(symbol: str) -> int | None:
+    """Determine lot size from symbol name, or ``None`` when it is unknown.
 
     Prefers the LONGEST matching underlying — plain substring iteration
     resolved ``BANKNIFTY24JULFUT`` to NIFTY's lot (``"NIFTY" in sym`` is true
@@ -169,7 +172,7 @@ def _get_lot_size(symbol: str) -> int:
     matches = [key for key in FALLBACK_LOT_SIZES if key in sym]
     if matches:
         return FALLBACK_LOT_SIZES[max(matches, key=len)]
-    return 1
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +789,13 @@ class PositionMirror:
             timestamp=now,
         )
 
+        lot_unknown = mode_val == AllocationMode.LOT_BASED.value and _get_lot_size(order.symbol) is None
+        skip_error = (
+            f"Not placed. The lot size for {order.symbol} isn't known."
+            if lot_unknown
+            else "Zero allocation — skipped"
+        )
+
         # Execute in parallel using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
             futures = {}
@@ -795,7 +805,7 @@ class PositionMirror:
                     result.skipped += 1
                     result.results.append(MirrorOrderResult(
                         account_id=acc.account_id,
-                        error="Zero allocation — skipped",
+                        error=skip_error,
                     ))
                     continue
                 futures[pool.submit(self._place_on_account, order, acc, qty)] = acc.account_id

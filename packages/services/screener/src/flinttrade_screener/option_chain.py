@@ -201,6 +201,6 @@ class OptionChainAnalyzer:
         )
 
     @staticmethod
-    def get_lot_size(symbol: str) -> int:
-        """Get lot size for an underlying from the shared lot lookup. Returns 1 if unknown."""
+    def get_lot_size(symbol: str) -> int | None:
+        """Lot size for an underlying from the shared lot lookup, or ``None`` if unknown."""
         return get_lot_size_sync(symbol)

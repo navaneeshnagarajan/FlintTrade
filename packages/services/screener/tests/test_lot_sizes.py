@@ -133,11 +133,11 @@ class TestGetLotSizeSync:
         assert get_lot_size_sync("NIFTY") == FALLBACK_LOT_SIZES["NIFTY"]
         assert get_lot_size_sync("Nifty") == FALLBACK_LOT_SIZES["NIFTY"]
 
-    def test_unknown_symbol_returns_1(self):
-        assert get_lot_size_sync("UNKNOWN_XYZ") == 1
+    def test_unknown_symbol_returns_none(self):
+        assert get_lot_size_sync("UNKNOWN_XYZ") is None
 
-    def test_empty_symbol_returns_1(self):
-        assert get_lot_size_sync("") == 1
+    def test_empty_symbol_returns_none(self):
+        assert get_lot_size_sync("") is None
 
     def test_whitespace_stripped(self):
         assert get_lot_size_sync("  NIFTY  ") == FALLBACK_LOT_SIZES["NIFTY"]
@@ -200,10 +200,9 @@ class TestLotSizeResolverCache:
         lot = resolver.get_lot_size("NIFTY", "NFO")
         assert lot == FALLBACK_LOT_SIZES["NIFTY"]
 
-    def test_truly_unknown_symbol_returns_1(self):
+    def test_truly_unknown_symbol_returns_none(self):
         resolver = self._make_resolver([])
-        lot = resolver.get_lot_size("NOTAREALSTOCK", "NSE")
-        assert lot == 1
+        assert resolver.get_lot_size("NOTAREALSTOCK", "NSE") is None
 
     def test_network_error_falls_back_gracefully(self):
         client = MagicMock()
@@ -329,7 +328,7 @@ class TestLotSizeResolverResolve:
     def test_unknown_symbol_reports_default_source(self):
         resolver = self._make_resolver([])
         resolution = resolver.resolve("NOTAREALSTOCK", "NSE")
-        assert resolution == LotResolution(1, "default")
+        assert resolution == LotResolution(None, "default")
 
     def test_get_lot_size_delegates_to_resolve(self):
         resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
