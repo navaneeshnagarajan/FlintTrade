@@ -19,8 +19,9 @@ are tested deterministically without real time.
 Order writes (place, modify and cancel share one ``"order"`` budget) are held to
 :data:`ORDER_RATE_LIMIT` per second for each broker on each exchange, so NSE
 and BSE orders through one broker each get their own 10 per second. NFO and CDS
-count as NSE, BFO and BCD as BSE. A write with no exchange uses its own
-per-broker budget. A capability default, workspace override or settings change
+count as NSE, BFO and BCD as BSE. A modify or cancel whose exchange is unknown
+spends from both the NSE and the BSE budget of that broker, so it never takes
+either over the limit. A capability default, workspace override or settings change
 can lower the limit but can never raise it or switch it off: a higher value,
 ``0`` or a missing value is clamped to the limit with a warning.
 """
@@ -58,10 +59,16 @@ _ORDER_VENUES: dict[str, str] = {
 _TOKEN_EPSILON = 1e-9
 
 
-def order_venue(exchange: str | None) -> str:
-    """Exchange whose order budget a segment uses. Unknown or blank is ``"*"``."""
+#: Budgets an order with an unknown exchange spends from.
+_UNKNOWN_ORDER_VENUES: tuple[str, ...] = ("NSE", "BSE")
+
+
+def order_venue(exchange: str | None) -> str | None:
+    """Exchange whose order budget a segment uses, or ``None`` when blank."""
     segment = (exchange or "").strip().upper()
-    return _ORDER_VENUES.get(segment, segment or "*")
+    if not segment:
+        return None
+    return _ORDER_VENUES.get(segment, segment)
 
 
 def cap_order_rate(rate: float, *, broker_id: str = "") -> float:
@@ -221,6 +228,8 @@ class BrokerRateLimiter:
         """Wait for and consume a token from every applicable budget.
 
         An order spends from the budget of its exchange (see :func:`order_venue`).
+        An order with no exchange spends from both the NSE and the BSE budget
+        of the broker and waits until both have a token.
 
         Quotes (including quote-backed depth) share both quote and generic data
         limits. Tokens are consumed together only when every bucket is ready.
@@ -237,13 +246,16 @@ class BrokerRateLimiter:
         while True:
             with self._lock:
                 now = self._clock()
+                if venue is None:
+                    keys = [(broker_id, "order", name) for name in _UNKNOWN_ORDER_VENUES]
+                else:
+                    keys = [(broker_id, applicable_kind, venue) for applicable_kind in kinds]
                 buckets = []
                 wait = 0.0
-                for applicable_kind in kinds:
-                    rate = self._rate(broker_id, applicable_kind)
+                for key in keys:
+                    rate = self._rate(broker_id, key[1])
                     if rate <= 0:
                         continue
-                    key = (broker_id, applicable_kind, venue)
                     bucket = self._buckets.get(key)
                     if bucket is None:
                         bucket = _Bucket(rate, now)

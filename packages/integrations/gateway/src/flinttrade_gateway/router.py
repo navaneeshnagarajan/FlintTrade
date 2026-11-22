@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Awaitable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -49,6 +50,8 @@ _GatedDispatch = Callable[
 ]
 
 _CANCEL_EXTRA_KEYS = ("variety", "amo", "trading_symbol", "segment")
+#: Placed orders remembered for charging a later modify or cancel.
+_PLACED_ORDER_MEMORY = 10_000
 
 
 def placement_acknowledgement_fields(result: Any) -> dict[str, Any]:
@@ -491,6 +494,11 @@ class BrokerRouter:
         # the gate (after verify + gate-consume), so it can only delay a dispatch,
         # never bypass safety. None → no throttle (unchanged behaviour).
         self._rate_limiter = rate_limiter
+        # Exchange of each order this router placed, keyed by
+        # (adapter_id, account_id, broker order id). A modify or cancel without
+        # an exchange is charged to the exchange of its original order.
+        self._placed_order_exchanges: OrderedDict[tuple[str, str, str], str] = OrderedDict()
+        self._placed_order_lock = threading.Lock()
         # Optional algo-tag guard (flinttrade_engine.algo_tag_guard.AlgoTagGuard).
         # For adapters advertising required or optional algo-tag support it
         # relays the operator's trusted configured id onto the dispatch session
@@ -872,13 +880,42 @@ class BrokerRouter:
                 with self._write_condition:
                     self._lifecycle_faults[attempt_id] = type(exc).__name__
 
-    async def _throttle(self, adapter_id: str, kind: str, order: Any = None) -> None:
+    async def _throttle(
+        self,
+        adapter_id: str,
+        kind: str,
+        order: Any = None,
+        account_id: str | None = None,
+    ) -> None:
         if self._rate_limiter is None:
             return
-        if kind == "order":
-            await self._rate_limiter.acquire(adapter_id, kind, exchange=self._order_exchange(order))
-        else:
+        if kind != "order":
             await self._rate_limiter.acquire(adapter_id, kind)
+            return
+        exchange = self._order_exchange(order) or self._original_order_exchange(adapter_id, account_id, order)
+        # A write whose exchange is still unknown is charged to both the NSE
+        # and the BSE budget of the broker (see BrokerRateLimiter.acquire).
+        await self._rate_limiter.acquire(adapter_id, kind, exchange=exchange or None)
+
+    def _original_order_exchange(self, adapter_id: str, account_id: str | None, order: Any) -> str:
+        order_id = order.get("order_id") if isinstance(order, Mapping) else getattr(order, "order_id", None)
+        if not isinstance(order_id, str) or not order_id:
+            return ""
+        with self._placed_order_lock:
+            return self._placed_order_exchanges.get((adapter_id, account_id or "", order_id), "")
+
+    def _remember_placed_order(self, adapter_id: str, account_id: str | None, order: Any, result: Any) -> None:
+        exchange = self._order_exchange(order)
+        if isinstance(result, Mapping):
+            result = result.get("order_id")
+        if not exchange or not isinstance(result, str) or not result:
+            return
+        with self._placed_order_lock:
+            key = (adapter_id, account_id or "", result)
+            self._placed_order_exchanges[key] = exchange
+            self._placed_order_exchanges.move_to_end(key)
+            while len(self._placed_order_exchanges) > _PLACED_ORDER_MEMORY:
+                self._placed_order_exchanges.popitem(last=False)
 
     @staticmethod
     def _order_exchange(order: Any) -> str:
@@ -1031,7 +1068,7 @@ class BrokerRouter:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order", signed_order)
+                await self._throttle(adapter_id, "order", signed_order, account_id)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1068,6 +1105,7 @@ class BrokerRouter:
                     result=result,
                     emergency=False,
                 )
+                self._remember_placed_order(adapter_id, account_id, signed_order, result)
                 return result
             finally:
                 self._release_write()
@@ -1116,7 +1154,7 @@ class BrokerRouter:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order", signed_order)
+                await self._throttle(adapter_id, "order", signed_order, account_id)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1220,7 +1258,7 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order", signed_order)
+                await self._throttle(adapter_id, "order", signed_order, account_id)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1342,7 +1380,7 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_payload)
-                await self._throttle(adapter_id, "order", signed_payload)
+                await self._throttle(adapter_id, "order", signed_payload, account_id)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1385,6 +1423,7 @@ class BrokerRouter:
                     result=result,
                     emergency=emergency_intent,
                 )
+                self._remember_placed_order(adapter_id, account_id, signed_payload, result)
                 return result
             finally:
                 self._release_write()

@@ -412,3 +412,15 @@ async def test_order_override_applies_to_every_exchange_bucket():
     await rl.acquire("dhan", "order", exchange="BSE")
     rl.apply_override("dhan", order=2)
     assert {key[2]: bucket.rate for key, bucket in rl._buckets.items()} == {"NSE": 2.0, "BSE": 2.0}
+
+
+@pytest.mark.asyncio
+async def test_an_order_with_no_exchange_waits_for_both_nse_and_bse():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(10):
+        await rl.acquire("dhan", "order", exchange="BSE")
+    assert clock.slept == []
+    await rl.acquire("dhan", "order")
+    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+    assert {key[2] for key in rl._buckets} == {"NSE", "BSE"}
