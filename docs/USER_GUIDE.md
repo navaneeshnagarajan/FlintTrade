@@ -1735,7 +1735,7 @@ flashes the outage copy.
 ## 9. AI Centre walkthrough
 
 Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Analysis, Sentiment, and RAG run in your own app, backed by
-`packages/services/ai`. The Analysis panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order. Suggest is a local filter UI over an
+`packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list. It is not a live AI fetch. Suggest stays
 labelled illustrative. See
 [Running your own automation](#self-run-automation).
