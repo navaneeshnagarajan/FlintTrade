@@ -29,6 +29,7 @@ vi.mock("@/services/api", () => {
   return {
     searchSymbol: vi.fn().mockResolvedValue([]),
     placeOrder: vi.fn().mockResolvedValue({ orderId: "TEST001" }),
+    getPositionbook: vi.fn().mockResolvedValue([]),
     getSymbol: vi.fn().mockResolvedValue({ symbol: "NIFTY", exchange: "NSE", lotsize: 50, tick_size: 0.05 }),
     OrderApiError,
   };
@@ -103,13 +104,14 @@ vi.mock("jotai", async () => {
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget, { stepQuantityOnLotGrid } from "../OrderPadWidget";
-import { OrderApiError, placeOrder, getSymbol, searchSymbol } from "@/services/api";
+import { OrderApiError, placeOrder, getPositionbook, getSymbol, searchSymbol } from "@/services/api";
 import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
 const mockPlaceOrder = vi.mocked(placeOrder);
 const mockGetSymbol = vi.mocked(getSymbol);
+const mockGetPositionbook = vi.mocked(getPositionbook);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -688,6 +690,84 @@ describe("OrderPadWidget", () => {
       "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
     );
     expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
+  });
+
+  describe("Exit now ticket", () => {
+    const held = (quantity: number) => ({
+      symbol: "NIFTY", exchange: "NSE", product: "MIS", quantity, averagePrice: 100, ltp: 101, pnl: 0, pnlPercent: 0,
+    });
+    const exitTicket = (openQuantity: number) => makeWidgetPanelProps({
+      params: {
+        symbol: "NIFTY", exchange: "NSE", action: "SELL", orderType: "LIMIT", price: 101, qty: openQuantity,
+        product: "MIS", exitOnly: true, openQuantity,
+      },
+    });
+    const line = () => screen.getAllByTestId("order-rule-line")[0];
+    const fill = (quantity: number) => {
+      fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: String(quantity) } });
+      fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "101" } });
+    };
+
+    it("caps the quantity at the open position and says so", async () => {
+      mockOpenPositions.rows = [held(4)];
+      render(<OrderPadWidget {...exitTicket(4)} />);
+      await screen.findByText("Lot 1 · Max 1,800 per order");
+      const qty = screen.getByLabelText("Quantity") as HTMLInputElement;
+      fireEvent.change(qty, { target: { value: "10" } });
+      expect(Number(qty.value)).toBe(4);
+      expect(line()).toHaveTextContent("FlintTrade · Quantity reduced to 4, the open position.");
+      expect(line()).toHaveAttribute("data-level", "warn");
+    });
+
+    it("blocks Place when the position has closed", async () => {
+      mockOpenPositions.rows = [];
+      render(<OrderPadWidget {...exitTicket(4)} />);
+      await screen.findByText("Lot 1 · Max 1,800 per order");
+      expect(line()).toHaveTextContent("FlintTrade · Position is closed. Order not sent.");
+      expect(line()).toHaveAttribute("data-level", "block");
+      expect(screen.getByRole("button", { name: /practice sell/i })).toBeDisabled();
+    });
+
+    it("re-reads the position before sending and cuts the quantity to it", async () => {
+      mockOpenPositions.rows = [held(4)];
+      mockGetPositionbook.mockResolvedValue([held(2)]);
+      render(<OrderPadWidget {...exitTicket(4)} />);
+      await screen.findByText("Lot 1 · Max 1,800 per order");
+      fill(4);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice sell/i }));
+      await waitFor(() => expect(line()).toHaveTextContent("FlintTrade · Quantity reduced to 2, the open position."));
+      expect(Number((screen.getByLabelText("Quantity") as HTMLInputElement).value)).toBe(2);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+      await reviewAndConfirmPractice(/practice sell/i);
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder.mock.calls[0][0]).toMatchObject({ action: "SELL", quantity: 2, exitOnly: true });
+    });
+
+    it("sends nothing when the re-read finds the position flat", async () => {
+      mockOpenPositions.rows = [held(4)];
+      mockGetPositionbook.mockResolvedValue([]);
+      render(<OrderPadWidget {...exitTicket(4)} />);
+      await screen.findByText("Lot 1 · Max 1,800 per order");
+      fill(4);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice sell/i }));
+      await waitFor(() => expect(line()).toHaveTextContent("FlintTrade · Position is closed. Order not sent."));
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing when the position cannot be read", async () => {
+      mockOpenPositions.rows = [held(4)];
+      mockGetPositionbook.mockRejectedValue(new Error("down"));
+      render(<OrderPadWidget {...exitTicket(4)} />);
+      await screen.findByText("Lot 1 · Max 1,800 per order");
+      fill(4);
+
+      fireEvent.click(screen.getByRole("button", { name: /practice sell/i }));
+      expect(await screen.findByText("Open position could not be read. Order not sent.")).toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
   });
 
   it("uses the shared requested exit line on Practice while Laya is Down", async () => {

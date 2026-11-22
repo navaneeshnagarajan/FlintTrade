@@ -619,6 +619,91 @@
           "message": "Price may be outside the exchange band (₹10–₹50)."
         }
       ]
+    },
+    {
+      "name": "exit ticket within the position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "75"
+      },
+      "context": {
+        "open_quantity": 150,
+        "last_price": "40"
+      },
+      "expected": []
+    },
+    {
+      "name": "exit ticket above the position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "225"
+      },
+      "context": {
+        "open_quantity": 150,
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "exit-quantity-capped",
+          "message": "Quantity reduced to 150, the open position."
+        }
+      ]
+    },
+    {
+      "name": "exit ticket on a closed position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "75"
+      },
+      "context": {
+        "open_quantity": 0,
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "exit-position-closed",
+          "message": "Position is closed. Order not sent."
+        }
+      ]
+    },
+    {
+      "name": "ordinary order ignores open quantity",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "quantity": "225"
+      },
+      "context": {
+        "open_quantity": 0,
+        "last_price": "40"
+      },
+      "expected": []
     }
   ],
   "stop_loss_limits": [

@@ -21,6 +21,8 @@ export interface PlaceOrderParams extends TradeInstruction {
   lotSize?: number;
   /** Broker freeze quantity. Admission uses the NSE index circular when this is absent. */
   freezeQty?: number;
+  /** Only reduce the open position: the server caps the quantity to it and refuses when flat. */
+  exitOnly?: boolean;
 }
 export interface ModifyOrderParams extends TradeInstruction { orderId: string; strategy?: string; disclosedQuantity?: number }
 export interface OrderStatusParams { orderId: string; strategy?: string }

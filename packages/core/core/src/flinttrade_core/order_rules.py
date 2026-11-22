@@ -45,6 +45,8 @@ CHECKS: frozenset[str] = frozenset(
         "order_type_not_allowed",
         "stop_limit_gap",
         "stop_limit_at_trigger",
+        "exit_position_closed",
+        "exit_quantity_capped",
         "price_band",
         "order_rate",
         "note",
@@ -182,6 +184,9 @@ class OrderFacts:
     at_minutes: int | None = None
     circuit_low: Decimal | None = None
     circuit_high: Decimal | None = None
+    quantity: int | None = None
+    exit_only: bool = False
+    open_quantity: int | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -418,6 +423,14 @@ def _evaluate_row(row: OrderRule, facts: OrderFacts, order_type: str) -> RuleRes
         if abs(limit - trigger) <= gap:
             return None
         return RuleResult(row.level, source, row.id, _fill(row.message, {"max_gap": _money(gap)}))
+    if row.check in {"exit_position_closed", "exit_quantity_capped"}:
+        if not facts.exit_only or facts.open_quantity is None:
+            return None
+        if row.check == "exit_position_closed":
+            return RuleResult(row.level, source, row.id, row.message) if facts.open_quantity < 1 else None
+        if facts.open_quantity < 1 or facts.quantity is None or facts.quantity <= facts.open_quantity:
+            return None
+        return RuleResult(row.level, source, row.id, _fill(row.message, {"qty": facts.open_quantity}))
     if row.check == "stop_limit_at_trigger":
         trigger, limit = facts.trigger_price, facts.price
         if trigger is None or limit is None or limit != trigger:
@@ -597,8 +610,13 @@ def facts_from_order(
     at_minutes: int | None = None,
     circuit_low: object = None,
     circuit_high: object = None,
+    open_quantity: int | None = None,
 ) -> OrderFacts:
-    """Build :class:`OrderFacts` from an Order model, a mapping or an engine order."""
+    """Build :class:`OrderFacts` from an Order model, a mapping or an engine order.
+
+    ``open_quantity`` is what an exit ticket may still close, from
+    :func:`exit_open_quantity`.
+    """
     order_type = _field(order, "pricetype", "order_type", "price_type", "orderType")
     stop_loss = _decimal(_field(order, "stop_loss_price", "stoploss", "stop_loss"))
     target = _decimal(_field(order, "target_price", "target"))
@@ -621,7 +639,45 @@ def facts_from_order(
         at_minutes=at_minutes,
         circuit_low=_positive(_decimal(circuit_low)),
         circuit_high=_positive(_decimal(circuit_high)),
+        quantity=_whole_quantity(_field(order, "quantity", "qty")),
+        exit_only=_field(order, "exit_only") is True,
+        open_quantity=open_quantity,
     )
+
+
+def _whole_quantity(value: object) -> int | None:
+    number = _decimal(value)
+    if number is None or number != number.to_integral_value():
+        return None
+    return int(number)
+
+
+def exit_open_quantity(net_quantity: int, action: str) -> int:
+    """Quantity an exit on ``action`` may close: the open size when it opposes the position, else 0."""
+    side = str(getattr(action, "value", action) or "").upper()
+    if (net_quantity > 0 and side == "SELL") or (net_quantity < 0 and side == "BUY"):
+        return abs(net_quantity)
+    return 0
+
+
+def exit_admission(order: object, net_quantity: int) -> tuple[int, list[RuleResult]]:
+    """Quantity to send for an exit ticket and the rule results that explain it.
+
+    Returns ``(0, [block])`` when the position is flat or on the same side,
+    ``(open, [warn])`` when the ticket asks for more than is open, otherwise
+    the ticket's own quantity and no results.
+    """
+    facts = facts_from_order(order)
+    open_quantity = exit_open_quantity(net_quantity, facts.action)
+    results = [
+        result
+        for result in evaluate(OrderFacts(**{**facts.__dict__, "exit_only": True, "open_quantity": open_quantity}))
+        if result.rule_id in {"exit-position-closed", "exit-quantity-capped"}
+    ]
+    if open_quantity < 1:
+        return 0, results
+    quantity = facts.quantity or 0
+    return min(quantity, open_quantity), results
 
 
 def _positive(value: Decimal | None) -> Decimal | None:
@@ -827,6 +883,8 @@ __all__ = [
     "evaluate",
     "evaluate_order",
     "exchange_family",
+    "exit_admission",
+    "exit_open_quantity",
     "facts_from_order",
     "headline",
     "underlying_of",
@@ -836,11 +894,11 @@ __all__ = [
     "market_band_label",
     "market_price_cap",
     "max_stop_limit_gap",
-    "stop_loss_limit_price",
     "normalise_order_type",
     "price_band",
     "results_payload",
     "rule_by_id",
     "rules_markdown",
+    "stop_loss_limit_price",
     "table_path",
 ]

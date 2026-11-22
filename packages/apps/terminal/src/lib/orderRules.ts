@@ -65,6 +65,11 @@ export interface OrderRuleInput {
   atMinutes?: number | null;
   circuitLow?: number | null;
   circuitHigh?: number | null;
+  quantity?: number | null;
+  /** An exit ticket: it may only reduce the open position. */
+  exitOnly?: boolean;
+  /** What the exit may still close, from ``exitOpenQuantity``. */
+  openQuantity?: number | null;
 }
 
 const LEVELS: RuleLevel[] = ["block", "warn", "info"];
@@ -271,6 +276,15 @@ function evaluateRow(row: RuleRow, facts: Facts): RuleResult | null {
       if (low <= limitPaise && limitPaise <= high) return null;
       return result(fill(row.message, { low: money(low), high: money(high) }));
     }
+    case "exit_position_closed":
+      if (!facts.exitOnly || facts.openQuantity == null) return null;
+      return facts.openQuantity < 1 ? result(row.message) : null;
+    case "exit_quantity_capped": {
+      const open = facts.openQuantity;
+      const quantity = facts.quantity;
+      if (!facts.exitOnly || open == null || open < 1 || quantity == null || quantity <= open) return null;
+      return result(fill(row.message, { qty: open }));
+    }
     case "stop_limit_at_trigger": {
       const trigger = positive(facts.triggerPrice);
       const limit = positive(facts.price);
@@ -338,6 +352,40 @@ export function evaluateOrderRules(input: OrderRuleInput, on: string = istToday(
   });
   scored.sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2]);
   return scored.map((entry) => entry.result);
+}
+
+/** Quantity an exit on ``action`` may close: the open size when it opposes the position, else 0. */
+export function exitOpenQuantity(netQuantity: number, action: string): number {
+  const side = String(action).toUpperCase();
+  if ((netQuantity > 0 && side === "SELL") || (netQuantity < 0 && side === "BUY")) return Math.abs(netQuantity);
+  return 0;
+}
+
+const EXIT_RULE_IDS = new Set(["exit-position-closed", "exit-quantity-capped"]);
+
+/**
+ * Quantity to send for an exit ticket against a signed ``netQuantity``, and the
+ * results that explain it (mirrors ``exit_admission``). ``0`` with a block
+ * result when the position is flat or on the same side.
+ */
+export function exitAdmission(
+  input: { symbol: string; exchange: string; action: string; quantity: number; netQuantity: number },
+  on: string = istToday(),
+): { quantity: number; results: RuleResult[] } {
+  const openQuantity = exitOpenQuantity(input.netQuantity, input.action);
+  const results = evaluateOrderRules(
+    {
+      symbol: input.symbol,
+      exchange: input.exchange,
+      orderType: "LIMIT",
+      action: input.action,
+      quantity: input.quantity,
+      exitOnly: true,
+      openQuantity,
+    },
+    on,
+  ).filter((item) => EXIT_RULE_IDS.has(item.rule_id));
+  return { quantity: openQuantity < 1 ? 0 : Math.min(input.quantity, openQuantity), results };
 }
 
 export interface StopLossLimitInput {

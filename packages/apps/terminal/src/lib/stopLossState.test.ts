@@ -34,12 +34,13 @@ describe("stop-loss triggered, not filled", () => {
   it("exits a long at the bid for the full open quantity, as a limit", () => {
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: 150, product: "MIS" }, { bid: 41.2, ask: 41.5, ltp: 41.3 })).toEqual({
       symbol: "X", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 150, product: "MIS", price: 41.2,
+      exitOnly: true, openQuantity: 150,
     });
   });
 
   it("exits a short at the ask, falling back to the last price", () => {
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: -75 }, { ltp: 12.33 })).toMatchObject({
-      action: "BUY", qty: 75, price: 12.35, orderType: "LIMIT",
+      action: "BUY", qty: 75, price: 12.35, orderType: "LIMIT", exitOnly: true, openQuantity: 75,
     });
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: -75 }, null)).not.toHaveProperty("price");
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: 0 }, null)).toBeNull();
@@ -48,12 +49,16 @@ describe("stop-loss triggered, not filled", () => {
   it("opens the order ticket and sends nothing", () => {
     const seen = vi.fn();
     window.addEventListener("flinttrade:addWidget", seen);
-    openExitTicket({ symbol: "X", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, price: 10 });
+    openExitTicket({
+      symbol: "X", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, price: 10, exitOnly: true, openQuantity: 75,
+    });
     window.removeEventListener("flinttrade:addWidget", seen);
     expect(seen).toHaveBeenCalledTimes(1);
     expect((seen.mock.calls[0][0] as CustomEvent).detail).toEqual({
       widgetId: "orderpad",
-      props: { symbol: "X", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, price: 10 },
+      props: {
+        symbol: "X", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, price: 10, exitOnly: true, openQuantity: 75,
+      },
     });
   });
 });

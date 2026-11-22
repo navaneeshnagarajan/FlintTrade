@@ -74,6 +74,9 @@ export interface ExitTicket {
   qty: number;
   product?: string;
   price?: number;
+  /** The ticket may only reduce the position; the pad caps its quantity at ``openQuantity``. */
+  exitOnly: true;
+  openQuantity: number;
 }
 
 /**
@@ -95,6 +98,8 @@ export function exitNowTicket(
     action,
     orderType: "LIMIT",
     qty: Math.abs(position.quantity),
+    exitOnly: true,
+    openQuantity: Math.abs(position.quantity),
     ...(position.product ? { product: position.product } : {}),
     ...(best != null ? { price: Math.round(best * 20) / 20 } : {}),
   };

@@ -39,7 +39,7 @@ NIFTY_CE = "NIFTY25NOV2624000CE"
 SENSEX_CE = "SENSEX27NOV2680000CE"
 _TODAY = date(2026, 11, 20)
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
-_EVALUATOR_PLACEHOLDERS = {"max_gap", "low", "high", "limit", "window", "wait", "broker_name", "band"}
+_EVALUATOR_PLACEHOLDERS = {"max_gap", "low", "high", "limit", "window", "wait", "broker_name", "band", "qty"}
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +133,30 @@ _TRIGGERS: dict[str, tuple[dict, dict]] = {
     "bse-stop-limit-gap": (
         {"symbol": SENSEX_CE, "exchange": "BFO", "pricetype": "SL", "trigger_price": "100", "price": "70"},
         {},
+    ),
+    "exit-position-closed": (
+        {
+            "symbol": NIFTY_CE,
+            "exchange": "NFO",
+            "action": "SELL",
+            "pricetype": "LIMIT",
+            "price": "40",
+            "quantity": "75",
+            "exit_only": True,
+        },
+        {"open_quantity": 0},
+    ),
+    "exit-quantity-capped": (
+        {
+            "symbol": NIFTY_CE,
+            "exchange": "NFO",
+            "action": "SELL",
+            "pricetype": "LIMIT",
+            "price": "40",
+            "quantity": "150",
+            "exit_only": True,
+        },
+        {"open_quantity": 75},
     ),
     "stop-loss-limit-at-trigger": (
         {"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "SL", "trigger_price": "100", "price": "100"},
@@ -522,6 +546,40 @@ def test_shared_stop_loss_limits_match(case: dict) -> None:
         on=date.fromisoformat(case["on"]),
     )
     assert str(got) == case["limit"]
+
+
+_EXIT = {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "LIMIT", "price": "40", "exit_only": True}
+
+
+@pytest.mark.parametrize(
+    ("action", "quantity", "net", "sent", "rule_id"),
+    [
+        ("SELL", 75, 150, 75, None),
+        ("SELL", 150, 150, 150, None),
+        ("SELL", 225, 150, 150, "exit-quantity-capped"),
+        ("BUY", 225, -150, 150, "exit-quantity-capped"),
+        ("SELL", 75, 0, 0, "exit-position-closed"),
+        ("SELL", 75, -150, 0, "exit-position-closed"),
+        ("BUY", 75, 150, 0, "exit-position-closed"),
+    ],
+)
+def test_exit_ticket_never_opens_a_position(action, quantity, net, sent, rule_id) -> None:
+    got, results = rules.exit_admission({**_EXIT, "action": action, "quantity": str(quantity)}, net)
+    assert got == sent
+    assert [r.rule_id for r in results] == ([rule_id] if rule_id else [])
+
+
+def test_exit_ticket_copy() -> None:
+    _, capped = rules.exit_admission({**_EXIT, "action": "SELL", "quantity": "225"}, 150)
+    _, closed = rules.exit_admission({**_EXIT, "action": "SELL", "quantity": "75"}, 0)
+    assert (capped[0].level, capped[0].message) == ("warn", "Quantity reduced to 150, the open position.")
+    assert (closed[0].level, closed[0].message) == ("block", "Position is closed. Order not sent.")
+
+
+def test_exit_rules_ignore_ordinary_orders() -> None:
+    order = {**_EXIT, "action": "SELL", "quantity": "225", "exit_only": False}
+    assert rules.evaluate_order(order, open_quantity=0, last_price="40") == []
+    assert rules.evaluate_order({**_EXIT, "action": "SELL", "quantity": "225"}, last_price="40") == []
 
 
 def test_a_name_ending_in_ce_is_not_an_option() -> None:

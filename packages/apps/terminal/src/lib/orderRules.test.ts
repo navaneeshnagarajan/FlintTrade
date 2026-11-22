@@ -6,6 +6,8 @@ import {
   hasBlockingRule,
   orderRules,
   ruleHeadline,
+  exitAdmission,
+  exitOpenQuantity,
   ruleResultsFrom,
   stopLossLimitPrice,
   type OrderRuleInput,
@@ -41,6 +43,9 @@ function toInput(item: Case): OrderRuleInput {
     atMinutes: c.at_minutes === undefined ? null : Number(c.at_minutes),
     circuitLow: n(c.circuit_low),
     circuitHigh: n(c.circuit_high),
+    quantity: n(o.quantity),
+    exitOnly: (o.exit_only as unknown) === true,
+    openQuantity: n(c.open_quantity),
   };
 }
 
@@ -80,6 +85,30 @@ describe("order rules mirror", () => {
       expect(results).toEqual([]);
     },
   );
+
+  it.each([
+    [150, "SELL", 150],
+    [-75, "BUY", 75],
+    [150, "BUY", 0],
+    [-75, "SELL", 0],
+    [0, "SELL", 0],
+  ])("an exit against net %i on %s may close %i", (net, action, open) => {
+    expect(exitOpenQuantity(net, action)).toBe(open);
+  });
+
+  it("cuts an exit ticket to the open position and refuses a closed one", () => {
+    const base = { symbol: "NIFTY25NOV2624000CE", exchange: "NFO", action: "SELL" };
+    expect(exitAdmission({ ...base, quantity: 225, netQuantity: 150 }, "2026-11-20")).toEqual({
+      quantity: 150,
+      results: [{ level: "warn", source: "FlintTrade", rule_id: "exit-quantity-capped", message: "Quantity reduced to 150, the open position." }],
+    });
+    expect(exitAdmission({ ...base, quantity: 75, netQuantity: 150 }, "2026-11-20")).toEqual({ quantity: 75, results: [] });
+    expect(exitAdmission({ ...base, quantity: 75, netQuantity: 0 }, "2026-11-20")).toEqual({
+      quantity: 0,
+      results: [{ level: "block", source: "FlintTrade", rule_id: "exit-position-closed", message: "Position is closed. Order not sent." }],
+    });
+    expect(exitAdmission({ ...base, quantity: 75, netQuantity: -75 }, "2026-11-20").quantity).toBe(0);
+  });
 
   it("reads the same table the server reads", () => {
     const ids = orderRules().map((row) => row.id);

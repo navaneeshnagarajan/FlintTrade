@@ -524,6 +524,46 @@
         "default_buffer_pct": 5
       },
       "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+    },
+    {
+      "id": "exit-position-closed",
+      "authority": "product",
+      "level": "block",
+      "source": "FlintTrade",
+      "description": "An exit ticket only reduces an open position. The position is read again just before sending, and when it is already flat the exit is not sent.",
+      "check": "exit_position_closed",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Position is closed. Order not sent."
+    },
+    {
+      "id": "exit-quantity-capped",
+      "authority": "product",
+      "level": "warn",
+      "source": "FlintTrade",
+      "description": "An exit ticket never opens a new position. A quantity above the open position is reduced to the open quantity before sending.",
+      "check": "exit_quantity_capped",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Quantity reduced to {qty}, the open position."
     }
   ]
 }

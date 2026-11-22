@@ -14,13 +14,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, ContextManager
 
 from flinttrade_core.backend_instance import BackendLeaseProof
-from flinttrade_core.exceptions import UnsupportedCapabilityError
+from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_core.order_rules import (
     OrderBudget,
     OrderBudgetExceeded,
     OrderRuleRefused,
     blocking,
     evaluate_order,
+    exit_admission,
+    facts_from_order,
 )
 from flinttrade_engine.request_context import RequestContext, parse_selector
 from flinttrade_engine.safety import (
@@ -958,6 +960,47 @@ class BrokerRouter:
         if budget is not None:
             raise OrderBudgetExceeded([budget])
 
+    async def _cap_exit_order(self, adapter_id: str, session: AdapterSessionView, order: Any) -> Any:
+        """Keep an exit ticket within the open position, read just before dispatch.
+
+        No Indian F&O broker API takes a reduce-only flag, so FlintTrade reads
+        the broker's net position for the contract and cuts the quantity to
+        it. A flat or same-side position refuses the order, so a fill that
+        lands between the ticket and this read can never open a new position.
+
+        Raises:
+            OrderRuleRefused: The position is already closed.
+            BrokerError: The broker's positions could not be read.
+        """
+        facts = facts_from_order(order)
+        if not facts.exit_only:
+            return order
+        try:
+            rows = await self._adapters[adapter_id].positions(session)
+        except Exception as exc:
+            raise BrokerError("Open position could not be read. Order not sent.", broker_id=adapter_id) from exc
+        net: int | None = None
+        for row in rows or ():
+            row_facts = facts_from_order(row)
+            if (row_facts.symbol.upper(), row_facts.exchange.upper(), row_facts.product or "MIS") != (
+                facts.symbol.upper(),
+                facts.exchange.upper(),
+                facts.product or "MIS",
+            ):
+                continue
+            if net is not None or row_facts.quantity is None:
+                raise BrokerError("Open position could not be read. Order not sent.", broker_id=adapter_id)
+            net = row_facts.quantity
+        quantity, results = exit_admission(order, net or 0)
+        if quantity < 1:
+            raise OrderRuleRefused(results)
+        if quantity == facts.quantity:
+            return order
+        logger.info("Exit quantity reduced to the open position | adapter=%s qty=%d", adapter_id, quantity)
+        if isinstance(order, Mapping):
+            return {**order, "quantity": str(quantity)}
+        return order.model_copy(update={"quantity": str(quantity)})
+
     def _algo_tag(self, adapter_id: str, session: AdapterSessionView, order: Any) -> None:
         """Relay the configured algo_id and count this write for algo-tag brokers.
 
@@ -1077,6 +1120,7 @@ class BrokerRouter:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._admit_order_rules(adapter_id, signed_order)
+                signed_order = await self._cap_exit_order(adapter_id, session, signed_order)
                 self._algo_tag(adapter_id, session, signed_order)
                 await self._throttle(adapter_id, "order")
                 attempt_id = self._prepare_lifecycle(

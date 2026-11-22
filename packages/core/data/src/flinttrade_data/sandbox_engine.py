@@ -32,7 +32,7 @@ from typing import Any
 from flinttrade_core.db import open_sqlite
 from flinttrade_core.indian_charges import estimate_practice_fill
 from flinttrade_core.instrument_lots import contract_quantity_message
-from flinttrade_core.order_rules import blocking, evaluate_order, headline, results_payload
+from flinttrade_core.order_rules import blocking, evaluate_order, exit_admission, headline, results_payload
 from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
@@ -614,6 +614,7 @@ class SandboxEngine:
         instrument_token: str = "",
         price_source: str | None = None,
         price_age_s: int | None = None,
+        exit_only: bool = False,
     ) -> dict[str, Any]:
         """Validate a paper order and either fill it or leave it pending.
 
@@ -637,6 +638,9 @@ class SandboxEngine:
             strategy: Optional strategy label retained on the order and trade.
             instrument_token: Security id of the listed contract. When set, the
                 quantity must be a positive multiple of that contract's lot size.
+            exit_only: The order may only reduce the open position. The position
+                is read under the engine lock; a flat or same-side position
+                refuses the order and a larger quantity is cut to the open size.
 
         Returns:
             Dict with keys:
@@ -706,7 +710,24 @@ class SandboxEngine:
             }
 
         margin_price = price if price > 0 else trigger_price
+        exit_results: list[dict[str, str]] = []
         with self._lock:
+            if exit_only:
+                pos = self._get_position(symbol, exchange, product)
+                net = int(pos["net_qty"]) if pos else 0
+                capped, results = exit_admission(
+                    {"symbol": symbol, "exchange": exchange, "action": action, "quantity": quantity}, net
+                )
+                exit_results = results_payload(results)
+                if capped < 1:
+                    return {
+                        "order_id": "",
+                        "status": "REJECTED",
+                        "message": headline(blocking(results)),
+                        "code": "order_rule_blocked",
+                        "rule_results": exit_results,
+                    }
+                quantity = capped
             if action == "BUY":
                 required_margin = self._estimate_margin(
                     quantity=quantity,
@@ -817,6 +838,8 @@ class SandboxEngine:
 
             message = last_close_fill_label(price, stored_age)
         result: dict[str, Any] = {"order_id": order_id, "status": status, "message": message}
+        if exit_results:
+            result["rule_results"] = exit_results
         if stored_source:
             result["price_source"] = stored_source
             result["price"] = price

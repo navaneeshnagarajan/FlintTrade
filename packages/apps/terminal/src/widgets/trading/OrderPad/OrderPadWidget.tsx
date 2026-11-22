@@ -48,12 +48,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { searchSymbol, placeOrder, getSymbol, OrderApiError } from "@/services/api";
+import { searchSymbol, placeOrder, getPositionbook, getSymbol, OrderApiError } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { capturedOrderOriginDisclosure } from "@/lib/orderErrorPresentation";
 import { useMargin } from "@/hooks/useMargin";
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   contractHasOpenExit,
   exitAlreadyPendingMessage,
@@ -80,6 +81,8 @@ import { istMinutes } from "@/lib/ist";
 import {
   brokerDisplayName,
   evaluateOrderRules,
+  exitAdmission,
+  exitOpenQuantity,
   hasBlockingRule,
   isOptionContract,
   ruleResultsFrom,
@@ -434,6 +437,17 @@ interface OrderPadPrefill {
   price?: number;
   qty?: number;
   product?: string;
+  /** "Exit now": the ticket may only reduce the position, at most ``openQuantity``. */
+  exitOnly?: boolean;
+  openQuantity?: number;
+}
+
+/** The contract an "Exit now" ticket closes and the size open when it was opened. */
+interface ExitTicketState {
+  symbol: string;
+  exchange: string;
+  action: "BUY" | "SELL";
+  openQuantity: number;
 }
 
 /** Symbol, exchange, and action used to ignore a repeated props sync. */
@@ -577,6 +591,9 @@ function OrderPadWidget(props: WidgetProps) {
     },
   });
 
+  const [exitTicket, setExitTicket] = useState<ExitTicketState | null>(null);
+  // The warn shown after an exit ticket's quantity was cut, until the quantity changes again.
+  const [exitNotice, setExitNotice] = useState<{ qty: number; results: RuleResult[] } | null>(null);
   const appliedTargetRef = useRef("");
   // Contract whose order type came from a prefill, so the option default below
   // leaves it alone.
@@ -612,6 +629,14 @@ function OrderPadWidget(props: WidgetProps) {
     }
     if (typeof next.qty === "number" && Number.isInteger(next.qty) && next.qty > 0) setValue("qty", next.qty);
     if (next.product === "MIS" || next.product === "NRML" || next.product === "CNC") setValue("product", next.product);
+    const exitOpen = next.openQuantity;
+    setExitTicket(
+      next.exitOnly && (next.action === "BUY" || next.action === "SELL")
+        && typeof exitOpen === "number" && Number.isInteger(exitOpen) && exitOpen >= 0
+        ? { symbol: next.symbol, exchange: next.exchange ?? "", action: next.action, openQuantity: exitOpen }
+        : null,
+    );
+    setExitNotice(null);
     setQuery(next.symbol);
     setSearchMiss(null);
     setSearchOpen(false);
@@ -624,6 +649,8 @@ function OrderPadWidget(props: WidgetProps) {
   const prefillPrice = prefill.price;
   const prefillQty = prefill.qty;
   const prefillProduct = prefill.product;
+  const prefillExitOnly = prefill.exitOnly;
+  const prefillOpenQuantity = prefill.openQuantity;
   useEffect(() => {
     applyPrefill({
       symbol: prefillSymbol,
@@ -633,8 +660,13 @@ function OrderPadWidget(props: WidgetProps) {
       price: prefillPrice,
       qty: prefillQty,
       product: prefillProduct,
+      exitOnly: prefillExitOnly,
+      openQuantity: prefillOpenQuantity,
     });
-  }, [applyPrefill, prefillSymbol, prefillExchange, prefillAction, prefillOrderType, prefillPrice, prefillQty, prefillProduct]);
+  }, [
+    applyPrefill, prefillSymbol, prefillExchange, prefillAction, prefillOrderType, prefillPrice, prefillQty,
+    prefillProduct, prefillExitOnly, prefillOpenQuantity,
+  ]);
 
   // Fired by retargetOrderPad. The docking library does not re-render a tab
   // whose node object is unchanged, so props.params stay stale. The nonce is
@@ -696,6 +728,7 @@ function OrderPadWidget(props: WidgetProps) {
   // the real native-write guard; this notice never authorises a submission.
   const discloseIndstocks = appMode === "live" && selectedNativeBroker === "indmoney";
   const gttUnavailableMessage = discloseIndstocks ? INDSTOCKS_GTT_UNAVAILABLE : "GTT orders aren't supported right now.";
+  const accountReadContext = useAccountReadContext();
   const { data: openPositions } = usePositions({
     enabled: appMode === "practice" || appMode === "live",
   });
@@ -711,13 +744,34 @@ function OrderPadWidget(props: WidgetProps) {
   const openQty = openPosition ? Math.abs(openPosition.quantity) : 0;
   const exitSide = openPosition ? exitSideForQuantity(openPosition.quantity) : null;
   const exitAlreadyPending = openPosition != null && contractHasOpenExit(openPosition, openOrders ?? []);
+  const exitActive = exitTicket != null
+    && contractToken(exitTicket.symbol) === contractToken(symbol)
+    && contractToken(exitTicket.exchange) === contractToken(exchange)
+    && exitTicket.action === action;
+  // An exit ticket follows the polled position once it has loaded; a flat book means closed.
+  const exitOpen = !exitActive
+    ? null
+    : openPositions === undefined
+      ? exitTicket.openQuantity
+      : exitSide === action ? openQty : 0;
   // Close caps the ticket only on the side that reduces this contract.
-  const closeCap = exitSide != null && action === exitSide && openQty > 0 ? openQty : null;
+  const closeCap = exitOpen != null && exitOpen > 0
+    ? exitOpen
+    : exitSide != null && action === exitSide && openQty > 0 ? openQty : null;
+
+  const noteExitCap = useCallback((requested: number, cap: number) => {
+    if (!exitActive || requested <= cap) return;
+    const { results } = exitAdmission({
+      symbol, exchange, action, quantity: requested, netQuantity: action === "SELL" ? cap : -cap,
+    });
+    setExitNotice({ qty: cap, results });
+  }, [action, exchange, exitActive, symbol]);
 
   useEffect(() => {
     if (closeCap == null || !Number.isFinite(qty) || qty <= closeCap) return;
+    noteExitCap(qty, closeCap);
     setValue("qty", closeCap, { shouldValidate: true });
-  }, [closeCap, qty, setValue]);
+  }, [closeCap, noteExitCap, qty, setValue]);
 
   useEffect(() => {
     setAdmission((current) => {
@@ -773,7 +827,10 @@ function OrderPadWidget(props: WidgetProps) {
     product,
     // Re-read on every tick or edit, which is often enough for a minute clock.
     atMinutes: istMinutes(),
-  }), [action, exchange, ltp, orderType, price, product, ruleBroker, symbol, trigPrice]);
+    quantity: Number.isFinite(qty) ? qty : null,
+    exitOnly: exitActive,
+    openQuantity: exitOpen,
+  }), [action, exchange, exitActive, exitOpen, ltp, orderType, price, product, qty, ruleBroker, symbol, trigPrice]);
   const ruleBlocked = hasBlockingRule(ruleResults);
   // A server or broker refusal of the last press, shown on the same line until
   // the order changes.
@@ -781,7 +838,10 @@ function OrderPadWidget(props: WidgetProps) {
   useEffect(() => {
     setSubmitRefusal(null);
   }, [symbol, exchange, action, orderType, product, qty, price, trigPrice]);
-  const lineResults = submitRefusal?.results.length ? submitRefusal.results : ruleResults;
+  const exitNoticeResults = exitActive && exitNotice && exitNotice.qty === qty ? exitNotice.results : [];
+  const lineResults = submitRefusal?.results.length
+    ? submitRefusal.results
+    : [...ruleResults, ...exitNoticeResults.filter((item) => !ruleResults.some((r) => r.rule_id === item.rule_id))];
 
   // Follow the joined channel: a fresh broadcast retargets the pad exactly
   // like picking the instrument from the search dropdown. The effect keys on
@@ -882,9 +942,10 @@ function OrderPadWidget(props: WidgetProps) {
         fieldOnChange(parsed);
         return;
       }
+      if (closeCap != null) noteExitCap(parsed, closeCap);
       fieldOnChange(closeCap != null ? Math.min(parsed, closeCap) : parsed);
     },
-    [closeCap],
+    [closeCap, noteExitCap],
   );
 
   // Broker capabilities — used to hide product for crypto, show dynamic exchanges
@@ -1332,6 +1393,39 @@ function OrderPadWidget(props: WidgetProps) {
       return;
     }
 
+    // An exit ticket re-reads the position just before sending. A quantity above
+    // it is cut and the operator presses Place again; a flat position stops here.
+    if (exitActive) {
+      let net: number | null;
+      try {
+        const rows = await getPositionbook(accountReadContext);
+        const row = rows.find((item) =>
+          contractToken(item.symbol) === contractToken(values.symbol)
+          && contractToken(item.exchange) === contractToken(values.exchange)
+          && contractToken(item.product || "MIS") === contractToken(values.product || "MIS"));
+        net = row ? row.quantity : 0;
+      } catch {
+        net = null;
+      }
+      if (net == null || !Number.isFinite(net)) {
+        showToast("error", "Open position could not be read. Order not sent.", 6000);
+        return;
+      }
+      const admitted = exitAdmission({
+        symbol: values.symbol, exchange: values.exchange, action: values.action, quantity: values.qty, netQuantity: net,
+      });
+      setExitTicket((current) => current && { ...current, openQuantity: exitOpenQuantity(net, values.action) });
+      if (admitted.quantity < 1) {
+        setSubmitRefusal({ results: admitted.results, text: admitted.results[0]?.message ?? "" });
+        return;
+      }
+      if (admitted.quantity < values.qty) {
+        setExitNotice({ qty: admitted.quantity, results: admitted.results });
+        setValue("qty", admitted.quantity, { shouldValidate: true });
+        return;
+      }
+    }
+
     // For a market-type order (MARKET / SL-M) the user never sets a price. In
     // Practice mode the paper engine needs a real fill price — a zero fabricates
     // a fill at 0.0 (now rejected by the sandbox), so feed the live LTP. Live
@@ -1360,6 +1454,7 @@ function OrderPadWidget(props: WidgetProps) {
       rationale: admissionRationale(values.note ?? ""),
       ...(lotSizeKnown && lotSize > 0 ? { lotSize } : {}),
       ...(brokerFreezeQty != null ? { freezeQty: brokerFreezeQty } : {}),
+      ...(exitActive ? { exitOnly: true } : {}),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call
@@ -1475,6 +1570,7 @@ function OrderPadWidget(props: WidgetProps) {
         ? { disclosedQuantity: values.discQty }
         : {}),
       strategy: "FlintOrderPad",
+      exitOnly: true,
     };
     const authorityMode = appMode === "live" ? "live" as const : "practice" as const;
     lastParamsRef.current = params;

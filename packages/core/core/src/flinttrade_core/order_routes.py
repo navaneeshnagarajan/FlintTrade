@@ -43,7 +43,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import jwt
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
@@ -504,6 +504,7 @@ def _body_to_order(
         strategy=str(body.get("strategy") or "Flint"),
         admission_note=str(body.get("rationale") or body.get("note") or body.get("admission_note") or ""),
         market_protection=body.get("market_protection"),
+        exit_only=body.get("exit_only") is True,
         **extra,
     )
 
@@ -695,6 +696,31 @@ def _record_reduce_only(body: Mapping[str, Any], mode: str) -> None:
 
     proposal = proposal_from_place_fields(body, mode=mode, source="operator")
     process_laya().admit_reduce_only(proposal)
+
+
+def _exit_ticket_admission(
+    body: dict[str, Any], positions: Sequence[Mapping[str, Any]] | None
+) -> tuple[tuple[Any, int] | None, list[Any]]:
+    """Hold an exit ticket to the open position read just now.
+
+    Returns ``(refusal, results)``. A flat or same-side position refuses the
+    order; a larger quantity is cut to the open size in ``body`` and a warn
+    result says so. Bodies without ``exit_only`` pass through unchanged.
+    """
+    from flinttrade_core.order_rules import exit_admission  # noqa: PLC0415
+
+    if body.get("exit_only") is not True:
+        return None, []
+    net = _position_net(positions, body) if positions is not None else None
+    if net is None:
+        message = "Open position could not be read. Order not sent."
+        return (jsonify({"status": "error", "code": "exit_position_unreadable", "message": message}), 409), []
+    quantity, results = exit_admission(body, net)
+    if quantity < 1:
+        return _order_rule_refusal(results), results
+    if quantity != _quantity_from_body(body):
+        body["quantity"] = quantity
+    return None, results
 
 
 def _optional_positive_int(raw: object) -> int | None:
@@ -985,12 +1011,14 @@ def _prepare_live_reduce_only(
     *,
     adapter_id: str,
     account_id: str,
-) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str, str], int, int] | None]:
+) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str, str], int, int] | None, list[Any]]:
     """Classify one live place under the contract lock.
 
-    Returns ``(laya_block, reservation)``. A reservation is held only when
-    the order qualifies, so a second close sees it before the broker book does.
-    The reservation tuple is ``(key, quantity, position_net)``.
+    Returns ``(laya_block, reservation, exit_results)``. A reservation is held
+    only when the order qualifies, so a second close sees it before the broker
+    book does. The reservation tuple is ``(key, quantity, position_net)``. An
+    exit ticket is held to the position read here; ``exit_results`` explains
+    a reduced quantity.
     """
     from flinttrade_engine.reduce_only import (  # noqa: PLC0415
         contract_key,
@@ -1011,8 +1039,13 @@ def _prepare_live_reduce_only(
     with contract_lock(key):
         positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
         if positions is None:
-            return _laya_place_response(body, mode=_MODE_LIVE, source="operator"), None
+            if body.get("exit_only") is True:
+                return _exit_ticket_admission(body, None)[0], None, []
+            return _laya_place_response(body, mode=_MODE_LIVE, source="operator"), None, []
         position_net = _position_net(positions, body)
+        exit_refusal, exit_results = _exit_ticket_admission(body, positions)
+        if exit_refusal is not None:
+            return exit_refusal, None, exit_results
         # Exact ACK coverage validates every supplied identity/quantity/state
         # alias again. A full book's aggregate pending quantity is not proof
         # that an invisible local ACK is represented. Unavailable books restore
@@ -1022,8 +1055,8 @@ def _prepare_live_reduce_only(
         if _own_exit_pending(body, positions, our_orders, reserved_exit(key)):
             label = _contract_label(body)
             if broker_orders is None:
-                return _exit_orders_unreadable_response(label), None
-            return _exit_pending_response(label), None
+                return _exit_orders_unreadable_response(label), None, exit_results
+            return _exit_pending_response(label), None, exit_results
         block, qualified = _admit_place(
             body,
             mode=_MODE_LIVE,
@@ -1034,10 +1067,10 @@ def _prepare_live_reduce_only(
             extra_pending=reserved_exit(key),
         )
         if not qualified or position_net is None:
-            return block, None
+            return block, None, exit_results
         quantity = _quantity_from_body(body)
         reserve_exit(key, quantity)
-        return None, (key, quantity, position_net)
+        return None, (key, quantity, position_net), exit_results
 
 
 def _safety_state_unavailable_response() -> tuple[Any, int]:
@@ -1807,13 +1840,16 @@ def _dispatch_live_order(
 
     reduce_hold: tuple[tuple[str, str, str, str, str, str], int, int] | None = None
     if ft_action == "place":
-        laya_block, reduce_hold = _prepare_live_reduce_only(
+        laya_block, reduce_hold, exit_results = _prepare_live_reduce_only(
             body,
             adapter_id=adapter_id,
             account_id=account_id,
         )
         if laya_block is not None:
             return laya_block
+        if exit_results:
+            g.exit_rule_results = exit_results
+            typed_order = typed_order.model_copy(update={"quantity": str(_quantity_from_body(body))})
 
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
@@ -2813,7 +2849,7 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     """
     from flinttrade_engine.reduce_only import contract_key, contract_lock  # noqa: PLC0415
 
-    from .protection_scope import request_execution_binding  # noqa: PLC0415
+    from .protection_scope import practice_request_sandbox, request_execution_binding  # noqa: PLC0415
 
     binding = request_execution_binding()
     try:
@@ -2830,6 +2866,12 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
         product=str(body.get("product") or "MIS"),
     )
     with contract_lock(key):
+        if body.get("exit_only") is True:
+            positions, _orders = _practice_books(practice_request_sandbox())
+            exit_refusal, exit_results = _exit_ticket_admission(body, positions)
+            if exit_refusal is not None:
+                return exit_refusal
+            return _with_rule_results(_dispatch_practice_place_locked(body), exit_results)
         return _dispatch_practice_place_locked(body)
 
 
@@ -2942,6 +2984,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                 trigger_price=trigger_price,
                 strategy=str(body.get("strategy") or "").strip(),
                 instrument_token=str(body.get("instrument_token") or body.get("security_id") or "").strip(),
+                exit_only=body.get("exit_only") is True,
                 **provenance,
             )
             if protection is not None:
@@ -2986,6 +3029,9 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         result.get("status", "?"),
     )
     if str(result.get("status", "")).upper() == "REJECTED":
+        rule_detail = (
+            {"code": result.get("code"), "rule_results": result["rule_results"]} if result.get("rule_results") else {}
+        )
         return jsonify(annotate(
             {
                 "status": "error",
@@ -2993,6 +3039,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                     str(result.get("message") or "Practice order rejected"),
                     str(body.get("symbol") or ""),
                 ),
+                **rule_detail,
             },
             outcome="rejected",
             reason=REASON_BROKER_REJECTED,
@@ -3100,9 +3147,14 @@ def _with_rule_results(response: tuple[Any, int], results: list[Any]) -> tuple[A
         data = resp.get_json(silent=True)
     except AttributeError:
         return response
-    if not isinstance(data, dict) or "rule_results" in data:
+    if not isinstance(data, dict):
         return response
-    data["rule_results"] = results_payload(results)
+    existing = data.get("rule_results") if isinstance(data.get("rule_results"), list) else []
+    seen = {item.get("rule_id") for item in existing if isinstance(item, dict)}
+    added = [item for item in results_payload(results) if item["rule_id"] not in seen]
+    if not added:
+        return response
+    data["rule_results"] = [*existing, *added]
     new_resp = jsonify(data)
     for header, value in resp.headers.items():
         if header.lower() not in {"content-length", "content-type"}:
@@ -3173,17 +3225,15 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
     if rule_refusal is not None:
         return rule_refusal
     variety = _variety_from_body(payload_body)
-    return _with_rule_results(
-        _dispatch_live_order(
-            "place",
-            payload_body,
-            live_payload,
-            adapter_id=adapter_id,
-            account_id=account_id,
-            variety=variety,
-        ),
-        rule_results,
+    response = _dispatch_live_order(
+        "place",
+        payload_body,
+        live_payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        variety=variety,
     )
+    return _with_rule_results(response, [*rule_results, *g.pop("exit_rule_results", [])])
 
 
 def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, int] | None:
@@ -3371,16 +3421,14 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
     if rule_refusal is not None:
         return rule_refusal
 
-    return _with_rule_results(
-        _dispatch_live_order(
-            "place",
-            body,
-            payload,
-            adapter_id=broker,
-            variety=_variety_from_body(body),
-        ),
-        rule_results,
+    response = _dispatch_live_order(
+        "place",
+        body,
+        payload,
+        adapter_id=broker,
+        variety=_variety_from_body(body),
     )
+    return _with_rule_results(response, [*rule_results, *g.pop("exit_rule_results", [])])
 
 
 @orders_bp.route("/modify", methods=["POST"])

@@ -787,3 +787,56 @@ class TestNetWorthLedger:
         assert engine.get_capital()["current"] == pytest.approx(_DEFAULT_CAPITAL)
         assert engine.get_capital()["used_margin"] == pytest.approx(800.0)
         assert funds["ledger_balance"] == pytest.approx(_DEFAULT_CAPITAL - 800.0)
+
+
+@pytest.mark.unit
+class TestExitOnly:
+    """An exit ticket only reduces the open position, read under the engine lock."""
+
+    def _long(self, engine: SandboxEngine, quantity: int) -> None:
+        result = engine.place_order("RELIANCE", "NSE", "BUY", quantity, 100.0, "MIS")
+        assert result["status"] == "COMPLETE"
+
+    def test_quantity_above_the_position_is_cut_to_it(self, engine: SandboxEngine) -> None:
+        self._long(engine, 10)
+        result = engine.place_order("RELIANCE", "NSE", "SELL", 25, 101.0, "MIS", exit_only=True)
+        assert result["status"] == "COMPLETE"
+        assert result["rule_results"] == [
+            {
+                "level": "warn",
+                "source": "FlintTrade",
+                "rule_id": "exit-quantity-capped",
+                "message": "Quantity reduced to 10, the open position.",
+            }
+        ]
+        assert engine.get_positions() == []
+
+    def test_a_flat_position_refuses_the_exit(self, engine: SandboxEngine) -> None:
+        result = engine.place_order("RELIANCE", "NSE", "SELL", 10, 101.0, "MIS", exit_only=True)
+        assert result["status"] == "REJECTED"
+        assert result["message"] == "FlintTrade · Position is closed. Order not sent."
+        assert result["rule_results"][0]["rule_id"] == "exit-position-closed"
+        assert engine.get_orders() == []
+
+    def test_an_exit_after_the_position_closed_does_not_open_one(self, engine: SandboxEngine) -> None:
+        self._long(engine, 10)
+        assert engine.place_order("RELIANCE", "NSE", "SELL", 10, 101.0, "MIS")["status"] == "COMPLETE"
+        result = engine.place_order("RELIANCE", "NSE", "SELL", 10, 101.0, "MIS", exit_only=True)
+        assert result["status"] == "REJECTED"
+        assert engine.get_positions() == []
+
+    def test_a_short_is_covered_by_a_buy_exit(self, engine: SandboxEngine) -> None:
+        engine._conn.execute(
+            "INSERT INTO positions (symbol, exchange, product, net_qty, avg_price, updated_at) "
+            "VALUES ('RELIANCE', 'NSE', 'MIS', -5, 100.0, 0)"
+        )
+        result = engine.place_order("RELIANCE", "NSE", "BUY", 8, 99.0, "MIS", exit_only=True)
+        assert result["status"] == "COMPLETE"
+        assert result["rule_results"][0]["message"] == "Quantity reduced to 5, the open position."
+        assert [order["quantity"] for order in engine.get_orders()] == [5]
+
+    def test_a_same_side_exit_is_refused(self, engine: SandboxEngine) -> None:
+        self._long(engine, 10)
+        result = engine.place_order("RELIANCE", "NSE", "BUY", 5, 101.0, "MIS", exit_only=True)
+        assert result["status"] == "REJECTED"
+        assert result["rule_results"][0]["rule_id"] == "exit-position-closed"

@@ -178,6 +178,7 @@ describe("OrdersWidget", () => {
         widgetId: "orderpad",
         props: {
           symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, product: "MIS",
+          exitOnly: true, openQuantity: 75,
         },
       }]);
       expect(mockModifyOrder).not.toHaveBeenCalled();

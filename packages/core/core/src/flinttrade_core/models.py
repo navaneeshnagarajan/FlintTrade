@@ -96,6 +96,8 @@ class Order(BaseModel):
     entry_trigger_type: str | None = None
     stop_loss_trigger_type: str | None = None
     target_trigger_type: str | None = None
+    # An exit ticket: only reduces the open position, never opens one.
+    exit_only: bool = Field(default=False, strict=True)
 
     @model_validator(mode="before")
     @classmethod
