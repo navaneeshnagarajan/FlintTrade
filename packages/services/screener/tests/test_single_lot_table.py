@@ -77,6 +77,39 @@ def test_terminal_source_has_no_index_lot_literal() -> None:
     assert hits == []
 
 
+# A front-end lot that falls back to 1 when none is known.
+_TS_LOT_FALLBACK = re.compile(
+    r"\blot\w*\s*(?:\?\?|\|\|)\s*1\b"
+    r"|\.lotsize\s*>\s*0\s*\?\s*[\w.]+\s*:\s*1\b"
+    r"|LOT\w*\[[^\]\n]*\]\s*\?\?\s*1\b",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Qty: {lots} × {lotSize ?? 1} = {displayQuantity}",
+        "setLotSize(info.lotsize > 0 ? info.lotsize : 1);",
+        "return MCX_LOT_SIZES[symbol.toUpperCase()] ?? 1;",
+        "const lot = row.lot_size || 1;",
+    ],
+)
+def test_ts_lot_fallback_guard_catches_a_lot_of_one(line: str) -> None:
+    assert _TS_LOT_FALLBACK.search(line)
+
+
+def test_terminal_source_has_no_lot_fallback_of_one() -> None:
+    terminal = PACKAGES / "apps" / "terminal" / "src"
+    hits = [
+        f"{path.relative_to(REPO_ROOT)}: {match.group(0)}"
+        for pattern in ("*.ts", "*.tsx")
+        for path in terminal.rglob(pattern)
+        if "__tests__" not in path.parts and ".test." not in path.name
+        for match in _TS_LOT_FALLBACK.finditer(path.read_text(encoding="utf-8", errors="ignore"))
+    ]
+    assert hits == []
+
 def test_finnifty_is_60_everywhere() -> None:
     from flinttrade_backtest.strategies.ema_supertrend_dema import lot_size_for as ema_lot_size_for
     from flinttrade_backtest.strategies.options_short_straddle_indian import lot_size_for

@@ -215,17 +215,34 @@ describe("QuickTradeWidget", () => {
     });
   });
 
-  it("blocks derivative orders (fail closed) while the lot size is unverified", async () => {
+  it("disables Buy and Sell and names the underlying when the lot lookup fails", async () => {
     mockGetSymbol.mockRejectedValue(new Error("symbol not found"));
     renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
 
-    await screen.findByText(/Lot size unverified — orders blocked/);
+    expect(await screen.findByText("The lot size for BANKNIFTY isn't known.")).toBeInTheDocument();
+    const buy = screen.getByRole("button", { name: /buy 1 lot /i });
+    const sell = screen.getByRole("button", { name: /sell 1 lot /i });
+    expect(buy).toBeDisabled();
+    expect(sell).toBeDisabled();
+    fireEvent.click(buy);
+    fireEvent.click(sell);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Not placed. The lot size for BANKNIFTY26JUN56000CE isn't verified.")).toBeInTheDocument();
+  it("never sends a derivative at lot 1 when the broker reports no lot", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY26DECFUT",
+      exchange: "NFO",
+      lotsize: 0,
+      tick_size: 0.05,
     });
+    renderQuickTrade({ symbol: "NIFTY26DECFUT", exchange: "NFO" });
+
+    expect(await screen.findByText("The lot size for NIFTY isn't known.")).toBeInTheDocument();
+    expect(screen.queryByText(/Qty: 1 × 1/)).toBeNull();
+    const buy = screen.getByRole("button", { name: /buy 1 lot /i });
+    expect(buy).toBeDisabled();
+    fireEvent.click(buy);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import fixture from "@flinttrade/instrument-lots";
 import {
+  lotUnknownMessage,
   contractsFromRows,
   indexLotLine,
   instrumentLotRows,
@@ -169,5 +170,17 @@ describe("lotSizeFromMaster", () => {
     expect(65 % (lot as number)).not.toBe(0);
     expect(lotSizeFromMaster("NIFTY", shipped.rows, asOf)).toBe(65);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("lotUnknownMessage", () => {
+  it.each([
+    ["NIFTY26DEC24000CE", "NIFTY"],
+    ["NIFTY 24500 CE", "NIFTY"],
+    ["NIFTYNXT5026DECFUT", "NIFTYNXT50"],
+    ["BANKNIFTY26JUN56000CE", "BANKNIFTY"],
+    ["m&m26decfut", "M&M"],
+  ])("names %s by its underlying", (symbol, underlying) => {
+    expect(lotUnknownMessage(symbol)).toBe(`The lot size for ${underlying} isn't known.`);
   });
 });

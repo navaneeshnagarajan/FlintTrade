@@ -417,6 +417,15 @@ export function missingLotRefusal(contract: string): string {
   );
 }
 
+const EXPIRY_IN_SYMBOL = /^([A-Z0-9&-]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/;
+
+/** Refusal line for a contract with no known lot, naming its underlying. */
+export function lotUnknownMessage(symbol: string): string {
+  const underlying = underlyingOfDisplayedSymbol(symbol);
+  const name = EXPIRY_IN_SYMBOL.exec(underlying)?.[1] ?? underlying;
+  return `The lot size for ${name || symbol.trim().toUpperCase()} isn't known.`;
+}
+
 /** Underlying of a desk symbol, so a compact option still finds its master row. */
 export function underlyingOfDisplayedSymbol(symbol: string): string {
   const desk = deskContractName(symbol);

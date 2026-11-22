@@ -26,7 +26,7 @@ import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
-import { lotCountLabel } from "@/lib/instrumentLots";
+import { lotCountLabel, lotUnknownMessage } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -232,18 +232,23 @@ function QuickTradeWidget(props: WidgetProps) {
 
   // Real lot size for the instrument — null until confirmed by the backend.
   const [lotSize, setLotSize] = useState<number | null>(null);
+  const [lotLookupDone, setLotLookupDone] = useState(false);
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
     setLotSize(null);
+    setLotLookupDone(false);
     getSymbol(symbol, exchange)
       .then((info) => {
         if (cancelled) return;
-        // Equities report 0/1 — normalise to 1 so quantity = lots.
-        setLotSize(info.lotsize > 0 ? info.lotsize : 1);
+        // No lot is ever assumed. An equity without one trades lots as shares.
+        setLotSize(info.lotsize > 0 ? info.lotsize : null);
       })
       .catch(() => {
-        // Leave null — derivative orders stay blocked (fail closed).
+        // Leave null: derivative orders stay blocked.
+      })
+      .finally(() => {
+        if (!cancelled) setLotLookupDone(true);
       });
     return () => {
       cancelled = true;
@@ -379,6 +384,7 @@ function QuickTradeWidget(props: WidgetProps) {
   }, []);
 
   const displayQuantity = resolveQuantity();
+  const lotUnknown = displayQuantity == null;
 
   // Fail-closed empty state — no panel params and no workspace selection means
   // there is nothing safe to trade. Rendered after all hooks (hook-order rule).
@@ -456,7 +462,11 @@ function QuickTradeWidget(props: WidgetProps) {
           {/* Effective quantity — the trader must see the real order size */}
           {displayQuantity != null ? (
             <div className="text-xxs text-text-muted font-mono tabular-nums">
-              Qty: {lots} × {lotSize ?? 1} = {displayQuantity}
+              {lotSize != null ? `Qty: ${lots} × ${lotSize} = ${displayQuantity}` : `Qty: ${displayQuantity}`}
+            </div>
+          ) : lotLookupDone ? (
+            <div className="text-xxs text-warning" role="note">
+              {lotUnknownMessage(symbol)}
             </div>
           ) : (
             <div className="text-xxs text-warning" role="note">
@@ -507,7 +517,7 @@ function QuickTradeWidget(props: WidgetProps) {
         <div className="flex gap-2 mt-auto">
           <Button
             onClick={() => handleAction("BUY")}
-            disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
@@ -518,7 +528,7 @@ function QuickTradeWidget(props: WidgetProps) {
           </Button>
           <Button
             onClick={() => handleAction("SELL")}
-            disabled={isPending || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >
