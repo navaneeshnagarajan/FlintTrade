@@ -6,7 +6,7 @@ import pytest
 
 from types import SimpleNamespace
 
-from flinttrade_gateway.rate_limiter import EXCHANGE_ORDER_RATE_LIMIT, BrokerRateLimiter
+from flinttrade_gateway.rate_limiter import ORDER_RATE_LIMIT, BrokerRateLimiter
 
 pytestmark = pytest.mark.unit
 
@@ -57,8 +57,8 @@ def test_order_override_above_the_limit_or_disabled_is_clamped(configured, caplo
         rl = BrokerRateLimiter.from_capabilities(
             {"dhan": _cap(order=10, data=5)}, overrides={"dhan": {"order": configured}},
         )
-    assert rl._rate("dhan", "order") == EXCHANGE_ORDER_RATE_LIMIT == 10.0
-    assert "clamped to the exchange limit" in caplog.text
+    assert rl._rate("dhan", "order") == ORDER_RATE_LIMIT == 10.0
+    assert "clamped to 10 orders per second per exchange" in caplog.text
 
 
 def test_capability_order_rate_above_the_limit_is_clamped():
@@ -157,7 +157,7 @@ def test_apply_override_updates_only_specified_kinds():
     # A previously-unknown broker can be configured too.
     rl.apply_override("newbroker", data=3.0)
     assert rl._rate("newbroker", "data") == 3.0
-    assert rl._rate("newbroker", "order") == 10.0  # unset orders still get the exchange limit
+    assert rl._rate("newbroker", "order") == 10.0  # unset orders still get the order limit
 
 
 @pytest.mark.asyncio
@@ -376,3 +376,39 @@ def test_invalid_persisted_override_keeps_capability_caps_and_other_overrides(in
     )
     assert limiter.snapshot()["dhan"] == {"order": 2, "data": 5, "quote": 1}
     assert limiter.snapshot()["custom"] == {"order": 10, "data": 3, "quote": 0}
+
+
+@pytest.mark.asyncio
+async def test_nse_and_bse_each_get_ten_orders_per_second_per_broker():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(10):
+        await rl.acquire("dhan", "order", exchange="NSE")
+        await rl.acquire("dhan", "order", exchange="BSE")
+        await rl.acquire("kotakneo", "order", exchange="NSE")
+    assert clock.slept == []
+    await rl.acquire("dhan", "order", exchange="BSE")
+    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("cash", "derivatives"), [("NSE", "NFO"), ("NSE", "CDS"), ("BSE", "BFO"), ("BSE", "BCD")])
+async def test_derivatives_orders_share_the_budget_of_their_exchange(cash, derivatives):
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(5):
+        await rl.acquire("dhan", "order", exchange=cash)
+        await rl.acquire("dhan", "order", exchange=derivatives.lower())
+    assert clock.slept == []
+    await rl.acquire("dhan", "order", exchange=derivatives)
+    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+
+
+@pytest.mark.asyncio
+async def test_order_override_applies_to_every_exchange_bucket():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    await rl.acquire("dhan", "order", exchange="NSE")
+    await rl.acquire("dhan", "order", exchange="BSE")
+    rl.apply_override("dhan", order=2)
+    assert {key[2]: bucket.rate for key, bucket in rl._buckets.items()} == {"NSE": 2.0, "BSE": 2.0}

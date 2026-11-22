@@ -872,8 +872,12 @@ class BrokerRouter:
                 with self._write_condition:
                     self._lifecycle_faults[attempt_id] = type(exc).__name__
 
-    async def _throttle(self, adapter_id: str, kind: str) -> None:
-        if self._rate_limiter is not None:
+    async def _throttle(self, adapter_id: str, kind: str, order: Any = None) -> None:
+        if self._rate_limiter is None:
+            return
+        if kind == "order":
+            await self._rate_limiter.acquire(adapter_id, kind, exchange=self._order_exchange(order))
+        else:
             await self._rate_limiter.acquire(adapter_id, kind)
 
     @staticmethod
@@ -1027,7 +1031,7 @@ class BrokerRouter:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order")
+                await self._throttle(adapter_id, "order", signed_order)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1112,7 +1116,7 @@ class BrokerRouter:
                     raise SafetyBypassError(f"session {account_id!r} is read-only")
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order")
+                await self._throttle(adapter_id, "order", signed_order)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1216,7 +1220,7 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order")
+                await self._throttle(adapter_id, "order", signed_order)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1338,7 +1342,7 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_payload)
-                await self._throttle(adapter_id, "order")
+                await self._throttle(adapter_id, "order", signed_payload)
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,

@@ -56,13 +56,14 @@ describe("BrokerRateLimitsPanel", () => {
     expect(await screen.findByText(/No rate-limited brokers connected/i)).toBeInTheDocument();
   });
 
-  it("states the exchange order limit", async () => {
+  it("states the order limit per exchange", async () => {
     renderPanel();
     await screen.findByText("dhan");
-    expect(screen.getByText("Exchange limit: 10 orders per second.")).toBeInTheDocument();
+    expect(screen.getByText("Max 10 orders per second per exchange. Higher rates need exchange registration.")).toBeInTheDocument();
     expect(screen.getByLabelText(/dhan order rate/i)).toHaveAccessibleDescription(
-      "Exchange limit: 10 orders per second.",
+      "Max 10 orders per second per exchange. Higher rates need exchange registration.",
     );
+    expect(screen.queryByText(/Orders\/s can be/)).not.toBeInTheDocument();
   });
 
   it.each(["20", "10.5", "0"])("blocks saving an order rate of %s", async (value) => {

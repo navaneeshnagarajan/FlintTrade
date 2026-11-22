@@ -284,8 +284,8 @@ def _rate_limit_generation_lease(handler: Any) -> Any:
 def update_rate_limits() -> Any:
     """Set a broker's order/data API rate limit (requests/sec).
 
-    ``0`` means unlimited for data. The order rate is capped at the exchange
-    limit (10 per second): a higher value or ``0`` is saved and applied as 10.
+    ``0`` means unlimited for data. The order rate is capped at 10 per second
+    per exchange: a higher value or ``0`` is saved and applied as 10.
 
     Body: ``{ "broker_id": str, "order"?: number, "data"?: number }``. The change
     is applied live to the running limiter AND persisted to workspace.json

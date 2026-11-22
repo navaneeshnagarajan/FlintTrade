@@ -202,7 +202,7 @@ class _BlockingLimiter:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def acquire(self, _broker_id: str, _kind: str) -> None:
+    async def acquire(self, _broker_id: str, _kind: str, **_kwargs: object) -> None:
         self.entered.set()
         await self.release.wait()
 
@@ -557,10 +557,10 @@ async def test_rate_limiter_throttle_runs_before_dispatch(*, backend_lease_facto
     the broker call, and can only delay (never bypass) a dispatch."""
     class _SpyLimiter:
         def __init__(self) -> None:
-            self.acquired: list[tuple[str, str]] = []
+            self.acquired: list[tuple[str, str, str | None]] = []
 
-        async def acquire(self, broker_id: str, kind: str) -> None:
-            self.acquired.append((broker_id, kind))
+        async def acquire(self, broker_id: str, kind: str, *, exchange: str | None = None) -> None:
+            self.acquired.append((broker_id, kind, exchange))
 
     adapter = _FakeAdapter()
     limiter = _SpyLimiter()
@@ -572,7 +572,7 @@ async def test_rate_limiter_throttle_runs_before_dispatch(*, backend_lease_facto
     order = _order()
     ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     await router.place_order(_request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx)
-    assert limiter.acquired == [("dhan", "order")]
+    assert limiter.acquired == [("dhan", "order", order.exchange)]
     assert adapter.placed == [order]  # throttle did not block the (gated) dispatch
 
 
