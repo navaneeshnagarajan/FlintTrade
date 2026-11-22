@@ -734,6 +734,6 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
                     if type(identity) is str:
                         identities.add(identity)
             state["unresolved_entry_ids"] = sorted(identities)
-        state["assessment"] = {**unavailable, "reasons": ["primitive_source_unavailable", str(exc)]}
+        state["assessment"] = unavailable
     state["revision"] += 1
     return state["assessment"]

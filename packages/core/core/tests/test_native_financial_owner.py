@@ -48,10 +48,10 @@ def _facts() -> dict[str, Any]:
 
     now = int(time.time() * 1000)
     return {
-        "history_from_ms": now - 1000, "observed_at_ms": now,
+        "history_from_ms": now - 3_600_000, "observed_at_ms": now,
         "native_order_date": datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat(),
-        "tariff_ref": _ref("synthetic-tariff"), "tariff_from_ms": now - 1000,
-        "tariff_through_ms": now + 60000, "entries": [], "fees": [],
+        "tariff_ref": _ref("synthetic-tariff"), "tariff_from_ms": now - 3_600_000,
+        "tariff_through_ms": now + 3_600_000, "entries": [], "fees": [],
     }
 
 
