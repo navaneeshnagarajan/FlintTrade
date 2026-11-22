@@ -22,7 +22,7 @@
     },
     {
       "name": "anyio",
-      "version": "4.15.1",
+      "version": "4.16.0",
       "vulns": []
     },
     {
@@ -158,7 +158,7 @@
     },
     {
       "name": "dhanhq",
-      "version": "2.3.0rc1",
+      "version": "2.3.0",
       "vulns": []
     },
     {
@@ -168,7 +168,7 @@
     },
     {
       "name": "filelock",
-      "version": "4.2.1",
+      "version": "4.2.6",
       "vulns": []
     },
     {
@@ -263,7 +263,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.10",
+      "version": "0.37.0",
       "vulns": []
     },
     {
@@ -494,7 +494,38 @@
     {
       "name": "soupsieve",
       "version": "3.0.1",
-      "vulns": []
+      "vulns": [
+        {
+          "id": "CVE-2026-126191",
+          "fix_versions": [
+            "3.0.2"
+          ],
+          "aliases": [
+            "GHSA-6655-6qjp-jx7x"
+          ],
+          "description": "Soup Sieve: Exponential ReDoS in selector compilation via \\9-run in CSS_ESCAPES/IDENTIFIER"
+        },
+        {
+          "id": "CVE-2026-126193",
+          "fix_versions": [
+            "3.0.2"
+          ],
+          "aliases": [
+            "GHSA-7g44-g9rc-x53w"
+          ],
+          "description": "Soup Sieve: Uncontrolled recursion in CSS parser lets nested pseudo-class selectors exhaust the Python call stack"
+        },
+        {
+          "id": "CVE-2026-126190",
+          "fix_versions": [
+            "4.0.0"
+          ],
+          "aliases": [
+            "GHSA-mmhr-3c5m-f64f"
+          ],
+          "description": "Soup Sieve: Polynomial-time denial of service in the descendant combinator"
+        }
+      ]
     },
     {
       "name": "structlog",
@@ -558,7 +589,7 @@
     },
     {
       "name": "websockets",
-      "version": "17.2",
+      "version": "17.4",
       "vulns": []
     },
     {
@@ -596,9 +627,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-11-08T11:02:25.715752Z",
-    "audited_at": "2026-11-08T11:02:25.715752Z",
-    "requirements_lock_sha256": "cfbec0bd7fb648ca56b2c59dfc69bb4984fe401beb3c6b0cea4e23121265a8b7",
+    "generated_at": "2026-11-22T12:17:26.706781Z",
+    "audited_at": "2026-11-22T12:17:26.706781Z",
+    "requirements_lock_sha256": "2e7c4e73d6e563dd7a14efc806d7b2da62af23bf587234670b9ddea64534303e",
     "pip_audit_exit_code": 1
   }
 }
