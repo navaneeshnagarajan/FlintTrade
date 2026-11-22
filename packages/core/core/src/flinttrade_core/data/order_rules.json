@@ -349,7 +349,7 @@
       "authority": "broker",
       "level": "info",
       "source": "Dhan",
-      "description": "Dhan sends market orders, including triggered Super Order legs, as limit orders within about 10% of the last price.",
+      "description": "Dhan sends API market orders as limit orders with market price protection. The band depends on the instrument and time of day.",
       "check": "note",
       "scope": {
         "exchange": "all",
