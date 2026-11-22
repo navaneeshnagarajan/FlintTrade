@@ -718,7 +718,7 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
     except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
         # A moved primitive pin is refused, not stored as an entry. A real
         # missing source still retains the entries it could not evaluate.
-        if str(exc) == "primitive source generation changed" and _fully_exited(facts):
+        if str(exc) == "primitive source generation changed" and type(facts) is dict and _fully_exited(facts):
             state["unresolved_entry_ids"] = []
             try:
                 _retain_known_fills(state, facts, row.get("schema_version") == "2-options-1")
