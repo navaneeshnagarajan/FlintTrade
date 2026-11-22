@@ -155,6 +155,11 @@ def index_underlying(symbol: str) -> str | None:
 
 def unverified_freeze_quantity(symbol: str) -> int | None:
     """Unverified BSE freeze quantity in units for a SENSEX or BANKEX contract."""
+    entry = _unverified_freeze_entry(symbol)
+    return entry[1] if entry else None
+
+
+def _unverified_freeze_entry(symbol: str) -> tuple[str, int] | None:
     compact = "".join(str(symbol).upper().split())
     if compact.startswith(_BSE_UNLISTED_LONGER_NAMES):
         return None
@@ -166,7 +171,7 @@ def unverified_freeze_quantity(symbol: str) -> int | None:
         return None
     for name, limit in table.items():
         if compact.startswith(name):
-            return limit
+            return name, limit
     return None
 
 
@@ -257,11 +262,12 @@ def quantity_freeze_warning(
         return None
     if resolve_freeze_quantity(symbol, broker_freeze_qty) is not None:
         return None
-    limit = unverified_freeze_quantity(symbol)
-    if limit is None or quantity <= limit:
+    entry = _unverified_freeze_entry(symbol)
+    if entry is None or quantity <= entry[1]:
         return None
+    name, limit = entry
     return UNVERIFIED_FREEZE_WARNING.format(
-        symbol=order_symbol_label(symbol),
+        symbol=name,
         freeze=format_indian_quantity(limit),
     )
 

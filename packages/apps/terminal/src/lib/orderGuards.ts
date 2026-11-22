@@ -267,6 +267,10 @@ const BSE_UNLISTED_LONGER_NAMES = ["SENSEX50"];
 
 /** Unverified BSE freeze value for a SENSEX or BANKEX contract. */
 export function unverifiedFreezeQuantity(symbol: string): number | null {
+  return unverifiedFreezeEntry(symbol)?.[1] ?? null;
+}
+
+function unverifiedFreezeEntry(symbol: string): [string, number] | null {
   const compact = symbol.toUpperCase().replace(/\s+/g, "");
   if (BSE_UNLISTED_LONGER_NAMES.some((name) => compact.startsWith(name))) return null;
   const table = /(CE|PE)$/.test(compact)
@@ -276,7 +280,7 @@ export function unverifiedFreezeQuantity(symbol: string): number | null {
       : null;
   if (!table) return null;
   for (const [name, limit] of Object.entries(table)) {
-    if (compact.startsWith(name)) return limit;
+    if (compact.startsWith(name)) return [name, limit];
   }
   return null;
 }
@@ -364,10 +368,11 @@ export function quantityFreezeWarning(
 ): string | null {
   if (!Number.isInteger(quantity) || quantity < 1) return null;
   if (resolveFreezeQuantity(symbol, brokerFreezeQty) != null) return null;
-  const limit = unverifiedFreezeQuantity(symbol);
-  if (limit == null || quantity <= limit) return null;
+  const entry = unverifiedFreezeEntry(symbol);
+  if (entry == null || quantity <= entry[1]) return null;
+  const [name, limit] = entry;
   return UNVERIFIED_FREEZE_WARNING
-    .replace("{symbol}", orderSymbolLabel(symbol))
+    .replace("{symbol}", name)
     .replace("{freeze}", formatIndianQuantity(limit));
 }
 

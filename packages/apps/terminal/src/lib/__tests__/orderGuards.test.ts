@@ -344,7 +344,7 @@ describe("unverified BSE freeze values", () => {
   it("compares the SENSEX value with units, not lots", () => {
     expect(quantityFreezeWarning("SENSEX25DEC85000CE", 50 * 20)).toBeNull();
     expect(quantityFreezeWarning("SENSEX25DEC85000CE", 51 * 20)).toBe(
-      "Max per order for SENSEX25DEC85000CE may be 1,000 qty. Split if the broker rejects.",
+      "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects.",
     );
   });
 

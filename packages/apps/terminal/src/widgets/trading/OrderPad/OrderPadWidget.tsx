@@ -1711,6 +1711,7 @@ function OrderPadWidget(props: WidgetProps) {
                     ? `Lot: ${lotSize}`
                     : "";
                 const freezeWarning = quantityFreezeWarning(symbol, Number(field.value), brokerFreezeQty);
+                const qtyHintText = freezeWarning || quantityHint;
                 const stepperCaps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
                   .filter((value): value is number => value != null);
                 const stepperMax = stepperCaps.length > 0 ? Math.min(...stepperCaps) : undefined;
@@ -1734,9 +1735,10 @@ function OrderPadWidget(props: WidgetProps) {
                     <p
                       id="orderpad-qty-hint"
                       role={freezeWarning ? "status" : undefined}
-                      className={`min-h-4 text-xs leading-4 ${freezeWarning ? "text-warning" : "text-text-muted"}`}
+                      title={qtyHintText || undefined}
+                      className={`h-4 overflow-hidden text-ellipsis whitespace-nowrap text-xs leading-4 ${freezeWarning ? "text-warning" : "text-text-muted"}`}
                     >
-                      {freezeWarning || quantityHint || "\u00a0"}
+                      {qtyHintText || "\u00a0"}
                     </p>
                     <p
                       id="orderpad-qty-error"

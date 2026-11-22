@@ -85,7 +85,7 @@ def test_unverified_sensex_limit_warns_and_lets_the_order_continue(
             {"symbol": "SENSEX26DEC85000CE", "exchange": "BFO", "quantity": 1_020, "lot_size": 20}
         )
     assert blocked is None
-    assert "Max per order for SENSEX26DEC85000CE may be 1,000 qty. Split if the broker rejects." in caplog.text
+    assert "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects." in caplog.text
 
 
 @pytest.mark.unit

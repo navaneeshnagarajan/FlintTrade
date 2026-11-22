@@ -548,7 +548,7 @@ def test_sensex_warning_compares_units_not_lots():
     # A lot of 20 makes 1,000 units 50 lots.
     assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 50 * 20) is None
     assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 51 * 20) == (
-        "Max per order for SENSEX25DEC85000CE may be 1,000 qty. Split if the broker rejects."
+        "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects."
     )
     assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 51 * 20, lot_size=20) is None
 
@@ -556,7 +556,7 @@ def test_sensex_warning_compares_units_not_lots():
 def test_unverified_warning_names_the_symbol_and_freeze():
     assert qty_freeze.quantity_freeze_warning("SENSEX", 1_001) is None
     assert qty_freeze.quantity_freeze_warning("SENSEX26DECFUT", 520) == (
-        "Max per order for SENSEX26DECFUT may be 500 qty. Split if the broker rejects."
+        "Max per order for SENSEX may be 500 qty. Split if the broker rejects."
     )
 
 

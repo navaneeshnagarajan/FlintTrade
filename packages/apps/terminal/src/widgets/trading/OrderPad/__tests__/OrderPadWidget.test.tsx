@@ -1291,11 +1291,31 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(screen.queryByText(/may be 1,000 qty/)).not.toBeInTheDocument();
     fireEvent.change(qtyInput, { target: { value: "1020" } });
     expect(
-      await screen.findByText("Max per order for SENSEX26DEC85000CE may be 1,000 qty. Split if the broker rejects."),
+      await screen.findByText("Max per order for SENSEX may be 1,000 qty. Split if the broker rejects."),
     ).toHaveAttribute("role", "status");
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the quantity hint to one fixed line when the freeze warning shows", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "SENSEX26NOV2680000CE", name: "SENSEX", exchange: "BFO",
+      instrumenttype: "OPTIDX", lotsize: 20, tick_size: 0.05,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "SENSEX26NOV2680000CE", exchange: "BFO" },
+    })} />);
+    await screen.findByText("Lot: 20");
+    const hint = document.getElementById("orderpad-qty-hint") as HTMLElement;
+    const lineClasses = ["h-4", "leading-4", "overflow-hidden", "text-ellipsis", "whitespace-nowrap"];
+    expect(hint).toHaveClass(...lineClasses);
+    expect(hint.className).not.toMatch(/min-h-/);
+    fireEvent.change(document.getElementById("orderpad-qty") as HTMLInputElement, { target: { value: "1020" } });
+    const warning = "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects.";
+    expect(await screen.findByText(warning)).toBe(hint);
+    expect(hint).toHaveClass(...lineClasses);
+    expect(hint).toHaveAttribute("title", warning);
   });
 
   it("uses the selected contract freeze quantity ahead of the index table", async () => {
