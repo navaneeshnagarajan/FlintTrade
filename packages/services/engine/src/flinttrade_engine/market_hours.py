@@ -414,7 +414,7 @@ def derivative_contract_close(
         return special.close_time
     if venue not in _DERIVATIVE_EXCHANGES:
         try:
-            return get_standard_hours(venue)[1]
+            return get_standard_hours(venue, target_date)[1]
         except ValueError:
             return None
     if target_date < _CAS_REVISION:
@@ -448,11 +448,15 @@ def derivative_contract_close(
     return _NFO_CLOSE_REVISED
 
 
-def get_standard_hours(exchange: str) -> tuple[time, time]:
+def get_standard_hours(exchange: str, on: date | None = None) -> tuple[time, time]:
     """Return the standard (open, close) times for an exchange.
+
+    NFO and BFO close by session date, the same as :func:`get_market_hours`
+    without special sessions.
 
     Args:
         exchange: Exchange code (e.g. "NSE", "MCX").
+        on: Session date. Defaults to today in IST.
 
     Returns:
         Tuple of (open_time, close_time) in IST.
@@ -466,6 +470,9 @@ def get_standard_hours(exchange: str) -> tuple[time, time]:
             f"Unknown exchange: {exchange!r}. "
             f"Supported: {', '.join(sorted(STANDARD_HOURS.keys()))}"
         )
+    if exchange in _DERIVATIVE_EXCHANGES:
+        session_date = on if on is not None else datetime.now(_IST).date()
+        return (_NFO_OPEN, _nfo_segment_close(session_date))
     return hours
 
 
@@ -501,10 +508,7 @@ def get_market_hours(
         )
         return (special.open_time, special.close_time)
 
-    if exchange in _DERIVATIVE_EXCHANGES:
-        return (_NFO_OPEN, _nfo_segment_close(target_date))
-
-    return get_standard_hours(exchange)
+    return get_standard_hours(exchange, target_date)
 
 
 def add_special_session(session: SpecialTradingSession) -> None:

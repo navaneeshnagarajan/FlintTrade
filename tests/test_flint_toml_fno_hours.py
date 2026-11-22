@@ -60,3 +60,18 @@ def test_index_expiry_close_matches_the_clock():
 def test_deploy_freeze_covers_the_latest_fno_close():
     latest_close = _windows()[-1]["hours"].split("-")[1]
     assert _exchanges()["deploy_freeze"]["equity_end"] >= latest_close
+
+
+def test_fno_segments_carry_no_undated_hours():
+    for segment in ("NFO", "BFO"):
+        assert "hours" not in _exchanges()[segment]
+
+
+def test_standard_hours_match_the_window_for_each_date():
+    for window in _windows():
+        close_label = window["hours"].split("-")[1]
+        for key in ("from", "until"):
+            if key in window:
+                day = date.fromisoformat(window[key])
+                for segment in ("NFO", "BFO"):
+                    assert market_hours.get_standard_hours(segment, day)[1].strftime("%H:%M") == close_label

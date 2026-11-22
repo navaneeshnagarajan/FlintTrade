@@ -250,22 +250,32 @@ export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
 };
 
 /**
- * Unverified BSE limit for SENSEX index options, like the other BSE freeze
- * rows: it is not checked against a current BSE notice, and a broker
- * `freeze_qty` always wins. SENSEX futures have a different limit, so only
- * option symbols use this, and SENSEX50 is excluded.
+ * Unverified BSE freeze values in units, not lots. None is checked against a
+ * current BSE notice, so they never refuse an order: a larger quantity gets a
+ * warning when the broker sends no `freeze_qty`. SENSEX50 has no entry.
  */
-export const BSE_INDEX_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+export const BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   SENSEX: 1000,
+  BANKEX: 900,
+};
+export const BSE_UNVERIFIED_FUTURE_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  SENSEX: 500,
+  BANKEX: 900,
 };
 
 const BSE_UNLISTED_LONGER_NAMES = ["SENSEX50"];
 
-function bseIndexOptionFreeze(symbol: string): number | null {
+/** Unverified BSE freeze value for a SENSEX or BANKEX contract. */
+export function unverifiedFreezeQuantity(symbol: string): number | null {
   const compact = symbol.toUpperCase().replace(/\s+/g, "");
-  if (!/(CE|PE)$/.test(compact)) return null;
   if (BSE_UNLISTED_LONGER_NAMES.some((name) => compact.startsWith(name))) return null;
-  for (const [name, limit] of Object.entries(BSE_INDEX_OPTION_FREEZE_QUANTITY)) {
+  const table = /(CE|PE)$/.test(compact)
+    ? BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY
+    : compact.endsWith("FUT")
+      ? BSE_UNVERIFIED_FUTURE_FREEZE_QUANTITY
+      : null;
+  if (!table) return null;
+  for (const [name, limit] of Object.entries(table)) {
     if (compact.startsWith(name)) return limit;
   }
   return null;
@@ -293,6 +303,7 @@ export function orderSymbolLabel(symbol: string): string {
 
 /** Visible quantity sentences. Match engine admission so wording is one edit. */
 export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
+export const UNVERIFIED_FREEZE_WARNING = "Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.";
 export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
 export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
 
@@ -326,7 +337,7 @@ export function quantityCapLabel(lotSize: number, placeable: number): string {
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE index table, then the unverified BSE SENSEX options limit.
+ * NSE index table. Unverified BSE values only warn; see `quantityFreezeWarning`.
  */
 export function resolveFreezeQuantity(
   symbol: string,
@@ -336,8 +347,28 @@ export function resolveFreezeQuantity(
     return brokerFreezeQty;
   }
   const underlying = indexUnderlying(symbol);
-  if (!underlying) return bseIndexOptionFreeze(symbol);
+  if (!underlying) return null;
   return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
+}
+
+/**
+ * Warning for a quantity in units above an unverified BSE freeze value.
+ *
+ * Only when the broker sends no freeze quantity and no verified limit covers
+ * the symbol. The order is still allowed.
+ */
+export function quantityFreezeWarning(
+  symbol: string,
+  quantity: number,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  if (resolveFreezeQuantity(symbol, brokerFreezeQty) != null) return null;
+  const limit = unverifiedFreezeQuantity(symbol);
+  if (limit == null || quantity <= limit) return null;
+  return UNVERIFIED_FREEZE_WARNING
+    .replace("{symbol}", orderSymbolLabel(symbol))
+    .replace("{freeze}", formatIndianQuantity(limit));
 }
 
 /**

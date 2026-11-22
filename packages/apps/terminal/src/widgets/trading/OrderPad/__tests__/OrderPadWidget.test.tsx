@@ -1277,6 +1277,27 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("warns above the unverified SENSEX value and still opens the review", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "SENSEX26DEC85000CE", name: "SENSEX", exchange: "BFO",
+      instrumenttype: "OPTIDX", lotsize: 20, tick_size: 0.05,
+    });
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      params: { symbol: "SENSEX26DEC85000CE", exchange: "BFO" },
+    })} />);
+    await screen.findByText("Lot: 20");
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "1000" } });
+    expect(screen.queryByText(/may be 1,000 qty/)).not.toBeInTheDocument();
+    fireEvent.change(qtyInput, { target: { value: "1020" } });
+    expect(
+      await screen.findByText("Max per order for SENSEX26DEC85000CE may be 1,000 qty. Split if the broker rejects."),
+    ).toHaveAttribute("role", "status");
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("uses the selected contract freeze quantity ahead of the index table", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "BANKNIFTY-OCT2026-FUT", name: "BANKNIFTY", exchange: "NFO",

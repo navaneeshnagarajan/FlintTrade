@@ -70,6 +70,7 @@ import {
   maxPlaceableQuantity,
   quantityAdmissionRefusal,
   quantityCapLabel,
+  quantityFreezeWarning,
   checkPriceForOrderType,
   isDerivativeExchange,
   OPTIONS_EXCHANGES,
@@ -1709,6 +1710,7 @@ function OrderPadWidget(props: WidgetProps) {
                   : lotSize > 0
                     ? `Lot: ${lotSize}`
                     : "";
+                const freezeWarning = quantityFreezeWarning(symbol, Number(field.value), brokerFreezeQty);
                 const stepperCaps = [closeCap, placeable != null && placeable > 0 ? placeable : null]
                   .filter((value): value is number => value != null);
                 const stepperMax = stepperCaps.length > 0 ? Math.min(...stepperCaps) : undefined;
@@ -1729,8 +1731,12 @@ function OrderPadWidget(props: WidgetProps) {
                       invalid={!!errors.qty}
                       errorId={errors.qty ? "orderpad-qty-error" : "orderpad-qty-hint"}
                     />
-                    <p id="orderpad-qty-hint" className="min-h-4 text-xs leading-4 text-text-muted">
-                      {quantityHint || "\u00a0"}
+                    <p
+                      id="orderpad-qty-hint"
+                      role={freezeWarning ? "status" : undefined}
+                      className={`min-h-4 text-xs leading-4 ${freezeWarning ? "text-warning" : "text-text-muted"}`}
+                    >
+                      {freezeWarning || quantityHint || "\u00a0"}
                     </p>
                     <p
                       id="orderpad-qty-error"

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from flinttrade_engine import qty_freeze
-from flinttrade_engine.qty_freeze import QuantityFreezeManager
+from flinttrade_engine.qty_freeze import QuantityFreezeManager, quantity_admission_refusal
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +244,8 @@ def test_nse_defaults_seeded_on_fresh_db(tmp_path: Path) -> None:
     assert mgr.get_limit("MIDCPNIFTY", "NFO") == 2800
     assert mgr.get_limit("NIFTYNXT50", "NFO") == 600
     assert mgr.get_limit("NIFTYFPI", "NFO") == 8500
-    assert mgr.get_limit("SENSEX", "BFO") == 500
+    assert mgr.get_limit("SENSEX", "BFO") is None
+    assert mgr.get_limit("BANKEX", "BFO") is None
     mgr.close()
 
 
@@ -527,21 +528,51 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
     assert quantity_admission_refusal("SBIN", "NSE", 7) is None
 
 
-@pytest.mark.parametrize("symbol", ["SENSEX25DEC85000CE", "SENSEX 85000 PE"])
-def test_sensex_options_use_the_unverified_bse_limit(symbol):
-    assert qty_freeze.resolve_freeze_quantity(symbol) == 1_000
-
-
-@pytest.mark.parametrize("symbol", ["SENSEX25DECFUT", "SENSEX5025DEC30000CE"])
-def test_sensex_futures_and_sensex50_have_no_fallback(symbol):
+@pytest.mark.parametrize(
+    ("symbol", "freeze"),
+    [
+        ("SENSEX25DEC85000CE", 1_000),
+        ("SENSEX 85000 PE", 1_000),
+        ("SENSEX25DECFUT", 500),
+        ("BANKEX25DEC60000CE", 900),
+        ("BANKEX25DECFUT", 900),
+    ],
+)
+def test_unverified_bse_values_never_refuse(symbol, freeze):
     assert qty_freeze.resolve_freeze_quantity(symbol) is None
+    assert qty_freeze.unverified_freeze_quantity(symbol) == freeze
+    assert quantity_admission_refusal(symbol, "BFO", freeze * 10) is None
+    assert quantity_admission_refusal(symbol, "BFO", freeze * 10, lot_size=freeze) is None
 
 
-def test_broker_freeze_wins_for_sensex_options():
-    assert qty_freeze.resolve_freeze_quantity("SENSEX25DEC85000CE", 900) == 900
+def test_sensex_warning_compares_units_not_lots():
+    # A lot of 20 makes 1,000 units 50 lots.
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 50 * 20) is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 51 * 20) == (
+        "Max per order for SENSEX25DEC85000CE may be 1,000 qty. Split if the broker rejects."
+    )
+    assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 51 * 20, lot_size=20) is None
 
 
-def test_sensex_options_limit_sits_with_the_unverified_bse_rows():
-    assert "SENSEX" not in qty_freeze._NSE_INDEX_FREEZE
-    assert qty_freeze._BSE_INDEX_OPTION_FREEZE == {"SENSEX": 1_000}
-    assert set(qty_freeze._BSE_DEFAULTS) == {("SENSEX", "BFO"), ("BANKEX", "BFO")}
+def test_unverified_warning_names_the_symbol_and_freeze():
+    assert qty_freeze.quantity_freeze_warning("SENSEX", 1_001) is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX26DECFUT", 520) == (
+        "Max per order for SENSEX26DECFUT may be 500 qty. Split if the broker rejects."
+    )
+
+
+def test_broker_freeze_for_bse_is_still_enforced():
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 2_000, broker_freeze_qty=900) is None
+    assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 1_000, lot_size=20, broker_freeze_qty=900) == (
+        "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders."
+    )
+
+
+def test_sensex50_has_no_unverified_value():
+    assert qty_freeze.unverified_freeze_quantity("SENSEX5025DEC30000CE") is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX5025DEC30000CE", 100_000) is None
+
+
+def test_unverified_bse_values_are_not_in_the_verified_table():
+    assert not {"SENSEX", "BANKEX"} & set(qty_freeze._NSE_INDEX_FREEZE)
+    assert not any(exchange == "BFO" for _symbol, exchange in qty_freeze._NSE_DEFAULTS)

@@ -13,6 +13,8 @@ import {
   sliceOrderQuantities,
   NSE_INDEX_FREEZE_QUANTITY,
   resolveFreezeQuantity,
+  quantityFreezeWarning,
+  unverifiedFreezeQuantity,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -326,18 +328,37 @@ describe("needsLargeOrderConfirmation", () => {
   });
 });
 
-describe("SENSEX options freeze quantity", () => {
-  it("uses the unverified BSE limit for SENSEX options", () => {
-    expect(resolveFreezeQuantity("SENSEX25DEC85000CE")).toBe(1000);
-    expect(resolveFreezeQuantity("SENSEX 85000 PE")).toBe(1000);
+describe("unverified BSE freeze values", () => {
+  it.each([
+    ["SENSEX25DEC85000CE", 1000],
+    ["SENSEX 85000 PE", 1000],
+    ["SENSEX25DECFUT", 500],
+    ["BANKEX25DEC60000CE", 900],
+    ["BANKEX25DECFUT", 900],
+  ])("never refuses %s above %i", (symbol, freeze) => {
+    expect(resolveFreezeQuantity(symbol)).toBeNull();
+    expect(unverifiedFreezeQuantity(symbol)).toBe(freeze);
+    expect(quantityAdmissionRefusal(symbol, freeze * 10)).toBeNull();
+    expect(quantityAdmissionRefusal(symbol, freeze * 10, freeze)).toBeNull();
   });
 
-  it("leaves SENSEX futures and SENSEX50 to the broker", () => {
-    expect(resolveFreezeQuantity("SENSEX25DECFUT")).toBeNull();
-    expect(resolveFreezeQuantity("SENSEX5025DEC30000CE")).toBeNull();
+  it("compares the SENSEX value with units, not lots", () => {
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 50 * 20)).toBeNull();
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 51 * 20)).toBe(
+      "Max per order for SENSEX25DEC85000CE may be 1,000 qty. Split if the broker rejects.",
+    );
   });
 
-  it("prefers the broker freeze quantity", () => {
-    expect(resolveFreezeQuantity("SENSEX25DEC85000CE", 900)).toBe(900);
+  it("enforces a broker freeze quantity instead of warning", () => {
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 2000, 900)).toBeNull();
+    expect(quantityAdmissionRefusal("SENSEX25DEC85000CE", 1000, 20, 900)).toBe(
+      "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders.",
+    );
+  });
+
+  it("has no value for SENSEX50", () => {
+    expect(unverifiedFreezeQuantity("SENSEX5025DEC30000CE")).toBeNull();
+    expect(quantityFreezeWarning("SENSEX5025DEC30000CE", 100000)).toBeNull();
   });
 });
+
