@@ -68,8 +68,8 @@
       "id": "algo-market-orders-fo-rejected",
       "authority": "regulatory",
       "level": "block",
-      "source": "Regulation",
-      "description": "API market orders in F&O are sent as limit orders with price protection and may not fill in a fast market.",
+      "source": "Exchange",
+      "description": "NSE rejects API market orders in F&O. Brokers convert them to limit orders with price protection, which may not fill in a fast market.",
       "check": "note",
       "scope": {
         "exchange": "NSE",

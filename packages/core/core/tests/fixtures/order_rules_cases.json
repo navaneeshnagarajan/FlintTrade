@@ -478,7 +478,7 @@
       "expected": [
         {
           "level": "block",
-          "source": "Regulation",
+          "source": "Exchange",
           "rule_id": "algo-market-orders-fo-rejected",
           "message": "Market orders in F&O are not accepted — use a limit price."
         }
