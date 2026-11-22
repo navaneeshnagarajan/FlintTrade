@@ -229,6 +229,26 @@ interchangeable, and the venue has no default. Setup → Brokers still fails on 
 uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
+See [Broker static IP](#broker-static-ip).
+
+<a id="broker-static-ip"></a>
+
+### Broker static IP
+
+You register a static IP with your broker before API orders are sent.
+
+Changing the registered IP is limited to once every 7 days.
+
+Where your broker allows it, a static IP may be shared with family members
+(your spouse, dependent children and dependent parents). Some brokers require
+each person to register their own IP, so you should check with your broker.
+
+On Kotak Neo, the API sign-in itself must happen from the machine with the
+registered static IP, not only orders.
+
+If the broker refuses a request because it did not come from the registered
+IP, check that you are running FlintTrade on that machine and network.
+
 ### Why two layers?
 
 ---
@@ -983,6 +1003,9 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
 
+- [ ] You get a static IP and register it with your broker. See
+      [Broker static IP](#broker-static-ip).
+
 Operator and automate Live place run Mode guard → Laya.admit →
 SafetySystem → gate_order → BrokerRouter. Laya does not place the
 order. A refusal or a quantity clamp stops before SafetySystem.
@@ -1637,7 +1660,26 @@ two unlabelled ₹ on mixed bases.
 Open Automation (`/automation`). A bookmark of `/automate` opens the same screen. An Automation place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
-quantity on its own. The hub has three sub-tools:
+quantity on its own. The hub has three sub-tools. What you run here is
+your own automation. See
+[Running your own automation](#self-run-automation).
+
+<a id="self-run-automation"></a>
+
+### Running your own automation
+
+You run FlintTrade on your own computer, with your own broker account. It does
+not host execution or sell strategies or signals.
+
+Brokers may ask clients who write their own algorithms to sign an undertaking
+with them. Under that undertaking, losses caused by the logic of your own
+strategy or automation cannot be taken to the exchange's investor grievance
+process. Problems on the broker's side are not covered by this.
+
+You opt in to Live yourself.
+Chat cannot place Live orders.
+A spoken order request is a proposal you review. See
+[Speaking with the AI assistant](#speaking-with-the-ai-assistant).
 
 ### Cron
 
@@ -1692,10 +1734,11 @@ flashes the outage copy.
 
 ## 9. AI Centre walkthrough
 
-Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Analysis, Sentiment, and RAG are backed by
-`packages/services/ai`. Suggest is a local filter UI over an
-illustrative strategy list — not a live AI fetch. Suggest stays
-labelled illustrative.
+Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Analysis, Sentiment, and RAG run in your own app, backed by
+`packages/services/ai`. The Analysis panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order. Suggest is a local filter UI over an
+illustrative strategy list. It is not a live AI fetch. Suggest stays
+labelled illustrative. See
+[Running your own automation](#self-run-automation).
 
 ### Chat
 
@@ -1822,11 +1865,10 @@ card.
 
 ### Analysis
 
-The Analysis panel shows rule-based and ML-derived software outputs. An
-executor runs multiple generators in parallel and aggregates diagnostics.
-The analysis is worked out inside your own app from market data. It is not
-a recommendation to trade, and it is not financial advice. You decide
-whether to place any order.
+The **Analysis** panel shows analysis worked out inside your own app from
+market data. Several checks run at the same time, and the panel combines
+their results. It is not a recommendation to trade, and it is not financial
+advice. You decide whether to place any order.
 
 ### Sentiment
 
