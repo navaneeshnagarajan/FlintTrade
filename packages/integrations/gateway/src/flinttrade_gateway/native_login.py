@@ -134,13 +134,11 @@ def _is_auth_failure(exc: BaseException) -> bool:
     retry or maintenance phrasing is surfaced rather than masked. Typed first —
     adapters map 401/403/expired to the :class:`AuthError` subtree — with an
     unambiguous-message fallback for adapters that raise a generic exception.
-    ``BrokerSessionDegraded`` is excluded: its credentials are authentic (only a
-    runtime constraint blocks writes), so its session must be kept.
     """
-    from flinttrade_core.exceptions import AuthError, BrokerSessionDegraded  # noqa: PLC0415
+    from flinttrade_core.exceptions import AuthError  # noqa: PLC0415
 
     if isinstance(exc, AuthError):
-        return not isinstance(exc, BrokerSessionDegraded)
+        return True
     return any(marker in str(exc).lower() for marker in _AUTH_FAILURE_MARKERS)
 
 
