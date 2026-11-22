@@ -2,14 +2,17 @@
  * Synthetic component fixture. Never part of the production entry point.
  *
  * Mounts the ticket's reserved rule line with the shared order-rules
- * evaluator, and the stop-loss not-filled chip with Exit now. No backend:
- * every "order" here is only evaluated, and Exit now only opens a ticket.
+ * evaluator, the stop-loss not-filled chip with Exit now, and the Live
+ * acknowledgement. No backend: every "order" here is only evaluated, Exit now
+ * only opens a ticket, and accepting Live only moves on to the PIN step.
  */
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
+import { LiveAcknowledgementDialog } from "../src/components/LiveAcknowledgementDialog";
 import { OrderRuleLine } from "../src/components/orders/OrderRuleLine";
 import { StopLossNotFilledChip } from "../src/components/orders/StopLossNotFilledChip";
+import { pendingLiveAcknowledgement } from "../src/lib/liveAcknowledgement";
 import { evaluateOrderRules, hasBlockingRule } from "../src/lib/orderRules";
 import { exitNowTicket, isStopLossTriggeredNotFilled } from "../src/lib/stopLossState";
 import "../src/index.css";
@@ -77,9 +80,35 @@ function Book() {
   );
 }
 
+function LiveSwitch() {
+  const [text, setText] = useState("");
+  const [step, setStep] = useState("Practice");
+  const next = () => {
+    setText("");
+    setStep("PIN");
+  };
+  return (
+    <section aria-label="Mode" className="space-y-2">
+      <button
+        type="button"
+        onClick={() => {
+          const pending = pendingLiveAcknowledgement();
+          if (pending) setText(pending);
+          else next();
+        }}
+      >
+        Live
+      </button>
+      <output aria-label="Mode step">{step}</output>
+      <LiveAcknowledgementDialog text={text} onCancel={() => setText("")} onAccept={next} />
+    </section>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <main className="dark bg-surface-base text-text-primary min-h-screen p-6 max-w-3xl mx-auto space-y-6">
     <Ticket />
     <Book />
+    <LiveSwitch />
   </main>,
 );

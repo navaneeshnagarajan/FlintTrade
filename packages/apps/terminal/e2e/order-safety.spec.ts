@@ -57,3 +57,28 @@ test("a triggered stop that did not fill shows the chip, and Exit now opens a li
   await page.getByRole("button", { name: "Stop fills" }).click();
   await expect(chip).toHaveCount(0);
 });
+
+test("the first switch to Live asks once; Turn on Live stays disabled until ticked", async ({ page }) => {
+  const step = page.getByLabel("Mode step");
+  await page.getByRole("button", { name: "Live", exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog.getByRole("heading", { name: "Turn on Live" })).toBeVisible();
+  await expect(dialog).toContainText(
+    "Orders will be sent from this computer through your broker account. Losses from your own strategy or automation aren't covered by the exchange grievance process.",
+  );
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(step).toHaveText("Practice");
+
+  await page.getByRole("button", { name: "Live", exact: true }).click();
+  const confirm = dialog.getByRole("button", { name: "Turn on Live" });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel("I understand").check();
+  await confirm.click();
+  await expect(step).toHaveText("PIN");
+
+  await page.reload();
+  await page.getByRole("button", { name: "Live", exact: true }).click();
+  await expect(page.getByLabel("Mode step")).toHaveText("PIN");
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+});
