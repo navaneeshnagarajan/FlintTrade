@@ -480,18 +480,34 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("blocks a LIMIT order without a limit price instead of sending ₹0", async () => {
+  it("refuses a blank limit when the contract has no live premium", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    // Switch to LIMIT — the price input appears; leave it empty
     fireEvent.click(screen.getByText("LIMIT"));
     expect(screen.getByText("Limit ₹")).toBeInTheDocument();
 
     await buyCeWithConfirm();
 
-    await screen.findByText(/price above zero before placing a LIMIT order/);
+    await screen.findByText(/^No live premium for .+\. Enter a limit price\.$/);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("sends a blank limit at the contract's live premium", async () => {
+    mockTicks.current = new Proxy(
+      {},
+      { get: () => ({ ltp: 123.42, close: 120 }) },
+    ) as Record<string, { ltp?: number; close?: number }>;
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderType: "LIMIT", price: 123.4, quantity: 75 }),
+      );
+    });
   });
 
   it("sends the entered limit price with a LIMIT order", async () => {
@@ -499,7 +515,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
 
     await buyCeWithConfirm();
 
@@ -539,7 +555,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -565,7 +581,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
 
     await buyCeWithConfirm();
@@ -636,7 +652,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -659,7 +675,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -675,7 +691,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -696,7 +712,7 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (75)");
 
     fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();

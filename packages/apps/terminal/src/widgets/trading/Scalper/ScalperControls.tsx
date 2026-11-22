@@ -256,14 +256,14 @@ export function ScalperControls({
           onChange={(v) => onOrderTypeChange(v as OrderTypeValue)}
         />
 
-        {/* Limit price — required for LIMIT orders (₹0 limits are rejected) */}
+        {/* Blank sends at the contract's live premium */}
         {orderType === "LIMIT" && (
           <NumberInput
             label="Limit ₹"
             value={limitPrice}
             onChange={onLimitPriceChange}
             min={0}
-            placeholder="0.00"
+            placeholder="Live premium"
           />
         )}
 

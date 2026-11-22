@@ -29,6 +29,7 @@ import {
   brokerDisplayName,
   evaluateOrderRules,
   hasBlockingRule,
+  optionLimitPrice,
   ruleHeadline,
   stopLossTargetPlacement,
   type RuleResult,
@@ -356,8 +357,9 @@ function ScalperWidget(props: WidgetProps) {
     exch: string,
     action: OrderAction,
     lastPrice: number | null,
+    limit?: number,
   ): RuleResult[] => {
-    const price = orderType === "LIMIT" ? parseFloat(limitPrice) : NaN;
+    const price = orderType === "LIMIT" ? (limit ?? parseFloat(limitPrice)) : NaN;
     const slPts = slPoints.trim() === "" ? null : Number(slPoints);
     const tgtPts = targetPoints.trim() === "" ? null : Number(targetPoints);
     const shared = {
@@ -426,8 +428,19 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       // A LIMIT order must carry a real price — ₹0 is a guaranteed rejection
-      // (or worse, a lenient bridge could treat it as marketable).
-      const price = orderType === "LIMIT" ? parseFloat(limitPrice) : 0;
+      // (or worse, a lenient bridge could treat it as marketable). A blank
+      // limit takes the contract's live premium, as the option chain does.
+      const ruleTick = ticksRef.current[`${exch}:${sym}`];
+      const ruleLastPrice = ruleTick?.ltp ?? ruleTick?.close ?? null;
+      let price = orderType === "LIMIT" ? parseFloat(limitPrice) : 0;
+      if (orderType === "LIMIT" && limitPrice.trim() === "") {
+        const premium = optionLimitPrice(ruleTick?.ltp ?? null);
+        if (premium == null) {
+          showStatus(`No live premium for ${sym}. Enter a limit price.`, "error");
+          return;
+        }
+        price = premium;
+      }
       const priceRefusal = checkPriceForOrderType(
         orderType === "LIMIT" ? "LIMIT" : "MARKET",
         orderType === "LIMIT" ? price : 1,
@@ -438,8 +451,7 @@ function ScalperWidget(props: WidgetProps) {
       }
       const qty = lots * resolvedLot.size;
 
-      const ruleTick = ticksRef.current[`${exch}:${sym}`];
-      const ruleResults = presetRuleResults(sym, exch, action, ruleTick?.ltp ?? ruleTick?.close ?? null);
+      const ruleResults = presetRuleResults(sym, exch, action, ruleLastPrice, orderType === "LIMIT" ? price : undefined);
       if (hasBlockingRule(ruleResults)) {
         showStatus(ruleHeadline(ruleResults.filter((item) => item.level === "block")), "error", 6000);
         return;
