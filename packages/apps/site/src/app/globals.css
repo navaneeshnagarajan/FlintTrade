@@ -363,6 +363,8 @@ kbd {
 .brand-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 44px;
   min-height: 44px;
   gap: 10px;
   border-radius: 999px;
@@ -427,8 +429,8 @@ kbd {
 
 .theme-toggle button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   min-width: 44px;
   min-height: 44px;
   place-items: center;
@@ -1132,6 +1134,13 @@ kbd {
   padding: 0 8px;
 }
 
+.product-links a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .subpage {
   position: relative;
   z-index: 1;
@@ -1154,6 +1163,13 @@ kbd {
   color: var(--site-muted);
   font-size: 18px;
   line-height: 1.7;
+}
+
+.subpage p a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .subpage.subpage-tight {

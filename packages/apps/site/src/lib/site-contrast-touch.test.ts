@@ -245,10 +245,12 @@ describe('site touch targets from the stylesheet', () => {
     }
   });
 
-  it('gives the theme toggle a 44px hit area and keeps the icon small', () => {
+  it('gives the theme toggle a 44px box and keeps the icon centred', () => {
     const button = ruleBodies(css, '.theme-toggle button').join('\n');
     const icon = ruleBodies(css, '.theme-toggle svg').join('\n');
 
+    expect(pixel(button, 'width')).toBe(44);
+    expect(pixel(button, 'height')).toBe(44);
     expect(pixel(button, 'min-width')).toBeGreaterThanOrEqual(44);
     expect(pixel(button, 'min-height')).toBeGreaterThanOrEqual(44);
     expect(button).toMatch(/place-items:\s*center/);
@@ -256,16 +258,36 @@ describe('site touch targets from the stylesheet', () => {
     expect(pixel(icon, 'height')).toBe(14);
   });
 
-  it('gives the brand link a 44px height with centred contents', () => {
+  it('gives the brand link a 44px box with centred contents', () => {
     const link = ruleBodies(css, '.brand-link').join('\n');
 
+    expect(pixel(link, 'min-width')).toBeGreaterThanOrEqual(44);
     expect(pixel(link, 'min-height')).toBeGreaterThanOrEqual(44);
     expect(link).toMatch(/align-items:\s*center/);
+    expect(link).toMatch(/justify-content:\s*center/);
     for (const body of ruleBodies(css, '.brand-link')) {
-      for (const property of ['height', 'min-height']) {
+      for (const property of ['width', 'min-width', 'height', 'min-height']) {
         const value = pixel(body, property);
         if (value != null) expect(value, property).toBeGreaterThanOrEqual(44);
       }
     }
+  });
+
+  it('gives product links a 44px hit area', () => {
+    const links = ruleBodies(css, '.product-links a').join('\n');
+
+    expect(links).toMatch(/display:\s*inline-flex/);
+    expect(links).toMatch(/align-items:\s*center/);
+    assertFloor('.product-links a', 'width');
+    assertFloor('.product-links a', 'height');
+  });
+
+  it('gives the download release-history link a 44px hit area', () => {
+    const links = ruleBodies(css, '.subpage p a').join('\n');
+
+    expect(links).toMatch(/display:\s*inline-flex/);
+    expect(links).toMatch(/align-items:\s*center/);
+    assertFloor('.subpage p a', 'width');
+    assertFloor('.subpage p a', 'height');
   });
 });
