@@ -192,7 +192,7 @@ export default async function HomePage() {
           </div>
           <div>
             <strong>AGPL</strong>
-            <span>AGPL-3.0 requires published source when a modified copy runs as a network service.</span>
+            <span>AGPL-3.0: if you share a copy, or run a modified copy as a network service, make its source available to the people who receive or use it.</span>
           </div>
         </div>
       </section>
@@ -201,8 +201,8 @@ export default async function HomePage() {
         <div className="section-heading">
           <h2>The site is generated from the repository.</h2>
           <p>
-            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
-            contribution commands are generated into the site rather than rewritten in a second place.
+            Root docs, package READMEs, screenshots, and
+            contribution commands are generated into the site.
           </p>
         </div>
         <div className="feature-grid">

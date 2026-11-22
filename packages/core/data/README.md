@@ -8,9 +8,9 @@
 
 ## Public surface
 
-- `src/flinttrade_data/tick_recorder.py: local tick buffering/storage; native capture unavailable`
-- `src/flinttrade_data/audit_logger.py: append-only audit trail`
-- `src/flinttrade_data/questdb_bridge.py: ILP-based ingestion`
+- `src/flinttrade_data/tick_recorder.py`: local tick buffering/storage; native capture unavailable
+- `src/flinttrade_data/audit_logger.py`: append-only audit trail
+- `src/flinttrade_data/questdb_bridge.py`: ILP-based ingestion
 
 (See the source for the full surface.)
 

@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/flinttrade_core/app.py: Flask app factory + blueprint registration`
-- `src/flinttrade_core/broker_client.py: frozen read facade: HTTP reads return 409; background consumers return 503`
-- `src/flinttrade_core/auth_service.py: argon2id passwords + Fernet TOTP + JWT issuance`
-- `src/flinttrade_core/config.py / src/flinttrade_core/workspace.py: env + workspace.json loaders`
+- `src/flinttrade_core/app.py`: Flask app factory + blueprint registration
+- `src/flinttrade_core/broker_client.py`: frozen read facade: HTTP reads return 409; background consumers return 503
+- `src/flinttrade_core/auth_service.py`: argon2id passwords + Fernet TOTP + JWT issuance
+- `src/flinttrade_core/config.py` / `src/flinttrade_core/workspace.py`: env + workspace.json loaders
 
 (See the source for the full surface.)
 

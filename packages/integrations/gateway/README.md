@@ -8,12 +8,12 @@
 
 ## Public surface
 
-- `src/flinttrade_gateway/adapter.py: BrokerAdapter Protocol + BROKER_CATALOG`
-- `src/flinttrade_gateway/router.py: BrokerRouter: dispatches broker writes only after SafetyContext verification`
-- `src/flinttrade_gateway/registry.py: native account and session registry over the 6-broker catalogue`
-- `src/flinttrade_gateway/brokers/: native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww, Delta Exchange) against the BrokerAdapter ABC`
-- `src/flinttrade_gateway/credentials.py: Fernet-encrypted credential vault`
-- `src/flinttrade_gateway/ws_bridge.py: local TickDispatcher queues and latest-tick cache; no network server`
+- `src/flinttrade_gateway/adapter.py`: BrokerAdapter Protocol + BROKER_CATALOG
+- `src/flinttrade_gateway/router.py`: BrokerRouter: dispatches broker writes only after SafetyContext verification
+- `src/flinttrade_gateway/registry.py`: native account and session registry over the 6-broker catalogue
+- `src/flinttrade_gateway/brokers/`: native per-broker adapters (Dhan, Upstox, Kotak Neo, INDmoney, Groww, Delta Exchange) against the BrokerAdapter ABC
+- `src/flinttrade_gateway/credentials.py`: Fernet-encrypted credential vault
+- `src/flinttrade_gateway/ws_bridge.py`: local TickDispatcher queues and latest-tick cache; no network server
 
 (See the source for the full surface.)
 

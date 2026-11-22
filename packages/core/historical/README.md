@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/flinttrade_historical/downloader.py: synchronous date chunking; default native broker history unavailable`
-- `src/flinttrade_historical/free_data.py: independent OpenChart + yfinance free-data downloads`
-- `src/flinttrade_historical/pipeline.py: local DuckDB storage for supplied and free-data bars`
-- `src/flinttrade_historical/expiry_tracker.py: monthly + weekly expiry calendar for NSE F&O / MCX`
+- `src/flinttrade_historical/downloader.py`: synchronous date chunking; default native broker history unavailable
+- `src/flinttrade_historical/free_data.py`: independent OpenChart + yfinance free-data downloads
+- `src/flinttrade_historical/pipeline.py`: local DuckDB storage for supplied and free-data bars
+- `src/flinttrade_historical/expiry_tracker.py`: monthly + weekly expiry calendar for NSE F&O / MCX
 
 (See the source for the full surface.)
 

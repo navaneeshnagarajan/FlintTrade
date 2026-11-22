@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/flinttrade_backtest/simulator.py: single-strategy event-driven backtest`
-- `src/flinttrade_backtest/engine.py: entry point used by the Lab route and CLI`
-- `src/flinttrade_backtest/portfolio_backtest.py: multi-strategy portfolio runs via VectorBT`
-- `src/flinttrade_backtest/strategies/: 94 ready-to-run template modules` (`_indicators.py` and `_mixin.py` are helpers, not templates)
+- `src/flinttrade_backtest/simulator.py`: single-strategy event-driven backtest
+- `src/flinttrade_backtest/engine.py`: entry point used by the Lab route and CLI
+- `src/flinttrade_backtest/portfolio_backtest.py`: multi-strategy portfolio runs via VectorBT
+- `src/flinttrade_backtest/strategies/`: 94 ready-to-run template modules (`_indicators.py` and `_mixin.py` are helpers, not templates)
 
 (See the source for the full surface.)
 

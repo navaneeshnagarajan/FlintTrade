@@ -8,8 +8,8 @@
 
 ## Public surface
 
-- `src/flinttrade_automation/cron_manager.py: workspace.json-backed scheduled jobs`
-- `src/flinttrade_automation/telegram_bot.py: passive notifications + emergency kill switch`
+- `src/flinttrade_automation/cron_manager.py`: workspace.json-backed scheduled jobs
+- `src/flinttrade_automation/telegram_bot.py`: passive notifications + emergency kill switch
 
 (See the source for the full surface.)
 

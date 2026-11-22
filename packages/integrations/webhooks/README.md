@@ -8,7 +8,7 @@
 
 ## Public surface
 
-- `src/flinttrade_webhooks/webhook_receiver.py: HMAC-validated webhook intake`
+- `src/flinttrade_webhooks/webhook_receiver.py`: HMAC-validated webhook intake
 
 (See the source for the full surface.)
 

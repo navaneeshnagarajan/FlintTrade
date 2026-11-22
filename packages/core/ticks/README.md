@@ -8,9 +8,9 @@
 
 ## Public surface
 
-- `src/lib.rs: PyO3 module entry`
-- `src/types.rs: core Tick / Signal / BacktestResult types`
-- `Cargo.toml: crate metadata and dependencies`
+- `src/lib.rs`: PyO3 module entry
+- `src/types.rs`: core Tick / Signal / BacktestResult types
+- `Cargo.toml`: crate metadata and dependencies
 
 (See the source for the full surface.)
 

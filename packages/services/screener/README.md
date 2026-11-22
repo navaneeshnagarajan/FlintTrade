@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/flinttrade_screener/option_chain.py: strike-by-strike chain with Greeks`
-- `src/flinttrade_screener/oi_analysis.py: OI analysis, PCR, and max-pain`
-- `src/flinttrade_screener/rrg.py: Relative Rotation Graph`
-- `src/flinttrade_screener/fundamental_screener.py: Screener.in-style fundamentals`
+- `src/flinttrade_screener/option_chain.py`: strike-by-strike chain with Greeks
+- `src/flinttrade_screener/oi_analysis.py`: OI analysis, PCR, and max-pain
+- `src/flinttrade_screener/rrg.py`: Relative Rotation Graph
+- `src/flinttrade_screener/fundamental_screener.py`: Screener.in-style fundamentals
 
 (See the source for the full surface.)
 

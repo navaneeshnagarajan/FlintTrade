@@ -8,11 +8,11 @@
 
 ## Public surface
 
-- `src/flinttrade_indicators/trend.py: SMA, EMA, MACD, ADX`
-- `src/flinttrade_indicators/momentum.py: RSI, Stochastic, ROC, MFI`
-- `src/flinttrade_indicators/oscillators.py: CCI, Williams %R, TRIX`
-- `src/flinttrade_indicators/volatility.py: ATR, Bollinger Bands, Keltner Channels`
-- `src/flinttrade_indicators/volume.py: OBV, Chaikin, VWAP`
+- `src/flinttrade_indicators/trend.py`: SMA, EMA, MACD, ADX
+- `src/flinttrade_indicators/momentum.py`: RSI, Stochastic, ROC, MFI
+- `src/flinttrade_indicators/oscillators.py`: CCI, Williams %R, TRIX
+- `src/flinttrade_indicators/volatility.py`: ATR, Bollinger Bands, Keltner Channels
+- `src/flinttrade_indicators/volume.py`: OBV, Chaikin, VWAP
 
 (See the source for the full surface.)
 

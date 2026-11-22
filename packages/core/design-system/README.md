@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src/index.ts: public design-system exports`
-- `src/brand/index.ts: logo and brand primitives`
-- `src/layers.ts: shared overlay stacking contract`
-- `src/tokens.css: Tailwind v4 design tokens`
+- `src/index.ts`: public design-system exports
+- `src/brand/index.ts`: logo and brand primitives
+- `src/layers.ts`: shared overlay stacking contract
+- `src/tokens.css`: Tailwind v4 design tokens
 
 (See the source for the full surface.)
 

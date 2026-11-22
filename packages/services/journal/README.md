@@ -8,9 +8,9 @@
 
 ## Public surface
 
-- `src/flinttrade_journal/trade_journal.py: journal-entry model and storage helpers`
-- `src/flinttrade_journal/order_analytics.py: execution-quality analytics`
-- `src/flinttrade_journal/pnl_tracker.py: realised P&L calculations`
+- `src/flinttrade_journal/trade_journal.py`: journal-entry model and storage helpers
+- `src/flinttrade_journal/order_analytics.py`: execution-quality analytics
+- `src/flinttrade_journal/pnl_tracker.py`: realised P&L calculations
 
 (See the source for the full surface.)
 

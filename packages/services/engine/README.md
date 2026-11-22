@@ -8,11 +8,11 @@
 
 ## Public surface
 
-- `src/flinttrade_engine/safety.py: five-layer order-admission safety, explicit L5 kill switch, and account-scoped MTM circuit breaker`
-- `src/flinttrade_engine/strategy_execution.py: gated scheduled-strategy execution through BrokerRouter`
-- `src/flinttrade_engine/strategy.py: base class for live strategies`
-- `src/flinttrade_engine/sandbox_executor.py: user-strategy execution with AST guard`
-- `src/flinttrade_engine/mode_guard.py: server-side mode-claim enforcement (explore for example data, practice, and live)`
+- `src/flinttrade_engine/safety.py`: five-layer order-admission safety, explicit L5 kill switch, and account-scoped MTM circuit breaker
+- `src/flinttrade_engine/strategy_execution.py`: gated scheduled-strategy execution through BrokerRouter
+- `src/flinttrade_engine/strategy.py`: base class for live strategies
+- `src/flinttrade_engine/sandbox_executor.py`: user-strategy execution with AST guard
+- `src/flinttrade_engine/mode_guard.py`: server-side mode-claim enforcement (explore for example data, practice, and live)
 
 (See the source for the full surface.)
 

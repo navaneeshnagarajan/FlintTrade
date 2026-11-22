@@ -213,7 +213,7 @@ control plane only.
 
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
-after persisted REST smoke evidence, and is never placeable Live;
+after a saved REST read succeeds, and it does not place Live orders;
 Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
 async market and order feeds are wired and locally tested with synthetic SDK
 clients, but no live-account or market-hours stream proof has been recorded.
@@ -394,8 +394,8 @@ for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome normally says **Unavailable** or **Degraded** plus the failure
 in plain words, never **Connected** or **Connected (read)**. Failure class
 Laya is the exception: Broker may stay **Connected** or **Connected (read)**
-while Live place stay muted. Other money-path
-classes mute Live place the same way, with one
+while Live orders stay muted. Other money-path
+classes mute Live orders the same way, with one
 rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
@@ -452,7 +452,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked for a slower request rate. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked: Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place stay closed. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked: Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live orders stay blocked. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice place is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info: Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -914,10 +914,10 @@ Chain expiry list for that symbol/exchange. When the list is
 non-empty, the expiry control is shown and charts/statistics cover
 only the selected expiry (the chain’s selected expiry when both
 widgets are open; otherwise the nearest listed). Example-data
-expiries stay listed. The Mode honesty line is the disclosure. There
+expiries stay listed. The line under the TopBar says this is example data. There
 is no second Example chip on the chain. No expiries or no
-OI is an honest empty: `No expiries for this symbol` or
-`No OI for this expiry`, with no bars and no PCR/max-pain stats.
+OI shows `No expiries for this symbol` or
+`No OI for this expiry`, with no bars and no PCR or max-pain figures.
 The widget never pairs “No expiries” with generic or sample bars.
 
 With example data, Terminal Watchlist checked LTP and % change columns
@@ -933,8 +933,8 @@ An empty watchlist never silently retargets
 .
 
 With example data, Terminal → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
-stay disarmed, in the same honesty class as Settings → Telegram
-**Test Send**. They never open Confirm Order and never place.
+stay off, as Settings → Telegram
+**Test Send** stays off on example data. They never open Confirm Order and never place.
 Helper: `Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.` **1-CLICK**
 stays OFF and disabled; its title is `One-click is unavailable for Example`. Sample quote preview is allowed; there is no Confirm
 BUY / Confirm SELL chrome. Practice and Live open Confirm only
@@ -1544,9 +1544,9 @@ Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
 selected expiry and symbol. Example data does not
-invent live OI. The Mode honesty line is the disclosure.
+invent live OI. The line under the TopBar says this is example data.
 There is no second Example chip on the chain strip. An empty expiry
-is an honest empty, not zeros-as-data.
+shows no figures, not zeros.
 
 ### OI Analytics
 
@@ -1560,8 +1560,8 @@ OI Chart shares Option Chain expiries for the symbol/exchange. The
 expiry control appears when that list is non-empty; charts and
 statistics cover only the selected expiry (the chain’s selection
 when both widgets are open; otherwise the nearest listed). Example-data
-expiries stay listed. The Mode honesty line is the disclosure.
-Expiries and the OI Chart are not badged Sample. Empty states
+expiries stay listed. The line under the TopBar says this is example data.
+Expiries and the OI Chart are not marked Sample. Empty states
 are honest: `No expiries for this symbol` or `No OI for this expiry`,
 with no bars and no PCR/max-pain stats. They never show “No expiries” over
 fake or generic bars.
@@ -1662,8 +1662,7 @@ two unlabelled ₹ on mixed bases.
 Open Automation (`/automation`). A bookmark of `/automate` opens the same screen. An Automation place is admitted before the safety layers,
 the same as an operator place. A clamp comes back as a dispatcher error.
 It does not open a desk confirm, and it does not place the reduced
-quantity on its own. The hub has three sub-tools. Execution stays on
-your computer. See
+quantity on its own. The hub has three sub-tools. Automations you run here are your own. See
 [Running your own automation](#self-run-automation).
 
 <a id="self-run-automation"></a>
@@ -1725,7 +1724,7 @@ the muted empty state `No execution logs for Example. Switch to Practice or Live
 load logs. Backend may be offline.` while the app is live and example data
 is showing. In Practice or Live, a successful
 load with no rows for the selected date shows `No execution logs for this
-date.`. That is not an outage. The red `Failed to load logs. Backend may be
+date.` That is not an outage. The red `Failed to load logs. Backend may be
 offline.` line (or Retry) is reserved for a real request failure. While
 logs are loading, the view shows a spinner / `Loading logs…` and never
 flashes the outage copy.
@@ -1819,9 +1818,9 @@ AI Chat live-read context: when an LLM is configured, Chat may
 use Practice simulated fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
-does not place Live orders. Live orders stay refused. Chat never
+cannot place Live orders. Chat never
 shows **Admit** or **Approved by Laya**. This does
-not lift the native broker HTTP freeze and does not claim every Chat
+not start broker account calls, and it does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
 When Chat is connected, the badge reads **Connected (suggest only)**.
 Suggest stays labelled illustrative and is not this live-read path.
@@ -1867,10 +1866,7 @@ card.
 
 ### Signals
 
-The **Signals** panel shows analysis worked out inside your own app from
-market data. Several checks run at the same time, and the panel combines
-their results. It is not a recommendation to trade, and you decide whether
-to place any order.
+The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order.
 
 ### Sentiment
 
@@ -2273,7 +2269,7 @@ Order Pad and Quick Trade show this under the place controls. Scalper,
 Positions, Order Ladder, and Option Chain may still show a place error
 as a toast.
 
-1. **Laya denied.** Read the server reason under the headline. The
+1. **Laya denied**. Read the server reason under the headline. The
    denial is one alert (`role="alert"`), the only live region. The reason
    line is named **Laya decision** and is not its own status. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
