@@ -535,7 +535,6 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
         ("SENSEX 85000 PE", 1_000),
         ("SENSEX25DECFUT", 500),
         ("BANKEX25DEC60000CE", 900),
-        ("BANKEX25DECFUT", 900),
     ],
 )
 def test_unverified_bse_values_never_refuse(symbol, freeze):
@@ -566,6 +565,13 @@ def test_broker_freeze_for_bse_is_still_enforced():
     assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 1_000, lot_size=20, broker_freeze_qty=900) == (
         "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders."
     )
+
+
+def test_bankex_futures_have_no_unverified_value():
+    assert qty_freeze.unverified_freeze_quantity("BANKEX25DECFUT") is None
+    assert qty_freeze.quantity_freeze_warning("BANKEX25DECFUT", 100_000) is None
+    assert qty_freeze.resolve_freeze_quantity("BANKEX25DECFUT") is None
+    assert quantity_admission_refusal("BANKEX25DECFUT", "BFO", 99_990, lot_size=30) is None
 
 
 def test_sensex50_has_no_unverified_value():

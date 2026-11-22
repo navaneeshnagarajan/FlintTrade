@@ -252,7 +252,8 @@ export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
 /**
  * Unverified BSE freeze values in units, not lots. None is checked against a
  * current BSE notice, so they never refuse an order: a larger quantity gets a
- * warning when the broker sends no `freeze_qty`. SENSEX50 has no entry.
+ * warning when the broker sends no `freeze_qty`. BANKEX has a value for
+ * options only. SENSEX50 has no entry.
  */
 export const BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   SENSEX: 1000,
@@ -260,7 +261,6 @@ export const BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY: Readonly<Record<string, numb
 };
 export const BSE_UNVERIFIED_FUTURE_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   SENSEX: 500,
-  BANKEX: 900,
 };
 
 const BSE_UNLISTED_LONGER_NAMES = ["SENSEX50"];

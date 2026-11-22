@@ -334,7 +334,6 @@ describe("unverified BSE freeze values", () => {
     ["SENSEX 85000 PE", 1000],
     ["SENSEX25DECFUT", 500],
     ["BANKEX25DEC60000CE", 900],
-    ["BANKEX25DECFUT", 900],
   ])("never refuses %s above %i", (symbol, freeze) => {
     expect(resolveFreezeQuantity(symbol)).toBeNull();
     expect(unverifiedFreezeQuantity(symbol)).toBe(freeze);
@@ -354,6 +353,12 @@ describe("unverified BSE freeze values", () => {
     expect(quantityAdmissionRefusal("SENSEX25DEC85000CE", 1000, 20, 900)).toBe(
       "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders.",
     );
+  });
+
+  it("has no value for BANKEX futures", () => {
+    expect(unverifiedFreezeQuantity("BANKEX25DECFUT")).toBeNull();
+    expect(quantityFreezeWarning("BANKEX25DECFUT", 100000)).toBeNull();
+    expect(quantityAdmissionRefusal("BANKEX25DECFUT", 99990, 30)).toBeNull();
   });
 
   it("has no value for SENSEX50", () => {

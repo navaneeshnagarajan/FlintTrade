@@ -121,10 +121,11 @@ _NSE_INDEX_FREEZE: dict[str, int] = {
 # BSE limits are unverified: none of them is checked against a current BSE
 # notice. They never refuse an order. When the broker sends no freeze_qty and
 # the quantity is above one of them, the order continues with a warning.
-# Quantities are in units, not lots. SENSEX50 starts with the same letters as
+# Quantities are in units, not lots. BANKEX has a value for options only.
+# SENSEX50 starts with the same letters as
 # SENSEX and has no entry.
 _BSE_UNVERIFIED_OPTION_FREEZE: dict[str, int] = {"SENSEX": 1_000, "BANKEX": 900}
-_BSE_UNVERIFIED_FUTURE_FREEZE: dict[str, int] = {"SENSEX": 500, "BANKEX": 900}
+_BSE_UNVERIFIED_FUTURE_FREEZE: dict[str, int] = {"SENSEX": 500}
 _BSE_UNLISTED_LONGER_NAMES: tuple[str, ...] = ("SENSEX50",)
 
 # Well-known defaults seeded when no CSV is loaded. The NSE table changes from
