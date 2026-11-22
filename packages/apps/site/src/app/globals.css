@@ -1165,11 +1165,13 @@ kbd {
   line-height: 1.7;
 }
 
-.subpage p a {
+.release-history-link {
   display: inline-flex;
   align-items: center;
   min-width: 44px;
   min-height: 44px;
+  padding-block: calc((44px - 1lh) / 2);
+  margin-block: calc((1lh - 44px) / 2);
 }
 
 .subpage.subpage-tight {

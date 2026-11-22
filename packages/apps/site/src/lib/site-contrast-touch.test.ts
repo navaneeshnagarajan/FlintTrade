@@ -282,12 +282,18 @@ describe('site touch targets from the stylesheet', () => {
     assertFloor('.product-links a', 'height');
   });
 
-  it('gives the download release-history link a 44px hit area', () => {
-    const links = ruleBodies(css, '.subpage p a').join('\n');
+  it('scopes the 44px release-history target so paragraph links stay in the line', () => {
+    const download = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
+    const link = ruleBodies(css, '.release-history-link').join('\n');
 
-    expect(links).toMatch(/display:\s*inline-flex/);
-    expect(links).toMatch(/align-items:\s*center/);
-    assertFloor('.subpage p a', 'width');
-    assertFloor('.subpage p a', 'height');
+    expect(download.match(/className="release-history-link"/g)).toHaveLength(2);
+    expect(ruleBodies(css, '.subpage p a')).toHaveLength(0);
+    expect(css).not.toMatch(/\.subpage\s+p\s+a\s*\{[^}]*min-height\s*:\s*44px/);
+    expect(link).toMatch(/display:\s*inline-flex/);
+    expect(link).toMatch(/align-items:\s*center/);
+    expect(pixel(link, 'min-height')).toBeGreaterThanOrEqual(44);
+    expect(pixel(link, 'min-width')).toBeGreaterThanOrEqual(44);
+    expect(link).toMatch(/padding-block:\s*calc\(\(44px - 1lh\) \/ 2\)/);
+    expect(link).toMatch(/margin-block:\s*calc\(\(1lh - 44px\) \/ 2\)/);
   });
 });
