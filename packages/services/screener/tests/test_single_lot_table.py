@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PACKAGES = REPO_ROOT / "packages"
 
@@ -20,6 +22,15 @@ _LOT_TABLE_LITERAL = re.compile(r"^\s*(?P<name>\w*LOT\w*)\s*(?::[^=\n]*)?=\s*(?:
 # A front-end lot table (a ``*LOT*`` record) that lists an NSE index.
 _TS_INDEX_LOT = re.compile(r"\w*LOT\w*[^=\n]*=\s*\{[^}]*\b(?:FINNIFTY|BANKNIFTY|MIDCPNIFTY)\b", re.IGNORECASE)
 
+# A guessed lot used when none is known: an annotated default, the default of a
+# ``.get("lot_size", ...)``, or the fallback of a lot table ``.get``. 0 and 1
+# mean "no lot" and are allowed.
+_LOT_DEFAULT_LITERAL = re.compile(
+    r"\blot_?size\w*\s*:[^=\n]*=\s*(?P<annotated>\d[\d_]*)\b"
+    r"|\.get\(\s*[\"'](?:lot_?size|lotsize)[\"']\s*,\s*(?P<body>\d[\d_]*)"
+    r"|\w*LOT\w*\.get\([^\n]*?,\s*(?P<table>\d[\d_]*)\s*\)",
+    re.IGNORECASE,
+)
 
 def _python_sources() -> list[Path]:
     return [
@@ -138,3 +149,39 @@ def test_order_command_with_lots_refuses_an_unknown_lot(monkeypatch) -> None:
 
     assert parse_order_command("Buy SENSEX26DEC85000CE 2 lots") is None
     assert parse_order_command("Buy RELIANCE 10 shares") is not None
+
+
+def _lot_default_hits(text: str) -> list[str]:
+    hits = []
+    for match in _LOT_DEFAULT_LITERAL.finditer(text):
+        value = next(group for group in match.groups() if group is not None)
+        if int(value.replace("_", "")) > 1:
+            hits.append(match.group(0))
+    return hits
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'lot_size = FALLBACK_LOT_SIZES.get(symbol.strip().upper(), 50)',
+        'lot_size: int = int(body.get("lot_size", 50))',
+        "        lot_size: int = 50,",
+        "    lot_size: int = 65",
+    ],
+)
+def test_lot_default_guard_catches_a_guessed_lot(line: str) -> None:
+    assert _lot_default_hits(line)
+
+
+def test_lot_default_guard_allows_no_lot() -> None:
+    assert not _lot_default_hits('lot_size = int(body.get("lot_size", 1) or 1)')
+    assert not _lot_default_hits("lot_size = _LOT_SIZE_TABLE.get(base, 0)")
+
+
+def test_no_python_source_guesses_a_lot() -> None:
+    found = [
+        f"{path.relative_to(REPO_ROOT)}: {hit}"
+        for path in _python_sources()
+        for hit in _lot_default_hits(path.read_text(encoding="utf-8", errors="ignore"))
+    ]
+    assert found == []

@@ -22,7 +22,7 @@ class OptionPosition:
     option_type: str = "CE"
     action: str = "BUY"
     lots: int = 1
-    lot_size: int = 65
+    lot_size: int = field(kw_only=True)
     underlying: str = ""
 
     @property
