@@ -358,8 +358,8 @@ class _BackendLeaseRuntimeWatch:
         self._thread.start()
 
     def _run(self) -> None:
-        while not self._stopped.is_set():
-            if not self._proof.wait_revoked(0.05):
+        while not self._stopped.wait(0.05):
+            if not self._proof.wait_revoked(0):
                 continue
             if self._stopped.is_set():
                 return
