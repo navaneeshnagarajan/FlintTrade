@@ -124,11 +124,11 @@ def _queued_workers(adapter: object) -> None:
     raise AssertionError("second actual SDK task never reached the transport-lock queue")
 
 
-def _capture(ledger: OrderLifecycleLedger, handle: SimpleNamespace):
+def _capture(ledger: OrderLifecycleLedger, handle: SimpleNamespace, *, timeout_seconds: float = 0.5):
     """Use the original half-second capture, including its real page prefix."""
     return ledger.refresh_observations(
         handle.owner, handle.port, history=TradeHistoryRequest("2026-10-23", "2026-10-24", 3),
-        ledger=LedgerRequest("2026-10-23", "2026-10-24"), timeout_seconds=0.5,
+        ledger=LedgerRequest("2026-10-23", "2026-10-24"), timeout_seconds=timeout_seconds,
     )
 
 
@@ -278,7 +278,11 @@ def test_normal_factory_default_callers_return_and_retry_original_cleanup(
     adapter = h.app.extensions["flinttrade.account_setup"].drivers["dhan"].adapter
     ledgers = [OrderLifecycleLedger(ledger_path=tmp_path / f"{index}.db") for index in range(2)]
     pool = ThreadPoolExecutor(max_workers=2)
-    futures = [pool.submit(asyncio.run, _capture(ledgers[0], h))]
+    # The held path must return inside half a second while the worker is blocked.
+    # The unheld path has to finish the trade pages and the ledger call; a loaded
+    # runner spent the half-second cap on those pages and skipped the ledger.
+    first_timeout = 0.5 if held else 2.0
+    futures = [pool.submit(asyncio.run, _capture(ledgers[0], h, timeout_seconds=first_timeout))]
     try:
         assert s.entered.wait(2)
         # The second operation is an ordinary daily capture. Keep the factory's
@@ -288,7 +292,7 @@ def test_normal_factory_default_callers_return_and_retry_original_cleanup(
         )))
         if held:
             _queued_workers(adapter)
-        done, _ = wait(futures, timeout=0.75)
+        done, _ = wait(futures, timeout=0.75 if held else 3.0)
         assert len(done) == 2, "ordinary asyncio.run callers still depend on a held SDK worker"
         results = [future.result() for future in futures]
         continuation = h.owner._continuation
