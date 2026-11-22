@@ -4649,15 +4649,15 @@ def place_options_strategy() -> tuple[Any, int]:
                 "code": "lot_size_unknown",
                 "message": f"The lot size for {underlying.strip().upper()} isn't known.",
             }
-        ), 400
+        ), 422
     if requested_lot is not None and requested_lot != lot_size:
         return jsonify(
             {
                 "status": "error",
                 "code": "lot_size_mismatch",
-                "message": f"Lot size {requested_lot} doesn't match {underlying.strip().upper()} ({lot_size}).",
+                "message": f"Lot size {requested_lot} doesn't match {underlying.strip().upper()}. Use {lot_size}.",
             }
-        ), 400
+        ), 422
 
     try:
         legs = _build_strategy_legs(

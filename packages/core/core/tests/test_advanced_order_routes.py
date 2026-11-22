@@ -254,7 +254,7 @@ def test_options_strategy_refuses_an_unknown_lot(monkeypatch):
         {"strategy_name": "short_straddle", "underlying": "nifty", "expiry": "25MAY25", "strike": 25000},
         monkeypatch,
     )
-    assert status == 400
+    assert status == 422
     assert body == {"status": "error", "code": "lot_size_unknown", "message": "The lot size for NIFTY isn't known."}
     assert seen == []
 
@@ -265,7 +265,7 @@ def test_options_strategy_refuses_a_lot_that_disagrees_with_the_master(monkeypat
         {"strategy_name": "short_straddle", "underlying": "NIFTY", "expiry": "25MAY25", "strike": 25000, "lot_size": 50},
         monkeypatch,
     )
-    assert status == 400
+    assert status == 422
     assert body["code"] == "lot_size_mismatch"
-    assert body["message"] == "Lot size 50 doesn't match NIFTY (65)."
+    assert body["message"] == "Lot size 50 doesn't match NIFTY. Use 65."
     assert seen == []
