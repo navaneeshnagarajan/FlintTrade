@@ -234,14 +234,20 @@ def test_late_bounded_evidence_retains_duty_after_zero_fill_settlement(tmp_path:
         assert json.loads(result_path.with_name("restart.json").read_text())["drained"] is False
 
 
+_BENIGN_TERMINAL_CASES = tuple(case for case, variant in TERMINAL_VARIANTS.items() if variant[3] is None)
+
+
+@pytest.mark.parametrize("case", _BENIGN_TERMINAL_CASES)
 def test_benign_and_unattributable_terminal_variants_preserve_settlement(
     mounted_desk: MountedDesk, sidecar: tuple[Any, list[str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    case: str,
 ) -> None:
-    """Check the benign matrix without sharing any held contradiction state.
+    """Check one benign variant without sharing held contradiction state.
 
     Each observation must leave the original persisted settlement byte-identical.
-    The ordinary normal-factory finalizers still run; no process loss is needed
-    for these no-duty controls. Contradictions retain separate fresh processes.
+    The variants are separate items so one inspect cannot consume the budget of
+    the rest. The ordinary normal-factory finalizers still run; no process loss
+    is needed for these no-duty controls.
     """
     from packages.core.core.tests.test_native_order_safety_v2 import _terminal_lifecycle_case
     from packages.core.core.tests.test_native_financial_owner import _financial
@@ -249,7 +255,7 @@ def test_benign_and_unattributable_terminal_variants_preserve_settlement(
     witnesses: list[dict[str, Any]] = []
 
     def observe(desk: MountedDesk, capture: Any) -> None:
-        """Inspect each external benign/identity-negative row with unchanged authority."""
+        """Inspect this external benign/identity-negative row with unchanged authority."""
         original = _retained_command_json(desk.app)
         ledger = desk.app.extensions["flinttrade_broker_dependencies"].lifecycle_store
         classify = ledger.native_command_observation
@@ -266,28 +272,24 @@ def test_benign_and_unattributable_terminal_variants_preserve_settlement(
             return evidence
 
         monkeypatch.setattr(ledger, "native_command_observation", observe_classification)
-        for case, variant in TERMINAL_VARIANTS.items():
-            if variant[3] is not None:
-                continue
-            start = len(classifications)
-            view = capture(case)
-            current = classifications[start:]
-            assert len(current) == 1
-            if case.startswith("equivalent-") or case == "ignored-inactive-fields":
-                assert current[0]["evidence"]["zero_fill_terminal"]
-                assert not current[0]["evidence"].get("conflicting", False)
-            else:
-                assert current == [{"unavailable": True}]
-            finance = _financial(desk)
-            drained = desk.app.config["EXECUTION_SESSIONS"].shutdown(0)
-            assert _retained_command_json(desk.app) == original
-            assert view["duty"]["obligations"] == [] and drained
-            assert view["entry_state"] == "retired" and view["grant"]["state"] == "revoked"
-            assert finance["assessment"]["status"] == "unavailable"
-            witnesses.append({"case": case, "view": view, "financial": finance, "drained": drained,
-                              "canonical_classification": current})
-            (tmp_path / "benign-evidence.json").write_text(json.dumps(witnesses))
+        start = len(classifications)
+        view = capture(case)
+        current = classifications[start:]
+        assert len(current) == 1
+        if case.startswith("equivalent-") or case == "ignored-inactive-fields":
+            assert current[0]["evidence"]["zero_fill_terminal"]
+            assert not current[0]["evidence"].get("conflicting", False)
+        else:
+            assert current == [{"unavailable": True}]
+        finance = _financial(desk)
+        drained = desk.app.config["EXECUTION_SESSIONS"].shutdown(0)
+        assert _retained_command_json(desk.app) == original
+        assert view["duty"]["obligations"] == [] and drained
+        assert view["entry_state"] == "retired" and view["grant"]["state"] == "revoked"
+        assert finance["assessment"]["status"] == "unavailable"
+        witnesses.append({"case": case, "view": view, "financial": finance, "drained": drained,
+                          "canonical_classification": current})
+        (tmp_path / "benign-evidence.json").write_text(json.dumps(witnesses))
 
     _terminal_lifecycle_case(mounted_desk, sidecar, monkeypatch, after_settlement=observe)
-    assert [item["case"] for item in witnesses] == [
-        case for case, variant in TERMINAL_VARIANTS.items() if variant[3] is None]
+    assert [item["case"] for item in witnesses] == [case]
