@@ -299,10 +299,16 @@ export function indexUnderlying(symbol: string): string | null {
   return null;
 }
 
-/** Symbol named in the freeze refusal. */
+const EXPIRY_IN_SYMBOL = /^([A-Z0-9&]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/;
+
+/** Underlying named in the freeze refusal. */
 export function orderSymbolLabel(symbol: string): string {
-  const text = symbol.trim().replace(/\s+/g, " ");
-  return text || "this contract";
+  const text = symbol.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return "this contract";
+  const index = indexUnderlying(text);
+  if (index) return index;
+  const head = text.split(/[ -]/)[0] ?? text;
+  return EXPIRY_IN_SYMBOL.exec(head)?.[1] ?? head;
 }
 
 /** Visible quantity sentences. Match engine admission so wording is one edit. */

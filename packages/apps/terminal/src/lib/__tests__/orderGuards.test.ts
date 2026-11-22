@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DERIVATIVE_EXCHANGES,
+  orderSymbolLabel,
   isDerivativeExchange,
   checkOrderEntryMode,
   checkLotSizeVerified,
@@ -192,10 +193,10 @@ describe("checkFreezeQuantity", () => {
   it("uses NSE/FAOP/77189 when the broker does not send a freeze quantity", () => {
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1800)).toBeNull();
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1820)).toBe(
-      "Max 1,800 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 1,800 per order for NIFTY. Place smaller orders.",
     );
     expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 601)).toBe(
-      "Max 600 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
+      "Max 600 per order for NIFTYNXT50. Place smaller orders.",
     );
     expect(checkFreezeQuantity("BANKNIFTY", 900)).toBeNull();
     expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
@@ -214,7 +215,7 @@ describe("checkFreezeQuantity", () => {
     expect(quantityAdmissionRefusal("NIFTY", 1801, 65)).toBe(overMax);
     expect(quantityAdmissionRefusal("NIFTY", 1800, 65)).toBe(overMax);
     expect(quantityAdmissionRefusal("NIFTY 24500 CE", 1800, 65)).toBe(
-      "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 1,755 per order for NIFTY. Place smaller orders.",
     );
     expect(quantityAdmissionRefusal("BANKNIFTY", 901, 30)).toBe(
       "Max 900 per order for BANKNIFTY. Place smaller orders.",
@@ -351,7 +352,7 @@ describe("unverified BSE freeze values", () => {
   it("enforces a broker freeze quantity instead of warning", () => {
     expect(quantityFreezeWarning("SENSEX25DEC85000CE", 2000, 900)).toBeNull();
     expect(quantityAdmissionRefusal("SENSEX25DEC85000CE", 1000, 20, 900)).toBe(
-      "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders.",
+      "Max 900 per order for SENSEX. Place smaller orders.",
     );
   });
 
@@ -367,3 +368,17 @@ describe("unverified BSE freeze values", () => {
   });
 });
 
+
+describe("freeze refusal label", () => {
+  it.each([
+    ["NIFTY 24500 CE", "NIFTY"],
+    ["NIFTY28MAR2422000CE", "NIFTY"],
+    ["BANKNIFTY-OCT2026-FUT", "BANKNIFTY"],
+    ["NIFTYNXT5026DECFUT", "NIFTYNXT50"],
+    ["SENSEX26NOV2680000CE", "SENSEX"],
+    ["RELIANCE26APRFUT", "RELIANCE"],
+    ["", "this contract"],
+  ])("names %s as %s", (symbol, label) => {
+    expect(orderSymbolLabel(symbol)).toBe(label);
+  });
+});

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -182,10 +183,20 @@ def _positive_int(value: object) -> int | None:
     return value if value > 0 else None
 
 
+_EXPIRY_IN_SYMBOL = re.compile(r"^([A-Z0-9&]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)")
+
+
 def order_symbol_label(symbol: str) -> str:
-    """Symbol named in the freeze refusal. Blank input uses a neutral label."""
-    text = " ".join(str(symbol).split())
-    return text or "this contract"
+    """Underlying named in the freeze refusal. Blank input uses a neutral label."""
+    text = " ".join(str(symbol).upper().split())
+    if not text:
+        return "this contract"
+    index = index_underlying(text)
+    if index is not None:
+        return index
+    head = re.split(r"[ -]", text, maxsplit=1)[0]
+    match = _EXPIRY_IN_SYMBOL.match(head)
+    return match.group(1) if match else head
 
 
 # Visible quantity sentences. Admission and the order pad use these templates

@@ -42,7 +42,7 @@ def test_admit_place_refuses_before_laya(monkeypatch: pytest.MonkeyPatch, app_co
     assert status == 400
     body = response.get_json()
     assert body["code"] == "quantity_admission"
-    assert body["message"] == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert body["message"] == "Max 1,755 per order for NIFTY. Place smaller orders."
 
 
 @pytest.mark.unit
@@ -72,7 +72,7 @@ def test_admit_place_uses_the_broker_freeze_quantity(app_context: None) -> None:
     response, status = blocked
     assert status == 400
     assert response.get_json()["message"] == (
-        "Max 250 per order for RELIANCE26APRFUT. Place smaller orders."
+        "Max 250 per order for RELIANCE. Place smaller orders."
     )
 
 
@@ -96,4 +96,4 @@ def test_broker_freeze_for_sensex_still_refuses(app_context: None) -> None:
     assert blocked is not None
     response, status = blocked
     assert status == 400
-    assert response.get_json()["message"] == "Max 1,000 per order for SENSEX26DEC85000CE. Place smaller orders."
+    assert response.get_json()["message"] == "Max 1,000 per order for SENSEX. Place smaller orders."

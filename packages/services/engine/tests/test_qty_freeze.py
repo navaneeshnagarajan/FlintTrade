@@ -447,7 +447,7 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
 
     assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1755, lot_size=65) is None
     message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1820, lot_size=65)
-    assert message == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 1,755 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal("BANKNIFTY", "NFO", 915, lot_size=30) == (
         "Max 900 per order for BANKNIFTY. Place smaller orders."
     )
@@ -509,7 +509,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == "Max 65 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 65 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",
@@ -563,7 +563,7 @@ def test_unverified_warning_names_the_symbol_and_freeze():
 def test_broker_freeze_for_bse_is_still_enforced():
     assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 2_000, broker_freeze_qty=900) is None
     assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 1_000, lot_size=20, broker_freeze_qty=900) == (
-        "Max 900 per order for SENSEX25DEC85000CE. Place smaller orders."
+        "Max 900 per order for SENSEX. Place smaller orders."
     )
 
 
@@ -582,3 +582,19 @@ def test_sensex50_has_no_unverified_value():
 def test_unverified_bse_values_are_not_in_the_verified_table():
     assert not {"SENSEX", "BANKEX"} & set(qty_freeze._NSE_INDEX_FREEZE)
     assert not any(exchange == "BFO" for _symbol, exchange in qty_freeze._NSE_DEFAULTS)
+
+
+@pytest.mark.parametrize(
+    ("symbol", "label"),
+    [
+        ("NIFTY 24500 CE", "NIFTY"),
+        ("NIFTY28MAR2422000CE", "NIFTY"),
+        ("BANKNIFTY-OCT2026-FUT", "BANKNIFTY"),
+        ("NIFTYNXT5026DECFUT", "NIFTYNXT50"),
+        ("SENSEX26NOV2680000CE", "SENSEX"),
+        ("RELIANCE26APRFUT", "RELIANCE"),
+        ("", "this contract"),
+    ],
+)
+def test_freeze_refusal_names_the_underlying(symbol, label):
+    assert qty_freeze.order_symbol_label(symbol) == label
