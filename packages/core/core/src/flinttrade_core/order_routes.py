@@ -110,12 +110,14 @@ def _run_on_client_loop(coro: Any) -> Any:
 def _http_broker_error_fields(exc: BaseException, adapter_id: str) -> dict[str, str]:
     """Detach whitelisted canonical error properties; never stringify an SDK fault."""
     from flinttrade_core import exceptions as errors  # noqa: PLC0415
+    from flinttrade_gateway.brokers.dhan_mapping import DhanApiRejection  # noqa: PLC0415
 
     known_types = (
         errors.BrokerError, errors.OrderError, errors.OrderRejectedByBroker,
         errors.InsufficientFunds, errors.InvalidPrice, errors.InvalidQuantity, errors.InvalidSymbol,
         errors.MarketClosed, errors.UnsupportedOrderType, errors.AuthError, errors.CredentialsInvalid,
         errors.SessionExpired, errors.RateLimitError, errors.NetworkError, errors.BrokerTimeout, errors.BrokerInternal,
+        DhanApiRejection,
     )
     if type(exc) not in known_types:
         return {}
@@ -147,6 +149,9 @@ def _http_broker_error_fields(exc: BaseException, adapter_id: str) -> dict[str, 
 
             redacted = redact_identity(message) or ""
             fields["broker_message"] = " ".join(redacted.split())[:256]
+    reason = properties.get("reason")
+    if type(exc) is DhanApiRejection and type(reason) is str and reason:
+        fields["broker_reason"] = reason
     return fields
 
 

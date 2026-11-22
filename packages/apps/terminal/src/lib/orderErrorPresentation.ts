@@ -26,6 +26,11 @@ const dispatchError = z.object({
   }),
 });
 const errorRecord = z.record(z.string(), z.unknown());
+/** Fixed rejection sentences the server may attach; any other text is ignored. */
+const brokerRejectionSentences = z.enum([
+  "Dhan rejected this because the request didn't come from your registered static IP.",
+  "Dhan rejected the order. Check static IP and segment activation.",
+]);
 const localGuardMessages = new Set([
   NATIVE_TARGET_NOT_READY_MESSAGE,
   "Order blocked: the displayed account authority no longer matches the current source, scope, account, or connection.",
@@ -91,18 +96,24 @@ export function nativeOrderErrorPresentation(error: unknown, origin: OrderErrorO
     // Invalid/oversized values are omitted, not stringified or truncated.
     const reason = boundedText.safeParse(body?.broker_message);
     const code = nativeCode.safeParse(body?.broker_code);
-    const observations = `${reason.success ? ` Broker reason (observation): ${reason.data}.` : ""}${code.success ? ` Broker code: ${code.data}.` : ""}`;
-    if (outcome === "unknown_after_dispatch") return unknown();
+    // A known rejection sentence goes first, with the broker's own message below it.
+    const sentence = brokerRejectionSentences.safeParse(item.broker === "dhan" ? body?.broker_reason : undefined);
+    const brokerLines = sentence.success ? `\n${sentence.data}${reason.success ? `\n${reason.data}` : ""}` : "";
+    const observations = `${reason.success && !sentence.success ? ` Broker reason (observation): ${reason.data}.` : ""}${code.success ? ` Broker code: ${code.data}.` : ""}`;
+    if (outcome === "unknown_after_dispatch") {
+      const fallback = unknown();
+      return { ...fallback, body: `${fallback.body}${brokerLines}` };
+    }
     const summary = boundedText.safeParse(body?.message);
     return {
       title: capturedOrderTitle("Order refused", params),
       originDisclosure: capturedOrderOriginDisclosure(origin),
-      body: `Order refused before dispatch. No order was sent. No automatic retry.${originText(origin)}${summary.success ? ` Refusal: ${summary.data}.` : ""}${observations}`,
+      body: `Order refused before dispatch. No order was sent. No automatic retry.${originText(origin)}${summary.success ? ` Refusal: ${summary.data}.` : ""}${observations}${brokerLines}`,
     };
   }
   // A partial/contradictory structured response cannot become a legacy definite
   // refusal based on its status, code, exception class or optimistic message.
-  if (body && ["dispatch_outcome", "retry_safe", "affected_item", "broker_code", "broker_message"].some((key) => Object.hasOwn(body, key))) return unknown();
+  if (body && ["dispatch_outcome", "retry_safe", "affected_item", "broker_code", "broker_message", "broker_reason"].some((key) => Object.hasOwn(body, key))) return unknown();
   // Preserve this existing explicit activation refusal, not a status-based
   // inference. It is separate from the gated possible-dispatch contract.
   if (error.status === 503 && body?.status === "error"
