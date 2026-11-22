@@ -1,7 +1,7 @@
 /**
  * Public-site contrast and touch size, read from the stylesheet.
  * WCAG 2.1 relative luminance. Normal text needs 4.5:1. Touch targets
- * declare a 44px box. Theme-toggle button sizes are not asserted here.
+ * declare a 44px box. Theme-toggle icons stay at their existing size.
  */
 
 import { readFileSync } from 'node:fs';
@@ -237,11 +237,35 @@ describe('site touch targets from the stylesheet', () => {
     expect(ruleBodies(css, '.main-nav a').join('\n')).toMatch(/display:\s*inline-flex/);
   });
 
-  it('gives the desktop guide, footer links, and product links a 44px box', () => {
-    for (const selector of ['.hero-electron-note a', '.site-footer a', '.product-links a']) {
+  it('gives the desktop guide and footer links a 44px box', () => {
+    for (const selector of ['.hero-electron-note a', '.site-footer a']) {
       assertFloor(selector, 'width');
       assertFloor(selector, 'height');
       expect(ruleBodies(css, selector).join('\n'), selector).toMatch(/display:\s*inline-flex/);
+    }
+  });
+
+  it('gives the theme toggle a 44px hit area and keeps the icon small', () => {
+    const button = ruleBodies(css, '.theme-toggle button').join('\n');
+    const icon = ruleBodies(css, '.theme-toggle svg').join('\n');
+
+    expect(pixel(button, 'min-width')).toBeGreaterThanOrEqual(44);
+    expect(pixel(button, 'min-height')).toBeGreaterThanOrEqual(44);
+    expect(button).toMatch(/place-items:\s*center/);
+    expect(pixel(icon, 'width')).toBe(14);
+    expect(pixel(icon, 'height')).toBe(14);
+  });
+
+  it('gives the brand link a 44px height with centred contents', () => {
+    const link = ruleBodies(css, '.brand-link').join('\n');
+
+    expect(pixel(link, 'min-height')).toBeGreaterThanOrEqual(44);
+    expect(link).toMatch(/align-items:\s*center/);
+    for (const body of ruleBodies(css, '.brand-link')) {
+      for (const property of ['height', 'min-height']) {
+        const value = pixel(body, property);
+        if (value != null) expect(value, property).toBeGreaterThanOrEqual(44);
+      }
     }
   });
 });

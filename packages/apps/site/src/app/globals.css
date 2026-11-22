@@ -363,6 +363,7 @@ kbd {
 .brand-link {
   display: inline-flex;
   align-items: center;
+  min-height: 44px;
   gap: 10px;
   border-radius: 999px;
   padding: 8px 14px 8px 10px;
@@ -428,6 +429,8 @@ kbd {
   display: grid;
   width: 32px;
   height: 32px;
+  min-width: 44px;
+  min-height: 44px;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -1127,14 +1130,6 @@ kbd {
   min-width: 44px;
   min-height: 44px;
   padding: 0 8px;
-}
-
-.product-links a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
 }
 
 .subpage {
