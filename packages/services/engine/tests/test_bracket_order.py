@@ -363,14 +363,51 @@ class TestPlaceBracket:
         assert entry_order.quantity == "50"
 
     def test_stoploss_exit_leg_is_sl_order(self):
-        """The SL exit leg is an SL-type order at the stop price, opposite side."""
+        """The SL exit leg is a stop-limit with its limit past the trigger, opposite side."""
         svc, place_leg, _ = _svc()
         svc.place_bracket(entry=_entry(action="BUY"), stoploss=22000.0, principal=PRINCIPAL)
         exit_order, _ = place_leg.calls[1]
         assert exit_order.action == "SELL"
         assert exit_order.pricetype == PriceType.SL
-        assert exit_order.price == "22000.0"
         assert exit_order.trigger_price == "22000.0"
+        # No exchange gap or band covers futures: the table's 5% default buffer.
+        assert exit_order.price == "20900.00"
+
+    @pytest.mark.parametrize(
+        ("symbol", "exchange", "entry_action", "trigger", "limit"),
+        [
+            # BSE option, trigger at or below ₹50: the ₹10 gap.
+            ("SENSEX27NOV2680000CE", "BFO", "BUY", 50.0, "40.00"),
+            ("SENSEX27NOV2680000CE", "BFO", "SELL", 30.0, "40.00"),
+            # BSE option above ₹50: 20% of the trigger, rounded down to the tick.
+            ("SENSEX27NOV2680000CE", "BFO", "BUY", 250.35, "200.30"),
+            ("SENSEX27NOV2680000CE", "BFO", "SELL", 120.0, "144.00"),
+            # NSE option: inside the price-protection band measured from the trigger.
+            ("NIFTY25NOV2624000CE", "NFO", "BUY", 30.0, "10.00"),
+            ("NIFTY25NOV2624000CE", "NFO", "SELL", 250.35, "350.45"),
+        ],
+    )
+    def test_stoploss_limit_sits_past_the_trigger_within_the_rules(
+        self, symbol, exchange, entry_action, trigger, limit
+    ):
+        from flinttrade_core.order_rules import evaluate_order
+
+        svc, place_leg, _ = _svc()
+        svc.place_bracket(
+            entry=_entry(symbol=symbol, exchange=exchange, action=entry_action, price=trigger),
+            stoploss=trigger,
+            principal=PRINCIPAL,
+        )
+        exit_order, _ = place_leg.calls[1]
+        assert exit_order.pricetype == PriceType.SL
+        assert exit_order.trigger_price == str(trigger)
+        assert exit_order.price == limit
+        if entry_action == "BUY":
+            assert float(exit_order.price) < trigger
+        else:
+            assert float(exit_order.price) > trigger
+        results = evaluate_order(exit_order, last_price=trigger)
+        assert results == []
 
     def test_target_exit_leg_is_limit_order(self):
         svc, place_leg, _ = _svc()

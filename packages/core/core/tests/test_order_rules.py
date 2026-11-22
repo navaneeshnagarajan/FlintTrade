@@ -32,9 +32,12 @@ from flinttrade_core.order_rules import (
     rules_markdown,
 )
 
-CASES = json.loads((Path(__file__).parent / "fixtures" / "order_rules_cases.json").read_text(encoding="utf-8"))["cases"]
+_FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "order_rules_cases.json").read_text(encoding="utf-8"))
+CASES = _FIXTURE["cases"]
+STOP_LOSS_LIMITS = _FIXTURE["stop_loss_limits"]
 NIFTY_CE = "NIFTY25NOV2624000CE"
 SENSEX_CE = "SENSEX27NOV2680000CE"
+_TODAY = date(2026, 11, 20)
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 _EVALUATOR_PLACEHOLDERS = {"max_gap", "low", "high", "limit", "window", "wait", "broker_name", "band"}
 
@@ -129,6 +132,10 @@ _TRIGGERS: dict[str, tuple[dict, dict]] = {
     ),
     "bse-stop-limit-gap": (
         {"symbol": SENSEX_CE, "exchange": "BFO", "pricetype": "SL", "trigger_price": "100", "price": "70"},
+        {},
+    ),
+    "stop-loss-limit-at-trigger": (
+        {"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "SL", "trigger_price": "100", "price": "100"},
         {},
     ),
     "bse-lpp-sensex-expiry-day": (
@@ -243,6 +250,68 @@ def test_every_rule_is_covered_by_an_effective_date_test() -> None:
 # ---------------------------------------------------------------------------
 # Edges
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("symbol", "exchange", "pricetype", "trigger", "limit", "warned"),
+    [
+        ("RELIANCE", "NSE", "SL", "100", "100", True),
+        (SENSEX_CE, "BFO", "SL", "40", "40", True),
+        ("RELIANCE", "NSE", "SL", "100", "99.95", False),
+        ("RELIANCE", "NSE", "LIMIT", "", "100", False),
+    ],
+)
+def test_stop_loss_limit_at_its_trigger_warns(symbol, exchange, pricetype, trigger, limit, warned) -> None:
+    order = {"symbol": symbol, "exchange": exchange, "action": "SELL", "pricetype": pricetype, "price": limit}
+    if trigger:
+        order["trigger_price"] = trigger
+    results = rules.evaluate_order(order, last_price=limit, on=_TODAY)
+    hits = [r for r in results if r.rule_id == "stop-loss-limit-at-trigger"]
+    assert bool(hits) is warned
+    assert all(r.level == "warn" for r in hits)
+
+
+@pytest.mark.parametrize(
+    ("symbol", "exchange", "exit_action", "trigger", "limit", "on"),
+    [
+        # BSE option, trigger at or below ₹50: the ₹10 gap is tighter than the band.
+        (SENSEX_CE, "BFO", "SELL", "50", "40.00", _TODAY),
+        (SENSEX_CE, "BFO", "BUY", "30", "40.00", _TODAY),
+        # Above ₹50: 20% of the trigger, rounded down to the tick.
+        (SENSEX_CE, "BFO", "SELL", "50.05", "40.05", _TODAY),
+        (SENSEX_CE, "BFO", "BUY", "250.35", "300.40", _TODAY),
+        # NSE option: the price-protection band from the trigger (₹20 floor, then 40%).
+        (NIFTY_CE, "NFO", "SELL", "30", "10.00", _TODAY),
+        (NIFTY_CE, "NFO", "BUY", "30", "50.00", _TODAY),
+        (NIFTY_CE, "NFO", "SELL", "250.35", "150.25", _TODAY),
+        # No exchange gap or band: the table's default buffer.
+        ("RELIANCE", "NSE", "SELL", "200", "190.00", _TODAY),
+        ("RELIANCE", "NSE", "BUY", "33.33", "34.95", _TODAY),
+        # SENSEX expiry day: the tighter expiry-day band floor.
+        (SENSEX_CE, "BFO", "SELL", "40", "30.00", date(2026, 11, 27)),
+        # A sell limit never drops below one tick.
+        (NIFTY_CE, "NFO", "SELL", "0.10", "0.05", _TODAY),
+    ],
+)
+def test_stop_loss_limit_price_uses_the_widest_buffer_the_table_allows(
+    symbol, exchange, exit_action, trigger, limit, on
+) -> None:
+    got = rules.stop_loss_limit_price(symbol, exchange, exit_action, Decimal(trigger), on=on)
+    assert got == Decimal(limit)
+    order = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "action": exit_action,
+        "pricetype": "SL",
+        "trigger_price": trigger,
+        "price": str(got),
+    }
+    assert rules.evaluate_order(order, last_price=trigger, on=on) == []
+    # One tick wider leaves the rules.
+    wider = got - Decimal("0.05") if exit_action == "SELL" else got + Decimal("0.05")
+    if wider > 0 and exchange != "NSE":
+        order["price"] = str(wider)
+        assert rules.evaluate_order(order, last_price=trigger, on=on) != []
 
 
 @pytest.mark.parametrize(
@@ -441,6 +510,18 @@ def test_wait_is_worded_for_its_window() -> None:
 def test_shared_cases_match_the_evaluator(case: dict) -> None:
     results = evaluate_order(case["order"], on=date.fromisoformat(case["on"]), **case["context"])
     assert results_payload(results) == case["expected"]
+
+
+@pytest.mark.parametrize("case", STOP_LOSS_LIMITS)
+def test_shared_stop_loss_limits_match(case: dict) -> None:
+    got = rules.stop_loss_limit_price(
+        case["symbol"],
+        case["exchange"],
+        case["exit_action"],
+        Decimal(case["trigger"]),
+        on=date.fromisoformat(case["on"]),
+    )
+    assert str(got) == case["limit"]
 
 
 def test_a_name_ending_in_ce_is_not_an_option() -> None:

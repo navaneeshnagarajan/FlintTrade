@@ -502,6 +502,28 @@
       "effective_to": null,
       "parameters": {},
       "message": "Stop-loss and target are placed as separate orders with this broker."
+    },
+    {
+      "id": "stop-loss-limit-at-trigger",
+      "authority": "product",
+      "level": "warn",
+      "source": "FlintTrade",
+      "description": "A stop-loss limit equal to its trigger leaves no room to fill once the trigger is hit. FlintTrade places its own stop-loss legs past the trigger, as far as the exchange gap and price band allow, or by the default buffer where no exchange limit applies.",
+      "check": "stop_limit_at_trigger",
+      "scope": {
+        "exchange": "all",
+        "broker": "all",
+        "instrument": "all",
+        "order_types": [
+          "SL"
+        ]
+      },
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {
+        "default_buffer_pct": 5
+      },
+      "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
     }
   ]
 }

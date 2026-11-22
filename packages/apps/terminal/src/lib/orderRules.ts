@@ -271,6 +271,12 @@ function evaluateRow(row: RuleRow, facts: Facts): RuleResult | null {
       if (low <= limitPaise && limitPaise <= high) return null;
       return result(fill(row.message, { low: money(low), high: money(high) }));
     }
+    case "stop_limit_at_trigger": {
+      const trigger = positive(facts.triggerPrice);
+      const limit = positive(facts.price);
+      if (trigger === null || limit === null || paise(limit) !== paise(trigger)) return null;
+      return result(row.message);
+    }
     case "note":
     case "market_price_cap":
       return result(fill(row.message, params));
@@ -332,6 +338,64 @@ export function evaluateOrderRules(input: OrderRuleInput, on: string = istToday(
   });
   scored.sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2]);
   return scored.map((entry) => entry.result);
+}
+
+export interface StopLossLimitInput {
+  symbol: string;
+  exchange: string;
+  exitAction: string;
+  trigger: number;
+  broker?: string | null;
+  product?: string | null;
+  tickPaise?: number;
+}
+
+/**
+ * Limit price for a protective stop-loss leg (mirrors ``stop_loss_limit_price``).
+ *
+ * The limit sits past the trigger in the exit direction by the widest buffer
+ * every matching stop-loss gap and price band row allows, the band measured
+ * from the trigger. Without such a row the ``stop_limit_at_trigger`` default
+ * buffer applies. Rounded to the tick toward the trigger.
+ */
+export function stopLossLimitPrice(input: StopLossLimitInput, on: string = istToday()): number | null {
+  const trigger = positive(input.trigger);
+  if (trigger === null) return null;
+  const tick = input.tickPaise ?? 5;
+  const sell = String(input.exitAction).toUpperCase() === "SELL";
+  const kind = instrumentKind(input.symbol, input.exchange);
+  const expiry = kind === "option" ? contractExpiry(input.symbol) : null;
+  const facts: Facts = {
+    symbol: input.symbol,
+    exchange: input.exchange,
+    orderType: "SL",
+    product: input.product ?? undefined,
+    broker: input.broker || "all",
+    kind,
+    venue: exchangeFamily(input.exchange),
+    expiryDay: expiry !== null && expiry === on,
+  };
+  const triggerPaise = paise(trigger);
+  const limits: number[] = [];
+  let defaultPct = 0;
+  const settled = new Set<string>();
+  for (const row of ROWS) {
+    if (row.check !== "stop_limit_gap" && row.check !== "price_band" && row.check !== "stop_limit_at_trigger") continue;
+    if (row.family && settled.has(row.family)) continue;
+    if (!inForce(row, on) || !scopeMatches(row, facts)) continue;
+    if (row.family) settled.add(row.family);
+    const params = row.parameters ?? {};
+    if (row.check === "stop_limit_gap") limits.push(maxStopLimitGapPaise(trigger, params));
+    else if (row.check === "price_band") {
+      const [low, high] = priceBandPaise(trigger, params);
+      limits.push(sell ? triggerPaise - low : high - triggerPaise);
+    } else defaultPct = num(params.default_buffer_pct, 0);
+  }
+  const buffer = limits.length ? Math.min(...limits) : (triggerPaise * defaultPct) / 100;
+  const ticks = sell
+    ? Math.max(1, Math.ceil((triggerPaise - buffer) / tick - 1e-7))
+    : Math.floor((triggerPaise + buffer) / tick + 1e-7);
+  return (ticks * tick) / 100;
 }
 
 /** The ticket line: the most serious result prefixed by its source. */

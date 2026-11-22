@@ -31,6 +31,7 @@ import {
   hasBlockingRule,
   optionLimitPrice,
   ruleHeadline,
+  stopLossLimitPrice,
   stopLossTargetPlacement,
   type RuleResult,
 } from "@/lib/orderRules";
@@ -382,11 +383,12 @@ function ScalperWidget(props: WidgetProps) {
     const anchor = Number.isFinite(price) && price > 0 ? price : lastPrice;
     if (slPts != null && slPts > 0 && anchor != null && anchor > 0) {
       const stop = snapToTick(anchor - (action === "BUY" ? 1 : -1) * slPts);
+      const exitAction = action === "BUY" ? "SELL" : "BUY";
       const exitResults = evaluateOrderRules({
         ...shared,
         orderType: "SL",
-        action: action === "BUY" ? "SELL" : "BUY",
-        price: stop,
+        action: exitAction,
+        price: stopLossLimitPrice({ symbol: sym, exchange: exch, exitAction, trigger: stop, broker: ruleBroker, product }),
         triggerPrice: stop,
       });
       for (const item of exitResults) {

@@ -536,6 +536,187 @@
           "message": "Price may be outside the exchange band (₹60–₹140)."
         }
       ]
+    },
+    {
+      "name": "nse equity stop-loss limit at trigger",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "100",
+        "price": "100"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "stop-loss-limit-at-trigger",
+          "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+        }
+      ]
+    },
+    {
+      "name": "bfo option stop-loss limit at trigger",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "40",
+        "price": "40"
+      },
+      "context": {
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "stop-loss-limit-at-trigger",
+          "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+        }
+      ]
+    },
+    {
+      "name": "nfo option stop-loss limit inside band",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "30",
+        "price": "10"
+      },
+      "context": {
+        "last_price": "30"
+      },
+      "expected": []
+    },
+    {
+      "name": "nfo option stop-loss limit past band",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "30",
+        "price": "9.95"
+      },
+      "context": {
+        "last_price": "30"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-limit-price-protection-options",
+          "message": "Price may be outside the exchange band (₹10–₹50)."
+        }
+      ]
+    }
+  ],
+  "stop_loss_limits": [
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "50",
+      "on": "2026-11-20",
+      "limit": "40.00"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "BUY",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "40.00"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "50.05",
+      "on": "2026-11-20",
+      "limit": "40.05"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "BUY",
+      "trigger": "250.35",
+      "on": "2026-11-20",
+      "limit": "300.40"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "40",
+      "on": "2026-11-27",
+      "limit": "30.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "10.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "BUY",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "50.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "250.35",
+      "on": "2026-11-20",
+      "limit": "150.25"
+    },
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "exit_action": "SELL",
+      "trigger": "200",
+      "on": "2026-11-20",
+      "limit": "190.00"
+    },
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "exit_action": "BUY",
+      "trigger": "33.33",
+      "on": "2026-11-20",
+      "limit": "34.95"
+    },
+    {
+      "symbol": "NIFTY25NOVFUT",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "22000",
+      "on": "2026-11-20",
+      "limit": "20900.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "0.10",
+      "on": "2026-11-20",
+      "limit": "0.05"
     }
   ]
 }

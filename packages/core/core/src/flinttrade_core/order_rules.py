@@ -25,7 +25,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -44,6 +44,7 @@ CHECKS: frozenset[str] = frozenset(
     {
         "order_type_not_allowed",
         "stop_limit_gap",
+        "stop_limit_at_trigger",
         "price_band",
         "order_rate",
         "note",
@@ -417,6 +418,11 @@ def _evaluate_row(row: OrderRule, facts: OrderFacts, order_type: str) -> RuleRes
         if abs(limit - trigger) <= gap:
             return None
         return RuleResult(row.level, source, row.id, _fill(row.message, {"max_gap": _money(gap)}))
+    if row.check == "stop_limit_at_trigger":
+        trigger, limit = facts.trigger_price, facts.price
+        if trigger is None or limit is None or limit != trigger:
+            return None
+        return RuleResult(row.level, source, row.id, row.message)
     if row.check == "price_band":
         reference, limit = facts.last_price, facts.price
         if reference is None or limit is None or reference <= 0 or limit <= 0:
@@ -466,15 +472,20 @@ def _sort_key(index: int, row: OrderRule) -> tuple[int, int, int]:
     return (LEVELS.index(row.level), AUTHORITIES.index(row.authority), index)
 
 
+def _with_expiry_day(facts: OrderFacts, kind: str, day: date) -> OrderFacts:
+    if facts.expiry_day is not None or kind != "option":
+        return facts
+    expiry = contract_expiry(facts.symbol)
+    return OrderFacts(**{**facts.__dict__, "expiry_day": expiry == day if expiry else False})
+
+
 def evaluate(facts: OrderFacts, *, on: date | None = None) -> list[RuleResult]:
     """Return every rule result for one order, most serious first."""
     day = on or ist_today()
     venue = exchange_family(facts.exchange)
     kind = facts.instrument or instrument_kind(facts.symbol, facts.exchange)
     order_type = normalise_order_type(facts.order_type)
-    if facts.expiry_day is None and kind == "option":
-        expiry = contract_expiry(facts.symbol)
-        facts = OrderFacts(**{**facts.__dict__, "expiry_day": expiry == day if expiry else False})
+    facts = _with_expiry_day(facts, kind, day)
     scored: list[tuple[tuple[int, int, int], RuleResult]] = []
     settled_families: set[str] = set()
     for index, row in enumerate(load_rules()):
@@ -492,6 +503,74 @@ def evaluate(facts: OrderFacts, *, on: date | None = None) -> list[RuleResult]:
             scored.append((_sort_key(index, row), result))
     scored.sort(key=lambda item: item[0])
     return [result for _, result in scored]
+
+
+def stop_loss_limit_price(
+    symbol: str,
+    exchange: str,
+    exit_action: str,
+    trigger: Decimal,
+    *,
+    broker: str = "all",
+    product: str = "",
+    tick: Decimal = Decimal("0.05"),
+    on: date | None = None,
+) -> Decimal:
+    """Limit price for a protective stop-loss leg.
+
+    The limit sits past ``trigger`` in the exit direction (below it for a sell,
+    above it for a buy) by the widest buffer every matching exchange row
+    allows: the stop-loss gap and the price band, the band measured from the
+    trigger because that is where the last price stands when the stop fires.
+    Where no exchange row applies, the default buffer of the
+    ``stop_limit_at_trigger`` row is used. The limit is rounded to ``tick``
+    toward the trigger so it never leaves the allowed range; a sell limit
+    never falls below one tick.
+    """
+    day = on or ist_today()
+    side = str(exit_action).upper()
+    facts = OrderFacts(
+        symbol=symbol,
+        exchange=exchange,
+        order_type="SL",
+        action=side,
+        price=trigger,
+        trigger_price=trigger,
+        last_price=trigger,
+        broker=broker or "all",
+        product=str(product or "").upper(),
+    )
+    venue = exchange_family(exchange)
+    kind = instrument_kind(symbol, exchange)
+    facts = _with_expiry_day(facts, kind, day)
+    limits: list[Decimal] = []
+    default_pct: Decimal | None = None
+    settled_families: set[str] = set()
+    for row in load_rules():
+        if row.check not in {"stop_limit_gap", "price_band", "stop_limit_at_trigger"}:
+            continue
+        if row.family is not None and row.family in settled_families:
+            continue
+        if not row.in_force(day) or not _scope_matches(row, facts, venue, kind, "SL"):
+            continue
+        if row.family is not None:
+            settled_families.add(row.family)
+        if row.check == "stop_limit_gap":
+            limits.append(max_stop_limit_gap(trigger, row.parameters))
+        elif row.check == "price_band":
+            low, high = price_band(trigger, row.parameters)
+            limits.append(trigger - low if side == "SELL" else high - trigger)
+        else:
+            default_pct = Decimal(str(row.parameters.get("default_buffer_pct", 0)))
+    if limits:
+        buffer = min(limits)
+    else:
+        buffer = trigger * (default_pct or Decimal(0)) / Decimal(100)
+    if side == "SELL":
+        ticks = ((trigger - buffer) / tick).to_integral_value(rounding=ROUND_CEILING)
+        return max(tick, ticks * tick).quantize(_PAISA)
+    ticks = ((trigger + buffer) / tick).to_integral_value(rounding=ROUND_FLOOR)
+    return (ticks * tick).quantize(_PAISA)
 
 
 def _field(order: object, *names: str) -> Any:
@@ -757,6 +836,7 @@ __all__ = [
     "market_band_label",
     "market_price_cap",
     "max_stop_limit_gap",
+    "stop_loss_limit_price",
     "normalise_order_type",
     "price_band",
     "results_payload",

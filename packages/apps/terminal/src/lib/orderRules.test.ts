@@ -7,6 +7,7 @@ import {
   orderRules,
   ruleHeadline,
   ruleResultsFrom,
+  stopLossLimitPrice,
   type OrderRuleInput,
 } from "./orderRules";
 
@@ -53,6 +54,32 @@ describe("order rules mirror", () => {
   it.each(all.map((item) => [item.name, item] as const))("matches the server for %s", (_name, item) => {
     expect(evaluateOrderRules(toInput(item), item.on)).toEqual(item.expected);
   });
+
+  const limits = (cases as unknown as { stop_loss_limits: Record<string, string>[] }).stop_loss_limits;
+
+  it.each(limits.map((item) => [`${item.symbol} ${item.exit_action} ${item.trigger}`, item] as const))(
+    "places the stop-loss limit where the server does for %s",
+    (_name, item) => {
+      const limit = stopLossLimitPrice(
+        { symbol: item.symbol, exchange: item.exchange, exitAction: item.exit_action, trigger: Number(item.trigger) },
+        item.on,
+      );
+      expect(limit).toBe(Number(item.limit));
+      const results = evaluateOrderRules(
+        {
+          symbol: item.symbol,
+          exchange: item.exchange,
+          orderType: "SL",
+          action: item.exit_action,
+          price: limit,
+          triggerPrice: Number(item.trigger),
+          lastPrice: Number(item.trigger),
+        },
+        item.on,
+      );
+      expect(results).toEqual([]);
+    },
+  );
 
   it("reads the same table the server reads", () => {
     const ids = orderRules().map((row) => row.id);
