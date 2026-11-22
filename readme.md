@@ -23,7 +23,7 @@ before enabling Live mode.
 - **Backend services:** Python 3.14 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 
-- **Safety model:** Practice and Live are the session Modes. Connected (read) is the Mode that reads your broker account without placing orders. Example is sample data. Server-side checks,
+- **Safety model:** Practice and Live are the session Modes. Connected (read) is a broker status. FlintTrade reads the account and places no orders. Example is sample data. Server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 
 - **Data and simulation:** DuckDB/Parquet storage, indicator packages,
