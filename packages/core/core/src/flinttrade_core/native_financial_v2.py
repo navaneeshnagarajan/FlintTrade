@@ -718,7 +718,13 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
     except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
         # A moved primitive pin is refused, not stored as an entry. A real
         # missing source still retains the entries it could not evaluate.
-        if _fully_exited(facts) and str(exc) in {"source_time_unavailable", "fee_date_unavailable", "mark_time_unavailable"}:
+        if str(exc) == "primitive source generation changed" and _fully_exited(facts):
+            state["unresolved_entry_ids"] = []
+            try:
+                _retain_known_fills(state, facts, row.get("schema_version") == "2-options-1")
+            except (ValueError, TypeError, KeyError, ArithmeticError):
+                pass
+        elif _fully_exited(facts) and str(exc) in {"source_time_unavailable", "fee_date_unavailable", "mark_time_unavailable"}:
             state["unresolved_entry_ids"] = []
         elif str(exc) != "primitive source generation changed" and not row.pop("_generation_recovered", False) and type(facts) is dict and type(facts.get("entries")) is list:
             identities = set(state.get("unresolved_entry_ids", ()))
@@ -728,6 +734,6 @@ def project_financial(workflow: Any, row: dict[str, Any], snapshot: Any, now: in
                     if type(identity) is str:
                         identities.add(identity)
             state["unresolved_entry_ids"] = sorted(identities)
-        state["assessment"] = unavailable
+        state["assessment"] = {**unavailable, "reasons": ["primitive_source_unavailable", str(exc)]}
     state["revision"] += 1
     return state["assessment"]
