@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 import pytest
 
 from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.order_rules import OrderBudget
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import gate_order, set_safety_gate_secret
 from flinttrade_gateway.brokers._base import Session
@@ -58,6 +59,18 @@ class _NoIoAdapter:
         return "BROKER-OID"
 
 
+class _OneOrderPerSecondBudget(OrderBudget):
+    """Real budget checks on a clock that advances one second per order, inside Dhan's limits."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._clock = 0.0
+
+    def check_and_record(self, broker, *, now, **kwargs):
+        self._clock += 1.0
+        return super().check_and_record(broker, now=self._clock, **kwargs)
+
+
 def _session(_ctx: object, _adapter_id: str, _account_id: str) -> Session:
     return Session(
         access_token="tok",
@@ -81,6 +94,7 @@ async def test_gated_order_path_overhead_under_ceiling(*, backend_lease_factory)
     """Mint + route N orders through the gate; assert mean overhead < ceiling."""
     adapter = _NoIoAdapter()
     router = BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory())
+    router._order_budget = _OneOrderPerSecondBudget()
     ctx = _ctx()
 
     start = time.perf_counter()

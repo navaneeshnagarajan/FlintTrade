@@ -609,6 +609,14 @@ class TestPracticeMode:
             "order_outcome": "rejected",
             "reason": "broker_rejected",
             "retry_safe": False,
+            "rule_results": [
+                {
+                    "level": "info",
+                    "message": "Practice fills a market order only within 3% of the last price.",
+                    "rule_id": "practice-market-price-cap",
+                    "source": "Practice",
+                }
+            ],
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
@@ -709,7 +717,7 @@ class TestPracticeMode:
         assert kwargs["price"] == 812.40
         assert kwargs["price_source"] == "last_close"
 
-    def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
+    def test_option_market_order_is_refused_before_the_sandbox(self, flask_app, client, monkeypatch):
         class Closed:
             def session_active(self, exchange, symbol=None):
                 return False
@@ -732,8 +740,9 @@ class TestPracticeMode:
 
         assert resp.status_code == 400
         assert resp.get_json()["message"] == (
-            "Option prices go stale outside market hours. Try again when the market opens."
+            "FlintTrade · Market orders aren't accepted on options. Use a limit price."
         )
+        assert resp.get_json()["code"] == "order_rule_blocked"
         mock_sandbox.place_order.assert_not_called()
 
     def test_pending_order_requires_a_running_tick_source(self, flask_app, client, monkeypatch):
