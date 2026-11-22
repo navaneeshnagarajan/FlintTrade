@@ -230,7 +230,7 @@ function ExpiryCountdownWidget() {
               type="button"
               aria-pressed={option.symbol === underlying.symbol}
               onClick={() => setUnderlying(option)}
-              className={`px-1.5 py-0.5 text-xxs rounded border ${
+              className={`min-h-11 px-2 text-xxs rounded border ${
                 option.symbol === underlying.symbol
                   ? "bg-accent/15 text-accent border-accent/40"
                   : "text-text-muted border-transparent hover:text-text-primary"
@@ -267,7 +267,7 @@ function ExpiryCountdownWidget() {
         )}
         {list.status === "error" && (
           <p className="text-xxs text-warning leading-snug" role="status">
-            Couldn&apos;t load the {underlying.symbol} expiry list. No dates are shown until it loads.
+            Couldn&apos;t load the {underlying.symbol} expiry list.
           </p>
         )}
         {list.status === "ready" && (

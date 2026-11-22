@@ -178,7 +178,24 @@ describe("ExpiryCountdownWidget", () => {
     render(<ExpiryCountdownWidget />);
     await flush();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-    expect(screen.getByText(/Couldn.t load the NIFTY expiry list/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Couldn.t load the NIFTY expiry list\.$/);
+  });
+
+  it("names SENSEX when the SENSEX list cannot load", async () => {
+    render(<ExpiryCountdownWidget />);
+    await flush();
+    apiMocks.getExpiry.mockRejectedValue(new Error("network"));
+    fireEvent.click(screen.getByRole("button", { name: "SENSEX" }));
+    await flush();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Couldn.t load the SENSEX expiry list\.$/);
+  });
+
+  it("gives each underlying toggle a 44px tall target", async () => {
+    render(<ExpiryCountdownWidget />);
+    await flush();
+    for (const name of ["NIFTY", "SENSEX"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass("min-h-11");
+    }
   });
 
   it("marks a contract the list does not carry as not listed", async () => {

@@ -89,7 +89,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- **Expiry dates come from the contract list.** Expiry Countdown and the chart's OI overlay read expiry dates from the exchange's contract list, the same list the option chain uses, instead of assuming a Thursday expiry. NIFTY contracts show their Tuesday expiry and SENSEX contracts their Thursday expiry, and a holiday-shifted expiry shows the date the list carries. Expiry Countdown can switch between NIFTY and SENSEX and shows each date as, for example, "Expires Tue 24 Nov". When the list cannot be loaded it says so and shows no guessed date. The OI overlay profiles the nearest listed contract and stays empty when no contract is listed.
+- **Expiry dates come from the contract list.** Expiry Countdown and the chart's OI overlay read expiry dates from the exchange's contract list, the same list the option chain uses, instead of assuming a Thursday expiry. NIFTY contracts show their Tuesday expiry and SENSEX contracts their Thursday expiry, and a holiday-shifted expiry shows the date the list carries. Expiry Countdown can switch between NIFTY and SENSEX and shows each date as, for example, "Expires Tue 24 Nov". When the list cannot be loaded it shows "Couldn't load the NIFTY expiry list." (or SENSEX) and no guessed date. The NIFTY and SENSEX toggle buttons are at least 44px tall. The OI overlay profiles the nearest listed contract and stays empty when no contract is listed.
 
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 
