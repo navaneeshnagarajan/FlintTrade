@@ -793,7 +793,7 @@ class PositionMirror:
         skip_error = (
             lot_size_unknown_message(order.symbol)
             if lot_unknown
-            else "Zero allocation — skipped"
+            else "Allocation is zero. Not mirrored."
         )
 
         # Execute in parallel using ThreadPoolExecutor
