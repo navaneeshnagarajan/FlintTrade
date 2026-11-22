@@ -528,7 +528,7 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
 
 
 @pytest.mark.parametrize("symbol", ["SENSEX25DEC85000CE", "SENSEX 85000 PE"])
-def test_sensex_options_use_the_bse_limit(symbol):
+def test_sensex_options_use_the_unverified_bse_limit(symbol):
     assert qty_freeze.resolve_freeze_quantity(symbol) == 1_000
 
 
@@ -539,3 +539,9 @@ def test_sensex_futures_and_sensex50_have_no_fallback(symbol):
 
 def test_broker_freeze_wins_for_sensex_options():
     assert qty_freeze.resolve_freeze_quantity("SENSEX25DEC85000CE", 900) == 900
+
+
+def test_sensex_options_limit_sits_with_the_unverified_bse_rows():
+    assert "SENSEX" not in qty_freeze._NSE_INDEX_FREEZE
+    assert qty_freeze._BSE_INDEX_OPTION_FREEZE == {"SENSEX": 1_000}
+    assert set(qty_freeze._BSE_DEFAULTS) == {("SENSEX", "BFO"), ("BANKEX", "BFO")}

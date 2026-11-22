@@ -118,19 +118,22 @@ _NSE_INDEX_FREEZE: dict[str, int] = {
     "NIFTYFPI": 8_500,
 }
 
-# BSE single order limit for SENSEX index options. SENSEX futures have a
-# different limit, so only option symbols use this. SENSEX50 starts with the
-# same letters and is excluded. Both exchange tables change from time to time;
-# recheck them against the exchanges' current limits regularly. A broker
-# ``freeze_qty`` always wins.
+# BSE limits are unverified: none of them is checked against a current BSE
+# notice, and a broker ``freeze_qty`` always wins. SENSEX index options use
+# 1,000 when the broker sends none. SENSEX futures have a different limit, and
+# SENSEX50 starts with the same letters, so neither uses it.
 _BSE_INDEX_OPTION_FREEZE: dict[str, int] = {"SENSEX": 1_000}
 _BSE_UNLISTED_LONGER_NAMES: tuple[str, ...] = ("SENSEX50",)
-
-# Well-known defaults seeded when no CSV is loaded.
-_NSE_DEFAULTS: dict[tuple[str, str], int] = {
-    **{(symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()},
+_BSE_DEFAULTS: dict[tuple[str, str], int] = {
     ("SENSEX", "BFO"): 500,
     ("BANKEX", "BFO"): 900,
+}
+
+# Well-known defaults seeded when no CSV is loaded. Both exchange tables change
+# from time to time; recheck them against the exchanges' current limits.
+_NSE_DEFAULTS: dict[tuple[str, str], int] = {
+    **{(symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()},
+    **_BSE_DEFAULTS,
 }
 
 _INDEX_FREEZE_NAMES: tuple[str, ...] = tuple(
@@ -218,7 +221,7 @@ def quantity_cap_label(lot_size: int, placeable: int) -> str:
 
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
     """Broker ``freeze_qty`` wins. Otherwise use the NSE index table, then the
-    BSE SENSEX options limit.
+    unverified BSE SENSEX options limit.
 
     Returns:
         The maximum quantity for one order, or ``None`` when no freeze applies.

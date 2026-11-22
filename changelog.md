@@ -89,7 +89,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- **F&O hours in config and a SENSEX options freeze limit.** `flint.toml` records the revised NSE and BSE derivatives close (15:45 from 2026-12-07, 15:30 for an index contract on its expiry day), and a test keeps it in step with the session clock. The deploy freeze now runs to 15:45. When the broker sends no freeze quantity, SENSEX options use the BSE single order limit of 1,000. SENSEX futures and SENSEX50 still rely on the broker. The NSE and BSE freeze tables need rechecking against the exchanges' current limits from time to time.
+- **Dated F&O hours and a SENSEX options freeze limit.** NSE and BSE equity derivatives close by session date: 15:30 until 2026-08-02, 15:40 from 2026-08-03 to 2026-12-06 under the closing auction rules, and 15:45 from 2026-12-07, when an index contract stops at 15:30 on its expiry day. `flint.toml` lists the same windows, and a test checks each window against the session clock. Order admission, the scheduler, Practice and the terminal clock use the close for the date being traded or simulated. The deploy freeze runs to 15:45. When the broker sends no freeze quantity, SENSEX options use 1,000. Like the other BSE freeze limits, that value is unverified and a broker freeze quantity always wins. SENSEX futures and SENSEX50 still rely on the broker.
 
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 

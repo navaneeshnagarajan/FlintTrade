@@ -327,7 +327,7 @@ describe("needsLargeOrderConfirmation", () => {
 });
 
 describe("SENSEX options freeze quantity", () => {
-  it("uses the BSE limit for SENSEX options", () => {
+  it("uses the unverified BSE limit for SENSEX options", () => {
     expect(resolveFreezeQuantity("SENSEX25DEC85000CE")).toBe(1000);
     expect(resolveFreezeQuantity("SENSEX 85000 PE")).toBe(1000);
   });

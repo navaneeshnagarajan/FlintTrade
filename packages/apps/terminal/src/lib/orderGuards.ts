@@ -250,10 +250,10 @@ export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
 };
 
 /**
- * BSE single order limit for SENSEX index options. SENSEX futures have a
- * different limit, so only option symbols use this, and SENSEX50 is excluded.
- * Both exchange tables change from time to time; recheck them against the
- * exchanges' current limits regularly. A broker `freeze_qty` always wins.
+ * Unverified BSE limit for SENSEX index options, like the other BSE freeze
+ * rows: it is not checked against a current BSE notice, and a broker
+ * `freeze_qty` always wins. SENSEX futures have a different limit, so only
+ * option symbols use this, and SENSEX50 is excluded.
  */
 export const BSE_INDEX_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   SENSEX: 1000,
@@ -326,7 +326,7 @@ export function quantityCapLabel(lotSize: number, placeable: number): string {
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE index table, then the BSE SENSEX options limit.
+ * NSE index table, then the unverified BSE SENSEX options limit.
  */
 export function resolveFreezeQuantity(
   symbol: string,
