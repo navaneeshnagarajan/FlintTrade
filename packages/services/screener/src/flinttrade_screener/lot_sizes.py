@@ -24,6 +24,7 @@ from __future__ import annotations
 import inspect
 import logging
 import math
+import re
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -126,6 +127,18 @@ class LotResolution(NamedTuple):
 
     lot_size: int | None
     source: str
+
+
+def lot_size_unknown_message(symbol: str) -> str:
+    """Refusal line for a symbol with no known lot, naming its underlying."""
+    compact = "".join(str(symbol).upper().split())
+    listed = [name for name in FALLBACK_LOT_SIZES if compact.startswith(name)]
+    if listed:
+        underlying = max(listed, key=len)
+    else:
+        match = re.match(r"[A-Z&-]*[A-Z&]", compact)
+        underlying = match.group(0) if match else compact
+    return f"The lot size for {underlying} isn't known."
 
 
 def get_lot_size_sync(symbol: str, exchange: str = "") -> int | None:  # noqa: ARG001

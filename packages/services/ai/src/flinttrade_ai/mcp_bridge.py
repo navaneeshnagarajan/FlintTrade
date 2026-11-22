@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
 
 from .llm_client import LLMClient, LLMMessage
 
@@ -59,6 +59,7 @@ TOOL_DEFINITIONS = [
 ]
 _READ_TOOLS = frozenset(tool["name"] for tool in TOOL_DEFINITIONS)
 _LOT_MAP = FALLBACK_LOT_SIZES
+LOT_SIZE_UNKNOWN = "lot_size_unknown"
 
 
 def parse_order_command(text: str) -> MCPToolCall | None:
@@ -78,7 +79,9 @@ def parse_order_command(text: str) -> MCPToolCall | None:
             if unit in {"lot", "lots"}:
                 underlying = next((name for name in sorted(_LOT_MAP, key=len, reverse=True) if name in symbol), None)
                 if underlying is None:
-                    return None
+                    return MCPToolCall(
+                        LOT_SIZE_UNKNOWN, {"message": lot_size_unknown_message(symbol)}, text, 0.8
+                    )
                 amount *= _LOT_MAP[underlying]
             quantity = str(amount)
         if token in {"at", "@"} and index + 1 < len(trailing):
@@ -141,6 +144,8 @@ class MCPBridge:
 
     def execute(self, text: str) -> MCPResult:
         call = self.parse(text)
+        if call.tool_name == LOT_SIZE_UNKNOWN:
+            return MCPResult(tool_name=call.tool_name, error=call.arguments["message"], raw_input=text)
         if call.tool_name == "place_order":
             return MCPResult(
                 tool_name=call.tool_name,

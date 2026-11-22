@@ -408,3 +408,12 @@ class TestModuleExports:
     def test_lot_resolution_importable_from_module(self):
         from flinttrade_screener.lot_sizes import LotResolution as ImportedResolution
         assert ImportedResolution is LotResolution
+
+
+def test_unknown_lot_message_names_the_underlying(monkeypatch):
+    from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+    assert lot_size_unknown_message("SENSEX26DEC85000CE") == "The lot size for SENSEX isn't known."
+    assert lot_size_unknown_message("notlisted 26 dec fut") == "The lot size for NOTLISTED isn't known."
+    assert lot_size_unknown_message("M&M26DECFUT") == "The lot size for M&M isn't known."

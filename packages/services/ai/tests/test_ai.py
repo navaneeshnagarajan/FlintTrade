@@ -464,6 +464,17 @@ class TestMCPBridge:
         # 2 lots × the near-month master lot.
         assert result.arguments["quantity"] == str(2 * lot)
 
+    def test_lots_with_an_unknown_lot_say_why(self):
+        from flinttrade_ai.mcp_bridge import LOT_SIZE_UNKNOWN, MCPBridge, parse_order_command
+
+        call = parse_order_command("Buy NOTLISTED26DECFUT 2 lots")
+        assert call is not None
+        assert call.tool_name == LOT_SIZE_UNKNOWN
+        assert call.arguments == {"message": "The lot size for NOTLISTED isn't known."}
+        result = MCPBridge().execute("Buy NOTLISTED26DECFUT 2 lots")
+        assert result.success is False
+        assert result.error == "The lot size for NOTLISTED isn't known."
+
     def test_parse_with_price(self):
         from flinttrade_ai.mcp_bridge import parse_order_command
         result = parse_order_command("Buy RELIANCE 10 shares at 2500 limit")

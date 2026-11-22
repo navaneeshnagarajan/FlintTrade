@@ -38,7 +38,7 @@ import numpy as np
 from flinttrade_backtest.strategies import _BacktestStrategyMixin
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
 
 logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 
@@ -136,7 +136,7 @@ class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
         lot_size = lot_size_for(symbol)
         if lot_size is None:
             if exchange.strip().upper() not in _CASH_EXCHANGES:
-                raise ValueError(f"The lot size for {symbol} isn't known.")
+                raise ValueError(lot_size_unknown_message(symbol))
             lot_size = 1
         self._quantity = str(lots * lot_size)
 
