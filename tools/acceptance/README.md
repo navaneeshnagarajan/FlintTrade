@@ -97,6 +97,35 @@ failure/error/skip records, and requires exactly boolean `true` for all seven
 accepted windows. It does **not** replace full body/geometry/native-scope/raw-window
 joins, original endpoint checks or the parent's final source/runtime acceptance.
 
+## Command lifetime and timeout receipts
+
+Every maintained mode uses a fresh Linux subreaper for each command. Custody is
+established before spawn; detached groups/sessions and double-forked children
+remain descendants of that owner. Cleanup signals only its kernel-declared
+children through generation-checked pidfds, then reaps adopted descendants until
+`waitpid` reports no children. The caller is not a subreaper and unrelated
+processes are never discovered by name, session, or a host-wide census.
+
+Normal exits (including nonzero and signal exits), deadlines, cancellation and
+controller EOF all drain owned descendants **before** the native port probes.
+`TimeoutExpired` still propagates as failure. Each command is appended in
+`finally`, even without a final browser JSON report. `*.ownership.json` records
+native exit/signal, executor outcome, deadline, PID/start/group/session identities,
+signals and reaps independently of the final `acceptance-execution.json`.
+
+Owner startup consumes the supplied execution budget. Cleanup has a separate
+five-second termination/reaping ceiling and one second for receipt delivery; it
+does not grant additional execution time. Elapsed cleanup also consumes any
+remaining shared browser budget (the existing 1,200-second deadline is unchanged).
+Incomplete cleanup or missing custody fails closed. Killing the owner itself or
+an unkillable kernel task cannot be reported as clean; outer isolation remains
+containment, not proof of inner cleanup.
+
+The normal `contracts.py` gate includes `ExecutorLifecycle` controls with real
+ready listeners and an unrelated same-namespace process. The CI
+`Reports Registrations` subset checks that registration and its omission mutant
+without executing lifecycle controls outside the authorised runtime.
+
 ## Diagnostics and integration
 
 `diagnostic-default --python PATH`, `diagnostic-policy --python PATH` and
@@ -113,3 +142,21 @@ terminal's aggregate e2e dispatch. Preserve its existing lanes and the shared-co
 carrier registrations. Do not make default `pnpm e2e` green by ignoring/skipping
 normal-factory specs. Collection, fixture unit tests and diagnostic results alone
 are not acceptance of the final installed runtime.
+
+### Bounded owner handoff
+
+Request delivery shares the original absolute execution-plus-cleanup-plus-delivery
+ceiling with every owner wait. Owner startup still consumes the execution budget;
+the owner refuses native startup after that earlier deadline. Exec-valid large
+environments remain supported. Cancellation closes the control channel (EOF),
+rather than attempting another write behind a full request. Early cancellation
+uses at most the existing cleanup/delivery remainder, not a renewed execution
+window. No timeout, grace, retry or browser budget is added.
+
+`run_owned` returns the real native exit or negative signal only for an ordinary
+exit with complete custody. Its mutable `CommandRecord` separates `exit`,
+`outcome` and `ownership`. If request delivery times out before the owner can
+write a receipt, the public runner still writes a command failure record with
+unknown native exit and no invented ownership, reaped children or cleanup proof.
+A stopped or lost owner is not a clean drain, even if outer containment later
+removes it. The maintained controls witness failure before exact owned rescue.

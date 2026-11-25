@@ -12,12 +12,12 @@
  *   --chart-up        bullish candle / rising price color
  *   --chart-down      bearish candle / falling price color
  *
- * Memoised on (activeThemeId + resolvedMode) so the chart only receives a
- * new options object when the theme actually changes.
+ * Memoised on the store's completed CSS publication, including live system
+ * changes. Selection alone is too early: CSS may still hold the old palette.
  */
 
 import { useMemo } from "react";
-import { useShallow } from "zustand/react/shallow";
+
 import {
   createFlintLightweightChartTheme,
   type FlintLightweightChartTheme,
@@ -49,12 +49,7 @@ export type LightweightChartTheme = FlintLightweightChartTheme &
 // ---------------------------------------------------------------------------
 
 export function useLightweightChartTheme(): LightweightChartTheme {
-  const { activeThemeId, resolvedMode } = useThemeStore(
-    useShallow((s) => ({
-      activeThemeId: s.activeThemeId,
-      resolvedMode: s.getResolvedMode(),
-    })),
-  );
+  const appliedThemeRevision = useThemeStore((s) => s.appliedThemeRevision);
 
   return useMemo(() => {
     const bg = cssVar("--chart-bg", "#0a0a0f");
@@ -77,5 +72,5 @@ export function useLightweightChartTheme(): LightweightChartTheme {
       muted,
     }) as LightweightChartTheme;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeThemeId, resolvedMode]);
+  }, [appliedThemeRevision]);
 }

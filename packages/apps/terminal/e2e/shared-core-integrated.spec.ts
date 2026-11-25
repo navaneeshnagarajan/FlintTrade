@@ -7,6 +7,7 @@ import { request as ownedRequest, type Locator, type Page, type Request, type Te
 import { z } from "zod";
 import { test as guardedTest, expect, type HttpMethod, type SyntheticPhasedFixtureRegistry } from "./fixture-registry";
 import { EDGE_PROBE_URLS, PUBLIC_INTERNET_PROBE_URL } from "../src/lib/operatorProbeUrls";
+import { armIncidentProtocol, SYSTEM_INSPECTION_CASE, type IncidentScope, type ProducerRow } from "./incident-delivery-protocol";
 
 // This journey requires an owned, OS-isolated normal-factory core. It does not
 // supply application API responses or claim provider/native qualification.
@@ -286,7 +287,47 @@ async function setup(page: Page, registry: SyntheticPhasedFixtureRegistry, info:
     await expect.poll(() => registry.readCounts(prefix + "/api/v1/native/accounts").completed).toBe(nativeReadBudget(info.title));
     expect(rows.filter(row => row.path === prefix + "/api/v1/native/accounts").every(row => row.status === 503)).toBe(true);
   }
-  return { bootstrap, register, registerRead, rows, finish, nativePhase, retireNative };
+  async function incidentInspection() {
+    expect(info.title).toBe(SYSTEM_INSPECTION_CASE);
+    expect(await page.evaluate(() => typeof Notification === "undefined" ? "unsupported" : Notification.permission)).not.toBe("granted");
+    const startup = z.object({ case_key: z.literal(sha(info.testId)), pid: z.number().int().positive() }).parse(JSON.parse(await fs.readFile(info.outputPath("normal-core/startup.json"), "utf8")));
+    const scope: IncidentScope = { caseId: info.testId, title: info.title, server: bootstrap.baseURL, pid: startup.pid, auth: "Bearer " + bootstrap.session.token, phase: "system-inspection" };
+    async function readDiagnostics() {
+      const response = await transport.get(bootstrap.baseURL + "/api/v1/system/diagnostics", { headers: { Authorization: scope.auth }, maxRedirects: 0 });
+      expect(response.status()).toBe(200);
+      return response.text();
+    }
+    const diagnosticsWire = await readDiagnostics();
+    const producerLedger: ProducerRow[] = JSON.parse(await fs.readFile(info.outputPath("normal-core/core-http-ledger.json"), "utf8"));
+    const protocol = armIncidentProtocol({ registry, origin: "http://127.0.0.1:5173", prefix, scope, diagnosticsWire, producerLedger,
+      expectedNativeReads: registry.callCount("GET", nativePath), relay,
+      current: async () => {
+        const current = Bootstrap.parse(JSON.parse(await fs.readFile(statePath!, "utf8")));
+        const owner = z.object({ case_key: z.literal(sha(info.testId)), pid: z.number() }).parse(JSON.parse(await fs.readFile(info.outputPath("normal-core/startup.json"), "utf8")));
+        const browser = await page.evaluate(() => JSON.parse(sessionStorage.getItem("flinttrade:auth-session")!));
+        expect(browser).toEqual(bootstrap.session);
+        expect(await page.evaluate(() => typeof Notification === "undefined" ? "unsupported" : Notification.permission)).not.toBe("granted");
+        return { ...scope, server: current.baseURL, pid: owner.pid, auth: "Bearer " + current.session.token };
+      },
+    });
+    await fs.writeFile(info.outputPath("incident-census-before-writes.json"), JSON.stringify(protocol.evidence(), null, 2));
+    const closeDiagnostics = diagnosticClosers.get(info.testId);
+    diagnosticClosers.set(info.testId, async () => {
+      try {
+        // Supplemental custody after the original body/window, including a
+        // failed body. Never use this read to admit or retry another write.
+        const readback: unknown = JSON.parse(await readDiagnostics());
+        await fs.writeFile(info.outputPath("incident-after-body-observation.json"), JSON.stringify({ ...protocol.evidence(), readback }, null, 2));
+      } finally { await closeDiagnostics?.(); }
+    });
+    return { ...protocol, async verifyDurable() {
+      const readback: unknown = JSON.parse(await readDiagnostics());
+      await fs.writeFile(info.outputPath("incident-protocol-final.json"), JSON.stringify({ ...protocol.evidence(), readback }, null, 2));
+      protocol.verifyReadback(readback); protocol.retire();
+      protocol.verifyCoreLedger(JSON.parse(await fs.readFile(info.outputPath("normal-core/core-http-ledger.json"), "utf8")));
+    } };
+  }
+  return { bootstrap, register, registerRead, rows, finish, nativePhase, retireNative, incidentInspection };
 }
 async function declaredReticle(info: TestInfo, predicates: Record<string, unknown>[], name = "reticle") {
   const clientPath = process.env["FLINTTRADE_E2E_RETICLE_CLIENT"];
@@ -697,6 +738,7 @@ test("published history leases reach mounted backtest and immutable evidence", a
   expect(finalLeaseRead?.status).toBe(404);
   expect(finalLeaseRead?.response).toMatchObject({ code: "dataset_or_lease_retired" });
   const settings = page.getByRole("region", { name: "Settings app", exact: true });
+  await settings.locator("summary").filter({ hasText: "Layout actions" }).click();
   const retainedControls = await controls.elementHandle();
   expect(retainedControls).not.toBeNull();
   const draft = "unsubmitted-snapshot-draft";
@@ -854,6 +896,7 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.getByRole("navigation", { name: "Apps", exact: true }).getByRole("link", { name: "Terminal", exact: true }).click();
   const terminal = page.getByRole("region", { name: "Terminal app", exact: true });
   await expect(terminal).toBeVisible();
+  await terminal.locator("summary").filter({ hasText: "Layout actions" }).click();
   await terminal.getByLabel("Layout name", { exact: true }).fill("Synthetic retained layout");
   await terminal.getByRole("button", { name: "Save layout", exact: true }).click();
   await expect(terminal.getByRole("status").filter({ hasText: "Saved Synthetic retained layout" })).toBeVisible();
@@ -869,7 +912,9 @@ test("nine actual app mounts retain layout and context with honest System and lo
   const mode = await page.evaluate(() => localStorage.getItem("flinttrade:mode"));
   const apps = page.getByRole("navigation", { name: "Apps", exact: true });
   await core.retireNative(nativeTerminalReads);
+  let incidents: Awaited<ReturnType<typeof core.incidentInspection>> | undefined;
   for (const name of ["Testing", "Portfolio", "Automation", "Reports", "Learn", "Brokers", "Settings", "System"]) {
+    if (name === "System") incidents = await core.incidentInspection();
     await apps.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp("/" + name.toLowerCase() + "$"));
     await expect(page.getByRole("region", { name: name + " app", exact: true })).toBeVisible();
@@ -892,9 +937,11 @@ test("nine actual app mounts retain layout and context with honest System and lo
   await page.setViewportSize({ width: 600, height: 760 });
   await checkpoint(page, info, "terminal-return-compact");
   await core.retireNative(nativeTerminalReads);
-  expect(core.rows.filter(row => row.method !== "GET")).toEqual([]);
+  expect(incidents).toBeDefined();
+  incidents!.assertOnlyWrites(core.rows);
   await core.finish();
-  await declaredReticle(info, [{ kind: "net", method: "POST", count: 0 }, { kind: "state", store: "mode", path: "mode", equals: "practice" }, { kind: "text", scope: '[data-testid="system-status-bar"]', contains: "GPU: Unavailable", visible: true }]);
+  await declaredReticle(info, [...incidents!.predicates, { kind: "state", store: "mode", path: "mode", equals: "practice" }, { kind: "text", scope: '[data-testid="system-status-bar"]', contains: "GPU: Unavailable", visible: true }]);
+  await incidents!.verifyDurable();
 });
 
 test("learning and training actions refuse without fabricated authority", async ({ page, syntheticApi }, info) => {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Layout, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { useLayoutStore } from "@/stores/layoutStore";
 
@@ -37,9 +37,21 @@ export default function WorkspaceSwitcher() {
     <div className="relative flex flex-col">
       <div
         data-testid="workspace-switcher"
-        className="flex items-center gap-1 h-7 px-2 rounded text-xs text-text-secondary border border-border-default/50 bg-surface-base/50"
+        className="flex min-w-0 items-center gap-1"
       >
-      <Layout size={12} className="text-text-muted" aria-hidden="true" />
+      <div className="flex min-w-0 items-center gap-1 overflow-x-auto" aria-hidden="true">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            tabIndex={-1}
+            onClick={() => handleSwitch(tab.id)}
+            className={`h-6 max-w-[9rem] shrink-0 truncate rounded-full px-2 text-[11px] ${tab.id === activeTabId ? "bg-white/15 text-white" : "text-white/55 hover:bg-white/10"}`}
+          >
+            {tab.name}
+          </button>
+        ))}
+      </div>
       <label htmlFor="active-workspace" className="sr-only">
         Active workspace
       </label>
@@ -47,7 +59,7 @@ export default function WorkspaceSwitcher() {
         id="active-workspace"
         value={activeTabId}
         onChange={(event) => handleSwitch(event.target.value)}
-        className="max-w-[12rem] cursor-pointer truncate bg-transparent font-medium text-text-secondary outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="sr-only"
       >
         {tabs.map((tab) => (
           <option key={tab.id} value={tab.id}>

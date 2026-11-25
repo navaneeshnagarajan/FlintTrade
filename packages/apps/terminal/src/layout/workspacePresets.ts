@@ -629,6 +629,92 @@ export function buildBeginnerCore(): IJsonModel {
   );
 }
 
+// ---------------------------------------------------------------------------// Preset 18 — Volatility Trading
+//
+// ┌──────────────┬───────────────┐
+// │ Option Chain │ Greeks Heatmap│
+// ├──────────────┼───────────────┤
+// │ IV Smile     │ Volatility    │
+// │ Cone         │ Surface       │
+// └──────────────┴───────────────┘
+//
+// Volatility-first desk: the option chain drives direction, the Greeks grid and
+// IV smile show the risk surface, and the volatility cone / surface show the
+// term structure. Built for scalpers trading volatility breakouts.
+// ---------------------------------------------------------------------------
+function buildVolatilityTrading(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(38, [tabJson("optionchain", "Option Chain")]),
+        rowJson(37, [
+          tabsetJson(50, [tabJson("greeksheatmap", "Greeks Heatmap")]),
+          tabsetJson(50, [tabJson("ivsmile", "IV Smile", { params: { view: "smile" } })]),
+        ]),
+        rowJson(25, [
+          tabsetJson(50, [tabJson("volatilitycone", "Volatility Cone")]),
+          tabsetJson(50, [tabJson("volsurface", "Vol Surface")]),
+        ]),
+      ]),
+    ]),
+  );
+}
+
+// ---------------------------------------------------------------------------// Preset 19 — Classic
+//
+// ┌──────────────┬───────────────┐
+// │     Chart    │   Order Pad   │
+// ├──────────────┼───────────────┤
+// │  Positions   │   Watchlist   │
+// └──────────────┴───────────────┘
+//
+// The classic trading desk: chart for timing, order pad for execution,
+// positions for risk, watchlist for opportunity. The enduring layout that
+// every trading app converges on.
+// ---------------------------------------------------------------------------
+function buildClassic(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(55, [tabJson("chart", "Chart")]),
+        tabsetJson(45, [tabJson("orderpad", "Order Pad")]),
+      ]),
+      rowJson(100, [
+        tabsetJson(50, [tabJson("positions", "Positions")]),
+        tabsetJson(50, [tabJson("watchlist", "Watchlist")]),
+      ]),
+    ]),
+  );
+}
+
+// ---------------------------------------------------------------------------// Preset 20 — Watchlist
+//
+// ┌──────────────┬───────────────┐
+// │  Watchlist   │     Chart     │
+// ├──────────────┼───────────────┤
+// │  Indices     │  Heat Map     │
+// └──────────────┴───────────────┘
+//
+// Watchlist-first desk: the watchlist drives the flow, the chart shows the
+// setup, the index strip gives macro context, and the sector heat map shows
+// where money is moving. Built for the trader who starts with a universe,
+// not a signal.
+// ---------------------------------------------------------------------------
+function buildWatchlist(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(40, [tabJson("watchlist", "Watchlist")]),
+        tabsetJson(60, [tabJson("chart", "Chart")]),
+      ]),
+      rowJson(100, [
+        tabsetJson(50, [tabJson("indexstrip", "Indices")]),
+        tabsetJson(50, [tabJson("marketoverview", "Sector Heat Map", { params: { tab: "sectors" } })]),
+      ]),
+    ]),
+  );
+}
+
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "scalper-zone",
@@ -748,6 +834,27 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "A broad sweep of the widget catalogue in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
     icon: "LayoutDashboard",
     build: buildEverything,
+  },
+  {
+    id: "volatility-trading",
+    name: "Volatility Trading",
+    description: "Option Chain + Greeks Heatmap + IV Smile + Volatility Cone + Vol Surface — volatility-first desk for scalpers",
+    icon: "Zap",
+    build: buildVolatilityTrading,
+  },
+  {
+    id: "classic",
+    name: "Classic",
+    description: "Chart + Order Pad + Positions + Watchlist — the classic trading desk that every app converges on",
+    icon: "LayoutDashboard",
+    build: buildClassic,
+  },
+  {
+    id: "watchlist",
+    name: "Watchlist",
+    description: "Watchlist + Chart + Indices + Sector Heat Map — watchlist-first desk for universe-driven trading",
+    icon: "Star",
+    build: buildWatchlist,
   },
 ];
 

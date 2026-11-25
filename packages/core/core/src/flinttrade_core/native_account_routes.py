@@ -185,8 +185,24 @@ def _guard_account_writes() -> Any | None:
         auth_error = require_operator_session()
         if auth_error is not None:
             return auth_error
+        if request.endpoint == "native_accounts.connect_native_account":
+            from .account_setup import setup_for  # noqa: PLC0415
+
+            service = setup_for(current_app._get_current_object())
+            if service is not None:
+                # This exact rewritten action alone bypasses the legacy guard.
+                # The real facade rechecks principal, custody and coherence.
+                return None
         return guard_broker_account_http()
     return None
+
+
+@native_accounts_bp.after_request
+def _uncached_account_mutations(response: Any) -> Any:
+    """Include early authentication refusals in the account no-store contract."""
+    if request.method in ("POST", "DELETE", "PUT", "PATCH"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _operator_actor_id() -> str:
@@ -1829,6 +1845,11 @@ def connect_native_account() -> Any:
 
     Body: ``{adapter_id, account_id, label?, credentials, is_primary?}``.
     """
+    from .account_setup import connect_http, setup_for  # noqa: PLC0415
+
+    app = current_app._get_current_object()
+    if setup_for(app) is not None:
+        return connect_http(app)
     body: dict[str, Any] = request.get_json(silent=True) or {}
     adapter_id = body.get("adapter_id", "")
     account_id = body.get("account_id", "")

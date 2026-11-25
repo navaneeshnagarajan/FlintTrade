@@ -260,6 +260,10 @@ function normaliseOrderBody(body: object): Record<string, unknown> {
   copyField("priceBasis", "price_basis");
   copyField("lotSize", "lot_size");
   copyField("freezeQty", "freeze_qty");
+  copyField("stopLoss", "stop_loss_price");
+  copyField("target", "target_price");
+  copyField("trailingStop", "trailing_jump");
+  copyField("oco", "market_protection_by_strategy");
 
   return normalised;
 }

@@ -843,7 +843,8 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       chartTheme,
       createFlintChartDisplaySettingsOptions(chartDisplaySettings),
     );
-    applyCandleSpan(chart.timeScale(), barsRef.current.length);
+    // Repainting must preserve the user's zoom/pan. Candle spanning belongs
+    // to data/geometry initialisation, not a theme or display-settings refresh.
   }, [chartDisplaySettings, chartTheme, chartRef, candleRef]);
 
   const handleDrawingCreated = useCallback((drawingId: string) => {

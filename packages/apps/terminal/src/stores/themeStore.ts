@@ -47,6 +47,8 @@ export interface ThemeState {
   /** Whether glass/backdrop-blur effects are enabled (default: true) */
   glass: boolean;
   reduceMotion: boolean;
+  /** Runtime-only publication after applyTheme has written the complete palette. */
+  appliedThemeRevision: number;
 
   // --- Actions ---
   setTheme: (id: string) => void;
@@ -185,6 +187,7 @@ const storeImpl: StateCreator<
   customThemes:  [],
   glass:         true,
   reduceMotion:  false,
+  appliedThemeRevision: 0,
 
   // --- setTheme ---
   setTheme: (id) => {
@@ -556,6 +559,10 @@ const storeImpl: StateCreator<
     } else {
       root.classList.remove("reduce-motion");
     }
+    // CSS consumers update directly, but canvas consumers need a store event.
+    // Publish after all writes: a subscriber may render synchronously and must
+    // never memoise the previous palette under the newly selected theme/mode.
+    set((state) => ({ appliedThemeRevision: state.appliedThemeRevision + 1 }));
   },
 });
 
@@ -566,6 +573,9 @@ const storeImpl: StateCreator<
 const persistedStore = persist(storeImpl, {
   name:    "flinttrade-theme",
   version: 4,
+  partialize: ({ activeThemeId, mode, customThemes, glass, reduceMotion }) => ({
+    activeThemeId, mode, customThemes, glass, reduceMotion,
+  }),
   migrate: (persisted: unknown, version: number): Partial<ThemeState> => {
     const p = (persisted ?? {}) as Record<string, unknown>;
 

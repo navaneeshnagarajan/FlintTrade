@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, ContextManager
+from typing import TYPE_CHECKING, Any, ContextManager
 
 from .source_root import discover_source_root
 from .broker_account_cutover import (
@@ -50,6 +50,9 @@ from .broker_account_cutover import (
 )
 
 # Ensure repo root is on sys.path for cross-package imports.
+if TYPE_CHECKING:
+    from .account_setup import AccountSetupDriver
+
 _REPO_ROOT = str(discover_source_root())
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -3492,6 +3495,7 @@ def create_flask_app(
     broker_account_mutation_admission: MutationAdmission = require_broker_account_mutations,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     backend_lease_proof: BackendLeaseProof | None = None,
+    account_setup_driver: AccountSetupDriver | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3513,11 +3517,25 @@ def create_flask_app(
         service_connection_store: Optional preconstructed inert connection authority.
         broker_account_mutation_admission: Explicit dependency for isolated legacy tests; production denies mutations.
         backend_lease_proof: Live process ownership required for broker runtime construction; omit for read-only setup.
+        account_setup_driver: Explicit local-cleanup driver for the partial fresh CONNECT composition; absent by default.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
     """
     runtime_ready = backend_lease_proof is not None
+    if account_setup_driver is not None:
+        from .account_setup import AccountSetupDriver  # noqa: PLC0415
+
+        if (
+            type(account_setup_driver) is not AccountSetupDriver
+            or not runtime_ready
+            or credential_store is not None
+            or registry is not None
+            or registry_publication_owner is not None
+            or broker_account_mutation_admission is not require_broker_account_mutations
+        ):
+            raise BrokerAccountCutoverUnavailable
+        account_setup_driver.__post_init__()
     if runtime_ready:
         require_backend_lease_proof(backend_lease_proof)
     elif any(
@@ -4087,7 +4105,12 @@ def create_flask_app(
     if runtime_ready and credential_store is None:
         flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
-        credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        if account_setup_driver is None:
+            credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
+        else:
+            from .account_setup import create_fresh_setup_store  # noqa: PLC0415
+
+            credential_store = create_fresh_setup_store(flinttrade_dir, backend_lease_proof, master_password)
         app.config["CREDENTIAL_STORE"] = credential_store
 
     if contract_manager is None:
@@ -5533,6 +5556,11 @@ def create_flask_app(
             app.config["INSTRUMENT_MASTER_REFRESH_OWNER"] = start_instrument_master_refresh()
         except Exception as exc:  # noqa: BLE001 - the shipped excerpt remains usable
             logger.warning("Instrument master refresh did not start (%s)", type(exc).__name__)
+
+    if account_setup_driver is not None:
+        from .account_setup import AccountSetup  # noqa: PLC0415
+
+        AccountSetup(app, account_setup_driver)
 
     return app
 

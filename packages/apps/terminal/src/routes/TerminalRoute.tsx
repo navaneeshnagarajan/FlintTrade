@@ -811,23 +811,25 @@ export default function TerminalRoute() {
       {/* Desk toolbar: the page name, the active workspace and the two ways
           to change the canvas are always one click away. */}
       <div
-        className="flex h-9 shrink-0 items-center gap-3 border-b border-border-default bg-surface-base px-3"
+        className="flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#071018] px-2"
         data-testid="desk-toolbar"
       >
-        <h1 className="ft-text-card-title text-text-primary">Trade</h1>
-        <span aria-hidden="true" className="h-4 w-px bg-border-default" />
+        <h1 aria-label="Trade" className="shrink-0 px-1 text-sm font-semibold tracking-tight text-[#7dffa1]">FlintTrade</h1>
         <WorkspaceSwitcher />
         <div className="ml-auto flex items-center gap-1">
+          <span className="hidden items-center gap-1 px-2 text-[11px] text-white/70 sm:inline-flex" data-testid="desk-total-pnl">
+            TOTAL P&L <span className="font-medium tabular-nums text-white/90">—</span>
+          </span>
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="h-7 text-xs text-text-secondary"
+            className="h-7 rounded-full border border-white/10 px-2 text-[11px] text-white/80"
             aria-label="Positions and orders"
             data-testid="trade-book-toggle"
             onClick={() => openTradeBook(bookTab ?? "positions")}
           >
-            Positions and orders
+            TOOLS
           </Button>
           {progressive && (
             <Button
@@ -858,13 +860,13 @@ export default function TerminalRoute() {
             aria-label="Add widget"
             data-testid="add-widget-button"
           >
-            + Widget
+            + WIDGETS
           </Button>
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="h-7 text-xs text-text-secondary"
+            className="h-7 rounded-full border border-white/10 px-2 text-[11px] text-white/80"
             onClick={() => setPresetPickerOpen(true)}
             data-testid="desk-layouts"
           >

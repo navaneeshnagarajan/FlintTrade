@@ -521,6 +521,24 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       ? (call?.ltp ?? call?.last_price ?? null)
       : (put?.ltp  ?? put?.last_price  ?? null);
 
+    // Fast Buy/Sell: open the Order Pad with the contract pre-filled so the
+    // operator can review quantity, price and protective bracket (SL / target /
+    // trailing / OCO) before submitting. Dispatches the same window event the
+    // layout layer uses to retarget an existing pad.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: undefined,
+          params: {
+            symbol: buildCompactOptionSymbol(symDef.label, selectedExpiry ?? "", strike, optionType) ?? `${symDef.label}${selectedExpiry ?? ""}${strike}${optionType}`,
+            exchange,
+            action: isCE ? "BUY" : "SELL",
+          },
+          nonce: crypto.randomUUID(),
+        },
+      }));
+    }
+
     if (legBuilderOpen) {
       // When LegBuilder is open, route the click into it
       legBuilderRef.current?.addLegFromStrike(strike, optionType);

@@ -1,37 +1,17 @@
 /**
- * FT-SITE-001: marketing primary nav must stay usable on narrow phones.
- * Source-based contract (site Vitest is Node, no layout engine).
+ * Navigation presentation guards. Mounted disclosure, route and skip-link
+ * behaviour is exercised by app/page.test.ts; viewport geometry needs browser acceptance.
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
-function readSite(relativePath: string): string {
-  return readFileSync(resolve(process.cwd(), relativePath), 'utf8');
-}
+const header = readFileSync(resolve(process.cwd(), 'src/components/site-header.tsx'), 'utf8');
+const presentation = readFileSync(resolve(process.cwd(), 'src/app/presentation.css'), 'utf8');
+const layout = readFileSync(resolve(process.cwd(), 'src/app/layout.tsx'), 'utf8');
 
-function mediaBlock(css: string, query: string, nextQuery?: string): string {
-  const start = css.indexOf(`@media (${query})`);
-  expect(start).toBeGreaterThan(-1);
-  const fromQuery = css.slice(start);
-  if (!nextQuery) {
-    return fromQuery;
-  }
-  const next = fromQuery.indexOf(`@media (${nextQuery})`, 1);
-  return next === -1 ? fromQuery : fromQuery.slice(0, next);
-}
-
-function rule(css: string, selector: string): string {
-  const match = css.match(new RegExp(`${selector}\\s*\\{[^}]+\\}`));
-  return match?.[0] ?? '';
-}
-
-describe('marketing primary nav (FT-SITE-001)', () => {
-  const header = readSite('src/components/site-header.tsx');
-  const css = readSite('src/app/globals.css');
-
+describe('marketing navigation', () => {
   it('keeps every primary destination, including Contribute, in the header', () => {
     const required = [
       { href: '/download', label: 'Download' },
@@ -41,55 +21,40 @@ describe('marketing primary nav (FT-SITE-001)', () => {
       { href: '/mcp', label: 'MCP' },
       { href: '/contribute', label: 'Contribute' },
     ];
-
     for (const item of required) {
       expect(header).toContain(`href: '${item.href}'`);
       expect(header).toContain(`label: '${item.label}'`);
     }
   });
 
-  it('does not clip nav labels behind overflow-x at phone widths', () => {
-    const tablet = mediaBlock(css, 'max-width: 900px', 'max-width: 620px');
-    const mobileNav = rule(tablet, '\\.main-nav');
-
-    expect(mobileNav).toMatch(/flex-wrap:\s*wrap/);
-    expect(mobileNav).not.toMatch(/overflow-x:\s*auto/);
-    expect(mobileNav).toMatch(/overflow:\s*visible/);
+  it('loads the static presentation after the protected signature stylesheet', () => {
+    expect(layout.indexOf("import './presentation.css'")).toBeGreaterThan(layout.indexOf("import './globals.css'"));
+    expect(presentation).not.toMatch(/@keyframes|\b(?:animation|transition)\s*:/);
+    expect(presentation).not.toMatch(/\.hero-logo|\.hero-title-char|\.hero-slogan|\.site-particles|\.site-impact/);
   });
 
-  it('stops primary nav links shrinking so Contribute cannot be crushed', () => {
-    const tablet = mediaBlock(css, 'max-width: 900px', 'max-width: 620px');
-    const navLinks =
-      rule(tablet, '\\.main-nav a') || rule(css, '\\.main-nav a');
-
-    expect(navLinks).toMatch(/flex-shrink:\s*0/);
-    expect(navLinks).toMatch(/white-space:\s*nowrap/);
-  });
-});
-
-describe('marketing primary nav (FT-SITE-003)', () => {
-  const css = readSite('src/app/globals.css');
-
-  it('compacts to two-across chips at phone widths so the demo link is not cramped', () => {
-    const phone = mediaBlock(css, 'max-width: 480px');
-    const nav = rule(phone, '\\.main-nav');
-    const links = rule(phone, '\\.main-nav a');
-
-    expect(nav.length).toBeGreaterThan(0);
-    expect(links.length).toBeGreaterThan(0);
-    expect(links).toMatch(/flex:\s*1 1 calc\(50%/);
-    expect(links).toMatch(/white-space:\s*nowrap/);
-    expect(links).toMatch(/text-align:\s*center/);
-    expect(links).toMatch(/font-size:\s*13px/);
-    expect(nav).not.toMatch(/overflow-x:\s*auto/);
+  it('switches to the compact menu before desktop links can wrap', () => {
+    const compact = presentation.slice(presentation.indexOf('@media (max-width: 1100px)'));
+    expect(compact).toMatch(/\.site-header \.main-nav\s*\{\s*display:\s*none/);
+    expect(compact).toMatch(/\.site-menu\s*\{\s*display:\s*block/);
+    expect(compact).toContain('grid-template-columns: auto 1fr auto');
   });
 
-  it('keeps the tablet wrap from FT-SITE-001 and does not reintroduce overflow-x auto', () => {
-    const tablet = mediaBlock(css, 'max-width: 900px', 'max-width: 620px');
-    const mobileNav = rule(tablet, '\\.main-nav');
+  it('contains long compact navigation labels without clipping or horizontal scrolling', () => {
+    expect(presentation).toMatch(/\.site-menu nav\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    expect(presentation).toMatch(/\.site-menu nav a\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    // Only the hero may contain its off-viewport decoration. Navigation and
+    // document rules must remain unclipped; real fireball geometry is browser-tested.
+    const horizontalContainment = [...presentation.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((rule) => /overflow-x:\s*(?:auto|hidden|clip)/.test(rule[2]))
+      .map((rule) => rule[1].trim());
+    expect(horizontalContainment).toEqual(['.product-site .hero']);
+  });
 
-    expect(mobileNav).toMatch(/flex-wrap:\s*wrap/);
-    expect(mobileNav).toMatch(/overflow:\s*visible/);
-    expect(mobileNav).not.toMatch(/overflow-x:\s*auto/);
+  it('keeps visible keyboard focus treatment for links, buttons and the native disclosure', () => {
+    expect(presentation).toContain(':where(a, button, summary, pre[tabindex]):focus-visible');
+    expect(presentation).toContain('outline: 2px solid var(--site-accent)');
+    expect(presentation).toContain('.site-skip-link:not(:focus)');
+    expect(header).toContain('<summary>Menu</summary>');
   });
 });

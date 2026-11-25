@@ -375,7 +375,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
     <>
       <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { if (showTemplateClone) setShowTemplateClone(false); else onClose(); } }}>
         <DialogContent
-          className="sm:max-w-3xl max-h-[85vh] flex flex-col bg-surface-card border-border-default p-0 animate-fade-in-scale"
+          className="sm:max-w-5xl max-h-[85vh] flex flex-col bg-[#071018] border-white/10 p-0 text-[#e8eef2] animate-fade-in-scale"
           onEscapeKeyDown={(event) => {
             if (!showTemplateClone) return;
             // This Escape cancels the nested view; the desk must not also close
@@ -504,21 +504,18 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
 
           {/* Preset grid */}
           <div hidden={showSavedPresets || showTemplateClone} className={showSavedPresets || showTemplateClone ? "hidden" : "p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0"}>
-            {WORKSPACE_PRESETS.map((preset) => {
-              const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
-              return (
-                <button
-                  key={preset.id}
+            {WORKSPACE_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
                   disabled={!workspaceReady}
                   onClick={() => handleSelectPreset(preset.id)}
-                  className="flex items-start gap-3 p-4 rounded-lg border border-border-default hover:border-accent/50 hover:bg-surface-hover transition-colors text-left group disabled:cursor-wait disabled:opacity-50"
+                  className="flex flex-col gap-3 p-3 rounded-lg border border-white/10 bg-[#0d1720] hover:border-[#7dffa1]/50 transition-colors text-left group disabled:cursor-wait disabled:opacity-50"
                 >
-                  <div className="mt-0.5 shrink-0 p-2 rounded-md bg-surface-hover group-hover:bg-accent/10 transition-colors">
-                    <Icon
-                      size={18}
-                      className="text-text-secondary group-hover:text-accent transition-colors"
-                    />
-                  </div>
+                  <span aria-hidden="true" className="grid h-24 grid-cols-[1.4fr_0.7fr_0.7fr] gap-1 rounded bg-[#071018] p-2">
+                    <span className="rounded bg-[#12202b]" />
+                    <span className="rounded bg-[#1d3140]" />
+                    <span className="rounded bg-[#1d3140]" />
+                  </span>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-text-primary leading-tight">
                       {preset.name}
@@ -528,8 +525,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
                     </p>
                   </div>
                 </button>
-              );
-            })}
+            ))}
           </div>
         </DialogContent>
       </Dialog>

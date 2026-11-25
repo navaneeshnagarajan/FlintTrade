@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 ROOT=Path(__file__).resolve().parents[3]
@@ -147,6 +148,121 @@ class RuntimeDispatch(unittest.TestCase):
         self.assertIn('optimisation refused',result.stderr)
 
 class Registrations(unittest.TestCase):
+    def test_desk_spec_is_registered_for_typecheck(self) -> None:
+        """Require the complete desk spec in the maintained compiler inventory."""
+        source = ROOT / 'packages/apps/terminal/tsconfig.e2e-infra.json'
+        self.assertIn('e2e/designer-desk-measure.spec.ts', json.loads(source.read_text())['include'],
+                      'Missing desk typecheck registration')
+
+    def test_desk_spec_is_registered_for_zero_warning_lint(self) -> None:
+        """Require the complete desk spec in the maintained zero-warning lint."""
+        source = ROOT / 'packages/apps/terminal/package.json'
+        argv = shlex.split(json.loads(source.read_text())['scripts']['e2e:infra:lint'])
+        self.assertIn('e2e/designer-desk-measure.spec.ts', argv, 'Missing desk lint registration')
+        self.assertIn('--max-warnings=0', argv)
+
+    def test_desk_typecheck_registration_omission_fails(self) -> None:
+        """Detect a compiler omission independently of the lint inventory."""
+        target = ROOT / 'packages/apps/terminal/tsconfig.e2e-infra.json'
+        original = Path.read_text
+        value = json.loads(original(target))
+        value['include'].remove('e2e/designer-desk-measure.spec.ts')
+        def read(path: Path, *args, **kwargs) -> str:
+            return json.dumps(value) if path == target else original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', read):
+            self.test_desk_spec_is_registered_for_zero_warning_lint()
+            with self.assertRaisesRegex(AssertionError, 'Missing desk typecheck registration'):
+                self.test_desk_spec_is_registered_for_typecheck()
+
+    def test_desk_lint_registration_omission_fails(self) -> None:
+        """Detect a lint omission independently of the compiler inventory."""
+        target = ROOT / 'packages/apps/terminal/package.json'
+        original = Path.read_text
+        value = json.loads(original(target))
+        argv = shlex.split(value['scripts']['e2e:infra:lint'])
+        argv.remove('e2e/designer-desk-measure.spec.ts')
+        value['scripts']['e2e:infra:lint'] = shlex.join(argv)
+        def read(path: Path, *args, **kwargs) -> str:
+            return json.dumps(value) if path == target else original(path, *args, **kwargs)
+        with patch.object(Path, 'read_text', read):
+            self.test_desk_spec_is_registered_for_typecheck()
+            with self.assertRaisesRegex(AssertionError, 'Missing desk lint registration'):
+                self.test_desk_spec_is_registered_for_zero_warning_lint()
+
+    def test_executor_lifecycle_controls_are_registered(self) -> None:
+        """Require the maintained lifecycle class in the complete package gate."""
+        source = (ROOT / 'tools/acceptance/tests/contracts.py').read_text()
+        self.assertIn('\nfrom executor_lifecycle import ExecutorLifecycle\n', source,
+                      'Missing maintained executor lifecycle registration')
+        controls = (ROOT / 'tools/acceptance/tests/executor_lifecycle.py').read_text()
+        self.assertIn('class ExecutorLifecycle(unittest.TestCase):', controls)
+
+    def test_executor_lifecycle_registration_omission_fails(self) -> None:
+        """Reject an omitted lifecycle registration without weakening its oracle."""
+        from unittest.mock import patch
+        original = Path.read_text
+        target = ROOT / 'tools/acceptance/tests/contracts.py'
+        def omitted(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            return text.replace('from executor_lifecycle import ExecutorLifecycle', '# omitted') if path == target else text
+        with patch.object(Path, 'read_text', omitted):
+            with self.assertRaisesRegex(AssertionError, 'Missing maintained executor lifecycle registration'):
+                self.test_executor_lifecycle_controls_are_registered()
+
+    def test_incident_protocol_control_inventory_and_runner(self):
+        terminal = ROOT / 'packages/apps/terminal'
+        source = (terminal / 'e2e/incident-delivery-protocol.control.ts').read_text()
+        match = re.search(r'const cases = (\[.*?\]) as const;', source)
+        if match is None:
+            self.fail('Missing explicit incident control inventory')
+        scenarios = json.loads(match.group(1))
+        expected = json.loads((ROOT / 'tools/reticle/incident-protocol-cases.json').read_text())
+        self.assertEqual(len(scenarios), 29)
+        self.assertEqual(sorted(expected), sorted('incident protocol ' + name for name in scenarios))
+        self.assertEqual(len(set(expected)), len(expected))
+        config = (terminal / 'playwright.incident-protocol.config.ts').read_text()
+        self.assertIn('testMatch: "incident-delivery-protocol.control.ts"', config)
+        self.assertIn('workers: 1, retries: 0, forbidOnly: true', config)
+        self.assertIn('serviceWorkers: "block"', config)
+        self.assertIn('"playwright.incident-protocol.config.ts"', (terminal / 'eslint.config.mjs').read_text())
+        runner = (ROOT / 'tools/reticle/run.py').read_text()
+        self.assertIn("terminal/'playwright.incident-protocol.config.ts'", runner)
+        self.assertIn("validate_cases(OUT/'incident-protocol-results.xml'", runner)
+        self.assertLess(runner.index("run(controls,'incident-protocol-controls'"), runner.index("code=run(cmd,'original'"))
+
+    def test_incident_protocol_registration_omissions_fail(self):
+        terminal = ROOT / 'packages/apps/terminal'
+        original = Path.read_text
+        files = ['e2e/incident-delivery-protocol.ts', 'e2e/incident-delivery-protocol.control.ts', 'playwright.incident-protocol.config.ts']
+        for inventory in ['tsconfig.e2e-infra.json', 'package.json']:
+            for omitted in files:
+                with self.subTest(inventory=inventory, omitted=omitted):
+                    target = terminal / inventory
+                    content = json.loads(original(target))
+                    if inventory.startswith('tsconfig'):
+                        content['include'].remove(omitted)
+                    else:
+                        content['scripts']['e2e:infra:lint'] = content['scripts']['e2e:infra:lint'].replace(omitted + ' ', '')
+                    def read(path, *args, **kwargs):
+                        return json.dumps(content) if path == target else original(path, *args, **kwargs)
+                    with patch.object(Path, 'read_text', read):
+                        with self.assertRaisesRegex(AssertionError, 'Missing (infra typecheck|zero-warning lint) registration'):
+                            self.test_new_e2e_sources_are_in_typecheck_and_lint_inventories()
+        for relative, before, after in [
+            ('tools/reticle/run.py', "terminal/'playwright.incident-protocol.config.ts'", "terminal/'omitted.ts'"),
+            ('packages/apps/terminal/eslint.config.mjs', '"playwright.incident-protocol.config.ts"', '"omitted.ts"'),
+            ('tools/reticle/incident-protocol-cases.json', 'incident protocol positive', 'incident protocol omitted'),
+        ]:
+            with self.subTest(omitted=relative):
+                target = ROOT / relative
+                content = original(target).replace(before, after)
+                self.assertNotEqual(content, original(target))
+                def read_runner(path, *args, **kwargs):
+                    return content if path == target else original(path, *args, **kwargs)
+                with patch.object(Path, 'read_text', read_runner):
+                    with self.assertRaises(AssertionError):
+                        self.test_incident_protocol_control_inventory_and_runner()
+
     def test_ci_runs_the_synthetic_contract_subset(self):
         workflow = (ROOT / '.github/workflows/test.yml').read_text()
         self.assertTrue('run: uv run python tools/acceptance/tests/contracts.py Reports Registrations' in workflow, 'CI is missing the synthetic report/registration contract step')
@@ -158,7 +274,7 @@ class Registrations(unittest.TestCase):
         app = config('tsconfig.json')
         infra = config('tsconfig.e2e-infra.json')
         expected_app = {'e2e/incidents/fixture.tsx', 'e2e/service-oauth-handoff.fixture.tsx', 'e2e/service-oauth-handoff.entry.ts'}
-        expected_infra = {'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts', 'e2e/visual/help-placement.ts'}
+        expected_infra = {'e2e/incident-delivery-protocol.ts','e2e/incident-delivery-protocol.control.ts','playwright.incident-protocol.config.ts', 'playwright.incidents.config.ts', 'playwright.policy.config.ts', 'playwright.reticle.config.ts', 'vite.reticle.config.ts', 'e2e/incidents/SystemIncidents.spec.ts', 'e2e/incidents/vite.config.ts', 'e2e/notification-disclosure.spec.ts', 'e2e/accessibility-overflow.spec.ts', 'e2e/structural-accessibility.spec.ts', 'e2e/structural-accessibility.ts', 'e2e/workspace-interactions.ts', 'e2e/observed-registry.ts', 'e2e/visual/help-placement.ts'}
         self.assertFalse(expected_app - set(app['include']), 'Missing app fixture typecheck registration: ' + str(expected_app - set(app['include'])))
         self.assertFalse(expected_infra - set(infra['include']), 'Missing infra typecheck registration: ' + str(expected_infra - set(infra['include'])))
         self.assertIs(app['compilerOptions']['allowImportingTsExtensions'], True)
@@ -509,6 +625,10 @@ class BrowserRoles(unittest.TestCase):
                 return 0
             with self.assertRaises(ValueError): module.collect({},execute)
             self.assertEqual(calls,['default-collection','default-infra-collection'])
+
+# Included by the normal maintained contract gate; the CI Reports/Registrations
+# subset checks registration without running process controls outside isolation.
+from executor_lifecycle import ExecutorLifecycle
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

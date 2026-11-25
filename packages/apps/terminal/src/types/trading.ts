@@ -21,6 +21,14 @@ export interface PlaceOrderParams extends TradeInstruction {
   lotSize?: number;
   /** Broker freeze quantity. Admission uses the NSE index circular when this is absent. */
   freezeQty?: number;
+  /** Protective bracket: stop-loss trigger price (SL / SL-M). */
+  stopLoss?: number;
+  /** Protective bracket: target / take-profit price. */
+  target?: number;
+  /** Protective bracket: trailing stop jump (points). */
+  trailingStop?: number;
+  /** One-cancels-other: SL and target legs cancel each other on fill. */
+  oco?: boolean;
 }
 export interface ModifyOrderParams extends TradeInstruction { orderId: string; strategy?: string; disclosedQuantity?: number }
 export interface OrderStatusParams { orderId: string; strategy?: string }

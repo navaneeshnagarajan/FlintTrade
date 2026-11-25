@@ -5,6 +5,7 @@ export function SiteFooter() {
     <footer className="site-footer">
       <p>FlintTrade is AGPL-3.0 open source software built for self-hosted Indian market workflows.</p>
       <div>
+        <Link href="/docs/disclaimer">Risk disclaimer</Link>
         <Link href="/docs/desktop">Desktop App</Link>
         <Link href="/docs">Docs</Link>
         <Link href="/mcp">MCP</Link>

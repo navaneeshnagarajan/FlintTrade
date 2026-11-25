@@ -128,6 +128,65 @@ def status(run_id: str) -> Any:
     return jsonify(status="success", data=owner.status(owner.scope(run_id, g.execution_actor)))
 
 
+@execution_sessions_bp.post("/native")
+def native_create() -> Any:
+    """Configure, never implicitly qualify or authorise native autonomy."""
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.create(_session_token_from_request(), _body())), 201
+
+
+@execution_sessions_bp.get("/<run_id>/autonomy")
+def native_status(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.status(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/qualify")
+def native_qualify(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    if _body():
+        raise ValueError("qualification accepts no caller evidence")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.qualify(_session_token_from_request(), run_id))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/grant")
+def native_grant(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.grant(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/revoke")
+def native_revoke(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    body = _body()
+    if set(body) != {"grant_id"}:
+        raise ValueError("exact grant required")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.revoke(_session_token_from_request(), run_id, body["grant_id"]))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/commands")
+def native_command(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    if request.headers.get("X-FlintTrade-Mode") not in {None, "live"}:
+        raise ValueError("command mode contradicts immutable native binding")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.submit(_session_token_from_request(), run_id, _body()))
+
+
+@execution_sessions_bp.post("/<run_id>/autonomy/reconcile")
+def native_reconcile(run_id: str) -> Any:
+    from .auth_routes import _session_token_from_request
+    if _body():
+        raise ValueError("reconciliation never accepts caller receipts")
+    owner = get_execution_sessions(current_app._get_current_object()).autonomy
+    return jsonify(status="success", data=owner.reconcile(_session_token_from_request(), run_id))
+
+
 @execution_sessions_bp.post("/<run_id>/<operation>")
 def control(run_id: str, operation: str) -> Any:
     from .auth_routes import _session_token_from_request

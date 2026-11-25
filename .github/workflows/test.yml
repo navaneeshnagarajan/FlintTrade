@@ -132,6 +132,8 @@ jobs:
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
       - run: uv sync --frozen
+      - name: Synthetic acceptance report and registration contracts
+        run: uv run python tools/acceptance/tests/contracts.py Reports Registrations
       - name: Verify pre-restructure baseline artefacts
         run: |
           uv run python - <<'PY'

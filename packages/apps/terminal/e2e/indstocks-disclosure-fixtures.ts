@@ -23,6 +23,7 @@ export const IND_BODY = {
   symbol: "RELIANCE", exchange: "NSE", action: "BUY", product: "MIS", orderType: "MARKET",
   quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad", rationale: "",
   order_type: "MARKET", trigger_price: 0, broker: IND_BROKER, account_id: IND_A,
+  lotSize: 1, lot_size: 1,
 };
 
 export function indPath(kind: string, account = IND_A): string {

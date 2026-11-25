@@ -5,9 +5,10 @@ import importlib.util
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
-from validate_results import validate_original
+from validate_results import validate_original, validate_cases
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parents[1]
@@ -61,6 +62,13 @@ def main():
             if args.mode=='collect':
                 code=run(cmd+['--list'],'collect',90)
             else:
+                if run([str(args.python),str(HERE/'tests/core_lifecycle.py')],'core-lifecycle',180):
+                    raise RuntimeError('Normal-factory fixture lifecycle controls failed')
+                controls=['pnpm','--dir',str(terminal),'exec','playwright','test','--config='+str(terminal/'playwright.incident-protocol.config.ts'),'--project=chromium','--workers=1','--retries=0']
+                if run(controls,'incident-protocol-controls',300):raise RuntimeError('Incident protocol controls failed')
+                expected=json.loads((HERE/'incident-protocol-cases.json').read_text())
+                validate_cases(OUT/'incident-protocol-results.xml', [('incident-delivery-protocol.control.ts', title) for title in expected])
+                shutil.move(OUT/'playwright/incident-protocol-controls', OUT/'incident-protocol-controls')
                 for port in [4400,5173,5100]:
                     with socket.socket() as listener:listener.bind(('127.0.0.1',port))
                 env.update(RETICLE_CAPTURE_RETENTION=json.dumps({'maxEvents':10000,'maxAgeMs':120000,'maxBytes':33554432}),RETICLE_JOURNAL='1',CHOKIDAR_USEPOLLING='1')

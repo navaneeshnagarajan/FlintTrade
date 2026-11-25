@@ -157,6 +157,11 @@ const orderSchema = z.object({
   trigPrice: z.number().min(0).optional(),
   discQty: z.number().int().min(0).optional(),
   note: z.string().max(4000).optional(),
+  // Protective bracket fields. Zero / absent means no protection.
+  stopLoss: z.number().min(0).optional(),
+  target: z.number().min(0).optional(),
+  trailingStop: z.number().min(0).optional(),
+  oco: z.boolean().optional(),
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
@@ -330,7 +335,7 @@ function NumField({ label, value, onChange, disabled = false, placeholder = "", 
 
 function ExchangeBadge({ exchange }: { exchange: string }) {
   return (
-    <span className="px-1.5 py-0.5 text-xxs font-semibold rounded bg-accent/10 border border-accent/20 text-accent uppercase tracking-wider">
+    <span className="px-1.5 py-0.5 text-xxs font-semibold rounded bg-accent/10 border border-accent/20 text-accent [[data-mode=light]_&]:text-text-primary uppercase tracking-wider">
       {exchange}
     </span>
   );
@@ -544,6 +549,10 @@ function OrderPadWidget(props: WidgetProps) {
       trigPrice: undefined,
       discQty: undefined,
       note: "",
+      stopLoss: undefined,
+      target: undefined,
+      trailingStop: undefined,
+      oco: false,
     },
   });
 
@@ -611,6 +620,10 @@ function OrderPadWidget(props: WidgetProps) {
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
   const note = watch("note");
+  const stopLoss = watch("stopLoss");
+  const target = watch("target");
+  const trailingStop = watch("trailingStop");
+  const oco = watch("oco");
 
   // Quantity-check refusals (lot multiple, freeze, exchange ceiling, unverified
   // lot, server admission) are decided on Buy/Sell, not while the operator
@@ -1242,6 +1255,17 @@ function OrderPadWidget(props: WidgetProps) {
       ...(values.discQty != null && values.discQty > 0
         ? { disclosedQuantity: values.discQty }
         : {}),
+      // Protective bracket: stop loss, target, trailing stop, OCO.
+      ...(values.stopLoss != null && values.stopLoss > 0
+        ? { stopLoss: values.stopLoss }
+        : {}),
+      ...(values.target != null && values.target > 0
+        ? { target: values.target }
+        : {}),
+      ...(values.trailingStop != null && values.trailingStop > 0
+        ? { trailingStop: values.trailingStop }
+        : {}),
+      ...(values.oco ? { oco: true } : {}),
       strategy: "FlintOrderPad",
       rationale: admissionRationale(values.note ?? ""),
       ...(lotSizeKnown && lotSize > 0 ? { lotSize } : {}),
@@ -1872,6 +1896,69 @@ function OrderPadWidget(props: WidgetProps) {
           />
         </div>
 
+        {/* Protective bracket: stop loss / target / trailing / OCO */}
+        <div className="grid grid-cols-2 gap-3">
+          <Controller
+            control={control}
+            name="stopLoss"
+            render={({ field }) => (
+              <NumField
+                id="orderpad-stop-loss"
+                label="Stop Loss"
+                value={field.value ?? ""}
+                onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
+                placeholder="0.00"
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="target"
+            render={({ field }) => (
+              <NumField
+                id="orderpad-target"
+                label="Target"
+                value={field.value ?? ""}
+                onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
+                placeholder="0.00"
+              />
+            )}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Controller
+            control={control}
+            name="trailingStop"
+            render={({ field }) => (
+              <NumField
+                id="orderpad-trailing-stop"
+                label="Trailing Stop"
+                value={field.value ?? ""}
+                onChange={(v) => field.onChange(v === "" ? undefined : Number(v))}
+                placeholder="0.00"
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="oco"
+            render={({ field }) => (
+              <div className="flex items-center gap-2">
+                <label className="text-xxs text-text-muted uppercase tracking-wider flex-1">
+                  OCO (SL &amp; target cancel each other)
+                </label>
+                <input
+                  id="orderpad-oco"
+                  type="checkbox"
+                  checked={!!field.value}
+                  onChange={(e) => field.onChange(e.target.checked)}
+                  className="w-5 h-5"
+                />
+              </div>
+            )}
+          />
+        </div>
+
         {/* Order summary preview */}
         <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-1">
           <div className="flex justify-between text-xs">
@@ -1906,6 +1993,30 @@ function OrderPadWidget(props: WidgetProps) {
             <div className="flex justify-between text-xs">
               <span className="text-text-muted">Trigger</span>
               <span className="font-mono tabular-nums text-text-primary">{trigPrice}</span>
+            </div>
+          )}
+          {stopLoss != null && stopLoss > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted">Stop Loss</span>
+              <span className="font-mono tabular-nums text-text-primary">{stopLoss}</span>
+            </div>
+          )}
+          {target != null && target > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted">Target</span>
+              <span className="font-mono tabular-nums text-text-primary">{target}</span>
+            </div>
+          )}
+          {trailingStop != null && trailingStop > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted">Trailing Stop</span>
+              <span className="font-mono tabular-nums text-text-primary">{trailingStop}</span>
+            </div>
+          )}
+          {oco && (
+            <div className="flex justify-between text-xs">
+              <span className="text-text-muted">OCO</span>
+              <span className="font-mono text-text-primary">SL &amp; target bracket</span>
             </div>
           )}
         </div>

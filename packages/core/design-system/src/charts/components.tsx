@@ -2793,7 +2793,7 @@ export function FlintChartIntervalPills({
             "rounded border border-transparent font-mono transition-colors",
             compact ? "px-1.5 py-0.5 text-xxs" : "px-2 py-1 text-xs",
             active === interval.value
-              ? "border-accent/40 bg-accent/15 text-accent"
+              ? "border-accent/40 bg-accent/15 text-accent [[data-mode=light]_&]:text-text-primary"
               : "text-text-muted hover:bg-surface-hover hover:text-text-primary",
           )}
           aria-pressed={active === interval.value}

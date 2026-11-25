@@ -1,47 +1,14 @@
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
-import Image from 'next/image';
+import { ArrowRight, ExternalLink, TerminalSquare } from 'lucide-react';
 import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
-import SectionEnterController from '@/components/section-enter-controller';
+import { ProductOverview } from '@/components/product-overview';
 import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
-import { listPackages } from '@/lib/mcp/capabilities';
-import { flinttradeAsset } from '@/lib/site-assets';
 import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
 import { webInstallCommands } from '@/lib/web-install-commands';
-
-const featureCards = [
-  {
-    icon: TerminalSquare,
-    title: 'A self-hosted workflow workspace',
-    copy: 'React, FlexLayout, Python services, Rust tick processing, and the native broker gateway in one inspectable workspace. Native broker HTTP is evidence-gated and frozen until Task 9D and Task 7C.2.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Safety before automation',
-    copy: 'Practice, Connected (read), and Live keep simulated fills, broker reads, and live orders apart. Example data is not a Mode.',
-  },
-  {
-    icon: Bot,
-    title: 'Agent-ready contribution docs',
-    copy: 'Generated docs indexes, llms files, and read-only MCP tools help contributors understand the repo before editing.',
-  },
-];
-
-const docsCards = [
-  {
-    href: '/download',
-    label: 'Install',
-    copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
-  },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, open Practice, and learn the workspace. Native connections remain frozen.' },
-  { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
-  { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
-  { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade terminal endpoints, authentication, and native broker contracts.' },
-];
 
 const wordmarkChars = BRAND_WORDMARK.split('');
 
@@ -64,19 +31,18 @@ const welcomeFeatures = [
 const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
 export default async function HomePage() {
-  const packages = listPackages().slice(0, 8);
   const origin = await resolveSiteOrigin();
   const mcpUrl = hostedMcpUrl(origin);
   const WEB_INSTALL_COMMANDS = webInstallCommands(origin);
 
   return (
-    <main className="site-shell">
+    <div className="site-shell product-site">
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
         <SiteScrollWorld />
       </div>
       <SiteHeader />
-      <SectionEnterController />
+      <main id="site-content" tabIndex={-1}>
 
       <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
@@ -109,33 +75,8 @@ export default async function HomePage() {
             ))}
           </div>
           <p>
-            Open-source self-hosted trading software for local research, sample-data
-            testing, manual orders, automation, and AI-assisted workflows. It runs in
-            the browser from your own machine. A desktop shell comes after a checksummed
-            Electron release.
+            Research, practise and review Indian markets. A self-hosted trading workspace for people and AI, with explicit execution permissions.
           </p>
-          <p className="hero-disclaimer">
-            v0.0.1 is not production ready. Use Practice and example data first; Live mode remains your own risk.
-          </p>
-          <div className="hero-feature-grid">
-            {welcomeFeatures.map((item) => (
-              <div key={item}>{item}</div>
-            ))}
-          </div>
-          <div className="hero-install" aria-labelledby="hero-web-install">
-            <p id="hero-web-install">Install the self-hosted web app. Nothing else needs to be installed first.</p>
-            {WEB_INSTALL_COMMANDS.map((entry) => (
-              <div className="code-panel" key={entry.platform}>
-                <header>
-                  <span>{entry.platform}</span>
-                  <span>terminal</span>
-                </header>
-                <pre>
-                  <code>{entry.command}</code>
-                </pre>
-              </div>
-            ))}
-          </div>
           <div className="hero-actions">
             <Link
               className="button primary"
@@ -154,141 +95,86 @@ export default async function HomePage() {
               Demo (example data) <ExternalLink aria-hidden="true" size={17} />
             </Link>
           </div>
-          <p className="hero-electron-note">
-            Electron installer pending.{' '}
-            <Link href="/docs/desktop">Desktop guide</Link>
-          </p>
-        </div>
-
-        <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
-          <div className="screenshot-stack">
-            <figure className="screen-frame main">
-              <Image src={flinttradeAsset('screenshots/01-welcome.jpg')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
-            </figure>
-            <figure className="screen-frame side">
-              <Image src={flinttradeAsset('screenshots/04-trade.png')} alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
-            </figure>
-            <figure className="screen-frame float">
-              <Image src={flinttradeAsset('screenshots/06-lab.png')} alt="Strategy lab" fill sizes="(max-width: 900px) 42vw, 20vw" />
-            </figure>
-          </div>
         </div>
       </section>
 
-      <section className="section">
-        <div className="metric-rail" aria-label="Project facts">
+      <aside className="product-notice" aria-label="Software status">
+        <p>v0.0.1 is not production ready. Use Practice and example data first; Live mode remains your own risk.</p>
+        <Link href="/docs/disclaimer">Read the disclaimer <ArrowRight size={16} aria-hidden="true" /></Link>
+      </aside>
+
+      <ProductOverview />
+
+      <section className="section product-section permission-section" aria-labelledby="permissions-heading">
+        <header className="product-heading">
+          <h2 id="permissions-heading">Choose the mode. Keep the limits.</h2>
+          <p>Example data is not a Mode. Connection status, account permissions and execution mode remain separate decisions.</p>
+        </header>
+        <dl className="mode-list">
           <div>
-            <strong>Gateway</strong>
-            <span>Broker connections use the native gateway. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
+            <dt>Practice</dt>
+            <dd>Work with simulated fills. Practice results are not live execution evidence.</dd>
           </div>
           <div>
-            <strong>18</strong>
-            <span>Package surfaces across Python, React, shared UI, Rust/PyO3, and the Electron desktop shell.</span>
+            <dt>Connected (read)</dt>
+            <dd>Read broker data where available. A connection does not grant permission to place orders.</dd>
           </div>
           <div>
-            <strong>71</strong>
-            <span>Terminal widgets described by the public contributor documentation.</span>
+            <dt>Live</dt>
+            <dd>Real orders require explicit permissions and supported account capabilities. Automation is not enabled by opening the app.</dd>
           </div>
-          <div>
-            <strong>AGPL</strong>
-            <span>Network-use source sharing keeps the self-hosted stack accountable.</span>
-          </div>
-        </div>
+        </dl>
+        <p className="product-note">Native broker connections are currently unavailable. Start with Practice and review the setup requirements before connecting an account.</p>
+        <details className="availability-details">
+          <summary>Capability and connection availability</summary>
+          <ul>{welcomeFeatures.map((feature) => <li key={feature}>{feature}</li>)}</ul>
+          <p><strong>71</strong> widgets are listed in the contributor catalogue. Availability depends on configuration and data sources.</p>
+          <p>Broker connections use the native gateway. Native connections remain frozen. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</p>
+          <Link href="/docs/user-guide">Read the current setup requirements</Link>
+        </details>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="1">
-        <div className="section-heading">
-          <h2>Built for people who read the source.</h2>
-          <p>
-            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
-            contribution commands are generated into the site rather than rewritten in a second place.
-          </p>
-        </div>
-        <div className="feature-grid">
-          {featureCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article className="feature-card" key={card.title}>
-                <Icon aria-hidden="true" />
-                <h3>{card.title}</h3>
-                <p>{card.copy}</p>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="section two-column section-enter" data-scroll-chapter="2">
-        <div className="section-heading">
-          <h2>Docs, API, and contribution paths in one flow.</h2>
-          <p>
-            Start with product usage, move into architecture and endpoint contracts, then use the MCP
-            tools to orient local development work.
-          </p>
-        </div>
-        <div className="mcp-steps">
-          {docsCards.map((item) => (
-            <Link className="mcp-step" href={item.href} key={item.href}>
-              <h3>{item.label}</h3>
-              <p>{item.copy}</p>
-            </Link>
+      <section className="section product-section install-section" aria-labelledby="web-app-install">
+        <header className="product-heading">
+          <h2 id="web-app-install">Run it on your own machine.</h2>
+          <p>Install the self-hosted web app, then start with Practice. Review the install instructions and scripts before running a command.</p>
+        </header>
+        <div className="install-commands">
+          {WEB_INSTALL_COMMANDS.map((entry) => (
+            <div className="code-panel" key={entry.platform}>
+              <header><span>{entry.platform}</span><span>Web app</span></header>
+              <pre tabIndex={0} aria-label={`${entry.platform} web-app install command`}><code>{entry.command}</code></pre>
+            </div>
           ))}
         </div>
+        <div className="product-links">
+          <Link href="/download">Install the web app <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href="/docs/desktop">Desktop guide <ArrowRight size={16} aria-hidden="true" /></Link>
+        </div>
+        <p className="product-note">Electron installer pending. Desktop downloads stay withheld until a complete, checksummed release is available.</p>
+        <p className="product-note">If a hosted command is unavailable, the install page includes repository-direct alternatives and uninstall instructions.</p>
       </section>
 
-      <section className="section two-column section-enter" data-scroll-chapter="3">
-        <div className="code-panel">
-          <header>
-            <span>Contributor MCP</span>
-            <span>read-only</span>
-          </header>
-          <pre>{`{
-  "mcpServers": {
-    "flinttrade-docs": {
-      "url": "${mcpUrl}"
-    },
-    "flinttrade-local": {
-      "command": "npm",
-      "args": ["run", "mcp:stdio"],
-      "cwd": "packages/apps/site"
-    }
-  }
-}`}</pre>
-        </div>
-        <div className="section-heading">
-          <h2>MCP for development, not trading.</h2>
-          <p>
-            The site exposes docs search, package maps, path explanations, test recommendations, and
-            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
-            stay outside this MCP surface.
-          </p>
-          <Link className="button secondary" href="/mcp">
-            MCP setup <ArrowRight aria-hidden="true" size={17} />
-          </Link>
-        </div>
+      <section className="section product-section contributor-section" aria-labelledby="contributor-heading" data-scroll-chapter="4">
+        <header className="product-heading">
+          <h2 id="contributor-heading">Open source. Open to inspection.</h2>
+          <p>Read the product guides, inspect the API contracts or contribute a change. The public documentation comes from the repository.</p>
+        </header>
+        <nav className="resource-links" aria-label="Product and contributor resources">
+          <Link href="/docs/user-guide">User guide <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href="/docs/developer-guide">Developer guide <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href="/api-reference">API reference <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href="/mcp">Contributor MCP <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href="/contribute">Contribute <ArrowRight size={16} aria-hidden="true" /></Link>
+        </nav>
+        <p className="product-note">MCP for development, not trading. The public MCP is read-only: it does not expose broker credentials, account state or order placement.</p>
+        <p className="product-note">Read-only docs endpoint: <code className="mcp-endpoint">{mcpUrl}</code></p>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="4">
-        <div className="section-heading">
-          <h2>Package map at contributor speed.</h2>
-          <p>
-            Each package README becomes a docs page and MCP resource, so agent-assisted development starts
-            from the same public source a human contributor reads.
-          </p>
-        </div>
-        <div className="package-list">
-          {packages.map((pkg) => (
-            <Link className="package-row" href={pkg.url} key={pkg.name}>
-              <strong>{pkg.name}</strong>
-              <span>{pkg.description}</span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
+      </main>
       <div data-scroll-chapter="5">
         <SiteFooter />
       </div>
-    </main>
+    </div>
   );
 }

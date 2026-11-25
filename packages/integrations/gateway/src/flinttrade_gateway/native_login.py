@@ -17,7 +17,9 @@ action, and daily token re-authentication.
 
 from __future__ import annotations
 
+import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -193,16 +195,34 @@ def quarantine_native_candidate(candidate: NativeSessionCandidate) -> None:
         _QUARANTINED_CANDIDATES.append(candidate)
 
 
-async def verify_native_session(adapter: Any, session: Any) -> str | None:
-    """Probe an unpublished payload; this function never mutates a registry."""
+async def verify_native_session(adapter: Any, session: Any, *, strict_probe: bool = False) -> str | None:
+    """Probe without publication, distinguishing admission from continuity.
+
+    Args:
+        adapter: External liveness provider, with funds as the legacy fallback.
+        session: Exact unpublished session to probe.
+        strict_probe: Require an actual successful probe for fresh admission.
+            The default preserves legacy keep-session policy, not verification.
+
+    Returns:
+        A legacy invalid-session message, or None after the applicable policy.
+
+    Raises:
+        RuntimeError: Strict verification has no callable probe.
+        BaseException: A strict probe fails or either policy is cancelled.
+    """
     reader = getattr(adapter, "liveness", None)
     if not callable(reader):
         reader = getattr(adapter, "funds", None)
     if not callable(reader):
+        if strict_probe:
+            raise RuntimeError("native_verification_unavailable")
         return None
     try:
         await reader(session)
     except Exception as exc:
+        if strict_probe:
+            raise
         if not should_keep_session_after_probe_error(exc):
             return SESSION_INVALID_RELOGIN_MESSAGE
     from flinttrade_gateway.monday_read_smoke import MONDAY_READ_BROKERS, probe_monday_session_reads
@@ -216,23 +236,62 @@ async def verify_native_session(adapter: Any, session: Any) -> str | None:
 async def prepare_native_session(
     adapter: Any, credentials: dict[str, Any], *, verify: bool,
     mutation_admission: MutationAdmission = require_broker_account_mutations,
+    strict_probe: bool = False,
+    accept_candidate: Callable[[NativeSessionCandidate], None] | None = None,
 ) -> NativeSessionCandidate:
-    """Authenticate outside the registry; production remains denied before work."""
+    """Prepare under explicit custody, without publishing or granting authority.
+
+    Args:
+        adapter: External authentication and optional replay-export provider.
+        credentials: Detached credential input for this attempt only.
+        verify: Whether to probe the newly created session.
+        mutation_admission: Existing fail-closed admission check before login.
+        strict_probe: Require successful verification rather than legacy
+            session-continuity policy. Requires verify to be True.
+        accept_candidate: Synchronous custody transfer immediately after login,
+            before any probe/export. A successful None return means the caller
+            retains this exact session even if later preparation raises.
+
+    Returns:
+        The actual unpublished candidate; legacy probe errors remain explicit.
+
+    Raises:
+        ValueError: Strict probing is requested without verification.
+        TypeError: The supplied custody callback is not synchronous or returns
+            a non-None value; the unclaimed payload stays quarantined.
+        BaseException: Admission, login, custody, probe or export fails. Original
+            failure/cancellation propagates; accepted custody stays caller-owned.
+    """
     mutation_admission()
+    if strict_probe and not verify:
+        raise ValueError("native_verification_required")
+    if accept_candidate is not None and (
+        not callable(accept_candidate) or inspect.iscoroutinefunction(accept_candidate)
+    ):
+        raise TypeError("native_candidate_custody_invalid")
     session = await adapter.login(credentials)
     candidate = NativeSessionCandidate(session, dict(credentials))
+    accepted = False
     try:
+        if accept_candidate is not None:
+            result = accept_candidate(candidate)
+            if result is not None:
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise TypeError("native_candidate_custody_incomplete")
+            accepted = True
         if verify:
-            candidate.probe_error = await verify_native_session(adapter, session)
+            candidate.probe_error = await verify_native_session(adapter, session, strict_probe=strict_probe)
         replay = getattr(adapter, "replay_credentials", None)
         if callable(replay) and candidate.probe_error is None:
             value = replay(dict(credentials), session)
             if isinstance(value, dict):
                 candidate.replay_credentials = value
     except BaseException:
-        quarantine_native_candidate(candidate)
+        if not accepted:
+            quarantine_native_candidate(candidate)
         raise
-    if candidate.probe_error is not None:
+    if candidate.probe_error is not None and not accepted:
         quarantine_native_candidate(candidate)
     return candidate
 

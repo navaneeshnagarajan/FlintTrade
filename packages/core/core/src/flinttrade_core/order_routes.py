@@ -64,8 +64,11 @@ class _LiveWriteProgress:
     started: bool = False
     invoked: bool = False
     failed_before_invoke: bool = False
+    before_invoke: Callable[[], None] | None = None
 
     def on_adapter_invoke(self) -> None:
+        if self.before_invoke is not None:
+            self.before_invoke()
         self.invoked = True
 
     @property
@@ -78,6 +81,53 @@ class _LiveWriteProgress:
         except BaseException:
             self.failed_before_invoke = not self.invoked
             raise
+
+
+@dataclass(frozen=True)
+class CompletedPreInvocationRefusal:
+    """Canonical completion proof, never inferred from an HTTP/error shape."""
+
+    cause: str = "canonical_completed_pre_invocation_refusal"
+
+
+@dataclass(frozen=True)
+class CanonicalDispatchOutcome:
+    """A completed canonical call and its independently observed write frontier."""
+
+    response: Any
+    status: int | None
+    refusal: CompletedPreInvocationRefusal | None = None
+
+
+def dispatch_native_command(body: dict[str, Any], *, adapter_id: str, account_id: str,
+                            authority: Any, cancel_order_id: str | None = None) -> CanonicalDispatchOutcome:
+    """Use the ordinary gate/router, retaining authoritative completion evidence.
+
+    The progress object is created here and passed through every queue site.
+    Returning before any queue, or an awaited coroutine's completed failure
+    before invocation, proves refusal. A pending task, wait timeout or invoked
+    adapter never does, regardless of exception class or HTTP status.
+    """
+    from .native_autonomy import NativeDispatchAuthority
+    if type(authority) is not NativeDispatchAuthority:
+        raise ValueError("trusted native command authority required")
+    progress = _LiveWriteProgress(before_invoke=authority.on_invoke)
+    response, status = None, None
+    try:
+        if cancel_order_id is not None:
+            with _require_live_safety().order_admission(f"{adapter_id}:{account_id}"):
+                response, status = _dispatch_live_cancel(
+                    {"orderid": cancel_order_id}, {}, adapter_id=adapter_id, account_id=account_id,
+                    native_authority=authority, progress=progress)
+        else:
+            response, status = _dispatch_live_order(
+                "place", body, {}, adapter_id=adapter_id, account_id=account_id,
+                native_authority=authority, progress=progress)
+    except Exception:
+        # Completion is observed here; the exception's type is not evidence.
+        pass
+    refusal = CompletedPreInvocationRefusal() if not progress.started or progress.failed_before_invoke else None
+    return CanonicalDispatchOutcome(response, status, refusal)
 
 
 def _run_on_client_loop(coro: Any) -> Any:
@@ -1453,6 +1503,7 @@ def _admit_and_route_live_order(
     body: dict[str, Any],
     lease: Any = None,
     progress: _LiveWriteProgress | None = None,
+    native_authority: Any = None,
 ) -> tuple[bool, Any]:
     """Atomically snapshot, check, gate, reserve, and dispatch one live order."""
     from pydantic import ValidationError  # noqa: PLC0415
@@ -1482,6 +1533,8 @@ def _admit_and_route_live_order(
                 type(exc).__name__,
             )
             return False, _safety_state_unavailable_response()
+        if native_authority is not None:
+            native_authority.check_account()
         active_lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
         admission = portfolio_state.admission_for(0)
         try:
@@ -1545,6 +1598,8 @@ def _admit_and_route_live_order(
             adapter_id=adapter_id,
             account_id=account_id,
         )
+        if native_authority is not None:
+            native_authority.on_admitted()
         reservation = active_lease.reserve(typed_order, admission.positions)
         progress = progress if progress is not None else _LiveWriteProgress()
         # Set before queueing: a client-loop wait failure cannot prove that the
@@ -1581,6 +1636,8 @@ def _dispatch_live_order(
     adapter_id: str = "",
     account_id: str | None = None,
     variety: str | None = None,
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """The single enforced execution channel for a live order placement (C1).
 
@@ -1678,6 +1735,12 @@ def _dispatch_live_order(
         selector=f"{adapter_id}:{account_id}",
     )
 
+    if native_authority is not None:
+        from .native_autonomy import NativeDispatchAuthority
+        if type(native_authority) is not NativeDispatchAuthority:
+            raise ValueError("trusted native command authority required")
+        request_ctx = native_authority.request_context(body, adapter_id, account_id)
+
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
@@ -1765,18 +1828,24 @@ def _dispatch_live_order(
 
     reduce_hold: tuple[tuple[str, str, str, str, str, str], int, int] | None = None
     if ft_action == "place":
-        laya_block, reduce_hold = _prepare_live_reduce_only(
-            body,
-            adapter_id=adapter_id,
-            account_id=account_id,
-        )
+        if native_authority is not None:
+            # This bounded slice only permits new cash entries from an empty
+            # account; it cannot borrow the operator's reduce-only exception.
+            laya_block = _laya_place_response(body, mode=_MODE_LIVE, source="automate")
+        else:
+            laya_block, reduce_hold = _prepare_live_reduce_only(
+                body,
+                adapter_id=adapter_id,
+                account_id=account_id,
+            )
         if laya_block is not None:
             return laya_block
 
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     admitted_place = False
-    progress = _LiveWriteProgress()
+    progress = progress if progress is not None else _LiveWriteProgress(
+        before_invoke=native_authority.on_invoke if native_authority is not None else None)
     result: Any = None
     try:
         admitted, outcome = _admit_and_route_live_order(
@@ -1789,6 +1858,7 @@ def _dispatch_live_order(
             ft_action=ft_action,
             body=body,
             progress=progress,
+            native_authority=native_authority,
         )
         if not admitted:
             return outcome
@@ -1927,6 +1997,8 @@ def _gated_write_dispatch(
     exposure_order: Any = None,
     exposure_positions: list[Any] | tuple[Any, ...] = (),
     reservation_order_id: str = "",
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """Shared gate -> ACL -> one-shot dispatch + fail-closed mapping for modify/cancel.
 
@@ -1962,7 +2034,14 @@ def _gated_write_dispatch(
     )
     safe_account = account_ref(account_id)
     safe_order = log_ref(order_id, kind="order")
-    progress = _LiveWriteProgress()
+    if native_authority is not None:
+        from .native_autonomy import NativeDispatchAuthority
+        if type(native_authority) is not NativeDispatchAuthority:
+            raise ValueError("trusted native command authority required")
+        request_ctx = native_authority.request_context(canonical_order, adapter_id, account_id)
+        native_authority.check_account()
+    progress = progress if progress is not None else _LiveWriteProgress(
+        before_invoke=native_authority.on_invoke if native_authority is not None else None)
 
     try:
         safety_ctx = gate_order(
@@ -1972,6 +2051,8 @@ def _gated_write_dispatch(
             account_id=account_id,
             backend_lease_proof=router.backend_lease_proof,
         )
+        if native_authority is not None:
+            native_authority.on_admitted()
         reservation = None
         if exposure_order is not None:
             if admission_lease is None:
@@ -2234,6 +2315,8 @@ def _dispatch_live_cancel(
     *,
     adapter_id: str = "",
     account_id: str | None = None,
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
 
@@ -2333,6 +2416,8 @@ def _dispatch_live_cancel(
         "cancel",
         canonical,
         payload,
+        native_authority=native_authority,
+        progress=progress,
         adapter_id=adapter_id,
         account_id=account_id,
         order_id=order_id,
