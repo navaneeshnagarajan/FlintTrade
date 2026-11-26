@@ -136,7 +136,7 @@ screen, sign-in, and setup. Each one runs at 1440×900 and 2560×1440.
 
 The checks use Example sample data, a frozen clock, motion turned off,
 fonts loaded, and masks on the ticker and canvases. Route mocks come from
-the same fail-closed registry as the other Playwright specs, so an
+the same strict mock registry as the other Playwright specs, so an
 unmocked `/ft-api` call still fails the fixture.
 
 Reticle does not judge these pictures. Reticle reads network, app state,
