@@ -1701,17 +1701,41 @@ function makeMockHistory(symbol?: string, exchange?: string, interval?: string):
 }
 
 
-function makeMockExpiries(count = 4): string[] {
+/**
+ * Sample expiry list for Explore. Sample data only: NSE-side contracts land on
+ * Tuesdays and BSE-side ones on Thursdays, with the last such day of each of
+ * the next few months (and the next quarter end) listed as the monthlies, so
+ * the sample list has the same shape as a broker's contract list.
+ */
+function makeMockExpiries(exchange?: string, weeklies = 4): string[] {
   const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  const expiries: string[] = [];
+  const sampleWeekday = String(exchange ?? "").toUpperCase().startsWith("B") ? 4 : 2;
+  const dates = new Map<number, Date>();
+  const add = (date: Date) => dates.set(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()), date);
   const cursor = new Date();
-  cursor.setDate(cursor.getDate() + ((4 - cursor.getDay() + 7) % 7 || 7)); // next Thursday
-  for (let i = 0; i < count; i++) {
-    const dd = String(cursor.getDate()).padStart(2, "0");
-    expiries.push(`${dd}-${months[cursor.getMonth()]}-${String(cursor.getFullYear()).slice(-2)}`);
+  cursor.setHours(0, 0, 0, 0);
+  cursor.setDate(cursor.getDate() + ((sampleWeekday - cursor.getDay() + 7) % 7 || 7));
+  for (let i = 0; i < weeklies; i++) {
+    add(new Date(cursor));
     cursor.setDate(cursor.getDate() + 7);
   }
-  return expiries;
+  const lastSampleDay = (year: number, month: number) => {
+    const last = new Date(year, month + 1, 0);
+    last.setDate(last.getDate() - ((last.getDay() - sampleWeekday + 7) % 7));
+    return last;
+  };
+  const today = new Date();
+  for (let step = 0; step < 6; step++) {
+    const monthly = lastSampleDay(today.getFullYear(), today.getMonth() + step);
+    if (monthly <= today) continue;
+    if (step < 3 || monthly.getMonth() % 3 === 2) add(monthly);
+  }
+  return [...dates.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, date]) => {
+      const dd = String(date.getDate()).padStart(2, "0");
+      return `${dd}-${months[date.getMonth()]}-${String(date.getFullYear()).slice(-2)}`;
+    });
 }
 
 
@@ -2074,7 +2098,7 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       return makeMockHistory(symbol, exchange, interval) as T;
     }
     case "expiry":
-      return { expiry: makeMockExpiries() } as T;
+      return { expiry: makeMockExpiries(exchange) } as T;
     case "optionchain": {
       const underlying = typeof params.underlying === "string" ? params.underlying : symbol;
       return makeMockOptionChain(underlying, exchange) as T;

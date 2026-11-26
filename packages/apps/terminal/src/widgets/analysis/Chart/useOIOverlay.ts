@@ -37,8 +37,10 @@ import {
   getFlintChartIndicatorPaneSpec,
 } from "@flinttrade/design-system";
 import type { FlintChartPriceLineSpec } from "@flinttrade/design-system";
-import { istParts, istToday, lastIstWeekdayOfMonth, toIstIsoDate } from "@/lib/ist";
+import { istToday } from "@/lib/ist";
 import { lightweightHistogramRuntime, lightweightLineRuntime } from "@/lib/lightweightChartRuntime";
+import { derivativesExchangeFor, nearestListedExpiry, parseExpiryList } from "@/lib/optionExpiry";
+import { getExpiry } from "@/services/api";
 import { getFtOIProfile } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
@@ -55,24 +57,6 @@ export interface UseOIOverlayParams {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Weekday the monthly NFO contract is ASSUMED to expire on
- * (4 = Thursday, JS weekday numbering).
- *
- * This is a configured assumption, not a verified exchange rule: NSE has
- * revised its expiry weekday since 2023 and nothing in this repository pins the
- * current one. It mirrors ``NSE_EXPIRY_WEEKDAY`` in ExpiryCountdownWidget —
- * both should move to a shared exchange-rules module once one exists, so the
- * rule is confirmed in a single place.
- *
- * It is only a FALLBACK contract guess: the authoritative expiry list is the
- * broker/symbol-master feed behind ``getExpiry`` in ``@/services/api``, which
- * the option-chain surfaces already use. Wiring it here needs an
- * underlying-exchange → derivatives-exchange mapping (this hook is handed
- * ``NSE``/``NSE_INDEX``/``MCX``, not ``NFO``), which does not exist yet.
- */
-const ASSUMED_MONTHLY_EXPIRY_WEEKDAY = 4;
 
 /**
  * ATM-centred strike window requested from the OI profile endpoint.
@@ -134,33 +118,33 @@ function createMaxPainCarrierSeriesOptions(): Record<string, unknown> {
 }
 
 /**
- * The nearest monthly NFO expiry as ``YYYY-MM-DD``, in IST.
+ * The contract the overlay profiles: the nearest expiry on the exchange's
+ * contract list, as ``YYYY-MM-DD``.
  *
- * Every read is IST: the calendar month, the weekday of its last day and the
- * emitted ISO date all come from ``@/lib/ist``. The previous version mixed
- * browser-local ``new Date(y, m, d)`` maths with a UTC ``toISOString()`` tail,
- * so an operator outside India could ask the backend for the wrong contract —
- * on a machine west of IST the month, the weekday and the date could each land
- * a day out.
- *
- * The expiry day itself still returns that day's contract: it trades until the
- * 15:30 IST close, and its OI is exactly what a chart wants to show.
+ * Reads the same ``getExpiry`` list the option chain uses, from the
+ * underlying's derivatives segment, so the overlay and the chain agree on the
+ * front contract and no expiry weekday is assumed here. The expiry day itself
+ * still returns that day's contract: it trades until the close, and its OI is
+ * exactly what a chart wants to show.
  *
  * Exported for its tests: the fetched contract is a correctness surface, not a
  * cosmetic one.
  *
+ * @param symbol - Underlying symbol, e.g. "NIFTY".
+ * @param exchange - The underlying's exchange as the chart holds it.
  * @param now - The current instant; defaults to now.
- * @returns The ISO date of the assumed nearest monthly expiry.
+ * @returns The ISO date of the nearest listed expiry, or null when the
+ *   exchange has no option list or the list carries no upcoming contract.
  */
-export function getNearestExpiry(now: Date = new Date()): string {
-  const { year, month } = istParts(now);
-  const todayKey = toIstIsoDate(now);
-  const thisMonth = toIstIsoDate(
-    lastIstWeekdayOfMonth(year, month, ASSUMED_MONTHLY_EXPIRY_WEEKDAY),
-  );
-  if (thisMonth >= todayKey) return thisMonth;
-  // Month index 12 rolls into January of the following year.
-  return toIstIsoDate(lastIstWeekdayOfMonth(year, month + 1, ASSUMED_MONTHLY_EXPIRY_WEEKDAY));
+export async function resolveOverlayExpiry(
+  symbol: string,
+  exchange: string,
+  now: Date = new Date(),
+): Promise<string | null> {
+  const optionExchange = derivativesExchangeFor(exchange);
+  if (!optionExchange) return null;
+  const listed = parseExpiryList(await getExpiry(symbol, optionExchange, "options"));
+  return nearestListedExpiry(listed, now)?.iso ?? null;
 }
 
 export function useOIOverlay({
@@ -227,7 +211,9 @@ export function useOIOverlay({
     }
 
     try {
-      const expiry = getNearestExpiry();
+      const expiry = await resolveOverlayExpiry(symbol, exchange);
+      // No listed contract: leave the series empty rather than guess a date.
+      if (!expiry || oiSeriesRef.current !== oiSeries) return;
       const profile = await getFtOIProfile(symbol, exchange, expiry, OI_PROFILE_STRIKE_COUNT);
 
       // Guard: this run may have been superseded (toggle-off, unmount, or a

@@ -24,8 +24,8 @@
  * holidays) deliberately does NOT live here — that is exchange rule-making, not
  * timezone arithmetic. Calendar primitives that take the weekday as an argument
  * (see {@link lastIstWeekdayOfMonth}) are fair game; the choice of weekday is
- * the caller's. See ``NSE_EXPIRY_WEEKDAY`` in ExpiryCountdownWidget, which still
- * needs maintainer confirmation against current NSE circulars.
+ * the caller's. Option expiry dates are read off the exchange's contract list
+ * (see ``@/lib/optionExpiry``), never computed from a weekday.
  */
 
 /** Minutes that IST runs ahead of UTC. Fixed: India observes no daylight saving. */
