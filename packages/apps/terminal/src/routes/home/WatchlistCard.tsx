@@ -29,7 +29,7 @@ function WatchlistRow({ label, value, change }: WatchlistRow) {
         </span>
         {change != null && (
           <span
-            className="font-mono text-[10px]"
+            className="font-mono text-[11px]"
             style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
           >
             {positive ? "+" : ""}{change.toFixed(2)}%
@@ -58,7 +58,7 @@ export function WatchlistCard() {
   return (
     <BentoCard size="default" label="Watchlist" data-testid="watchlist-card">
       <div className="p-4 h-full flex flex-col gap-2">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+        <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
           Watchlist
         </p>
         <div className="flex-1 space-y-0.5">

@@ -118,7 +118,7 @@ export function DocsTab({
             <span className="block text-xs text-text-muted leading-snug truncate mt-0.5">
               {result.snippet}
             </span>
-            <span className="block text-[10px] text-text-muted/60 font-mono mt-0.5 truncate">
+            <span className="block text-[11px] text-text-muted/60 font-mono mt-0.5 truncate">
               docs/{result.path}
             </span>
           </div>

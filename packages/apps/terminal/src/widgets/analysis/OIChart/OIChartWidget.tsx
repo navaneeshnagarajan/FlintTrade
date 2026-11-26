@@ -45,14 +45,14 @@
  * it was frozen from mount.
  *
  * DATA HONESTY.
- *   - "Sample data" provenance badge whenever the chain plane is not live:
- *     no broker connected, or Explore mode (where `services/api` serves a mock
- *     chain while a broker still reads as connected).
- *   - The signals view carries the tri-state Live / Mixed data / Sample data
+ *   - The chain plane is sample only in Explore (where `services/api` serves
+ *     a mock chain), which the Mode line discloses; a disconnected chain is an
+ *     empty state.
+ *   - The signals view carries the tri-state Live / Mixed data / Example data
  *     badge, which requires an explicit `is_sample_data: false` from BOTH
  *     analytics responses before it will say Live — and is forced to "sample"
  *     whenever the chain plane is sample, so one header can never claim two
- *     different provenances.
+ *     different provenances. The Example data badge hides in Explore.
  *   - Max pain is drawn only when `getMaxPain` explicitly attests
  *     `is_sample_data: false` and the visible chain has positive OI.
  *   - A missing figure renders as "--", never as 0.
@@ -89,6 +89,8 @@ import { useModeStore } from "@/stores/modeStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useMarketDataScope } from "@/hooks/useDataScope";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
+import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -1367,7 +1369,7 @@ function OIChartWidget(props: WidgetProps) {
           {view === "signals" ? (
             signalsProvenance === "live" ? (
               <span
-                className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
                 role="status"
                 aria-label="Live: OI signals from the connected broker's option chain"
                 title="Live — OI-action classification + unusual-OI from the connected broker's chain."
@@ -1376,13 +1378,15 @@ function OIChartWidget(props: WidgetProps) {
               </span>
             ) : signalsProvenance === "mixed" ? (
               <span
-                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-400"
                 role="status"
                 aria-label="Showing mixed live and sample OI data"
                 title="Only one OI response is explicitly live; the other section is sample or unavailable."
               >
                 Mixed data
               </span>
+            ) : selectedExpiry ? (
+              <ExampleDataBadge />
             ) : null
           ) : null}
 
@@ -1570,12 +1574,15 @@ function OIChartWidget(props: WidgetProps) {
       </div>
 
       {/* Error banner */}
-      {error && (
-        <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
-          <AlertCircle size={11} />
-          <span>{error}</span>
-        </div>
-      )}
+      {error &&
+        (isBrokerRequiredMessage(error) ? (
+          <BrokerRequiredNotice what="open interest" className="flex-none rounded-none border-x-0 border-t-0" />
+        ) : (
+          <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
+            <AlertCircle size={11} />
+            <span>{error}</span>
+          </div>
+        ))}
 
       {/* Optional spot candlestick strip */}
       {showPrice && (

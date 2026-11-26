@@ -143,10 +143,11 @@ describe("OI Analytics signals view", () => {
     expect(screen.getByText("Signal")).toBeInTheDocument();
   });
 
-  it("shows the Sample data badge and sample signals when disconnected", async () => {
+  it("shows the Example data badge and sample signals when disconnected", async () => {
     renderSignals();
     expect((await screen.findAllByText("24500")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
     // Live analytics stay gated off while disconnected.
     expect(ftApiMocks.getOIChangeAnalysis).not.toHaveBeenCalled();
     expect(ftApiMocks.getUnusualOI).not.toHaveBeenCalled();
@@ -160,6 +161,7 @@ describe("OI Analytics signals view", () => {
     renderSignals();
 
     expect(await screen.findByText("Live")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
     expect(await screen.findByText("25000")).toBeInTheDocument();
   });
 
@@ -311,6 +313,7 @@ describe("OI Analytics signals view", () => {
     await waitFor(() => expect(ftApiMocks.getUnusualOI).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
   });
 
   it("never claims Live analytics while the chain plane is an Explore mock", async () => {
@@ -324,6 +327,8 @@ describe("OI Analytics signals view", () => {
     await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalled());
     expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    // Explore's Mode line already says Example data.
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 
   it("keeps the z-score unusual-OI chips", async () => {

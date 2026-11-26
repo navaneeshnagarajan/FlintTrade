@@ -95,6 +95,7 @@ vi.mock("@/lib/utils", () => ({
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
+import { useModeStore } from "@/stores/modeStore";
 import OrderFlowWidget from "../OrderFlowWidget";
 
 // ---------------------------------------------------------------------------
@@ -817,5 +818,57 @@ describe("OrderFlowWidget", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ isLoading: true }));
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Loading order flow data...")).toBeInTheDocument();
+  });
+});
+
+describe("OrderFlowWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels backend sample buckets in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    const status = screen.getByTestId("order-flow-toolbar-status");
+    expect(within(status).getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("keeps the label visible in the compact toolbar", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(
+      <div style={{ width: "220px", height: "96px" }}>
+        <OrderFlowWidget {...defaultProps} />
+      </div>,
+    );
+    resizeObservedElement(screen.getByTestId("order-flow-panel"), 220, 96);
+
+    const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
+    expect(within(toolbar).getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(within(toolbar).getByRole("button", { name: "More order flow controls" })).toBeInTheDocument();
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge for live aggregator buckets", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { interval: 60, is_live: true }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ import { PlotlyChart } from "@/components/charts/PlotlyChart";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Data, Layout } from "plotly.js";
 
@@ -63,6 +64,13 @@ function VolSurfaceWidget() {
     useVolSurface(symbol, exchange, expiryDates, strikeCount, isConnected);
 
   const data = isConnected ? liveData : SAMPLE_VOL_SURFACE_DATA;
+  // The backend serves flagged sample surface when it has no live chain, even
+  // while a broker is connected. Fail closed: only an explicit `false` is live.
+  // Disconnected, the teaser's Preview label covers the local sample.
+  const showingExample =
+    isConnected &&
+    liveData != null &&
+    (liveData as { is_sample_data?: unknown }).is_sample_data !== false;
 
   const plotData = useMemo<Data[]>(() => {
     if (!data?.iv_matrix?.length) return [];
@@ -119,7 +127,7 @@ function VolSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        
+        {showingExample && <ExampleDataBadge />}
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger className="h-7 px-2 text-xs w-36">
             <SelectValue />
@@ -137,12 +145,14 @@ function VolSurfaceWidget() {
           value={expiriesInput}
           onChange={(e) => setExpiriesInput(e.target.value)}
           placeholder="Expiries (comma-sep, YYYY-MM-DD)"
+          aria-label="Expiry dates, comma-separated"
           className="flex-1 min-w-44 px-2 py-0.5 text-xs bg-surface-hover border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
         />
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-text-muted">Strikes</span>
           <input
             type="range"
+            aria-label="Number of strikes"
             min={10}
             max={40}
             value={strikeCount}

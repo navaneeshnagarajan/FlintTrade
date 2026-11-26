@@ -103,7 +103,7 @@ export function PositionsCard() {
         {/* In Explore the absolute DemoBadge occupies the top-right corner, so
             clear it — this is the only home card with header content there. */}
         <div className={`flex items-center justify-between ${isExplore ? "pr-12" : ""}`}>
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted inline-flex items-center gap-1.5">
+          <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted inline-flex items-center gap-1.5">
             Positions
             {isExplore && <ExampleLabel testId="positions-example-label" />}
           </p>
@@ -128,13 +128,13 @@ export function PositionsCard() {
         </div>
 
         {!isExplore && aggregate.positionsStatus === "stale" && !isError && !queryUi.isFrozen && (
-          <p role="status" className="text-[10px] text-warning">P&L stale — last known value</p>
+          <p role="status" className="text-[11px] text-warning">P&L stale: last known value</p>
         )}
 
         {isError && (
           <div
             role="alert"
-            className="flex items-center justify-between gap-2 text-[10px] text-loss"
+            className="flex items-center justify-between gap-2 text-[11px] text-loss"
           >
             <span>
               Positions unavailable
@@ -152,7 +152,7 @@ export function PositionsCard() {
         )}
 
         {queryUi.isFrozen && !isError && (
-          <p role="status" className="text-[10px] text-warning">
+          <p role="status" className="text-[11px] text-warning">
             {queryUi.isPaused
               ? "Offline — displayed positions are frozen"
               : "Broker disconnected — displayed positions are frozen"}
@@ -181,7 +181,7 @@ export function PositionsCard() {
                 >
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-text-primary truncate">{pos.symbol}</p>
-                    <p className="text-[10px] text-text-muted">
+                    <p className="text-[11px] text-text-muted">
                       {pos.quantity > 0 ? "LONG" : "SHORT"} · {Math.abs(pos.quantity)}
                     </p>
                   </div>
@@ -193,7 +193,7 @@ export function PositionsCard() {
                       {formatPositionPnl(pos.pnl)}
                     </p>
                     <p
-                      className="font-mono text-[10px]"
+                      className="font-mono text-[11px]"
                       data-testid={`position-pnl-percent-${pos.symbol}`}
                       style={{ color: tone }}
                     >

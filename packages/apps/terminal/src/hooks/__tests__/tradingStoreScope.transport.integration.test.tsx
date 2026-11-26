@@ -201,7 +201,7 @@ describe("current-account aggregate truth", () => {
     });
     expect(welcome().getByText(value)).toBeInTheDocument();
     expect(welcome().getByText("Positions stale — last known P&L")).toBeInTheDocument();
-    expect(within(screen.getByTestId("positions-card")).getByText("P&L stale — last known value")).toBeInTheDocument();
+    expect(within(screen.getByTestId("positions-card")).getByText("P&L stale: last known value")).toBeInTheDocument();
 
     act(() => { onlineManager.setOnline(true); });
     await waitFor(() => expect(useTradingStore.getState()).toMatchObject({ fundsStatus: "ready", positionsStatus: "ready" }));
@@ -429,7 +429,7 @@ describe("current-account aggregate truth", () => {
     await screen.findByLabelText("Daily loss alert: ₹3000; kill switch status: inactive");
     await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.positions.list(A_SCOPE), exact: true, refetchType: "none" }); });
     await welcome().findByText("Positions stale — last known P&L");
-    expect(within(screen.getByTestId("positions-card")).getByText("P&L stale — last known value")).toBeInTheDocument();
+    expect(within(screen.getByTestId("positions-card")).getByText("P&L stale: last known value")).toBeInTheDocument();
     expect(screen.getByLabelText("Daily loss alert: ₹3000; kill switch status: inactive")).toHaveTextContent("last known P&L");
     expect(screen.getByLabelText("Primary banner")).toHaveTextContent("live_risk");
     expect(useTradingStore.getState().fundsStatus).toBe("ready");

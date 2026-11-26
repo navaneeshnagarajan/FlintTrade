@@ -37,13 +37,15 @@
  *
  * Provenance is FAIL-CLOSED for both payloads: a response counts as live only
  * when it explicitly attests `is_sample_data: false`. A missing, malformed or
- * true flag renders the "Demo data" affordance. (The retired GEX widget's
+ * true flag on a connected read renders the Example data badge; disconnected,
+ * the teaser's Preview label covers the local sample. (The retired GEX widget's
  * check originally failed OPEN — a payload that omitted the flag rendered as
  * live. That posture does not survive here.)
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, BarChart3, ChevronDown, LineChart, Loader2, RefreshCw } from "lucide-react";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import type { WidgetProps } from "@/types/widgets";
 import type { Data, Layout } from "plotly.js";
 import { FlintMultiLineChart } from "@flinttrade/design-system";
@@ -173,9 +175,9 @@ function Selector({ value, options, onChange }: { value: string; options: string
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-md border border-border-default bg-surface-card px-2.5 py-1.5">
-      <div className="text-[10px] uppercase tracking-wide text-text-muted">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-text-muted">{label}</div>
       <div className="text-sm font-mono tabular-nums text-text-primary">{value}</div>
-      {hint && <div className="text-[10px] text-text-muted">{hint}</div>}
+      {hint && <div className="text-[11px] text-text-muted">{hint}</div>}
     </div>
   );
 }
@@ -459,10 +461,10 @@ function GammaDensityWidget(props: WidgetProps) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-text-primary">Dealer Gamma</h3>
-          <p className="text-[10px] text-text-muted">
+          <p className="text-[11px] text-text-muted">
             {subtitle}
             {expiry && !isSample && <span className="ml-1">· {expiry}</span>}
-            
+            {isConnected && isSample && <ExampleDataBadge className="ml-1.5" />}
             {expiryUnavailable && <span className="ml-1 text-amber-500">· No future expiry</span>}
           </p>
         </div>
@@ -544,7 +546,7 @@ function GammaDensityWidget(props: WidgetProps) {
       ) : isDensityView ? (
         chartState ? (
           <div className="flex-1 min-h-0">
-            <div className="flex items-center gap-4 mb-1 text-[10px]">
+            <div className="flex items-center gap-4 mb-1 text-[11px]">
               <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded bg-amber-500 inline-block" /><span className="text-text-muted">To Expiry</span></span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded bg-sky-500 inline-block" /><span className="text-text-muted">Intraday</span></span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded border border-green-500 inline-block" /><span className="text-text-muted">±1σ zone</span></span>

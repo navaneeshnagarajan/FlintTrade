@@ -7,7 +7,7 @@
  * `updateParameters` view persistence.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -29,7 +29,9 @@ vi.mock("../api", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { fetchSeasonality, type SeasonalityData } from "../api";
+import { useModeStore } from "@/stores/modeStore";
 import SeasonalityWidget from "../SeasonalityWidget";
+import { contrastRatio } from "../heatColours";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockFetch = fetchSeasonality as ReturnType<typeof vi.fn>;
@@ -247,5 +249,56 @@ describe("SeasonalityWidget — FDC3 channel", () => {
       broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SBIN", exchange: "NSE" }),
     );
     expect(screen.getByLabelText("Selected symbol: TCS")).toBeInTheDocument();
+  });
+});
+
+describe("SeasonalityWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in statistics in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    renderWidget();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderWidget();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("labels a backend payload that flags itself as sample", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    mockFetch.mockResolvedValue({ ...liveData(), is_sample_data: true });
+    renderWidget();
+    expect(await screen.findByTestId("example-data-badge")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge for live analyser output", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    renderWidget();
+    expect(await screen.findByText("Live")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+});
+
+describe("SeasonalityWidget heat tile contrast", () => {
+  it("renders opaque tiles whose value text meets AA contrast", () => {
+    const { container } = renderWidget();
+
+    const tiles = container.querySelectorAll<HTMLElement>("[data-weighted-heatmap-tile]");
+    expect(tiles.length).toBe(12);
+    for (const tile of tiles) {
+      const fill = tile.style.backgroundColor;
+      expect(fill).toMatch(/^rgb\(/);
+      const value = tile.querySelector<HTMLElement>(".font-bold");
+      expect(value).not.toBeNull();
+      expect(contrastRatio(fill, value?.style.color ?? "") ?? 0).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });

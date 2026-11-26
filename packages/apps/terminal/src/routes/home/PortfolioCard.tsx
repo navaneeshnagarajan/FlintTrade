@@ -112,13 +112,13 @@ export function PortfolioCard() {
     <BentoCard size="default" label="Portfolio" data-testid="portfolio-card">
       {isExplore && <DemoBadge />}
       <div className="p-4 h-full flex flex-col gap-3">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+        <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
           {isExplore || accountReadsEnabled ? "Portfolio" : "Portfolio (Broker required)"}
         </p>
 
         <div>
           <p
-            className="text-[10px] text-text-muted mb-0.5 flex items-center gap-1.5"
+            className="text-[11px] text-text-muted mb-0.5 flex items-center gap-1.5"
             title={figureTitle}
           >
             Net Worth
@@ -138,14 +138,14 @@ export function PortfolioCard() {
                 : "—"}
           </p>
           {isPractice && netWorthPublished && (
-            <p className="text-[10px] text-text-muted mt-0.5" data-testid="portfolio-charges-source">
+            <p className="text-[11px] text-text-muted mt-0.5" data-testid="portfolio-charges-source">
               Practice account, after estimated charges
             </p>
           )}
         </div>
 
         <div>
-          <p className="text-[10px] text-text-muted mb-1.5 flex items-center gap-1.5">
+          <p className="text-[11px] text-text-muted mb-1.5 flex items-center gap-1.5">
             Allocation
             {!allocationIsAccount && <ExampleLabel testId="allocation-example-label" />}
           </p>
@@ -170,7 +170,7 @@ export function PortfolioCard() {
                   style={{ background: slice.color }}
                   aria-hidden="true"
                 />
-                <span className="text-[10px] text-text-secondary">
+                <span className="text-[11px] text-text-secondary">
                   {slice.label} {formatSlicePct(slice.pct)}
                 </span>
               </div>
