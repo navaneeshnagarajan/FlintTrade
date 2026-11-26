@@ -138,7 +138,7 @@ function DesktopShellUnavailable({ lookupFailed }: { lookupFailed: boolean }) {
           The GitHub release feed could not be reached from this deployment, so desktop installer
           availability could not be checked just now. This is a temporary lookup failure, not a
           statement that an installer does or does not exist. Reload shortly, or read the{' '}
-          <a href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
+          <a className="release-history-link" href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
             GitHub release history
           </a>{' '}
           directly. The web app above is unaffected.
@@ -157,7 +157,7 @@ function DesktopShellUnavailable({ lookupFailed }: { lookupFailed: boolean }) {
       </p>
       <p>
         Follow the{' '}
-        <a href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
+        <a className="release-history-link" href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
           GitHub release history
         </a>{' '}
         or return here after the Electron release is published. Until then, the self-hosted web
