@@ -927,9 +927,10 @@ the line names that size as last listed instead of dropping the name.
 Disagreeing old sizes stay `—`, and an expired security id still cannot
 be ordered.
 `missing_lot_refusal` is the order text:
-`Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Order Pad shows that
-sentence once, inline, when a derivative has no verified lot. The Order Pad also shows a lot-multiple refusal once, inline:
+`The lot size for <underlying> isn't known. Order not placed.`
+`<underlying>` is the underlying name. Places that do not refuse an
+order show only the first sentence (`lot_unknown_message`). The Order Pad
+shows the refusal once, inline, when a derivative has no known lot. The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
 Place refuses either that multiple or a freeze breach before Laya, with
 HTTP 400 `quantity_admission`. An order over the per-order freeze limit
@@ -937,7 +938,7 @@ is refused with that HTTP 400 and code `quantity_admission`. The message
 gives the limit, names the instrument, and asks for smaller orders. The
 order is not split. The limit is the broker freeze field when the body
 carries one, otherwise the exchange figure. The Practice sandbox
-returns an unverified lot as HTTP 400 with the visible message and no
+returns an unknown lot as HTTP 400 with the visible message and no
 `code` field.
 The terminal does not bundle a second copy of the excerpt. The app shell
 calls `loadInstrumentLotRows` once (`GET /api/v1/instrument-lots`). A

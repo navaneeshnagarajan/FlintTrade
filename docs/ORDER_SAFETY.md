@@ -49,10 +49,10 @@ place refuses a quantity that is not a positive multiple of the lot, or
 that is above the freeze limit, with HTTP 400 `quantity_admission`. The
 Order Pad shows the lot sentence once, inline:
 `Quantity must be a multiple of the lot size (N).`
-`N` is that contract's lot. It is not a published constant. A missing
-verified lot is a different sentence, also shown once, inline:
-`Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Practice sandbox returns
+`N` is that contract's lot. It is not a published constant. A contract
+with no known lot is refused with a different sentence, also shown once, inline:
+`The lot size for <underlying> isn't known. Order not placed.`
+`<underlying>` is the underlying name. The Practice sandbox returns
 that sentence as HTTP 400 with `status: error` and no `code` field, and
 it does not fill the order. An order over the per-order freeze limit is
 refused with HTTP 400 and code `quantity_admission`. The message gives
