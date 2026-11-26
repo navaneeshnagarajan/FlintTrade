@@ -30,6 +30,20 @@ updates:
     groups:
       js-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # These sets pin each other as exact peers, and Dependabot updates one
+      # package at a time, so the install never resolves. Bump each set by
+      # hand in one change. Security updates still apply.
+      - dependency-name: "fumadocs-core"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "fumadocs-ui"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "fumadocs-mdx"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "electron-builder"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "electron-builder-squirrel-windows"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
 
   # Python uv workspace (13 packages via the root uv.lock).
   - package-ecosystem: "uv"
@@ -44,6 +58,30 @@ updates:
     groups:
       py-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Broker SDKs are pinned in brokers.lock and moved by the Broker SDK
+      # freshness workflow. Two of them install from git sources that
+      # Dependabot cannot resolve.
+      - dependency-name: "dhanhq"
+      - dependency-name: "upstox-python-sdk"
+      - dependency-name: "kotakneoapi"
+      - dependency-name: "growwapi"
+      # Newer yfinance needs certifi 2026 through curl-cffi, and growwapi
+      # 1.5.0 caps certifi below 2026. Lift this once growwapi allows it.
+      - dependency-name: "yfinance"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      # Pinned in several workspace members or in an optional extra.
+      # Dependabot edits one member at a time, so the lock never resolves.
+      # Bump these by hand across every member in one change. Security
+      # updates still apply.
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "numpy"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "pyotp"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "pyarrow"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
 
   # Rust/PyO3 ticks crate.
   - package-ecosystem: "cargo"
