@@ -10,10 +10,11 @@ on:
     - cron: '0 4 * * 0'
   workflow_dispatch:
 
-# Cancel earlier in-flight runs when a new commit lands on the same ref.
-# Back-to-back pushes only need the newest matrix; earlier runs are superseded.
+# Cancel earlier in-flight runs when a new commit lands on the same PR ref.
+# Back-to-back PR pushes only need the newest matrix. Each main push gets its
+# own group, so a later squash never cancels the run for an earlier one.
 concurrency:
-  group: test-${{ github.ref }}
+  group: test-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 
 env:
