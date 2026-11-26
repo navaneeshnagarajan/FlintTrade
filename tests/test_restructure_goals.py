@@ -750,7 +750,7 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
     # flinttrade-fs-promoter.node and ship it inside the AppImage, so that
     # image's glibc is the installer's floor.
     required_posix = {
-        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-26.04"),
+        ("test.yml", "electron-desktop-suite"): (None, "ubuntu-26.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,

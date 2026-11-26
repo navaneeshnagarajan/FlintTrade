@@ -106,7 +106,7 @@ def test_classifier_outputs_reach_each_required_surface():
         "node-core-tests": "terminal", "node-widget-tests-1": "terminal",
         "node-widget-tests-2a": "terminal", "node-widget-tests-2b": "terminal",
         "node-widget-tests-3": "terminal", "rust-ticks-tests": "rust",
-        "electron-desktop-tests": "desktop", "terminal-e2e-infra-self-tests": "terminal",
+        "electron-desktop-suite": "desktop", "terminal-e2e-infra-self-tests": "terminal",
         "python-shards": "python",
     }.items():
         assert jobs[name]["needs"] == "changed-surfaces"
@@ -170,5 +170,37 @@ def test_actual_python_summary_propagates_every_required_failure(selected, invar
         [sys.executable, "-c", script], capture_output=True, text=True, check=False,
         env=os.environ | {"PYTHON_REQUIRED": selected, "INVARIANTS_RESULT": invariants,
                           "SHARDS_RESULT": shards, "CLASSIFIER_RESULT": classification},
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_required_electron_context_runs_on_every_pull_request():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    gate = jobs["electron-desktop-tests"]
+    assert "name" not in gate
+    assert set(gate["needs"]) == {"changed-surfaces", "electron-desktop-suite"}
+    assert gate["if"] == "always() && github.event.pull_request.draft != true"
+    assert "continue-on-error" not in gate
+    assert [name for name, job in jobs.items() if job.get("name") == "electron-desktop-tests"] == []
+
+
+@pytest.mark.parametrize("selected,suite,classification,expected", [
+    ("true", "success", "success", 0),
+    ("false", "skipped", "success", 0),
+    ("true", "failure", "success", 1),
+    ("true", "cancelled", "success", 1),
+    ("true", "skipped", "success", 1),
+    ("false", "success", "success", 1),
+    ("false", "skipped", "failure", 1),
+    ("", "skipped", "success", 1),
+])
+def test_electron_summary_propagates_every_suite_failure(selected, suite, classification, expected):
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    step = jobs["electron-desktop-tests"]["steps"][0]
+    script = textwrap.dedent("\n".join(step["run"].splitlines()[1:-1]))
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False,
+        env=os.environ | {"DESKTOP_REQUIRED": selected, "SUITE_RESULT": suite,
+                          "CLASSIFIER_RESULT": classification},
     )
     assert result.returncode == expected, result.stdout + result.stderr

@@ -37,9 +37,10 @@ on:
       - '.github/workflows/visual-a11y.yml'
       - '.github/actions/**'
 
+# Every main run gets its own group, so a later merge never cancels it.
 concurrency:
-  group: visual-a11y-${{ github.ref }}
-  cancel-in-progress: true
+  group: visual-a11y-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: write

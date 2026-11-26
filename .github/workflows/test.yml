@@ -10,11 +10,11 @@ on:
     - cron: '0 4 * * 0'
   workflow_dispatch:
 
-# Cancel earlier in-flight runs when a new commit lands on the same ref.
-# Back-to-back pushes only need the newest matrix; earlier runs are superseded.
+# Branch and pull request runs are superseded by newer commits. Every main
+# run gets its own group, so a later merge never cancels or replaces it.
 concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  group: test-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -457,7 +457,7 @@ jobs:
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
   # directory package on every non-draft code change; the weekly workflow
   # covers platform-specific packaging.
-  electron-desktop-tests:
+  electron-desktop-suite:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.desktop == 'true'
     # ubuntu-26.04 matches flint.toml os_requires. This job packages a directory
@@ -491,6 +491,37 @@ jobs:
         run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
       - name: Verify packaged Electron security contract
         run: pnpm --filter @flinttrade/desktop verify:package
+
+  # Branch protection requires this exact name. It runs on every non-draft
+  # pull request, so a failed classifier or a cancelled suite cannot be
+  # reported as a skipped, passing check.
+  electron-desktop-tests:
+    needs: [changed-surfaces, electron-desktop-suite]
+    if: always() && github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the selected Electron suite
+        env:
+          CLASSIFIER_RESULT: ${{ needs.changed-surfaces.result }}
+          DESKTOP_REQUIRED: ${{ needs.changed-surfaces.outputs.desktop }}
+          SUITE_RESULT: ${{ needs.electron-desktop-suite.result }}
+        run: |
+          python - <<'PYTHON'
+          import os
+          import sys
+          selected = os.environ["DESKTOP_REQUIRED"]
+          expected = "success" if selected == "true" else "skipped"
+          valid = (
+              selected in {"true", "false"}
+              and os.environ["CLASSIFIER_RESULT"] == "success"
+              and os.environ["SUITE_RESULT"] == expected
+          )
+          if not valid:
+              print("The Electron suite failed, was cancelled or did not run.")
+              sys.exit(1)
+          print("Electron suite passed." if selected == "true" else "No desktop changes.")
+          PYTHON
 
   terminal-e2e-infra-self-tests:
     needs: changed-surfaces
