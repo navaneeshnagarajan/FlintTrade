@@ -203,7 +203,7 @@ export default async function DownloadPage() {
         <section aria-labelledby="web-app-install">
           <h2 id="web-app-install">Install the self-hosted web app</h2>
           <p>
-            This is the primary path and it needs nothing pre-installed — no Python, no Node, no
+            This is the primary path. It needs nothing pre-installed: no Python, no Node, no
             git, no bash and no make. The installer provisions a pinned, checksum-verified
             toolchain, builds FlintTrade from a managed source checkout, and installs a{' '}
             <span className="font-mono">flinttrade</span> launcher. Open{' '}
@@ -270,8 +270,8 @@ export default async function DownloadPage() {
           <h2 id="repo-direct-fallback">If this site is unreachable</h2>
           <p>
             Use these whenever a command above fails: every install and uninstall URL here is
-            only a redirect to a script in the repository, so an outage — or a deployment
-            without an immutable source commit — answers 503, and piping that response into a
+            only a redirect to a script in the repository, so an outage, or a deployment
+            without an immutable source commit, answers 503, and piping that response into a
             shell does nothing useful. The commands below fetch the same scripts from the
             repository and depend on no deployment.
           </p>
