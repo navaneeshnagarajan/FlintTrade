@@ -37,7 +37,7 @@ export function OrdersCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <ClipboardList size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="ft-text-overline text-text-muted">
             Recent Orders
           </p>
           {isExplore && <ExampleLabel testId="orders-example-label" />}
@@ -46,7 +46,7 @@ export function OrdersCard() {
         {isError && (
           <div
             role="alert"
-            className="flex items-center justify-between gap-2 text-[11px] text-loss"
+            className="flex items-center justify-between gap-2 text-xxs text-loss"
           >
             <span>
               Orders unavailable
@@ -64,7 +64,7 @@ export function OrdersCard() {
         )}
 
         {queryUi.isFrozen && !isError && (
-          <p role="status" className="text-[11px] text-warning">
+          <p role="status" className="text-xxs text-warning">
             {queryUi.isPaused
               ? "Offline — displayed orders are frozen"
               : "Broker disconnected — displayed orders are frozen"}
@@ -86,7 +86,7 @@ export function OrdersCard() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold uppercase shrink-0"
+                      className="inline-block px-1.5 py-0.5 rounded ft-text-overline shrink-0"
                       style={{
                         background: isBuy
                           ? "rgba(34,197,94,0.12)"
@@ -109,7 +109,7 @@ export function OrdersCard() {
                       {order.quantity} × ₹{order.price.toLocaleString("en-IN")}
                     </p>
                     <p
-                      className="text-[11px]"
+                      className="text-xxs"
                       style={{
                         color:
                           order.status === "COMPLETE"

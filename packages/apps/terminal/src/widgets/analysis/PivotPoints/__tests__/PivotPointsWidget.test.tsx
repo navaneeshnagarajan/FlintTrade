@@ -257,7 +257,7 @@ describe("PivotPointsWidget example-data badge", () => {
     render(<PivotPointsWidget />);
 
     await waitFor(() => expect(mockGetQuotes).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
     expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
   });
 

@@ -232,7 +232,7 @@ export function BacktestConfigPanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="backtest-start-date" className="text-xs text-text-secondary">Start Date</Label>
+                <Label htmlFor="backtest-start-date" className="text-xs text-text-secondary">Start date</Label>
                 <Input
                   id="backtest-start-date"
                   type="date"
@@ -243,7 +243,7 @@ export function BacktestConfigPanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="backtest-end-date" className="text-xs text-text-secondary">End Date</Label>
+                <Label htmlFor="backtest-end-date" className="text-xs text-text-secondary">End date</Label>
                 <Input
                   id="backtest-end-date"
                   type="date"

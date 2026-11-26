@@ -99,7 +99,7 @@ describe("AuditTrailWidget", () => {
     useModeStore.setState({ mode: "practice" });
     render(<AuditTrailWidget />, { wrapper });
     expect(screen.getByText(/BUY NIFTY 22500 CE/)).toBeTruthy();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("shows entry count in filter bar", () => {

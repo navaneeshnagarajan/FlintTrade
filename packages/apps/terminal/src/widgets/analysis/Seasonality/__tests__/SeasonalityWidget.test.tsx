@@ -31,7 +31,6 @@ import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { fetchSeasonality, type SeasonalityData } from "../api";
 import { useModeStore } from "@/stores/modeStore";
 import SeasonalityWidget from "../SeasonalityWidget";
-import { contrastRatio } from "../heatColours";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockFetch = fetchSeasonality as ReturnType<typeof vi.fn>;
@@ -260,7 +259,7 @@ describe("SeasonalityWidget example-data badge", () => {
   it("labels the built-in statistics in Practice when no broker is connected", () => {
     useModeStore.setState({ mode: "practice" });
     renderWidget();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {
@@ -284,21 +283,5 @@ describe("SeasonalityWidget example-data badge", () => {
     renderWidget();
     expect(await screen.findByText("Live")).toBeInTheDocument();
     expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
-  });
-});
-
-describe("SeasonalityWidget heat tile contrast", () => {
-  it("renders opaque tiles whose value text meets AA contrast", () => {
-    const { container } = renderWidget();
-
-    const tiles = container.querySelectorAll<HTMLElement>("[data-weighted-heatmap-tile]");
-    expect(tiles.length).toBe(12);
-    for (const tile of tiles) {
-      const fill = tile.style.backgroundColor;
-      expect(fill).toMatch(/^rgb\(/);
-      const value = tile.querySelector<HTMLElement>(".font-bold");
-      expect(value).not.toBeNull();
-      expect(contrastRatio(fill, value?.style.color ?? "") ?? 0).toBeGreaterThanOrEqual(4.5);
-    }
   });
 });

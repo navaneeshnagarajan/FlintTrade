@@ -180,7 +180,7 @@ describe("GapAnalysisWidget example-data badge", () => {
     useModeStore.setState({ mode: "practice" });
     mockConnected.mockReturnValue(true);
     render(<GapAnalysisWidget />);
-    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example data");
+    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

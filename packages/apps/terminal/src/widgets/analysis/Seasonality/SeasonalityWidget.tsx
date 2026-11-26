@@ -38,7 +38,6 @@ import type { WsInstrument } from "@/types/api";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { heatColour, heatTextColour } from "./heatColours";
 import { fetchSeasonality, type SeasonalityData } from "./api";
 import { SAMPLE_SEASONALITY } from "./sampleData";
 
@@ -98,10 +97,18 @@ function formatPct(value: number, decimals = 2): string {
   return value > 0 ? `+${fixed}%` : `${fixed}%`;
 }
 
-/** Tile fill plus the text colour that stays readable on it. */
-function heatTile(value: number, maxAbs: number): { color: string; textColor: string } {
-  const color = heatColour(value, maxAbs);
-  return { color, textColor: heatTextColour(color) };
+/**
+ * Return-heat tile colour: green for positive months/days, red for negative,
+ * neutral grey near zero; opacity scales with magnitude within the view.
+ */
+function heatColour(value: number, maxAbs: number): string {
+  if (!Number.isFinite(value) || maxAbs <= 0 || Math.abs(value) < 1e-9) {
+    return "rgba(113, 113, 122, 0.35)";
+  }
+  const alpha = 0.25 + 0.55 * Math.min(Math.abs(value) / maxAbs, 1);
+  return value > 0
+    ? `rgba(34, 197, 94, ${alpha.toFixed(2)})`
+    : `rgba(239, 68, 68, ${alpha.toFixed(2)})`;
 }
 
 function maxAbsReturn(values: number[]): number {
@@ -119,7 +126,8 @@ function monthlyEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     valueLabel: formatPct(row.avg_return_pct),
     detailLabel: `${Math.round(row.positive_rate * 100)}% +ve · ${row.years_count}y`,
     weight: Math.max(Math.abs(row.avg_return_pct), 0.15),
-    ...heatTile(row.avg_return_pct, maxAbs),
+    color: heatColour(row.avg_return_pct, maxAbs),
+    textColor: "#ffffff",
   }));
 }
 
@@ -131,7 +139,8 @@ function weekdayEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     valueLabel: formatPct(row.avg_return_pct, 3),
     detailLabel: `${Math.round(row.positive_rate * 100)}% +ve · ${row.sample_count}d`,
     weight: Math.max(Math.abs(row.avg_return_pct), 0.01),
-    ...heatTile(row.avg_return_pct, maxAbs),
+    color: heatColour(row.avg_return_pct, maxAbs),
+    textColor: "#ffffff",
   }));
 }
 
@@ -142,7 +151,8 @@ function dayOfMonthEntries(data: SeasonalityData): FlintWeightedHeatmapEntry[] {
     label: `Day ${row.day}`,
     valueLabel: formatPct(row.avg_return_pct, 2),
     weight: 1, // equal-width grid: the colour carries the signal
-    ...heatTile(row.avg_return_pct, maxAbs),
+    color: heatColour(row.avg_return_pct, maxAbs),
+    textColor: "#ffffff",
   }));
 }
 
@@ -275,12 +285,12 @@ function SeasonalityWidget(props: WidgetProps) {
       aria-label="Seasonality widget"
     >
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <CalendarRange size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">Seasonality</span>
+        <span className="whitespace-nowrap text-xs font-semibold text-text-primary">Seasonality</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: seasonality computed from real daily price history"
             title="Live — calendar-return statistics computed from the connected broker's daily bars."
@@ -328,7 +338,7 @@ function SeasonalityWidget(props: WidgetProps) {
 
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-        <p className="text-[11px] text-text-muted">
+        <p className="text-xxs text-text-muted">
           {instrument.symbol} · average {view === "monthly" ? "monthly" : "daily"} return by{" "}
           {view === "monthly" ? "calendar month" : view === "weekday" ? "trading weekday" : "day of month"}
           

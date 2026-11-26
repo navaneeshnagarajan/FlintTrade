@@ -276,12 +276,12 @@ function VolatilityConeWidget() {
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Triangle size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">Volatility Cone</span>
+        <span className="whitespace-nowrap text-xs font-semibold text-text-primary">Volatility Cone</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: HV cone computed from real price history"
             title="Live — historical-volatility percentiles from real price history; the overlay is current realised HV."

@@ -58,12 +58,12 @@ describe("PCRTrendWidget", () => {
   it("labels the built-in series as example data in Practice, connected or not", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     const { unmount } = render(<PCRTrendWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
     unmount();
 
     mockUseBrokerConnected.mockReturnValue(true);
     render(<PCRTrendWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the example-data label to the Mode line in Explore", () => {

@@ -196,7 +196,7 @@ describe("StraddlePnLWidget example-data badge", () => {
 
     render(<StraddlePnLWidget />, { wrapper });
 
-    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example data");
+    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example");
   });
 
   it("fails closed when a connected payload omits the provenance flag", () => {

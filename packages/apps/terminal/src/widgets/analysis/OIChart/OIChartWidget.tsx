@@ -1369,7 +1369,7 @@ function OIChartWidget(props: WidgetProps) {
           {view === "signals" ? (
             signalsProvenance === "live" ? (
               <span
-                className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
+                className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
                 role="status"
                 aria-label="Live: OI signals from the connected broker's option chain"
                 title="Live — OI-action classification + unusual-OI from the connected broker's chain."
@@ -1378,7 +1378,7 @@ function OIChartWidget(props: WidgetProps) {
               </span>
             ) : signalsProvenance === "mixed" ? (
               <span
-                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-400"
+                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xxs font-medium text-amber-400"
                 role="status"
                 aria-label="Showing mixed live and sample OI data"
                 title="Only one OI response is explicitly live; the other section is sample or unavailable."

@@ -833,7 +833,7 @@ describe("OrderFlowWidget example-data badge", () => {
     );
     render(<OrderFlowWidget {...defaultProps} />);
     const status = screen.getByTestId("order-flow-toolbar-status");
-    expect(within(status).getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(within(status).getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("keeps the label visible in the compact toolbar", () => {
@@ -849,7 +849,7 @@ describe("OrderFlowWidget example-data badge", () => {
     resizeObservedElement(screen.getByTestId("order-flow-panel"), 220, 96);
 
     const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
-    expect(within(toolbar).getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(within(toolbar).getByTestId("example-data-badge")).toHaveTextContent("Example");
     expect(within(toolbar).getByRole("button", { name: "More order flow controls" })).toBeInTheDocument();
   });
 

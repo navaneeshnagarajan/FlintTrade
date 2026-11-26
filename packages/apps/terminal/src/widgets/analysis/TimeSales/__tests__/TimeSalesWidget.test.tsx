@@ -45,6 +45,7 @@ import { useTape } from "../useTape";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useDepthData } from "@/hooks/useDepthData";
 import TimeSalesWidget from "../TimeSalesWidget";
+import { useModeStore } from "@/stores/modeStore";
 import { SAMPLE_TAPE } from "../sampleData";
 import type { TapePrint } from "../tape";
 
@@ -68,9 +69,10 @@ beforeEach(() => {
 
 describe("TimeSalesWidget — tape", () => {
   it("renders the sample tape with demo affordance when disconnected", () => {
+    useModeStore.setState({ mode: "practice" });
     render(<TimeSalesWidget {...defaultProps} />);
 
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Tape & Microstructure");
     // Sample prints render (unique first-row time from the sample tape).
     expect(screen.getByText(SAMPLE_TAPE[0].time)).toBeInTheDocument();
@@ -87,7 +89,7 @@ describe("TimeSalesWidget — tape", () => {
 
     render(<TimeSalesWidget {...defaultProps} />);
 
-    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("11:00:02")).toBeInTheDocument();
     expect(screen.getByText("500")).toBeInTheDocument();
@@ -148,7 +150,7 @@ describe("TimeSalesWidget — microstructure statistics", () => {
 
     render(<TimeSalesWidget {...statsViewProps} />);
 
-    const avgRow = screen.getByText("Avg Trade Size").closest("div") as HTMLElement;
+    const avgRow = screen.getByText("Avg trade size").closest("div") as HTMLElement;
     expect(within(avgRow).getByText("no size on feed")).toBeInTheDocument();
     expect(within(avgRow).getByText("—")).toBeInTheDocument();
     expect(within(avgRow).queryByText("0")).not.toBeInTheDocument();
@@ -158,9 +160,10 @@ describe("TimeSalesWidget — microstructure statistics", () => {
     // Replaces the retired widget's unconditional "Sample data" badge: the data
     // is real when connected, so the disclosure is now tied to sample mode —
     // but it must still be impossible to read demo statistics as live ones.
+    useModeStore.setState({ mode: "practice" });
     render(<TimeSalesWidget {...statsViewProps} />);
 
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
     expect(screen.getByTestId("feature-teaser")).toBeInTheDocument();
     // Sample statistics are the sample tape's own: 20 prints, 10 buys, 9 sells.
     expect(screen.getByText("50% up / 45% down")).toBeInTheDocument();

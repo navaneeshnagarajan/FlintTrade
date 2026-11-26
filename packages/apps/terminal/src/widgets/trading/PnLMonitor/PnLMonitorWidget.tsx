@@ -320,7 +320,7 @@ function PnLMonitorWidget(props: WidgetProps) {
         <div className="ml-auto flex items-center gap-1.5 min-w-0">
           {provenance !== null && (
             <span
-              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-400 whitespace-nowrap"
+              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xxs font-medium text-amber-400 whitespace-nowrap"
               role="status"
               aria-label="Showing practice-account data from your Practice account"
               title="Practice mode — P&L is computed from your Practice account."

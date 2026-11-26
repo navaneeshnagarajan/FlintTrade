@@ -117,13 +117,13 @@ describe("DeliveryDataWidget example-data badge", () => {
   it("labels the illustrative rows in Practice", () => {
     useModeStore.setState({ mode: "practice" });
     render(<DeliveryDataWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("labels the illustrative rows in Live", () => {
     useModeStore.setState({ mode: "live" });
     render(<DeliveryDataWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

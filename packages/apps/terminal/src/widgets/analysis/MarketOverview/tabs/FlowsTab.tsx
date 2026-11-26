@@ -97,7 +97,7 @@ function SegmentRow({ seg }: { seg: FiiLongShortSegment }) {
           <div className="flex-1 h-1.5 rounded-full bg-red-500/25 overflow-hidden">
             <div className="h-full bg-green-500/70" style={{ width: `${longPct}%` }} />
           </div>
-          <span className="font-mono tabular-nums text-text-muted text-[11px] w-8 text-right">
+          <span className="font-mono tabular-nums text-text-muted text-xxs w-8 text-right">
             {seg.long_pct.toFixed(0)}%
           </span>
         </div>
@@ -115,7 +115,7 @@ function CashSegmentTable({ rows }: { rows: FiiDiiCashRow[] }) {
     <div className="rounded-md border border-border-default overflow-auto">
       <table className="w-full text-xs" aria-label="FII/DII capital market segment">
         <thead>
-          <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
+          <tr className="ft-text-overline text-text-muted border-b border-border-default">
             {["Date", "FII Buy", "FII Sell", "FII Net", "DII Buy", "DII Sell", "DII Net"].map((h) => (
               <th key={h} className="py-1 px-2 text-right first:text-left font-medium">{h}</th>
             ))}
@@ -156,7 +156,7 @@ function DiiDerivativeTable({ snapshot }: { snapshot: FiiDiiSnapshot }) {
     <div className="rounded-md border border-border-default overflow-auto">
       <table className="w-full text-xs" aria-label="DII derivative positioning">
         <thead>
-          <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
+          <tr className="ft-text-overline text-text-muted border-b border-border-default">
             {["Segment", "Long", "Short", "Net"].map((h) => (
               <th key={h} className="py-1 px-2 text-right first:text-left font-medium">{h}</th>
             ))}
@@ -237,7 +237,7 @@ function FlowsTab() {
         <div>
           <h3 className="text-sm font-semibold text-text-primary">FII Long/Short</h3>
           {ratioIsSample && <span className="text-xxs text-warning" role="status">Sample data</span>}
-          <p className="text-[11px] text-text-muted">
+          <p className="text-xxs text-text-muted">
             Participant OI · {ratio.trade_date || "—"}
             
           </p>
@@ -257,7 +257,7 @@ function FlowsTab() {
       {/* Aggregate futures bias gauge */}
       <div className="rounded-md border border-border-default bg-surface-card p-2.5">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-text-muted">Futures bias</span>
+          <span className="ft-text-overline text-text-muted">Futures bias</span>
           <span className={`flex items-center gap-1 font-semibold ${cls}`}>
             <Icon size={13} />
             {ratio.bias_label}
@@ -267,7 +267,7 @@ function FlowsTab() {
           <div className="h-full bg-green-500/70" style={{ width: `${biasFill}%` }} />
           <div className="absolute inset-y-0 left-1/2 w-px bg-text-muted/50" />
         </div>
-        <div className="flex justify-between mt-1 text-[11px] text-text-muted font-mono tabular-nums">
+        <div className="flex justify-between mt-1 text-xxs text-text-muted font-mono tabular-nums">
           <span>Short {fmtOi(ratio.futures_short)}</span>
           <span className={cls}>{ratio.futures_bias.toFixed(1)}% long</span>
           <span>Long {fmtOi(ratio.futures_long)}</span>
@@ -283,7 +283,7 @@ function FlowsTab() {
         <div className="overflow-auto">
           <table className="w-full text-xs" aria-label="FII long/short by segment">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-text-muted border-b border-border-default">
+              <tr className="ft-text-overline text-text-muted border-b border-border-default">
                 <th className="py-1 pr-2 text-left font-medium">Segment</th>
                 <th className="py-1 px-2 text-right font-medium">Long</th>
                 <th className="py-1 px-2 text-right font-medium">Short</th>

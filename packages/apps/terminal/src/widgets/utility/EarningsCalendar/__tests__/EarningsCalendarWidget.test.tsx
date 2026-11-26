@@ -283,7 +283,7 @@ describe("EarningsCalendarWidget example-data badge", () => {
   it("labels the built-in entries in Practice when no broker is connected", () => {
     useModeStore.setState({ mode: "practice" });
     render(<EarningsCalendarWidget />, { wrapper });
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

@@ -158,7 +158,7 @@ describe("ArbitrageScannerWidget example-data badge", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("fails closed when a connected scan omits the provenance flag", () => {

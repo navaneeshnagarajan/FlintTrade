@@ -183,7 +183,7 @@ function PortfolioOptimiserWidget() {
         <span className="text-xs font-semibold text-text-primary">Portfolio Optimiser</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: weights optimised from real basket history"
             title="Live — mean-variance weights from ~1y of the basket's real daily history."
@@ -192,7 +192,7 @@ function PortfolioOptimiserWidget() {
           </span>
         ) : isPractice ? (
           <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-400"
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xxs font-medium text-amber-400"
             role="status"
             aria-label="Practice: weights optimised from the Practice basket history"
             title="Practice — read-only weights from the current Practice data scope."

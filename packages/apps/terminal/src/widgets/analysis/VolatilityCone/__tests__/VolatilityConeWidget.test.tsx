@@ -136,7 +136,7 @@ describe("VolatilityConeWidget example-data badge", () => {
   it("labels the built-in cone in Practice when no broker is connected", () => {
     useModeStore.setState({ mode: "practice" });
     render(<VolatilityConeWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

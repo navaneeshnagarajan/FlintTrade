@@ -293,7 +293,7 @@ export function OverlapTab() {
           {presentation.label === "demo" ? (
             <span
               data-testid="overlap-demo-label"
-              className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium tracking-wide"
+              className="inline-flex items-center rounded px-1.5 py-0.5 text-xxs font-medium tracking-wide"
               style={{
                 background: "var(--color-surface-active)",
                 color: "var(--color-text-muted)",

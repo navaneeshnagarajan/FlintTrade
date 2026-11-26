@@ -167,7 +167,7 @@ function ResultItem({
         <p className="text-xs text-text-muted leading-relaxed mt-0.5 line-clamp-2">
           {highlightSnippet(result.snippet, query)}
         </p>
-        <p className="text-[11px] text-text-muted/60 mt-1 font-mono truncate">
+        <p className="text-xxs text-text-muted/60 mt-1 font-mono truncate">
           docs/{result.path}
         </p>
       </div>
@@ -406,7 +406,7 @@ export default function DocsSearch({
             <FooterHint keys="Esc" label="Close" />
           </div>
           {results.length > 0 && (
-            <span className="text-[11px] text-text-muted">
+            <span className="text-xxs text-text-muted">
               {results.length} result{results.length !== 1 ? "s" : ""}
             </span>
           )}
@@ -423,7 +423,7 @@ export default function DocsSearch({
 function FooterHint({ keys, label }: { keys: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-text-muted">
-      <kbd className="font-mono text-[11px] bg-glass-l2 border border-glass-l1 rounded px-1 py-0.5 leading-none">
+      <kbd className="font-mono text-xxs bg-glass-l2 border border-glass-l1 rounded px-1 py-0.5 leading-none">
         {keys}
       </kbd>
       <span>{label}</span>

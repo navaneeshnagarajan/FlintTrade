@@ -229,7 +229,6 @@ function PivotPointsWidget() {
       >
         <GitFork size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Pivot Points</span>
-        {showingExampleInputs && <ExampleDataBadge />}
         <div className="flex-1" />
         {isLive ? (
           <span
@@ -247,12 +246,14 @@ function PivotPointsWidget() {
           >
             Practice
           </span>
+        ) : showingExampleInputs ? (
+          <ExampleDataBadge />
         ) : null}
         {isLoading && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />}
       </div>
 
       {/* Symbol selector */}
-      <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-surface-elevated border-b border-border-subtle">
+      <div className="flex-none flex flex-wrap items-center gap-2 px-3 py-1.5 bg-surface-elevated border-b border-border-subtle">
         <span className="text-xxs text-text-muted uppercase tracking-wide shrink-0">
           Symbol
         </span>
@@ -266,7 +267,7 @@ function PivotPointsWidget() {
         </Select>
         {loadError &&
           (isBrokerRequiredMessage(loadError) ? (
-            <BrokerRequiredNotice what="the previous day's prices" className="ml-auto min-w-0 py-0.5" />
+            <BrokerRequiredNotice what="the previous day's prices" className="basis-full min-w-0 py-0.5" />
           ) : (
             <span className="text-xxs text-loss ml-auto truncate max-w-40" title={loadError}>
               {loadError}

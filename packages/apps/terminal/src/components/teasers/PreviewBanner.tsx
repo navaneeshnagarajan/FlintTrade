@@ -169,7 +169,7 @@ export function PreviewBanner({ config, className }: PreviewBannerProps) {
           {/* Status badge */}
           <span
             className={cn(
-              "shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider",
+              "shrink-0 rounded px-1.5 py-0.5 font-mono ft-text-overline",
               colorClass,
               "bg-current/10",
             )}

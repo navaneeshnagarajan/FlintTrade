@@ -370,7 +370,7 @@ describe("StraddleWidget", () => {
     renderWidget({ view });
 
     expect(await screen.findByText("200")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Example option quotes" })).toHaveTextContent("Example data");
+    expect(screen.getByRole("status", { name: "Example option quotes" })).toHaveTextContent("Example");
     expect(screen.queryByText(/live ATM/i)).not.toBeInTheDocument();
     expect(apiMocks.getPositionbook).not.toHaveBeenCalled();
   });

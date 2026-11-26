@@ -290,9 +290,9 @@ function EconomicCalendarWidget() {
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarClock size={13} className="text-text-muted" aria-hidden="true" />
-        <span className="text-xs font-medium text-text-primary">Economic Calendar</span>
+        <span className="whitespace-nowrap text-xs font-medium text-text-primary">Economic Calendar</span>
         {showingExampleEvents && <ExampleDataBadge />}
         <div className="flex-1" />
         <div className="flex items-center gap-1.5">

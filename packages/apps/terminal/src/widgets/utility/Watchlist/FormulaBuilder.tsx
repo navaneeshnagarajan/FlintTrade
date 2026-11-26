@@ -47,7 +47,7 @@ export function FormulaBuilder({ customFormulas, onAdd, onRemove }: FormulaBuild
           {customFormulas.map((f) => (
             <div key={f.id} className="flex items-center gap-2 rounded px-1.5 py-1 bg-surface-elevated text-xs">
               <span className="text-text-primary font-medium truncate">{f.name}</span>
-              <span className="text-[11px] text-text-muted font-mono truncate flex-1">{f.expression}</span>
+              <span className="text-xxs text-text-muted font-mono truncate flex-1">{f.expression}</span>
               <button
                 type="button"
                 onClick={() => onRemove(f.id)}
@@ -90,9 +90,9 @@ export function FormulaBuilder({ customFormulas, onAdd, onRemove }: FormulaBuild
       </div>
 
       {error ? (
-        <p className="mt-1 text-[11px] text-loss">{error}</p>
+        <p className="mt-1 text-xxs text-loss">{error}</p>
       ) : (
-        <p className="mt-1 text-[11px] text-text-muted">Fields: {FORMULA_FIELD_NAMES.join(", ")}</p>
+        <p className="mt-1 text-xxs text-text-muted">Fields: {FORMULA_FIELD_NAMES.join(", ")}</p>
       )}
     </div>
   );

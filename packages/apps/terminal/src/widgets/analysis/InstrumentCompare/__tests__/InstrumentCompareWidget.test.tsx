@@ -132,7 +132,7 @@ describe("InstrumentCompareWidget example-data badge", () => {
     useModeStore.setState({ mode: "practice" });
     mockUseBrokerConnected.mockReturnValue(true);
     render(<InstrumentCompareWidget />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

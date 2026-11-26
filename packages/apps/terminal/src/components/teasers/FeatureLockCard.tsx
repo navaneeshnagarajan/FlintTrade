@@ -74,7 +74,7 @@ export function FeatureLockCard({
           aria-hidden="true"
         >
           <Lock size={10} className="text-text-muted" />
-          <span className="text-[11px] text-text-muted font-medium">
+          <span className="text-xxs text-text-muted font-medium">
             Locked
           </span>
         </div>
@@ -91,11 +91,11 @@ export function FeatureLockCard({
               {featureName}
             </h3>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={cn("text-[11px] font-medium uppercase tracking-wider", statusColor)}>
+              <span className={cn("ft-text-overline", statusColor)}>
                 {statusLabel}
               </span>
               {version && (
-                <span className="text-[11px] text-text-muted font-mono">
+                <span className="text-xxs text-text-muted font-mono">
                   · {version}
                 </span>
               )}

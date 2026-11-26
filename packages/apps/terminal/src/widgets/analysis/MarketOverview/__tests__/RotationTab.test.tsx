@@ -123,7 +123,7 @@ describe("RRGCanvas provenance", () => {
 
   it("badges the plot as example data when the response omits is_sample_data", () => {
     render(<RRGCanvas data={rrgResponse({})} tailLength={2} />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("drops the badge only on an explicit is_sample_data: false", () => {

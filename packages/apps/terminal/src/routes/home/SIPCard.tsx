@@ -29,7 +29,7 @@ export function SIPCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <RefreshCw size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="ft-text-overline text-text-muted">
             Example SIPs
           </p>
           <ExampleLabel testId="sip-example-label" />
@@ -43,7 +43,7 @@ export function SIPCard() {
             >
               <div className="min-w-0">
                 <p className="text-xs text-text-primary truncate">{sip.fundName}</p>
-                <p className="text-[11px] text-text-muted">
+                <p className="text-xxs text-text-muted">
                   Next: {format(sip.nextDate, "dd MMM")}
                 </p>
               </div>

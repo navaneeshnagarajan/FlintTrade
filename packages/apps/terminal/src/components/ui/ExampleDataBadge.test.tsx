@@ -19,18 +19,18 @@ describe("ExampleDataBadge", () => {
     useModeStore.setState({ mode: "practice" });
     render(<ExampleDataBadge />);
     const badge = screen.getByTestId("example-data-badge");
-    expect(badge).toHaveTextContent("Example data");
+    expect(badge).toHaveTextContent("Example");
     expect(badge).toHaveAttribute("role", "status");
     expect(badge).toHaveAttribute(
       "title",
-      "These figures are built-in examples, not market or account data.",
+      "Example figures",
     );
   });
 
   it("labels example figures in Live", () => {
     useModeStore.setState({ mode: "live" });
     render(<ExampleDataBadge />);
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("accepts a custom label and merges a class name", () => {

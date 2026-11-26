@@ -236,7 +236,7 @@ describe("EconomicCalendarWidget example-data badge", () => {
   it("labels the bundled fallback schedule in Practice", () => {
     useModeStore.setState({ mode: "practice" });
     renderWidget();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

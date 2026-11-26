@@ -35,6 +35,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
+import { EXAMPLE_LABEL } from "@/lib/operatorModeLabel";
 import type { WidgetProps } from "@/types/widgets";
 import type { ISeriesApi, LineData, Time } from "lightweight-charts";
 import { createFlintLineChart } from "@flinttrade/design-system";
@@ -459,7 +460,7 @@ function StraddleChart({
       {
         ariaLabel: "ATM straddle price chart",
         height,
-        layout: { fontSize: 10 },
+        layout: { fontSize: 12 },
         timeScale: { ticksVisible: true },
         defaultSeriesOptions: {
           priceLineVisible: false,
@@ -1072,7 +1073,7 @@ function StraddleWidget(props: WidgetProps) {
               aria-label="Example option quotes"
               className="px-1.5 py-0.5 text-xxs text-warning bg-warning/10 border border-warning/30 rounded"
             >
-              Example data
+              {EXAMPLE_LABEL}
             </span>
           )}
 

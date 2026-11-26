@@ -62,13 +62,13 @@ function PatternRow({ m }: { m: PatternMatch }) {
       <Icon size={14} className={cls} />
       <div className="flex-1 min-w-0">
         <div className="text-text-primary font-medium truncate">{m.label}</div>
-        <div className="text-[11px] text-text-muted">{m.time || `bar ${m.index}`}</div>
+        <div className="text-xxs text-text-muted">{m.time || `bar ${m.index}`}</div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         <div className="w-12 h-1.5 rounded-full bg-surface-hover overflow-hidden">
           <div className={`h-full ${m.direction === "bearish" ? "bg-red-500/70" : m.direction === "bullish" ? "bg-green-500/70" : "bg-text-muted/60"}`} style={{ width: `${Math.round(m.strength * 100)}%` }} />
         </div>
-        <span className="font-mono tabular-nums text-[11px] text-text-muted w-8 text-right">
+        <span className="font-mono tabular-nums text-xxs text-text-muted w-8 text-right">
           {Math.round(m.strength * 100)}%
         </span>
       </div>
@@ -94,7 +94,7 @@ function PatternDetectionWidget() {
           <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
             <CandlestickChart size={14} /> Pattern Detection
           </h3>
-          <p className="text-[11px] text-text-muted">
+          <p className="text-xxs text-text-muted">
             {scan.bar_count} daily bars · {scan.matches.length} patterns
             {response.is_sample_data !== false && <span className="ml-1 text-warning" role="status">Sample data</span>}
           </p>
@@ -114,7 +114,7 @@ function PatternDetectionWidget() {
         </div>
       </div>
 
-      <div className="flex gap-3 text-[11px]">
+      <div className="flex gap-3 text-xxs">
         <span className="text-green-500">{bullish} bullish</span>
         <span className="text-red-500">{bearish} bearish</span>
       </div>

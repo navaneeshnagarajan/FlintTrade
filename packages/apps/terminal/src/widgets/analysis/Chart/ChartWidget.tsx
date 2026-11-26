@@ -456,7 +456,7 @@ function IndicatorPaneResizeOverlay({
           }}
         >
           <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 rounded bg-accent/30 opacity-30 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-accent/30 bg-surface-card/95 px-1.5 py-0.5 text-[11px] font-mono leading-none text-accent opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-accent/30 bg-surface-card/95 px-1.5 py-0.5 text-xxs font-mono leading-none text-accent opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
             {pane.label} {pane.stretchFactor.toFixed(2)}x
           </span>
         </div>
@@ -1693,7 +1693,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showHV} onCheckedChange={(v) => toggleIndicator("showHV", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block shrink-0" />Hist Volatility
-              <PeriodInput label="Hist Volatility period" value={periods.hv} onChange={(v) => setPeriods((p) => ({ ...p, hv: v }))} />
+              <PeriodInput label="Historical volatility period" value={periods.hv} onChange={(v) => setPeriods((p) => ({ ...p, hv: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showVortex} onCheckedChange={(v) => toggleIndicator("showVortex", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500 inline-block shrink-0" />Vortex
@@ -1738,7 +1738,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
                                 event.stopPropagation();
                                 setIndicatorPaneSize(pane.scaleId, size);
                               }}
-                              className={`h-5 w-6 rounded text-[11px] font-semibold leading-none transition-colors ${
+                              className={`h-5 w-6 rounded text-xxs font-semibold leading-none transition-colors ${
                                 active
                                   ? "bg-accent text-accent-foreground"
                                   : "text-text-muted hover:bg-surface-hover hover:text-text-primary"

@@ -215,9 +215,9 @@ function PCRTrendWidget() {
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="PCR Trend widget">
 
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <TrendingDown size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">PCR Trend</span>
+        <span className="whitespace-nowrap text-xs font-semibold text-text-primary">PCR Trend</span>
         <ExampleDataBadge />
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />

@@ -431,7 +431,7 @@ describe("Dealer Gamma widget example-data badge", () => {
 
     await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
     expect(screen.getByText("chain unavailable")).toBeInTheDocument();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("badges a connected payload that does not attest live provenance", async () => {

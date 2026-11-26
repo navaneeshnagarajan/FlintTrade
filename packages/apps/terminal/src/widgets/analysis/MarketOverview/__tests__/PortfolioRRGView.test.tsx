@@ -75,7 +75,7 @@ describe("PortfolioRRGView example-data badge", () => {
   it("badges a sample-flagged portfolio plot in Practice", async () => {
     ftApiMocks.getPortfolioRRGData.mockResolvedValue(rrgPayload({ is_sample_data: true }));
     renderView();
-    expect(await screen.findByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(await screen.findByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("fails closed when the response omits the provenance flag", async () => {

@@ -204,7 +204,7 @@ describe("VolSurfaceWidget example-data badge", () => {
 
     render(<VolSurfaceWidget />, { wrapper });
 
-    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example data");
+    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example");
   });
 
   it("fails closed when a connected surface omits the provenance flag", () => {

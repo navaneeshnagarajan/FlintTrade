@@ -189,7 +189,7 @@ const SAMPLE_NOT_USED = {
 describe("PortfolioOptimiserWidget example-data badge", () => {
   it("labels the built-in allocation in Live when no broker is connected", () => {
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("labels the built-in allocation in Practice when the optimisation fails", async () => {
@@ -199,7 +199,7 @@ describe("PortfolioOptimiserWidget example-data badge", () => {
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
 
     expect(await screen.findByText(/Practice optimisation unavailable/)).toBeInTheDocument();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("leaves the label to the Mode line in Explore", () => {

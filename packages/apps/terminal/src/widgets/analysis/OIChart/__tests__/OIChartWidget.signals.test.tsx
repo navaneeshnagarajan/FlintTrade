@@ -147,7 +147,7 @@ describe("OI Analytics signals view", () => {
     renderSignals();
     expect((await screen.findAllByText("24500")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
-    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example data");
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
     // Live analytics stay gated off while disconnected.
     expect(ftApiMocks.getOIChangeAnalysis).not.toHaveBeenCalled();
     expect(ftApiMocks.getUnusualOI).not.toHaveBeenCalled();
