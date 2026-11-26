@@ -297,33 +297,42 @@ def _release_files(*versions: str, yanked: tuple[str, ...] = ()) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("locked", "versions", "yanked", "expected"),
+    ("locked", "info_version", "versions", "yanked", "expected"),
     [
-        ("2.3.0", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
-        ("2.4.0rc1", ("2.3.0", "2.4.0rc1"), (), "2.4.0rc1"),
-        ("2.4.0rc1", ("2.3.0", "2.4.0rc1", "2.4.0rc2"), (), "2.4.0rc2"),
-        ("2.4.0rc1", ("2.3.0", "2.4.0rc1", "2.4.0rc2"), ("2.4.0rc2",), "2.4.0rc1"),
-        ("2.4.0rc1", ("2.3.0", "2.4.0rc1", "2.4.0"), (), "2.4.0"),
-        ("2.3.0rc1", ("2.3.0", "2.3.0rc1"), (), "2.3.0"),
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
+        ("2.3.0", "2.4.0rc1", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0a1", "2.4.0b1", "2.4.0.dev1"), (), "2.3.0"),
+        ("2.3.0", "2.4.0", ("2.3.0", "2.4.0rc1", "2.4.0"), (), "2.4.0"),
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0"), ("2.4.0",), "2.3.0"),
+        ("2.4.0rc1", "2.3.0", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
     ],
 )
-def test_upstream_version_lets_a_release_candidate_lead_stable(locked, versions, yanked, expected) -> None:
-    stable = max((v for v in versions if v.replace(".", "").isdigit()), key=lambda v: tuple(map(int, v.split("."))))
-    data = {"info": {"version": stable}, "releases": _release_files(*versions, yanked=yanked)}
+def test_upstream_version_ignores_prereleases(locked, info_version, versions, yanked, expected) -> None:
+    data = {"info": {"version": info_version}, "releases": _release_files(*versions, yanked=yanked)}
     assert syncer.upstream_pypi_version(data, locked) == expected
 
 
-def test_sync_treats_a_leading_release_candidate_as_current(tmp_path, monkeypatch) -> None:
+def test_sync_keeps_final_pin_current_when_release_candidate_exists(tmp_path, monkeypatch) -> None:
     body = b"wheel-bytes"
     digest = hashlib.sha256(body).hexdigest()
     wheel = {
-        "filename": "dhanhq-2.4.0rc1-py3-none-any.whl",
+        "filename": "dhanhq-2.3.0-py3-none-any.whl",
         "packagetype": "bdist_wheel",
         "python_version": "py3",
         "url": "https://files.example/dhanhq.whl",
         "digests": {"sha256": digest},
     }
-    release = {"info": {"version": "2.3.0"}, "releases": {"2.3.0": [dict(wheel)], "2.4.0rc1": [wheel]}}
+    rc_wheel = {
+        "filename": "dhanhq-2.4.0rc1-py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "python_version": "py3",
+        "url": "https://files.example/dhanhq-rc.whl",
+        "digests": {"sha256": digest},
+    }
+    release = {
+        "info": {"version": "2.4.0rc1"},
+        "releases": {"2.3.0": [wheel], "2.4.0rc1": [rc_wheel]},
+    }
 
     def opener(url: str) -> tuple[int, bytes]:
         if url == "https://pypi.org/pypi/dhanhq/json":
@@ -332,7 +341,7 @@ def test_sync_treats_a_leading_release_candidate_as_current(tmp_path, monkeypatc
             return 200, body
         raise AssertionError(url)
 
-    monkeypatch.setattr(syncer, "load_broker_lock", lambda _path: [{"name": "dhanhq", "version": "2.4.0rc1"}])
+    monkeypatch.setattr(syncer, "load_broker_lock", lambda _path: [{"name": "dhanhq", "version": "2.3.0"}])
     monkeypatch.setattr(
         syncer,
         "sync_git_mirror",
@@ -341,6 +350,6 @@ def test_sync_treats_a_leading_release_candidate_as_current(tmp_path, monkeypatc
 
     manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
 
-    assert manifest["sdks"][0]["pypi_latest_version"] == "2.4.0rc1"
+    assert manifest["sdks"][0]["pypi_latest_version"] == "2.3.0"
     assert manifest["sdks"][0]["pypi_current"] is True
     assert manifest["drift"] == []

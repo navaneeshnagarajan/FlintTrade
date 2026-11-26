@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from dhanhq import ConditionalOrder, ForeverOrder, Funds, Order as SDKOrder, Portfolio, SuperOrder
+from dhanhq import ForeverOrder, Funds, Order as SDKOrder, Portfolio, SuperOrder
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import UnsupportedCapabilityError
@@ -20,7 +20,6 @@ from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers import dhan_mapping as m
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.dhan import DhanAdapter, _ROUTER_TOKEN
-from flinttrade_gateway.router import _adapter_write
 
 pytestmark = pytest.mark.unit
 
@@ -60,7 +59,7 @@ def adapter_and_session(transport: RecordingHTTP) -> tuple[DhanAdapter, Session]
 
 
 def test_sdk_version_is_the_repository_pin() -> None:
-    assert version("dhanhq") == "2.4.0rc1"
+    assert version("dhanhq") == "2.3.0"
     assert RecordingSDK.modify_super_order is SuperOrder.modify_super_order
     assert RecordingSDK.modify_forever is ForeverOrder.modify_forever
     assert RecordingSDK.modify_order is SDKOrder.modify_order
@@ -377,14 +376,6 @@ def test_creation_builders_fit_actual_pinned_sdk_signatures_without_dispatch_ena
     assert super_bound.arguments["stopLossPrice"] == 90.0
     assert super_bound.arguments["trailingJump"] == 5.0
     assert sdk.dhan_http.calls == []  # No creation/resource call was made.
-
-
-def test_sdk_multi_order_placement_has_no_adapter_route() -> None:
-    assert callable(ConditionalOrder.place_multi_order)
-    assert not hasattr(DhanAdapter, "place_multi_order")
-    adapter, _session = adapter_and_session(RecordingHTTP())
-    with pytest.raises(UnsupportedCapabilityError):
-        _adapter_write(adapter, "place_multi_order")
 
 
 async def test_write_token_identity_gate_stays_ahead_of_valid_mapping() -> None:

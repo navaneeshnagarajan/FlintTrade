@@ -802,7 +802,7 @@ wheels = [
 
 [[package]]
 name = "dhanhq"
-version = "2.4.0rc1"
+version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas" },
@@ -810,9 +810,9 @@ dependencies = [
     { name = "requests" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/59/47812cc1705d0d93e9b2f37b999d577fb1fe4cb821732cc7a21277cfc95e/dhanhq-2.4.0rc1.tar.gz", hash = "sha256:a5d55d4e7d2ff542a170e7791228c898e8917f6200dcc169c55cdd4bcec8b312", size = 69576, upload-time = "2026-11-26T09:14:55.149Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/d9/9910974c44b3fe6e12a992207211f56a426b0b9927c651378d9c29e4d405/dhanhq-2.3.0.tar.gz", hash = "sha256:9eb90268168704a33b0a8d7d3bcb34920380319c1cadd4bf75c04078e90f4451", size = 56627, upload-time = "2026-10-08T14:40:32.087Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/72/d53dd94b75073c1789f65d368af196f32f6546888a3c5da72726ae5d5dfd/dhanhq-2.4.0rc1-py3-none-any.whl", hash = "sha256:a8b20db77dd60cfcbb9c35cf92dcf8ff1cad741e420d7a8cafbd3b835f9c8c27", size = 53433, upload-time = "2026-11-26T09:14:54.239Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/a5/a11752cd0f8472f18d84b0cd1f22efe7e903c8654e573e55237f6851a6c1/dhanhq-2.3.0-py3-none-any.whl", hash = "sha256:5d8f841f6e854e6bbfa62fe7ff7d1b1ddca771249e37b64c688373980dcd7462", size = 45243, upload-time = "2026-10-08T14:40:30.916Z" },
 ]
 
 [[package]]
@@ -1188,7 +1188,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = "==50.0.2" },
-    { name = "dhanhq", specifier = "==2.4.0rc1" },
+    { name = "dhanhq", specifier = "==2.3.0" },
     { name = "flinttrade-core", editable = "packages/core/core" },
     { name = "flinttrade-engine", editable = "packages/services/engine" },
     { name = "growwapi", specifier = "==1.5.0" },
