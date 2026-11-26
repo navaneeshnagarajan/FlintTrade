@@ -74,9 +74,7 @@ describe("terminal usability chrome", () => {
   it("keeps the mode pill reachable when the top bar is crowded", () => {
     const topbar = read("chrome/TopBarV2.tsx");
     expect(topbar).not.toContain("overflow-x-auto");
-    // FT-MOBILE-002 requires reachable controls, not clipping by class name.
-    // Bind the replacement to the mounted bar/context owners: both rows wrap,
-    // and the inner row can shrink only within the bar's available width.
+    // Both rows wrap, and the inner row shrinks only within the bar's width.
     const barClasses = topbar.match(/className="(ft-topbar\s[^"]*)"/)?.[1].split(/\s+/);
     const contextClasses = topbar.match(/className="(ft-topbar-context\s[^"]*)"/)?.[1].split(/\s+/);
     expect(barClasses).toContain("flex-wrap");
