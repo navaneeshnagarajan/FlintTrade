@@ -2,16 +2,16 @@
 
 > Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and an optional QuestDB client (writes off by default).
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 
 ## Public surface
 
-- `src/flinttrade_data/tick_recorder.py — local tick buffering/storage; native capture unavailable`
-- `src/flinttrade_data/audit_logger.py — append-only audit trail`
-- `src/flinttrade_data/questdb_bridge.py — ILP-based ingestion (writes require QUESTDB_WRITE_ENABLED=true or allow_writes=True)`
-- `src/flinttrade_data/questdb_client.py — PostgreSQL-wire client (same write default)`
+- `src/flinttrade_data/tick_recorder.py`: local tick buffering/storage; native capture unavailable
+- `src/flinttrade_data/audit_logger.py`: append-only audit trail
+- `src/flinttrade_data/questdb_bridge.py`: ILP-based ingestion (writes require QUESTDB_WRITE_ENABLED=true or allow_writes=True)
+- `src/flinttrade_data/questdb_client.py`: PostgreSQL-wire client (same write default)
 
 (See the source for the full surface.)
 
@@ -34,7 +34,7 @@ python -m pytest packages/core/data/tests/ -v --import-mode=importlib
 ```
 
 Run one command per line. They work unchanged in bash, zsh and Windows
-PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+PowerShell. Do not join them with `&&`, which Windows PowerShell 5.1 does not
 support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
@@ -42,13 +42,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
