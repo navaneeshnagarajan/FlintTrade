@@ -1,18 +1,18 @@
 # Engine
 
-> Five-layer order-admission safety, gated scheduled-strategy execution, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation.
+> Five-layer order admission, gated scheduled strategies, a scheduler, a base strategy class, an AST-guarded sandbox, bracket orders, a mode guard, and reconciliation.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 
 ## Public surface
 
-- `src/flinttrade_engine/safety.py — five-layer order-admission safety, explicit L5 kill switch, and account-scoped MTM circuit breaker`
-- `src/flinttrade_engine/strategy_execution.py — gated scheduled-strategy execution through BrokerRouter`
-- `src/flinttrade_engine/strategy.py — base class for live strategies`
-- `src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard`
-- `src/flinttrade_engine/mode_guard.py — server-side mode-claim enforcement (explore for example data, practice, and live)`
+- `src/flinttrade_engine/safety.py`: five-layer order-admission safety, explicit L5 kill switch, and account-scoped MTM circuit breaker
+- `src/flinttrade_engine/strategy_execution.py`: gated scheduled-strategy execution through BrokerRouter
+- `src/flinttrade_engine/strategy.py`: base class for live strategies
+- `src/flinttrade_engine/sandbox_executor.py`: user-strategy execution with AST guard
+- `src/flinttrade_engine/mode_guard.py`: server-side mode-claim enforcement (explore for example data, practice, and live)
 
 (See the source for the full surface.)
 
@@ -35,7 +35,7 @@ python -m pytest packages/services/engine/tests/ -v --import-mode=importlib
 ```
 
 Run one command per line. They work unchanged in bash, zsh and Windows
-PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+PowerShell. Do not join them with `&&`, which Windows PowerShell 5.1 does not
 support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
@@ -43,13 +43,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
