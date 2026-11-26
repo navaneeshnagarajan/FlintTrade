@@ -23,6 +23,12 @@ from .questdb_config import QuestDBWritesDisabledError
 
 logger = logging.getLogger("flinttrade.data.questdb_routes")
 
+WRITES_DISABLED_MESSAGE = (
+    "QuestDB writes are disabled. "
+    "Enable writes by setting QUESTDB_WRITE_ENABLED=true "
+    "or by passing allow_writes=True."
+)
+
 questdb_bp = Blueprint("questdb", __name__, url_prefix="/api/v1/data/questdb")
 
 # Module-level singleton — replaced via ``init_questdb_routes`` for DI.
@@ -107,7 +113,8 @@ def insert_ticks() -> tuple[Response, int]:
     try:
         count = bridge.insert_ticks(ticks)
     except QuestDBWritesDisabledError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 403
+        logger.warning("QuestDB write refused: %s", exc)
+        return jsonify({"status": "error", "message": WRITES_DISABLED_MESSAGE}), 403
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Upstream service failed"}), 502
 
@@ -143,7 +150,8 @@ def run_query() -> tuple[Response, int]:
     try:
         rows = bridge.query(sql)
     except QuestDBWritesDisabledError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 403
+        logger.warning("QuestDB write refused: %s", exc)
+        return jsonify({"status": "error", "message": WRITES_DISABLED_MESSAGE}), 403
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 

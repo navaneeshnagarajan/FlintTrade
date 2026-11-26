@@ -5,6 +5,7 @@ All tests use mocks. Do not run them against a live QuestDB instance.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,6 +20,7 @@ from flinttrade_data.questdb_config import (
     resolve_allow_writes,
     writes_enabled_from_env,
 )
+from flinttrade_data.questdb_routes import WRITES_DISABLED_MESSAGE
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +157,27 @@ class TestReadOnlySql:
     )
     def test_rejects_writes_and_unknown(self, sql):
         assert is_read_only_sql(sql) is False
+
+    def test_comments_do_not_hide_a_following_read(self):
+        assert is_read_only_sql("-- prologue\nSELECT 1 -- trailing") is True
+        assert is_read_only_sql("/* INSERT INTO ticks */ SELECT 1") is True
+        assert is_read_only_sql("SELECT /* mid */ 1") is True
+
+    def test_comments_do_not_turn_a_write_into_a_read(self):
+        assert is_read_only_sql("INSERT INTO ticks -- SELECT 1") is False
+        assert is_read_only_sql("/* SELECT 1 */ INSERT INTO ticks") is False
+
+    def test_pathological_unclosed_comment_returns_quickly(self):
+        sql = "/*" + ("*" * 200_000)
+        started = time.perf_counter()
+        assert is_read_only_sql(sql) is False
+        assert (time.perf_counter() - started) < 0.5
+
+    def test_pathological_long_closed_comment_keeps_following_select(self):
+        sql = "/*" + ("x" * 200_000) + "*/ SELECT 1"
+        started = time.perf_counter()
+        assert is_read_only_sql(sql) is True
+        assert (time.perf_counter() - started) < 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +330,10 @@ class TestQuestDBRouteWriteGuard:
                 )
         assert resp.status_code == 403
         body = resp.get_json()
+        leak = str(QuestDBWritesDisabledError("insert_ticks"))
         assert body["status"] == "error"
-        assert "disabled" in body["message"].lower()
+        assert body["message"] == WRITES_DISABLED_MESSAGE
+        assert leak not in (resp.get_data(as_text=True) or "")
         mock_conn.assert_not_called()
 
     def test_ticks_route_inserts_when_writes_enabled(self):
@@ -336,6 +361,10 @@ class TestQuestDBRouteWriteGuard:
                     json={"sql": "INSERT INTO ticks VALUES (1)"},
                 )
         assert resp.status_code == 403
+        body = resp.get_json()
+        leak = str(QuestDBWritesDisabledError("query"))
+        assert body["message"] == WRITES_DISABLED_MESSAGE
+        assert leak not in (resp.get_data(as_text=True) or "")
         mock_get.assert_not_called()
 
     @pytest.mark.parametrize("allow_writes", [False, True])

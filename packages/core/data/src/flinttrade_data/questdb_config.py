@@ -17,8 +17,6 @@ DEFAULT_ILP_PORT = 9009
 DEFAULT_PG_PORT = 8812
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
-_COMMENT_RE = re.compile(r"(--[^\n]*|/\*.*?\*/)", re.DOTALL)
-_STRING_RE = re.compile(r"('(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\$\$.*?\$\$)", re.DOTALL)
 _LEADING_WORD_RE = re.compile(r"^\s*([A-Za-z]+)\b")
 _READ_START = frozenset({"SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC", "WITH"})
 _WRITE_WORD_RE = re.compile(
@@ -127,6 +125,79 @@ def require_writes(allow_writes: bool, operation: str) -> None:
         raise QuestDBWritesDisabledError(operation)
 
 
+def _strip_sql_comments(sql: str) -> str:
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    run = 0
+    while i < n:
+        if sql.startswith("--", i):
+            if i > run:
+                out.append(sql[run:i])
+            i += 2
+            while i < n and sql[i] != "\n":
+                i += 1
+            out.append(" ")
+            run = i
+            continue
+        if sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            if end != -1:
+                if i > run:
+                    out.append(sql[run:i])
+                out.append(" ")
+                i = end + 2
+                run = i
+                continue
+        i += 1
+    if run < n:
+        out.append(sql[run:])
+    return "".join(out)
+
+
+def _strip_sql_strings(sql: str) -> str:
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    run = 0
+    while i < n:
+        ch = sql[i]
+        if ch in "'\"":
+            quote = ch
+            j = i + 1
+            closed = False
+            while j < n:
+                if sql[j] == quote:
+                    if j + 1 < n and sql[j + 1] == quote:
+                        j += 2
+                        continue
+                    if i > run:
+                        out.append(sql[run:i])
+                    out.append(" ")
+                    i = j + 1
+                    run = i
+                    closed = True
+                    break
+                j += 1
+            if closed:
+                continue
+            i += 1
+            continue
+        if ch == "$" and i + 1 < n and sql[i + 1] == "$":
+            end = sql.find("$$", i + 2)
+            if end != -1:
+                if i > run:
+                    out.append(sql[run:i])
+                out.append(" ")
+                i = end + 2
+                run = i
+                continue
+        i += 1
+    if run < n:
+        out.append(sql[run:])
+    return "".join(out)
+
+
 def is_read_only_sql(sql: str) -> bool:
     """Return ``True`` when ``sql`` is a recognised read-only statement.
 
@@ -137,7 +208,7 @@ def is_read_only_sql(sql: str) -> bool:
     """
     if not isinstance(sql, str) or not sql.strip():
         return False
-    stripped = _STRING_RE.sub(" ", _COMMENT_RE.sub(" ", sql)).strip()
+    stripped = _strip_sql_strings(_strip_sql_comments(sql)).strip()
     match = _LEADING_WORD_RE.match(stripped)
     if not match or match.group(1).upper() not in _READ_START:
         return False

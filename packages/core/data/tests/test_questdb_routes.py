@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
 from flask import Flask
 
 import flinttrade_data.questdb_routes as mod
+from flinttrade_data.questdb_config import QuestDBWritesDisabledError
+from flinttrade_data.questdb_routes import WRITES_DISABLED_MESSAGE
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +92,27 @@ def test_insert_ticks_not_list(client):
     assert resp.status_code == 400
 
 
+def test_insert_ticks_writes_disabled_hides_exception_text(app, caplog):
+    """403 with a fixed message; exception text stays server side."""
+    bridge = _mock_bridge()
+    exc = QuestDBWritesDisabledError("insert_ticks")
+    leak = str(exc)
+    bridge.insert_ticks.side_effect = exc
+    mod.init_questdb_routes(bridge)
+    with caplog.at_level(logging.WARNING, logger="flinttrade.data.questdb_routes"):
+        with app.test_client() as client:
+            resp = client.post(
+                "/api/v1/data/questdb/ticks",
+                json={"ticks": [{"symbol": "NIFTY", "exchange": "NFO", "ltp": 1.0}]},
+            )
+    body = resp.get_json()
+    assert resp.status_code == 403
+    assert body["message"] == WRITES_DISABLED_MESSAGE
+    raw = resp.get_data(as_text=True) or ""
+    assert leak not in raw
+    assert leak in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/data/questdb/query
 # ---------------------------------------------------------------------------
@@ -108,6 +132,27 @@ def test_query_empty_sql(client):
     """400 when sql is absent."""
     resp = client.post("/api/v1/data/questdb/query", json={})
     assert resp.status_code == 400
+
+
+def test_query_writes_disabled_hides_exception_text(app, caplog):
+    """403 with a fixed message; exception text stays server side."""
+    bridge = _mock_bridge()
+    exc = QuestDBWritesDisabledError("query")
+    leak = str(exc)
+    bridge.query.side_effect = exc
+    mod.init_questdb_routes(bridge)
+    with caplog.at_level(logging.WARNING, logger="flinttrade.data.questdb_routes"):
+        with app.test_client() as client:
+            resp = client.post(
+                "/api/v1/data/questdb/query",
+                json={"sql": "INSERT INTO ticks VALUES (1)"},
+            )
+    body = resp.get_json()
+    assert resp.status_code == 403
+    assert body["message"] == WRITES_DISABLED_MESSAGE
+    raw = resp.get_data(as_text=True) or ""
+    assert leak not in raw
+    assert leak in caplog.text
 
 
 # ---------------------------------------------------------------------------
