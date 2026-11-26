@@ -17,7 +17,7 @@ function recovered() {
   } };
 }
 const decode = (value: unknown) => decodeManagedAccountResult(value, key, "reconnect", target);
-const unavailable = /outcome unavailable.*authentication may have occurred/i;
+const unavailable = /^Sign-in result unknown\. Refresh accounts before you sign in again\.$/;
 
 describe("strict account-result contract (synthetic, no trading authority)", () => {
   const statuses = ["session_present", "session_unavailable", "cleanup_pending", "blocked", "read_only_recovery"];

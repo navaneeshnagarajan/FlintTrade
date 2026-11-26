@@ -120,7 +120,7 @@ function corrupt(path: string, value: unknown) {
   body = JSON.stringify(payload);
 }
 it.each(corruptions)("refuses %s at the exported client", async (_name, path, value) => {
-  corrupt(path, value); await expect(login()).rejects.toThrow(/outcome unavailable/i); soleWrite();
+  corrupt(path, value); await expect(login()).rejects.toThrow(/^Sign-in result unknown\./); soleWrite();
 });
 for (const surface of ["setup", "settings"] as const) {
   describe(`${surface} recovery mounted caller`, () => {
@@ -143,12 +143,11 @@ for (const surface of ["setup", "settings"] as const) {
     it.each(wire.samples)("renders literal $id without inferring write readiness", async sample => {
       select(sample); mount(); await submit();
       const unknown = JSON.parse(row.body).receipt.state === "authentication_unknown";
-      const notice = await screen.findByText(unknown ? /authentication outcome unknown; blocked/i : /read-only recovery for/i);
+      const notice = await screen.findByText(unknown ? /^Sign-in result unknown\./ : /is Connected \(read\)\. Reconcile orders and positions before you trade\./);
       if (!unknown) {
-        expect(notice).toHaveTextContent(`${row.broker} / ${row.accountId}`);
-        expect(notice).toHaveTextContent(/Reconciliation required.*No write or grant authority.*Publication-time owner census reference only; not current books, flatness, or entry readiness/i);
+        expect(notice).toHaveTextContent(`${row.broker} / ${row.accountId} is Connected (read). Reconcile orders and positions before you trade.`);
       }
-      expect(screen.queryByText(/fresh credentials below|re-authenticated\./i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Enter your credentials again below|Signed in to /i)).not.toBeInTheDocument();
       await waitFor(() => expect(useBrokerStore.getState().accounts.find(a => a.broker === row.broker && a.account_id === row.accountId)).toMatchObject({ read_only: true, status: "connected" }));
       const accounts = useBrokerStore.getState().accounts;
       const account = accounts.find(a => a.broker === row.broker && a.account_id === row.accountId)!;
@@ -161,8 +160,8 @@ for (const surface of ["setup", "settings"] as const) {
     });
     it.each(corruptions.filter(([name]) => ["absent recovery", "foreign account", "reordered response operation", "missing reconciliation", "unknown status"].includes(name)))("renders %s refusal without fresh credentials or auth retry", async (_name, path, value) => {
       corrupt(path, value); mount(); await submit();
-      expect(await screen.findByText(/account outcome unavailable/i)).toBeInTheDocument();
-      expect(screen.queryByText(/read-only recovery for|fresh credentials below/i)).not.toBeInTheDocument(); soleWrite();
+      expect(await screen.findByText(/^Sign-in result unknown\./)).toBeInTheDocument();
+      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
     });
     it("does not clear an independent broker fault on restricted recovery", async () => {
       const fault = { message: "Book source unavailable", httpStatus: 503, broker: "dhan" };
@@ -173,7 +172,7 @@ for (const surface of ["setup", "settings"] as const) {
       nextAccounts = () => new Promise(resolve => { release = resolve; });
       try {
         await submit();
-        expect(await screen.findByText(/read-only recovery for/i)).toBeInTheDocument();
+        expect(await screen.findByText(/is Connected \(read\)\. Reconcile orders and positions before you trade\./)).toBeInTheDocument();
         await waitFor(() => expect(release).toBeTypeOf("function"));
         // The mutation result alone cannot clear a read fault. The existing
         // independent account-query recovery policy is tested separately.
@@ -185,8 +184,8 @@ for (const surface of ["setup", "settings"] as const) {
     it("renders actual restarted replay separately from an independently recovered account list", async () => {
       select(wire.samples.find(s => s.key === JSON.parse(wire.restartReplay.body).receipt.operationId)!);
       body = wire.restartReplay.body; mount(); await submit();
-      expect(await screen.findByText(/committed.*current session unavailable/i)).toBeInTheDocument();
-      expect(screen.queryByText(/read-only recovery for|fresh credentials below/i)).not.toBeInTheDocument(); soleWrite();
+      expect(await screen.findByText(/^Account updated\. Session unavailable\./)).toBeInTheDocument();
+      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
     });
     it.each(["account-return", "hidden-return"])("fences late recovery across %s", async retirement => {
       let resolve!: (value: Response) => void;
@@ -203,7 +202,7 @@ for (const surface of ["setup", "settings"] as const) {
       }
       const reads = requests.filter(r => r.method === "GET").length;
       await act(async () => { resolve(response(row)); });
-      expect(screen.queryByText(/read-only recovery for|fresh credentials below|re-authenticated\./i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below|Signed in to /i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "GET")).toHaveLength(reads); soleWrite();
     });
   });

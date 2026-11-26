@@ -53,14 +53,14 @@ async function inspect() {
 function enterFiniteIntent(region: ReturnType<typeof within>) {
   const s = GrantRequestV2Schema.parse(captured.samples[4]!.request_json);
   const values = {
-    "Entry instrument ID": s.limits.instruments[0]!.instrument_id,
+    "Instrument ID": s.limits.instruments[0]!.instrument_id,
     "Entry exchange": s.limits.instruments[0]!.exchange, "Entry product": s.limits.instruments[0]!.product,
     "Maximum order quantity": s.limits.max_order_quantity, "Maximum total quantity": s.limits.max_total_quantity,
     "Maximum entry commands": s.limits.max_commands, "Maximum entry reads": s.limits.max_reads,
-    "Grant duration (ms)": s.limits.max_duration_ms, "Grant expiry (epoch ms)": s.expires_at_ms,
+    "Duration (ms)": s.limits.max_duration_ms, "Expires at (local time)": new Date(s.expires_at_ms - new Date(s.expires_at_ms).getTimezoneOffset() * 60_000).toISOString().slice(0, -1),
   };
   for (const [label, value] of Object.entries(values)) fireEvent.change(region.getByLabelText(label), { target: { value: String(value) } });
-  fireEvent.click(region.getByRole("checkbox", { name: "Allow placement requests" }));
+  fireEvent.click(region.getByRole("checkbox", { name: "Allow new orders" }));
 }
 
 it("retires held finite controls on Activity hide and A-B-A without replay or resurrected drafts", async () => {
@@ -68,10 +68,10 @@ it("retires held finite controls on Activity hide and A-B-A without replay or re
   const tree = (mode: "visible" | "hidden") => <Activity mode={mode}><NativeV2Studio sessions={census()} census="available" /></Activity>;
   const mounted = render(tree("visible"));
   let region = await inspect(); enterFiniteIntent(region);
-  const oldControls = region.getByRole("region", { name: "Finite native permission" });
-  fireEvent.click(region.getByRole("button", { name: "Preview finite custody" }));
+  const oldControls = region.getByRole("region", { name: "Trading permission" });
+  fireEvent.click(region.getByRole("button", { name: "Preview limits" }));
   expect(trace.calls).toEqual([2,3,4]);
-  fireEvent.click(region.getByRole("button", { name: "Preview finite custody" }));
+  fireEvent.click(region.getByRole("button", { name: "Preview limits" }));
   expect(trace.calls).toEqual([2,3,4]);
   mounted.rerender(tree("hidden"));
   const other = { ...account, account_id: "Other" };
@@ -83,12 +83,12 @@ it("retires held finite controls on Activity hide and A-B-A without replay or re
   expect(oldControls).not.toBeInTheDocument();
   mounted.rerender(tree("visible"));
   expect(oldControls).not.toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
   expect(trace.calls).toEqual([2,3,4]);
   region = await inspect();
   expect(region.getByLabelText("Maximum order quantity")).toHaveValue("");
-  expect(region.getByRole("button", { name: "Accept finite custody" })).toBeDisabled();
-  expect(region.getByRole("button", { name: "Start native producer" })).toBeDisabled();
+  expect(region.getByRole("button", { name: "Accept limits" })).toBeDisabled();
+  expect(region.getByRole("button", { name: "Start strategy" })).toBeDisabled();
   expect(trace.calls).toEqual([2,3,4,2,3]); expect(trace.queue).toEqual([]);
 });
 
@@ -96,14 +96,14 @@ it("renders uncertain acceptance without enabling grant or resending", async () 
   const trace = transport([2,3,4,5,6,7,8,9], undefined, 7);
   render(<NativeV2Studio sessions={census()} census="available" />);
   const region = await inspect(); enterFiniteIntent(region);
-  fireEvent.click(region.getByRole("button", { name: "Preview finite custody" }));
-  await waitFor(() => expect(region.getByRole("button", { name: "Accept finite custody" })).toBeEnabled());
-  fireEvent.click(region.getByRole("button", { name: "Accept finite custody" }));
+  fireEvent.click(region.getByRole("button", { name: "Preview limits" }));
+  await waitFor(() => expect(region.getByRole("button", { name: "Accept limits" })).toBeEnabled());
+  fireEvent.click(region.getByRole("button", { name: "Accept limits" }));
   expect(await region.findByRole("alert")).toHaveTextContent("unknown");
-  expect(region.getByRole("button", { name: "Grant finite entry permission" })).toBeDisabled();
-  expect(region.getByRole("button", { name: "Start native producer" })).toBeDisabled();
-  expect(region.getByRole("button", { name: "Read exact native status" })).toBeEnabled();
-  expect(region.getByRole("button", { name: "Stop native entries" })).toBeEnabled();
+  expect(region.getByRole("button", { name: "Grant permission" })).toBeDisabled();
+  expect(region.getByRole("button", { name: "Start strategy" })).toBeDisabled();
+  expect(region.getByRole("button", { name: "Read status" })).toBeEnabled();
+  expect(region.getByRole("button", { name: "Stop entries" })).toBeEnabled();
   expect(trace.calls).toEqual([2,3,4,5,6,7,8,9]); expect(trace.queue).toEqual([]);
 });
 
@@ -121,12 +121,12 @@ it.each(["model census", "account provenance", "accepted digest", "receiving ope
     });
     render(<NativeV2Studio sessions={census()} census="available" />);
     const region = await inspect(); enterFiniteIntent(region);
-    fireEvent.click(region.getByRole("button", { name: "Preview finite custody" }));
-    await waitFor(() => expect(region.getByRole("button", { name: "Accept finite custody" })).toBeEnabled());
-    fireEvent.click(region.getByRole("button", { name: "Accept finite custody" }));
+    fireEvent.click(region.getByRole("button", { name: "Preview limits" }));
+    await waitFor(() => expect(region.getByRole("button", { name: "Accept limits" })).toBeEnabled());
+    fireEvent.click(region.getByRole("button", { name: "Accept limits" }));
     expect(await region.findByRole("alert")).toHaveTextContent("unknown");
-    expect(region.getByRole("button", { name: "Grant finite entry permission" })).toBeDisabled();
-    expect(region.getByRole("button", { name: "Start native producer" })).toBeDisabled();
+    expect(region.getByRole("button", { name: "Grant permission" })).toBeDisabled();
+    expect(region.getByRole("button", { name: "Start strategy" })).toBeDisabled();
     expect(trace.calls).toEqual([2,3,4,5,6,7,8,9]); expect(trace.queue).toEqual([]);
   },
 );
@@ -135,11 +135,11 @@ it("retires a late acceptance across connected A-B-A without a readback or grant
   const trace = transport([2,3,4,5,6,7,8,9], 7);
   render(<NativeV2Studio sessions={census()} census="available" />);
   const region = await inspect(); enterFiniteIntent(region);
-  fireEvent.click(region.getByRole("button", { name: "Preview finite custody" }));
-  await waitFor(() => expect(region.getByRole("button", { name: "Accept finite custody" })).toBeEnabled());
-  fireEvent.click(region.getByRole("button", { name: "Accept finite custody" }));
+  fireEvent.click(region.getByRole("button", { name: "Preview limits" }));
+  await waitFor(() => expect(region.getByRole("button", { name: "Accept limits" })).toBeEnabled());
+  fireEvent.click(region.getByRole("button", { name: "Accept limits" }));
   expect(trace.calls).toEqual([2,3,4,5,6,7]);
-  const oldControls = region.getByRole("region", { name: "Finite native permission" });
+  const oldControls = region.getByRole("region", { name: "Trading permission" });
   const other = { ...account, account_id: "Other" };
   await act(async () => {
     useBrokerStore.setState({ accounts: [account, other], activeAccountId: brokerAccountKey(other) });
@@ -147,7 +147,7 @@ it("retires a late acceptance across connected A-B-A without a readback or grant
     trace.release();
   });
   expect(oldControls).not.toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(trace.calls).toEqual([2,3,4,5,6,7]); expect(trace.queue).toEqual([8,9]);
 });

@@ -29,9 +29,7 @@ it("retains the literal Native Live refusal beside inspection and entry-retireme
   try {
     await screen.findByText(/No registered runs/);
     const panel = screen.getByRole("region", { name: "Execution sessions" });
-    expect(within(panel).getByText("Native Live execution remains unavailable.", { exact: false })).toBeVisible();
-    expect(within(panel).getByText("Inspection and entry retirement are available here; activation, qualification and protection controls are unavailable.", { exact: false })).toBeVisible();
-    expect(within(panel).getByText("Runs belong to the backend and continue across app switches and UI closure. Logout retires entries; restart requires reconciliation.", { exact: false })).toBeVisible();
+    expect(within(panel).getByText("Runs keep going when you switch apps or close the window. Signing out stops new entries. After a restart, reconcile before you trade.")).toBeVisible();
     expect(calls).toEqual(["GET /api/v1/execution-sessions"]);
   } finally {
     mounted.unmount(); client.clear();
@@ -59,8 +57,8 @@ it.each(Object.entries(retirement.scenarios))("allows canonical retirement of a 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const mounted = render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   const region = await screen.findByRole("region", { name: "Live run bounded-one" });
-  expect(within(region).getByText(/Effective entry authority: not authorised/)).toBeVisible();
-  expect(within(region).getByText(/Native readiness reported by Core: not ready/)).toBeVisible();
+  expect(within(region).getByText("Trading allowed: No")).toBeVisible();
+  expect(within(region).getByText("Ready: No")).toBeVisible();
   expect(within(region).getByText(/Grant grant-one: not marked revoked/)).toBeVisible();
   const stop = within(region).getByRole("button", { name: "Stop entries" });
   expect(stop).toBeEnabled();
@@ -70,9 +68,9 @@ it.each(Object.entries(retirement.scenarios))("allows canonical retirement of a 
   fireEvent.click(stop);
   await waitFor(() => expect(within(region).getByText(/Grant grant-one: revoked/)).toBeVisible());
   expect(stop).toBeDisabled();
-  expect(within(region).getByText(/Effective entry authority: not authorised/)).toBeVisible();
-  expect(within(region).getByText(/Native readiness reported by Core: not ready/)).toBeVisible();
-  expect(within(region).getByText(/not proof of broker flatness/)).toBeVisible();
+  expect(within(region).getByText("Trading allowed: No")).toBeVisible();
+  expect(within(region).getByText("Ready: No")).toBeVisible();
+  expect(within(region).getByText(/Stop entries leaves open orders and positions in place/)).toBeVisible();
   fireEvent.click(stop);
   expect(calls).toEqual(["GET /api/v1/execution-sessions", "POST /api/v1/execution-sessions/bounded-one/stop", "GET /api/v1/execution-sessions/bounded-one", "GET /api/v1/execution-sessions"]);
   expect(useModeStore.getState().mode).toBe("live");
@@ -129,9 +127,8 @@ it("inspects native receipts separately from Paper and retires effective authori
   const view = (hidden: boolean) => <QueryClientProvider client={client}><Activity mode={hidden ? "hidden" : "visible"}><ForwardTestSection /></Activity></QueryClientProvider>;
   const mounted = render(view(false));
   const native = await screen.findByRole("region", { name: "Live run bounded-one" });
-  expect(within(native).getByText(/Effective entry authority: authorised/)).toBeVisible();
-  expect(within(native).getByText(/Requested authority: place/)).toBeVisible();
-  expect(within(native).getByText(/reconciliation_required/)).toBeVisible();
+  expect(within(native).getByText("Trading allowed: Yes")).toBeVisible();
+  expect(within(native).getByText(/Requested: place/)).toBeVisible();
   expect(within(native).getByText(/Grant expiry/)).toBeVisible();
   expect(within(native).getByText(/Qualification expiry/)).toBeVisible();
   expect(within(native).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
@@ -145,15 +142,15 @@ it("inspects native receipts separately from Paper and retires effective authori
   expect(within(paper).getByRole("button", { name: "Configure run policy" })).toBeVisible();
   expect(within(paper).getByRole("button", { name: "Protection policy" })).toBeVisible();
   expect(within(paper).getByRole("button", { name: "Close run positions…" })).toBeVisible();
-  expect(within(screen.getByRole("region", { name: "Live run legacy-synthetic" })).getByText(/Native authority unavailable/)).toBeVisible();
+  expect(within(screen.getByRole("region", { name: "Live run legacy-synthetic" })).getByText("Run status unavailable. Read status again.")).toBeVisible();
   act(() => useModeStore.setState({ mode: "practice" }));
   mounted.rerender(view(true)); mounted.rerender(view(false));
   expect(calls.filter(c => c.startsWith("POST"))).toEqual([]);
   fireEvent.click(within(native).getByRole("button", { name: "Stop entries" }));
-  await waitFor(() => expect(within(native).getByText(/Effective entry authority: not authorised/)).toBeVisible());
+  await waitFor(() => expect(within(native).getByText("Trading allowed: No")).toBeVisible());
   expect(within(native).getByRole("button", { name: "Stop entries" })).toBeDisabled();
   expect(within(native).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
-  expect(within(native).getByText(/not proof of broker flatness/)).toBeVisible();
+  expect(within(native).getByText(/Stop entries leaves open orders and positions in place/)).toBeVisible();
   expect(calls.filter(c => c.startsWith("POST"))).toEqual(["POST /api/v1/execution-sessions/bounded-one/stop"]);
   expect(calls.filter(c => c === "GET /api/v1/execution-sessions/bounded-one")).toHaveLength(1);
   expect(useModeStore.getState().mode).toBe("practice");
@@ -179,7 +176,7 @@ it("refuses the whole cancellation census rather than displaying fills against a
   }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const mounted = render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Run census unavailable");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Runs unavailable");
   expect(screen.queryByRole("region", { name: "Live run bounded-one" })).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Practice run paper-synthetic" })).not.toBeInTheDocument();
   expect(screen.queryByText(/observed filled quantity: 100/)).not.toBeInTheDocument();
@@ -203,7 +200,7 @@ it("displays a finite Core qualification expiry outside the browser date range w
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   const region = await screen.findByRole("region", { name: "Live run bounded-one" });
-  expect(within(region).getByText(/Qualification expiry: 1e\+300 epoch seconds/)).toBeVisible();
+  expect(within(region).getByText("Qualification expiry: Invalid date.")).toBeVisible();
   expect(failures).toEqual([]);
 });
 
@@ -226,8 +223,8 @@ it("keeps known fills and obligations visible beside a synthetic late ACK observ
   expect(within(region).getByRole("list", { name: "Command receipts" })).toHaveTextContent("acknowledged");
   expect(within(region).getByRole("list", { name: "Command receipts" })).toHaveTextContent("observed filled quantity: 1");
   expect(within(region).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
-  expect(within(region).getByText(/Native readiness reported by Core: not ready/)).toBeVisible();
-  expect(within(region).getByText(/not proof of broker flatness/)).toBeVisible();
+  expect(within(region).getByText("Ready: No")).toBeVisible();
+  expect(within(region).getByText(/Stop entries leaves open orders and positions in place/)).toBeVisible();
   expect(calls).toEqual(["GET /api/v1/execution-sessions"]); expect(failures).toEqual([]);
 });
 
@@ -245,7 +242,7 @@ it("withdraws the entire visible census after an invalid native row instead of s
   render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   await screen.findByRole("region", { name: "Live run bounded-one" });
   fireEvent.click(screen.getByRole("button", { name: "Refresh runs" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Run census unavailable");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Runs unavailable");
   expect(screen.queryByRole("region", { name: "Live run bounded-one" })).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Practice run paper-synthetic" })).not.toBeInTheDocument();
   expect(screen.queryByText(/No registered runs/)).not.toBeInTheDocument();

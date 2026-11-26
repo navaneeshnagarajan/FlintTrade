@@ -53,7 +53,7 @@ it('finishes the original claimed attempt across StrictMode replay without resen
     expect(signal?.aborted).toBe(false);
     await act(async () => { release(new Response(JSON.stringify({ id, claim, state: 'sending' }))); });
     await waitFor(() => expect(calls.filter(key => key.endsWith('/receipt'))).toHaveLength(1));
-    expect(await screen.findByText('Failed — explicit retry required')).toBeVisible();
+    expect(await screen.findByText('Failed. Retry to send.')).toBeVisible();
     expect(calls.filter(key => key.endsWith('/claim'))).toHaveLength(1);
     expect(unexpected).toEqual([]); expect(failures).toEqual([]);
   } finally {

@@ -4,7 +4,7 @@ import { DURATION, EASE_ENTER } from "@/lib/motion";
 import { useThemeStore } from "@/stores/themeStore";
 
 interface TabTransitionProps {
-  /** Active tab identifier — changes mount the next panel immediately. */
+  /** Active tab identifier. A change mounts the next panel immediately. */
   tabKey: string;
   children: React.ReactNode;
   className?: string;

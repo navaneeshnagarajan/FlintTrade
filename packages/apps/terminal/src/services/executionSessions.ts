@@ -142,7 +142,7 @@ async function mutate(id: string, path: string, body: unknown, fence: AuthSessio
         || observed.autonomy.authorised || observed.autonomy.native_ready || observed.entries_armed
         || observed.autonomy.qualification !== null || observed.autonomy.grant?.revoked !== true
         || observed.state !== "entries_stopped") {
-        throw new ExecutionSessionError("unknown", "Native entry retirement not confirmed. Read exact status; never resend.");
+        throw new ExecutionSessionError("unknown", "Stop not confirmed. Read status before you try again.");
       }
     }
   }
@@ -165,7 +165,7 @@ export function hasRetainedNativeGrant(target: ExecutionSessionRecord): boolean 
 export async function controlExecutionSession(target: ExecutionSessionRecord, operation: SessionOperation, fence = captureAuthSessionFence()) {
   executionSessionSchema.parse(target);
   if (target.environment === "live" && (operation !== "stop" || !hasRetainedNativeGrant(target))) {
-    throw new ExecutionSessionError("refused", "Native inspection only; Stop entries requires an observed non-revoked retained grant.");
+    throw new ExecutionSessionError("refused", "Stop entries needs an active grant. Read status to refresh it.");
   }
   return mutate(target.run_id, `/${encodeURIComponent(target.run_id)}/${operation}`,
     { account: target.account, environment: target.environment, expected_generation: target.generation }, fence, target);
@@ -232,23 +232,23 @@ export function createNativeV2Client() {
   const isCurrent = () => !disposed && scopeKey === nativeStudioScopeKey() && isAuthSessionFenceCurrent(fence);
   const unsubscribe = subscribeNativeStudioScope(() => { if (!isCurrent()) abort.abort(); });
   const assertCurrent = () => {
-    if (!isCurrent()) throw new ExecutionSessionError("retired", "Account or operator changed; previous results detached.");
-    if (!onlineManager.isOnline()) throw new ExecutionSessionError("unavailable", "Offline. Read exact status after reconnecting.");
+    if (!isCurrent()) throw new ExecutionSessionError("retired", "Account changed. Read status again.");
+    if (!onlineManager.isOnline()) throw new ExecutionSessionError("unavailable", "Offline. Reconnect, then read status.");
     if (isDemoAuthSession() || !useAuthStore.getState().token || useAuthStore.getState().status !== "logged-in") {
-      throw new NativeV2PreflightError("An installed operator session is required.");
+      throw new NativeV2PreflightError("Sign in on this computer to use runs.");
     }
-    if (!account || account.source !== "native") throw new NativeV2PreflightError("Select an exact native account.");
+    if (!account || account.source !== "native") throw new NativeV2PreflightError("Select a broker account.");
   };
   const requireAccount = (view: NativeV2View) => {
     if (view.scope.broker !== account?.broker || view.scope.account_id !== account?.account_id) {
-      throw new ExecutionSessionError("unknown", "Native response belongs to a different account; no authority inferred.");
+      throw new ExecutionSessionError("unknown", "Response is for another account. Select the account and read again.");
     }
     return view;
   };
   const decodeView = (raw: unknown, id: string): NativeV2View => {
     const result = nativeV2ViewSchema.safeParse(raw);
     if (!result.success || result.data.scope.run_id !== id) {
-      throw new ExecutionSessionError("unknown", "Invalid nominal native response or exact run identity.");
+      throw new ExecutionSessionError("unknown", "Run data invalid. Read status again.");
     }
     return requireAccount(result.data);
   };
@@ -266,16 +266,14 @@ export function createNativeV2Client() {
     } catch {
       assertCurrent();
       throw new ExecutionSessionError(body === undefined ? "unavailable" : "unknown",
-        "Native outcome unavailable. Read exact status; no automatic resend.");
+        "Result unknown. Read status before you try again.");
     }
     assertCurrent();
     const envelope = z.object({ status: z.string(), data: z.unknown().optional(), code: z.string().optional() }).safeParse(raw);
     if (!response.ok || !envelope.success || envelope.data.status !== "success") {
       const refused = response.status >= 400 && response.status < 500;
-      const code = envelope.success && /^[a-z0-9_]{1,100}$/.test(envelope.data.code ?? "")
-        ? envelope.data.code : "native_response_unavailable";
       throw new ExecutionSessionError(refused ? "refused" : body === undefined ? "unavailable" : "unknown",
-        `Core ${response.status}: ${code}. Read exact status; do not resend.`);
+        `Request failed (${response.status}). Read status before you try again.`);
     }
     return envelope.data.data;
   }
@@ -284,7 +282,7 @@ export function createNativeV2Client() {
     const view = decodeView(await requestV2(`/${encodeURIComponent(id)}/autonomy-v2`), id);
     const session = decode(await requestV2(`/${encodeURIComponent(id)}`), id);
     if (!session.autonomy_v2 || viewIdentity(session.autonomy_v2) !== viewIdentity(view)) {
-      throw new ExecutionSessionError("unknown", "Native views disagree; generation or evidence changed. Read again.");
+      throw new ExecutionSessionError("unknown", "Run changed. Read status again.");
     }
     return { view, session };
   }
@@ -292,13 +290,13 @@ export function createNativeV2Client() {
     try { return await read(id); }
     catch (error) {
       if (error instanceof ExecutionSessionError && error.outcome === "retired") throw error;
-      throw new ExecutionSessionError("unknown", "Write acknowledgement could not be reconciled. Read exact status; never resend.");
+      throw new ExecutionSessionError("unknown", "Result unknown. Read status before you try again.");
     }
   }
   function claim(id: string, operation: string, body: unknown) {
     assertCurrent();
     const key = canonicalPolicy([fence, account, id, operation, body]);
-    if (nativeCommandsSent.has(key)) throw new NativeV2PreflightError("Command already sent. Read exact status; never replay.");
+    if (nativeCommandsSent.has(key)) throw new NativeV2PreflightError("Already sent. Read status.");
     nativeCommandsSent.add(key);
   }
   async function mutateView(id: string, path: string, body: unknown, expectedConfig: NativeV2View["config"],
@@ -316,7 +314,7 @@ export function createNativeV2Client() {
       || viewIdentity(acknowledgement) !== viewIdentity(durable.view)
       || canonicalPolicy(durable.view.config) !== canonicalPolicy(expectedConfig)
       || (expected && canonicalPolicy(expected.scope) !== canonicalPolicy(durable.view.scope))) {
-      throw new ExecutionSessionError("unknown", failure instanceof ExecutionSessionError ? failure.message : "Native acknowledgement/readback mismatch. Never resend automatically.");
+      throw new ExecutionSessionError("unknown", failure instanceof ExecutionSessionError ? failure.message : "Result unconfirmed. Read status before you try again.");
     }
     return durable;
   }
@@ -331,7 +329,7 @@ export function createNativeV2Client() {
       || !equal(parsed.data.report_ref, view.report?.report_ref)
       || parsed.data.expires_at_ms <= Date.now()
       || parsed.data.expires_at_ms - Date.now() > parsed.data.limits.max_duration_ms) {
-      throw new NativeV2PreflightError("Exact finite selection and current report required; no permission defaults.");
+      throw new NativeV2PreflightError("Enter every limit and evaluate qualification first.");
     }
     return { view, selection: parsed.data };
   }
@@ -341,11 +339,11 @@ export function createNativeV2Client() {
     if (selectedAccount?.read_only || selectedAccount?.status !== "connected" || view.global_kill
       || view.loss_threshold_latched || view.report?.status !== "eligible"
       || view.report.expires_at_ms <= Date.now()) {
-      throw new NativeV2PreflightError("Current writable account and eligible evidence required; read exact status.");
+      throw new NativeV2PreflightError("Select a connected account with trading enabled, then read status.");
     }
   }
   async function once<T>(id: string, action: () => Promise<T>): Promise<T> {
-    if (inFlight.has(id)) throw new NativeV2PreflightError("Native lifecycle action pending. Do not duplicate it.");
+    if (inFlight.has(id)) throw new NativeV2PreflightError("Action in progress.");
     inFlight.add(id);
     try { return await action(); } finally { inFlight.delete(id); }
   }
@@ -365,7 +363,7 @@ export function createNativeV2Client() {
       || !equal(view.config, observation.view.config) || !equal(view.grant, observation.view.grant)
       || view.entry_state !== observation.view.entry_state || view.producer_state !== observation.view.producer_state
       || !matches(ack, observation)) {
-      throw new ExecutionSessionError("unknown", "Custody acknowledgement/readback mismatch. No grant inferred; never resend.");
+      throw new ExecutionSessionError("unknown", "Acceptance unconfirmed. Read status before you try again.");
     }
     return { ack, observation };
   }
@@ -375,13 +373,13 @@ export function createNativeV2Client() {
     async configure(raw: unknown) {
       assertCurrent();
       const parsed = nativeV2ConfigurationSchema.safeParse(raw);
-      if (!parsed.success) throw new NativeV2PreflightError("Complete the exact cash/options configuration; no defaults supplied.");
+      if (!parsed.success) throw new NativeV2PreflightError("Fill in every field.");
       const request = parsed.data;
       if (request.config.broker !== account?.broker || request.config.account_id !== account?.account_id
-        || request.config.environment !== "production") throw new NativeV2PreflightError("Configuration account/environment mismatch.");
+        || request.config.environment !== "production") throw new NativeV2PreflightError("Settings are for another account or mode. Select it and save again.");
       const currentAccount = useBrokerStore.getState().getActiveAccount();
       if (currentAccount?.read_only || currentAccount?.status !== "connected") {
-        throw new NativeV2PreflightError("Configuration is read-only until this native account is connected and writable.");
+        throw new NativeV2PreflightError("Settings are read-only. Connect this account with trading enabled to edit.");
       }
       Id.parse(request.config.run_id);
       return mutateView(request.config.run_id, "/native-v2", request, request.config);
@@ -393,7 +391,7 @@ export function createNativeV2Client() {
       if (!parsed.success || parsed.data.run_id !== view.scope.run_id
         || parsed.data.expected_binding_revision !== view.scope.binding_revision
         || parsed.data.read_plan.deadline_ms <= Date.now() || parsed.data.read_plan.deadline_ms - Date.now() > 60_000) {
-        throw new NativeV2PreflightError("Inspection needs the exact binding and an explicit finite canonical read plan.");
+        throw new NativeV2PreflightError("Set read limits and a deadline to inspect.");
       }
       return mutateView(view.scope.run_id, `/${encodeURIComponent(view.scope.run_id)}/autonomy-v2/inspect`,
         parsed.data, view.config, view);
@@ -420,7 +418,7 @@ export function createNativeV2Client() {
       const preview = nativeV2PreviewSchema.parse(raw);
       if (!custody || !equal(custody.preview, preview) || custody.receipt
         || !equal(view.duty, preview.duty) || !equal(view.scope, preview.duty.scope)) {
-        throw new NativeV2PreflightError("Read and preview this exact finite custody before accepting it.");
+        throw new NativeV2PreflightError("Preview the limits before you accept them.");
       }
       selectionFor(view, preview.selection);
       const body = TransferAcceptRequestV2Schema.parse({ schema_version: "2", preview_ref: preview.preview_ref,
@@ -456,7 +454,7 @@ export function createNativeV2Client() {
         || !equal(view.transfer_receipts.filter(value => equal(value.transfer_ref, custody!.receipt!.transfer_ref)), [custody.receipt])
         || !equal(view.duty?.receiving_acceptance_ref, custody.receipt.transfer_ref)
         || view.duty?.obligation_revision !== custody.receipt.obligation_revision) {
-        throw new NativeV2PreflightError("Explicit receiving acceptance for this exact finite selection required.");
+        throw new NativeV2PreflightError("Accept the previewed limits first.");
       }
       return once(view.scope.run_id, () => mutateView(view.scope.run_id,
         `/${encodeURIComponent(view.scope.run_id)}/autonomy-v2/grant`, selection, view.config, view,
@@ -471,12 +469,12 @@ export function createNativeV2Client() {
     async start(target: ExecutionSessionRecord): Promise<NativeV2Observation> {
       assertCurrent();
       const original = executionSessionSchema.parse(target);
-      if (!original.autonomy_v2) throw new NativeV2PreflightError("Exact native v2 observation required for Start.");
+      if (!original.autonomy_v2) throw new NativeV2PreflightError("Read status before you start.");
       const view = requireAccount(original.autonomy_v2);
       requireEntryEvidence(view);
       if (view.entry_state !== "granted" || view.producer_state !== "not_started"
         || view.grant?.state !== "active" || view.grant.expires_at_ms <= Date.now()) {
-        throw new NativeV2PreflightError("A current finite grant and separate explicit Start are required.");
+        throw new NativeV2PreflightError("Grant permission first, then start.");
       }
       const body = StartRequestV2Schema.parse({ schema_version: "2", run_id: view.scope.run_id,
         expected_binding_revision: view.scope.binding_revision, grant_ref: view.grant.grant_ref });
@@ -485,7 +483,7 @@ export function createNativeV2Client() {
           body, view.config, view, value => value.entry_state === "started" && value.producer_state === "running"
             && equal(value.grant, view.grant));
         if (next.session.generation !== original.generation + 1 || !next.session.entries_armed) {
-          throw new ExecutionSessionError("unknown", "Start generation/readback unconfirmed. Read exact status; never resend.");
+          throw new ExecutionSessionError("unknown", "Start unconfirmed. Read status before you try again.");
         }
         return next;
       });
@@ -493,7 +491,7 @@ export function createNativeV2Client() {
     async stop(target: ExecutionSessionRecord): Promise<NativeV2Observation> {
       assertCurrent();
       const original = executionSessionSchema.parse(target);
-      if (!original.autonomy_v2) throw new NativeV2PreflightError("Exact native v2 observation required for Stop.");
+      if (!original.autonomy_v2) throw new NativeV2PreflightError("Read status before you stop.");
       const view = requireAccount(original.autonomy_v2);
       const path = `/${encodeURIComponent(original.run_id)}/stop`;
       const body = { account: original.account, environment: original.environment, expected_generation: original.generation };
@@ -517,7 +515,7 @@ export function createNativeV2Client() {
           || row.entries_armed || row.autonomy_v2.entry_state !== "retired"
           || row.autonomy_v2.effective_authority !== "none"
           || !["not_started", "stopping", "stopped", "failed"].includes(row.autonomy_v2.producer_state)) {
-          throw new ExecutionSessionError("unknown", "Entry retirement unconfirmed. Stop is not settlement; never resend.");
+          throw new ExecutionSessionError("unknown", "Stop unconfirmed. Read status before you try again.");
         }
       }
       if (ack?.autonomy_v2) {
@@ -528,7 +526,7 @@ export function createNativeV2Client() {
           && ["stopped", "failed"].includes(durable.view.producer_state);
         const comparable = drained ? { ...before, producer_state: durable.view.producer_state } : before;
         if (viewIdentity(comparable) !== viewIdentity(durable.view)) {
-          throw new ExecutionSessionError("unknown", "Stop acknowledgement/readback disagree. Custody remains unresolved.");
+          throw new ExecutionSessionError("unknown", "Stop unconfirmed. Check orders and positions.");
         }
       }
       return durable;

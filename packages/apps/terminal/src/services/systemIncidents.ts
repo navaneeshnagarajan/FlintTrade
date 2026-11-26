@@ -29,9 +29,9 @@ export type DeliveryReceipt = z.infer<typeof Delivery>;
 
 export const deliveryLabels: Record<DeliveryReceipt['state'], string> = {
   pending:'Pending', browser_pending:'Browser permission / consumer pending', sending:'Attempt started; outcome pending',
-  submitted_unobserved:'Submitted; user delivery unobserved', unknown:'Unknown outcome — not retried',
-  failed:'Failed — explicit retry required', disabled:'Disabled — explicit opt-in required', cancelled:'Cancelled before send',
-  revoked:'Binding revoked — not sent', backpressure:'Delivery paused by backpressure — incident retained',
+  submitted_unobserved:'Submitted; user delivery unobserved', unknown:'Result unknown. Not retried.',
+  failed:'Failed. Retry to send.', disabled:'Disabled. Turn it on to send.', cancelled:'Cancelled before send',
+  revoked:'Revoked. Not sent.', backpressure:'Delivery paused. Incident kept.',
 };
 
 export const SYSTEM_DIAGNOSTICS_KEY = ['system', 'diagnostics'] as const;

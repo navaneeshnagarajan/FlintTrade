@@ -79,7 +79,7 @@ it("uses project checkboxes with native label, keyboard and disabled behaviour w
   render(<NativeV2Studio sessions={census()} census="available" />);
   await user.click(screen.getByRole("button", { name: "Inspect mounted-native" }));
   const studio = within(screen.getByRole("region", { name: "Native Studio" }));
-  const names = ["Allow placement requests", "Allow cancellation of unfilled orders",
+  const names = ["Allow new orders", "Allow cancelling open orders",
     "Inspect orders", "Inspect positions", "Inspect holdings", "Inspect trades", "Inspect fees",
     "Inspect broker_protection", "Inspect quotes"];
   try {
@@ -106,15 +106,15 @@ it("uses project checkboxes with native label, keyboard and disabled behaviour w
     await user.keyboard(" ");
     expect(checkbox).not.toBeChecked();
   }
-  await user.click(studio.getByText("Allow placement requests"));
-  expect(studio.getByRole("checkbox", { name: "Allow placement requests" })).toBeChecked();
+  await user.click(studio.getByText("Allow new orders"));
+  expect(studio.getByRole("checkbox", { name: "Allow new orders" })).toBeChecked();
   await user.keyboard(" ");
-  expect(studio.getByRole("checkbox", { name: "Allow placement requests" })).not.toBeChecked();
+  expect(studio.getByRole("checkbox", { name: "Allow new orders" })).not.toBeChecked();
   for (const label of ["Maximum order quantity", "Maximum total quantity", "Maximum entry commands",
-    "Maximum entry reads", "Grant duration (ms)", "Grant expiry (epoch ms)"]) {
+    "Maximum entry reads", "Duration (ms)", "Expires at (local time)"]) {
     expect(studio.getByLabelText(label)).toHaveValue("");
   }
-  for (const name of ["Preview finite custody", "Accept finite custody", "Grant finite entry permission", "Start native producer"]) {
+  for (const name of ["Preview limits", "Accept limits", "Grant permission", "Start strategy"]) {
     expect(studio.getByRole("button", { name })).toBeDisabled();
   }
   expect(calls).toEqual([`GET /ft-api${exact}/autonomy-v2`, `GET /ft-api${exact}`]);

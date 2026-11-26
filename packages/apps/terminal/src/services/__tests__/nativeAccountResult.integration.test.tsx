@@ -80,7 +80,7 @@ describe("current managed account HTTP correspondence", () => {
     else if (field === "extra") body.receipt.secret = "must-not-echo";
     else body.receipt[field] = { operationId: connected.key, kind: "connect", credentialGeneration: 0, state: "authentication_unknown", reason: "must-not-echo\n" }[field as "kind"];
     replies.push({ body: JSON.stringify(body), status: 200 });
-    await expect(reloginNativeAccount("dhan", "Synthetic", undefined, reconnected.key!)).rejects.toThrow(/outcome unavailable/i);
+    await expect(reloginNativeAccount("dhan", "Synthetic", undefined, reconnected.key!)).rejects.toThrow(/^Sign-in result unknown\./);
     expect(requests).toHaveLength(1);
   });
 });
@@ -99,29 +99,29 @@ for (const surface of ["setup", "settings"] as const) {
     }
     it("renders current normal-factory reconnect success without demanding credentials or granting writes", async () => {
       replies.push(reconnected); mount(); await submit();
-      expect(await screen.findByText(/session present.*not.*trading authority/i)).toBeInTheDocument();
-      expect(screen.queryByText(/fresh credentials below/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/Signed in\. Check trading status before you place orders\./)).toBeInTheDocument();
+      expect(screen.queryByText(/Enter your credentials again below/i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method !== "GET")).toEqual([{ method: "POST", path: reconnected.path, body: "{}" }]);
       expect(useBrokerStore.getState().accounts[0].read_smoke_ok).toBe(false);
     });
     it("does not let an independent live account census erase an unavailable durable replay", async () => {
       replies.push(expired); mount(); await submit(); accountBody = presentAccounts.body;
-      expect(await screen.findByText(/committed.*session unavailable/i)).toBeInTheDocument();
-      expect(screen.queryByText(/fresh credentials below/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/^Account updated\. Session unavailable\./)).toBeInTheDocument();
+      expect(screen.queryByText(/Enter your credentials again below/i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "POST")).toHaveLength(1);
     });
     it("renders a genuine committed cleanup-pending receipt without success or fresh-credential inference", async () => {
       reconnectKey = cleanupWire.key;
       replies.push(cleanupWire); mount(); await submit();
-      expect(await screen.findByText(/committed.*cleanup pending/i)).toBeInTheDocument();
-      expect(screen.queryByText(/session present|fresh credentials below/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/^Account updated\. Sign-in still finishing\./)).toBeInTheDocument();
+      expect(screen.queryByText(/Signed in|Enter your credentials again below/i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "POST")).toHaveLength(1);
     });
     it("refuses an unknown future status without credential prefill or resend", async () => {
       const body = JSON.parse(reconnected.body); body.runtimeStatus = "future_unrecognised";
       replies.push({ body: JSON.stringify(body), status: 200 }); mount(); await submit();
-      expect(await screen.findByText(/account outcome unavailable/i)).toBeInTheDocument();
-      expect(screen.queryByText(/fresh credentials below/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/^Sign-in result unknown\./)).toBeInTheDocument();
+      expect(screen.queryByText(/Enter your credentials again below/i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "POST")).toHaveLength(1);
     });
     it.each(["account-return", "hidden-return"])("retires a held result across %s", async retirement => {
@@ -138,7 +138,7 @@ for (const surface of ["setup", "settings"] as const) {
       }
       const reads = requests.filter(r => r.method === "GET").length;
       await act(async () => { resolve(response(reconnected)); });
-      expect(screen.queryByText(/session present|re-authenticated|fresh credentials below/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Signed in|Enter your credentials again below/i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "GET")).toHaveLength(reads);
     });
   });
@@ -162,8 +162,8 @@ describe("mounted direct CONNECT with genuine factory bodies", () => {
   }
   it.each([connected, unknown])("renders current direct CONNECT: $body", async row => {
     await form(row);
-    expect(await screen.findByText(row === connected ? /session present.*not.*trading authority/i : /authentication outcome unknown; blocked/i)).toBeInTheDocument();
-    expect(screen.queryByText(/fresh credentials below/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(row === connected ? /Signed in\. Check trading status before you place orders\./ : /^Sign-in result unknown\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Enter your credentials again below/i)).not.toBeInTheDocument();
     expect(requests.filter(r => r.method === "POST")).toEqual([{ method: "POST", path: connected.path, body: JSON.stringify({ adapter_id: "dhan", account_id: "Synthetic", credentials: { client_id: "Synthetic", access_token: "synthetic-access" } }) }]);
     expect(screen.getByLabelText("Access token")).toHaveValue("");
     expect(JSON.stringify(client.getMutationCache().getAll().map(m => m.state))).not.toContain("synthetic-access");
@@ -176,7 +176,7 @@ describe("mounted direct CONNECT with genuine factory bodies", () => {
     view.rerender(<QueryClientProvider client={client}><Activity mode="hidden"><BrokerConnect /></Activity></QueryClientProvider>);
     await act(async () => { resolve(response(connected)); });
     view.rerender(<QueryClientProvider client={client}><Activity mode="visible"><BrokerConnect /></Activity></QueryClientProvider>);
-    expect(screen.queryByText(/session present.*trading authority/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Signed in/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Access token")).toHaveValue("");
   });
 });

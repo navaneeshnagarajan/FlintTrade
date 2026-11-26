@@ -113,7 +113,7 @@ it.each([
 ])("refuses native Stop for %s", async (_name, response) => {
   const io = transport({ [`GET /api/v1/execution-sessions/${response.data.run_id}`]: () => new Response(JSON.stringify(response)) });
   const target = await readExecutionSession(response.data.run_id);
-  await expect(controlExecutionSession(target, "stop")).rejects.toThrow(/inspection/);
+  await expect(controlExecutionSession(target, "stop")).rejects.toThrow(/needs an active grant/);
   expect(io.calls).toHaveLength(1); expect(io.failures).toEqual([]);
 });
 
@@ -129,7 +129,7 @@ it.each(Object.entries(retirement.scenarios))("retires a retained %s-blocked gra
   const target = await readExecutionSession("bounded-one");
   expect(target).toMatchObject({ entries_armed: false, native_ready: false, autonomy: { authorised: false, grant: { revoked: false } } });
   for (const operation of ["start", "rearm", "close"] as const) {
-    await expect(controlExecutionSession(target, operation)).rejects.toThrow(/inspection/);
+    await expect(controlExecutionSession(target, operation)).rejects.toThrow(/needs an active grant/);
   }
   await expect(controlExecutionSession(target, "stop")).resolves.toEqual(responses.stopped.data);
   await expect(controlExecutionSession(target, "stop")).rejects.toThrow(/already sent/);

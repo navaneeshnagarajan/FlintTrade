@@ -687,7 +687,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
       const current = captureResultFence();
       return runAccountAction(`native:${sel.adapter}:${sel.account}:reconnect`,
         (key) => {
-          if (!current()) throw new Error("Account action retired before dispatch.");
+          if (!current()) throw new Error("Account changed. Action not sent.");
           return reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key);
         }).then((result) => current() ? result : null);
     },
@@ -696,7 +696,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
       setError("");
       setNotice("receipt" in r
         ? accountResultPresentation(r).message
-        : `${sel.adapter} account ${sel.account} re-authenticated.`);
+        : `Signed in to ${sel.adapter} ${sel.account}.`);
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {
@@ -708,11 +708,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         setAccountId(sel.account);
         setAccountLabel("");
         setNotice("");
-        setError(`${e.message} Enter fresh credentials below to re-authenticate.`);
+        setError(`${e.message} Enter your credentials again below.`);
         return;
       }
       setNotice("");
-      setError(e instanceof Error ? e.message : "Re-login failed.");
+      setError(e instanceof Error ? e.message : "Sign-in failed. Enter your credentials again.");
     },
   });
 

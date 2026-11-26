@@ -44,7 +44,7 @@ describe("purpose-safe presets", () => {
     expect(validateAppLayout("terminal", json)).toBe(true);
   });
   it("offers the captured watchlist-left geometry as an explicit repeatable preset", () => {
-    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist driven", template: true });
+    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist-driven", template: true });
     const json = buildAppPreset("terminal", "watchlist-driven");
     expect(json.layout.children).toMatchObject([
       { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
@@ -65,8 +65,8 @@ describe("purpose-safe presets", () => {
     expect(readAppLayouts("terminal").Current).toEqual(saved);
     expect(readAppLayouts("terminal")["My overview"]).toEqual(saved);
   });
-  it("offers Trader and Option Scalper as layouts, never personas", () => {
-    expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option Scalper"]));
+  it("offers Trader and Option scalper as layouts, never personas", () => {
+    expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option scalper"]));
     expect(validateAppLayout("terminal", buildAppPreset("terminal", "trader"))).toBe(true);
   });
   for (const app of APPS) it(`${app.name} mounts only compatible widgets`, () => {

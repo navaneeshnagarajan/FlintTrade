@@ -110,7 +110,7 @@ const LegacyReloginSchema = strictOwnObject({
 }, ["session"]);
 
 function unavailable(): never {
-  throw new Error("Account outcome unavailable — authentication may have occurred. Refresh account status; do not automatically retry or replace credentials.");
+  throw new Error("Sign-in result unknown. Refresh accounts before you sign in again.");
 }
 
 /** Bind durable operation and recovery target to the submitted request. Ordinary
@@ -142,7 +142,7 @@ export function decodeReloginResult(value: unknown, key: string, target?: Accoun
   const parsed = LegacyReloginSchema.safeParse(value);
   if (parsed.success) {
     if (!parsed.data.session.has_session) {
-      throw new NativeCredentialsRequired("Re-login did not establish a session — enter fresh credentials.");
+      throw new NativeCredentialsRequired("Sign-in failed. Enter your credentials again.");
     }
     return (value as { session: LegacyReloginResult }).session;
   }
@@ -151,18 +151,18 @@ export function decodeReloginResult(value: unknown, key: string, target?: Accoun
 export function accountResultPresentation(result: AccountSessionResult): { sessionPresent: boolean; message: string } {
   if (!("receipt" in result)) {
     const present = "connected" in result ? result.connected : result.has_session;
-    return { sessionPresent: present, message: present ? "Session present; not read completeness or trading authority." : "Session unavailable. Refresh account status." };
+    return { sessionPresent: present, message: present ? "Signed in. Check trading status before you place orders." : "Session unavailable. Refresh account status." };
   }
   const { receipt, runtimeStatus } = result;
   if (runtimeStatus === "read_only_recovery") return {
     sessionPresent: true,
-    message: `Account operation committed (including durable replay); read-only recovery for ${result.recovery.broker} / ${result.recovery.accountId}. Reconciliation required. No write or grant authority. Publication-time owner census reference only; not current books, flatness, or entry readiness.`,
+    message: `${result.recovery.broker} / ${result.recovery.accountId} is Connected (read). Reconcile orders and positions before you trade.`,
   };
   const reason = receipt.reason ? ` Reason: ${receipt.reason}.` : "";
-  if (receipt.state === "authentication_unknown") return { sessionPresent: false, message: `Authentication outcome unknown; blocked. Do not automatically retry or replace credentials.${reason}` };
-  if (runtimeStatus === "blocked") return { sessionPresent: false, message: `Account operation blocked; no session availability established.${reason}` };
-  const disposition = receipt.state === "committed" ? "Account operation committed (including durable replay)" : "Account operation rejected";
-  if (runtimeStatus === "cleanup_pending") return { sessionPresent: false, message: `${disposition}; cleanup pending. Session availability is not established.${reason}` };
-  if (runtimeStatus === "session_unavailable") return { sessionPresent: false, message: `${disposition}; current session unavailable. Refresh account status; this is not evidence that credentials are stale.${reason}` };
-  return { sessionPresent: true, message: `${disposition}; session present, not read completeness or trading authority.` };
+  if (receipt.state === "authentication_unknown") return { sessionPresent: false, message: `Sign-in result unknown. Refresh accounts before you sign in again.${reason}` };
+  if (runtimeStatus === "blocked") return { sessionPresent: false, message: `Account action blocked. Sign in again.${reason}` };
+  const disposition = receipt.state === "committed" ? "Account updated" : "Account update rejected";
+  if (runtimeStatus === "cleanup_pending") return { sessionPresent: false, message: `${disposition}. Sign-in still finishing. Refresh accounts in a moment.${reason}` };
+  if (runtimeStatus === "session_unavailable") return { sessionPresent: false, message: `${disposition}. Session unavailable. Refresh accounts.${reason}` };
+  return { sessionPresent: true, message: `${disposition}. Signed in. Check trading status before you place orders.` };
 }

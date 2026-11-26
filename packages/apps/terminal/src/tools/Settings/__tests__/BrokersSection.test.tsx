@@ -1571,20 +1571,20 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
       ),
     );
     await waitFor(() =>
-      expect(screen.getByText(/re-authenticated/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Signed in to dhan/i)).toBeInTheDocument(),
     );
   });
 
   it("prefills the connect form when the stored material is stale", async () => {
     (reconnectBrokerAccount as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new NativeCredentialsRequired("Re-login did not establish a session — enter fresh credentials."),
+      new NativeCredentialsRequired("Sign-in failed. Enter your credentials again."),
     );
     renderSection();
     await waitFor(() => expect(screen.getByLabelText(/re-authenticate dhan/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText(/re-authenticate dhan/i));
     await waitFor(() =>
-      expect(screen.getByText(/enter fresh credentials below/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Enter your credentials again below/)).toBeInTheDocument(),
     );
     // Broker + account id are prefilled so the operator only types the fresh secret.
     expect((screen.getByLabelText(/account id/i) as HTMLInputElement).value).toBe("1234567890");

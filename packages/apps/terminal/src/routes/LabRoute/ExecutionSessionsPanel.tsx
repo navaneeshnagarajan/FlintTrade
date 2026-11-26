@@ -56,7 +56,7 @@ export function ExecutionSessionsPanel() {
     <header>
       <h3 className="text-lg font-semibold">Practice forward runs</h3>
       <p className="text-sm text-text-secondary">Independent run books. Terminal’s Live account and mode remain unchanged.</p>
-      <p className="text-xs text-text-muted">Runs belong to the backend and continue across app switches and UI closure. Logout retires entries; restart requires reconciliation. Native Live execution remains unavailable. Legacy native v1: Inspection and entry retirement are available here; activation, qualification and protection controls are unavailable.</p>
+      <p className="text-xs text-text-muted">Runs keep going when you switch apps or close the window. Signing out stops new entries. After a restart, reconcile before you trade.</p>
     </header>
     <div className="grid gap-3 sm:grid-cols-2 rounded border border-border-default p-4">
       <div><Label htmlFor="paper-symbols">Symbols</Label><Input id="paper-symbols" value={symbols} onChange={event => setSymbols(event.target.value)} placeholder="Exact symbols, comma-separated" /></div>
@@ -69,17 +69,17 @@ export function ExecutionSessionsPanel() {
     {!enabled ? <p>Installed operator session required. Preview does not create runs.</p> : null}
     {command.isPending ? <p role="status">Pending exact run: {pendingId}. Do not resend.</p> : null}
     {error ? <div role="alert" className="text-sm text-warning break-words">{error}<Button variant="outline" disabled={command.isPending} onClick={() => command.mutate({ read: pendingId })}>Read exact run</Button></div> : null}
-    {query.isError ? <p role="alert">Run census unavailable — this is not an empty or stopped book.</p> : null}
+    {query.isError ? <p role="alert">Runs unavailable. Refresh to try again.</p> : null}
     {query.isLoading ? <p role="status">Reading run identities…</p> : null}
     {!query.isError && query.data?.length === 0 ? <p>No registered runs for this operator. Historical custody may still require reconciliation.</p> : null}
     {((query.isError ? [] : query.data) ?? []).filter(row => !row.autonomy_v2).map(row => <section key={row.run_id} aria-label={`${row.environment === "paper" ? "Practice" : "Live"} run ${row.run_id}`} className="rounded border border-border-default p-4 space-y-3 min-w-0">
       <div className="flex flex-wrap gap-2 items-center"><h4 className="font-mono break-all">{row.run_id}</h4><span>{row.state}</span></div>
-      <p className="text-xs break-all">{row.account} · {row.environment} · generation {row.generation}{row.environment === "paper" ? ` · ${row.entries_armed ? "Entries armed" : "Entries retired"}` : ""}</p>
+      <p className="text-xs break-all">{row.account} · {row.environment === "paper" ? "Practice" : "Live"} · Generation {row.generation}{row.environment === "paper" ? ` · ${row.entries_armed ? "Entries armed" : "Entries retired"}` : ""}</p>
       {row.environment === "live" ? <>
         <NativeExecutionInspection native={row.autonomy} />
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" disabled={!enabled || command.isPending || !hasRetainedNativeGrant(row)} onClick={() => command.mutate({ target: row, operation: "stop" })}>Stop entries</Button>
-          <Button variant="outline" disabled={!enabled || command.isPending} onClick={() => command.mutate({ read: row.run_id })}>Read exact status</Button>
+          <Button variant="outline" disabled={!enabled || command.isPending} onClick={() => command.mutate({ read: row.run_id })}>Read status</Button>
         </div>
       </> : <>
       <p className="text-xs">Protection: {row.protection}. Stop entries does not cancel working orders or close positions.</p>

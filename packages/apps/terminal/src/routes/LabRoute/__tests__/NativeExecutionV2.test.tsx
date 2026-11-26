@@ -17,11 +17,11 @@ it("mounts a readonly native configuration with blank limits and no requests or 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const mounted = render(<QueryClientProvider client={client}><ExecutionSessionsPanel /></QueryClientProvider>);
   expect(screen.getByRole("heading", { name: "Native Studio" })).toBeVisible();
-  for (const label of ["Capital cap", "Exposure cap", "Loss action threshold", "Maximum mark age (ms)"]) {
+  for (const label of ["Capital limit", "Exposure limit", "Loss limit", "Max quote age (ms)"]) {
     expect(screen.getByLabelText(label)).toHaveValue("");
   }
-  expect(screen.getByRole("button", { name: "Save native configuration" })).toBeDisabled();
-  for (const name of [/^Grant/, /^Start native/, /^Accept transfer/]) {
+  expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();
+  for (const name of [/^Grant/, /^Start strategy/, /^Accept transfer/]) {
     expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
   }
   expect(fetcher).not.toHaveBeenCalled();
@@ -60,18 +60,18 @@ it.each(["late success", "late error"])("detaches the previous account's draft, 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const mounted = render(<StrictMode><QueryClientProvider client={client}><ExecutionSessionsPanel /></QueryClientProvider></StrictMode>);
   let studio = screen.getByRole("region", { name: "Native Studio" });
-  fireEvent.change(within(studio).getByLabelText("Capital cap"), { target: { value: "300" } });
+  fireEvent.change(within(studio).getByLabelText("Capital limit"), { target: { value: "300" } });
   fireEvent.click(await within(studio).findByRole("button", { name: "Inspect mounted-native" }));
   await waitFor(() => expect(release).toBeTypeOf("function"));
-  expect(within(studio).getByRole("region", { name: "Native run evidence" })).toBeVisible();
+  expect(within(studio).getByRole("region", { name: "Run details" })).toBeVisible();
   act(() => {
     const other = { ...account, account_id: "Other" };
     useBrokerStore.setState({ accounts: [account, other], activeAccountId: brokerAccountKey(other) });
   });
   expect(studio).not.toBeInTheDocument();
   studio = screen.getByRole("region", { name: "Native Studio" });
-  expect(within(studio).queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
-  expect(within(studio).getByLabelText("Capital cap")).toHaveValue("");
+  expect(within(studio).queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
+  expect(within(studio).getByLabelText("Capital limit")).toHaveValue("");
   expect(signal?.aborted).toBe(true);
   await act(async () => {
     if (outcome === "late success") release?.(new Response(read.body));
@@ -117,20 +117,20 @@ it("keeps Stop available for stale disconnected account evidence and renders ret
   await within(studio).findByText(/Qualification: blocked/);
   await waitFor(() => expect(within(studio).queryByRole("status")).not.toBeInTheDocument());
   act(() => useBrokerStore.getState().setAccounts([{ ...account, status: "disconnected", read_only: true }]));
-  const button = within(studio).getByRole("button", { name: "Stop native entries" });
+  const button = within(studio).getByRole("button", { name: "Stop entries" });
   expect(button).toBeEnabled();fireEvent.click(button);
   await within(studio).findByText("retired / not_started");
   expect(button).toBeDisabled();
-  expect(within(studio).getByText(/not a zero-exposure census/)).toBeVisible();
-  expect(within(studio).getByText(/does not cancel exchange orders/)).toBeVisible();
+  expect(within(studio).getByText("Fill and exposure data unavailable. Read status again.")).toBeVisible();
+  expect(within(studio).getByText("Stop blocks new entries. Open orders and positions stay in place.")).toBeVisible();
   expect(calls).toEqual([`GET ${initialCensus.path}`,`GET ${exact}/autonomy-v2`,`GET ${exact}`,
     `POST ${exact}/stop`,`GET ${exact}/autonomy-v2`,`GET ${exact}`]);
   expect(failures).toEqual([]);
   act(() => onlineManager.setOnline(false));
   expect(studio).not.toBeInTheDocument();
   studio = screen.getByRole("region", { name: "Native Studio" });
-  expect(within(studio).getByText(/Offline —/)).toBeVisible();
-  expect(within(studio).queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
+  expect(within(studio).getByText(/^Offline\. Data shown may be out of date/)).toBeVisible();
+  expect(within(studio).queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
   mounted.unmount();client.clear();
 });
 
@@ -166,12 +166,12 @@ it.each(["native:run", "native.run", "native/run", " native", "native ", "a".rep
     const mounted = render(<QueryClientProvider client={client}><ExecutionSessionsPanel /></QueryClientProvider>);
     const studio = within(screen.getByRole("region", { name: "Native Studio" }));
     await studio.findByRole("button", { name: "Inspect mounted-native" });
-    fireEvent.change(studio.getByLabelText("Exact native run ID"), { target: { value: id } });
-    fireEvent.click(studio.getByRole("button", { name: "Read exact native status" }));
+    fireEvent.change(within(studio.getByRole("region", { name: "Runs" })).getByLabelText("Run ID"), { target: { value: id } });
+    fireEvent.click(studio.getByRole("button", { name: "Read status" }));
     await studio.findByRole("alert");
-    expect(studio.getByLabelText("Exact native run ID")).toHaveValue(id);
+    expect(within(studio.getByRole("region", { name: "Runs" })).getByLabelText("Run ID")).toHaveValue(id);
     expect(calls).toEqual([`/ft-api${census.path}`]); expect(failures).toEqual([]);
-    expect(studio.queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
+    expect(studio.queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
     mounted.unmount(); client.clear();
   },
 );
@@ -187,9 +187,9 @@ it.each(["duplicate", "foreign run", "missing collection"])("refuses a %s comple
   const fetcher = vi.fn(async () => new Response(JSON.stringify(raw))); vi.stubGlobal("fetch", fetcher);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const mounted = render(<QueryClientProvider client={client}><ExecutionSessionsPanel /></QueryClientProvider>);
-  await screen.findByText("Run census unavailable — this is not an empty or stopped book.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Runs unavailable. Refresh to try again.");
   const studio = within(screen.getByRole("region", { name: "Native Studio" }));
   expect(studio.queryByRole("button", { name: "Inspect mounted-native" })).not.toBeInTheDocument();
-  expect(studio.queryByRole("region", { name: "Native run evidence" })).not.toBeInTheDocument();
+  expect(studio.queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(1); mounted.unmount(); client.clear();
 });

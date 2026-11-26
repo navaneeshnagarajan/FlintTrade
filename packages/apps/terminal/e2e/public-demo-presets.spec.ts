@@ -86,7 +86,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     // Layout management opens from the app toolbar and stays open until closed.
     await app.getByRole("button", { name: "Layout", exact: true }).click();
     const frozenTime = await page.evaluate(() => Date.now());
-    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist driven", "Market watch", "Chart focus", "Overview", "Trader", "Market watch (FlintTrade)", "Option Scalper", "Multi chart"]);
+    await expect(app.getByRole("combobox", { name: "Terminal preset", exact: true }).locator("option")).toHaveText(["Choose a layout", "Scalper zone", "Volatility trading", "Classic", "Watchlist-driven", "Market overview", "Chart focus", "Overview", "Trader", "Market watch", "Option scalper", "Multi chart"]);
     await app.getByRole("combobox", { name: "Terminal preset", exact: true }).selectOption("multi-chart");
     await expect(app.locator('[data-app-widget="chart"]')).toHaveCount(4);
     await expect.poll(chartIds).toHaveLength(4);
@@ -145,7 +145,7 @@ test("anonymous public preview saves, restores and safely exchanges app-local la
     expect(nextSkill).toEqual(previousSkill);
     checkpoints.push({ name: "reset-retained-records", before: nonLayouts, after: afterReset });
     await app.getByLabel("Import app layout", { exact: true }).setInputFiles(exportPath);
-    await expect(app.getByRole("status")).toHaveText("Imported presentation layout; execution unchanged.");
+    await expect(app.getByRole("status")).toHaveText("Layout imported.");
     await expect.poll(async () => (await layouts())["Current"]).toEqual(edited);
     const rejected = [
       { ...exported, app: "testing" },

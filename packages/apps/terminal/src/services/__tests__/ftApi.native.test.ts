@@ -200,6 +200,6 @@ describe("ftApi.native envelope unwrapping", () => {
 
   it("reloginNativeAccount throws when the session did not establish", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ login: "login-failed", session: { has_session: false } }));
-    await expect(reloginNativeAccount("dhan", "A1", undefined, actionKey)).rejects.toThrow(/fresh credentials/i);
+    await expect(reloginNativeAccount("dhan", "A1", undefined, actionKey)).rejects.toThrow(/Enter your credentials again/);
   });
 });

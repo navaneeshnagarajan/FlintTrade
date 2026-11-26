@@ -76,7 +76,7 @@ it("imports the same selected export again after a preset, and again after a ref
     // this with fireEvent.change or direct invocation of an import handler.
     await user.upload(input, file);
     expect(await screen.findByText("Knowledge leaf")).toBeVisible();
-    expect(app.getByRole("status")).toHaveTextContent("Imported presentation layout; execution unchanged.");
+    expect(app.getByRole("status")).toHaveTextContent("Layout imported.");
     expect(preset).toHaveValue("");
     expect(app.queryByRole("alert")).not.toBeInTheDocument();
     expect(app.getByLabelText("Import app layout")).toBe(input);
@@ -88,7 +88,7 @@ it("imports the same selected export again after a preset, and again after a ref
   expect(app.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.getByText("Knowledge leaf")).toBeVisible();
   await user.upload(input, file);
-  expect(await app.findByRole("status")).toHaveTextContent("Imported presentation layout; execution unchanged.");
+  expect(await app.findByRole("status")).toHaveTextContent("Layout imported.");
   expect(app.queryByRole("alert")).not.toBeInTheDocument();
   expect(preset).toHaveValue("");
   expect(app.getByTestId("app-execution-scope")).toHaveTextContent("Example · No execution account selected");

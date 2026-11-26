@@ -49,37 +49,37 @@ it("replays the post-ingress-repair producer capture through mounted finite cont
   const studio = within(screen.getByRole("region", { name: "Native Studio" }));
   await waitFor(() => expect(studio.queryByRole("status")).not.toBeInTheDocument());
   for (const label of ["Maximum order quantity", "Maximum total quantity", "Maximum entry commands",
-    "Maximum entry reads", "Grant duration (ms)", "Grant expiry (epoch ms)"]) {
+    "Maximum entry reads", "Duration (ms)", "Expires at (local time)"]) {
     expect(studio.getByLabelText(label)).toHaveValue("");
   }
-  expect(studio.getByRole("button", { name: "Preview finite custody" })).toBeDisabled();
+  expect(studio.getByRole("button", { name: "Preview limits" })).toBeDisabled();
   const values: Record<string, string> = {
-    "Entry instrument ID": selection.limits.instruments[0]!.instrument_id,
+    "Instrument ID": selection.limits.instruments[0]!.instrument_id,
     "Entry exchange": selection.limits.instruments[0]!.exchange,
     "Entry product": selection.limits.instruments[0]!.product,
     "Maximum order quantity": String(selection.limits.max_order_quantity),
     "Maximum total quantity": String(selection.limits.max_total_quantity),
     "Maximum entry commands": String(selection.limits.max_commands),
     "Maximum entry reads": String(selection.limits.max_reads),
-    "Grant duration (ms)": String(selection.limits.max_duration_ms),
-    "Grant expiry (epoch ms)": String(selection.expires_at_ms),
+    "Duration (ms)": String(selection.limits.max_duration_ms),
+    "Expires at (local time)": new Date(selection.expires_at_ms - new Date(selection.expires_at_ms).getTimezoneOffset() * 60_000).toISOString().slice(0, -1),
   };
   for (const [label, value] of Object.entries(values)) fireEvent.change(studio.getByLabelText(label), { target: { value } });
-  fireEvent.click(studio.getByRole("checkbox", { name: "Allow placement requests" }));
-  fireEvent.click(studio.getByRole("button", { name: "Preview finite custody" }));
-  await waitFor(() => expect(studio.getByRole("button", { name: "Accept finite custody" })).toBeEnabled());
+  fireEvent.click(studio.getByRole("checkbox", { name: "Allow new orders" }));
+  fireEvent.click(studio.getByRole("button", { name: "Preview limits" }));
+  await waitFor(() => expect(studio.getByRole("button", { name: "Accept limits" })).toBeEnabled());
   expect(calls.filter(call => call.endsWith("/grant") || call.endsWith("/start"))).toEqual([]);
-  fireEvent.click(studio.getByRole("button", { name: "Accept finite custody" }));
-  await waitFor(() => expect(studio.getByRole("button", { name: "Grant finite entry permission" })).toBeEnabled());
-  fireEvent.click(studio.getByRole("button", { name: "Grant finite entry permission" }));
-  await waitFor(() => expect(studio.getByRole("button", { name: "Start native producer" })).toBeEnabled());
+  fireEvent.click(studio.getByRole("button", { name: "Accept limits" }));
+  await waitFor(() => expect(studio.getByRole("button", { name: "Grant permission" })).toBeEnabled());
+  fireEvent.click(studio.getByRole("button", { name: "Grant permission" }));
+  await waitFor(() => expect(studio.getByRole("button", { name: "Start strategy" })).toBeEnabled());
   expect(studio.getByText("granted / not_started")).toBeVisible();
   expect(calls.filter(call => call.endsWith("/start"))).toEqual([]);
-  fireEvent.click(studio.getByRole("button", { name: "Start native producer" }));
+  fireEvent.click(studio.getByRole("button", { name: "Start strategy" }));
   await studio.findByText("started / running");
-  fireEvent.click(studio.getByRole("button", { name: "Stop native entries" }));
+  fireEvent.click(studio.getByRole("button", { name: "Stop entries" }));
   await studio.findByText("retired / stopped");
-  expect(studio.getByText(/does not cancel exchange orders/)).toBeVisible();
+  expect(studio.getByText("Stop blocks new entries. Open orders and positions stay in place.")).toBeVisible();
   expect(queue).toEqual([]);
   expect(failures).toEqual([]);
 });

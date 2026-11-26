@@ -93,7 +93,7 @@ export function ConnectedAccounts() {
     try {
       setError(null);
       const result = await runAccountAction(`${brokerAccountKey(account)}:reconnect`, (key) => {
-        if (!current()) throw new Error("Account action retired before dispatch.");
+        if (!current()) throw new Error("Account changed. Action not sent.");
         return reconnectBrokerAccount(account, key);
       });
       if (!current()) return;
@@ -101,7 +101,7 @@ export function ConnectedAccounts() {
       await refreshAccounts();
     } catch (e) {
       if (!current()) return;
-      setResultNotice({ current, message: e instanceof Error ? e.message : "Account outcome unavailable; refresh account status." });
+      setResultNotice({ current, message: e instanceof Error ? e.message : "Account status unknown. Refresh accounts." });
     }
   };
 

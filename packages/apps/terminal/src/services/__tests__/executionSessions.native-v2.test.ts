@@ -141,7 +141,7 @@ it("stops an ungranted stale run using its actual generation without implying cu
     const result = await client.stop(target);
     expect(result.session).toEqual(JSON.parse(finalSession.body).data);
     expect(result.view).toMatchObject({ entry_state: "retired", duty: null, effective_authority: "none" });
-    await expect(client.stop(target)).rejects.toThrow(/already sent/);
+    await expect(client.stop(target)).rejects.toThrow(/Already sent/);
     expect(calls).toEqual([`GET ${exact}`, `POST ${exact}/stop`, `GET ${exact}/autonomy-v2`, `GET ${exact}`]);
     expect(failures).toEqual([]);
   } finally { client.dispose(); }
@@ -176,7 +176,7 @@ it.each(["malformed acknowledgement", "successful-HTTP error envelope", "readbac
     const client = createNativeV2Client();
     try {
       await expect(client.configure(configured.request_json)).rejects.toMatchObject({ outcome: "unknown" });
-      await expect(client.configure(configured.request_json)).rejects.toThrow(/already sent/);
+      await expect(client.configure(configured.request_json)).rejects.toThrow(/Already sent/);
       expect(calls).toEqual(fault === "readback unavailable"
         ? [`POST ${base}/native-v2`, `GET ${exact}/autonomy-v2`]
         : [`POST ${base}/native-v2`, `GET ${exact}/autonomy-v2`, `GET ${exact}`]);

@@ -1,5 +1,5 @@
 /**
- * TopBarV2 — shared compact app bar, wrapping rather than clipping controls:
+ * TopBarV2: shared compact app bar that wraps controls instead of clipping them:
  *
  *   [F FlintTrade] | [Search symbols, pages, commands…  Ctrl K]
  *                                  [Account*] [Mode] [Market · IST] [Status]

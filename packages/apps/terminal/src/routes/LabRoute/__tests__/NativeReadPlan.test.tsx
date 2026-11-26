@@ -41,18 +41,18 @@ const exact = "/api/v1/execution-sessions/mounted-native";
   fireEvent.click(screen.getByRole("button", { name: "Inspect mounted-native" }));
   const studio = within(screen.getByRole("region", { name: "Native Studio" }));
   await waitFor(() => expect(studio.queryByRole("status")).not.toBeInTheDocument());
-  expect(studio.getByRole("button", { name: "Inspect selected surfaces" })).toBeDisabled();
-  expect(studio.getByLabelText("Maximum inspection reads")).toHaveValue("");
+  expect(studio.getByRole("button", { name: "Read selected" })).toBeDisabled();
+  expect(studio.getByLabelText("Max reads")).toHaveValue("");
   for (const surface of selected.read_plan.surfaces) fireEvent.click(studio.getByRole("checkbox", { name: `Inspect ${surface}` }));
-  fireEvent.change(studio.getByLabelText("Maximum inspection reads"), { target: { value: String(selected.read_plan.max_reads) } });
-  fireEvent.change(studio.getByLabelText("Maximum inspection pages"), { target: { value: String(selected.read_plan.max_pages) } });
-  fireEvent.change(studio.getByLabelText("Inspection deadline (local time)"), {
+  fireEvent.change(studio.getByLabelText("Max reads"), { target: { value: String(selected.read_plan.max_reads) } });
+  fireEvent.change(studio.getByLabelText("Max pages"), { target: { value: String(selected.read_plan.max_pages) } });
+  fireEvent.change(studio.getByLabelText("Deadline (local time)"), {
     target: { value: new Date(selected.read_plan.deadline_ms - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, -1) },
   });
-  fireEvent.click(studio.getByRole("button", { name: "Inspect selected surfaces" }));
-  await studio.findByText("Qualification: blocked. A report never grants entry authority.");
-  expect(studio.getByRole("button", { name: "Start native producer" })).toBeDisabled();
-  expect(studio.getByText(/Missing fee windows or quote instruments remain unavailable/)).toBeVisible();
+  fireEvent.click(studio.getByRole("button", { name: "Read selected" }));
+  await studio.findByText("Qualification: blocked");
+  expect(studio.getByRole("button", { name: "Start strategy" })).toBeDisabled();
+  expect(studio.getByText("Selected reads share one read limit and a deadline of up to 60 seconds.")).toBeVisible();
   expect(calls.filter(call => call.startsWith("POST"))).toEqual([`POST ${exact}/autonomy-v2/inspect`]);
   expect(queue).toEqual([]); expect(failures).toEqual([]);
 });
