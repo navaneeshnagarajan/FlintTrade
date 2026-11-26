@@ -4,9 +4,9 @@ flinttrade is licensed under AGPL-3.0-or-later. The dependencies tracked by the
 lockfiles below carry their own licences; see the NOTICE/notices bundle and
 supply-chain/licence-allowlist.yml for the compatibility policy.
 
-- uv.lock: present (sha256: 92e580720c0043987a0e12ccbfd8f66804a287f604aac0b0233b62c94bc07856)
-- requirements.lock: present (sha256: 2e7c4e73d6e563dd7a14efc806d7b2da62af23bf587234670b9ddea64534303e)
+- uv.lock: present (sha256: 7971dac15001ceb7eaa5ed96b95bbf33bf7ed9d0e7f5ca03b12465ea4af41f3a)
+- requirements.lock: present (sha256: e9982c55e11e2351ba3e317be01b7296785137d575f7d7812e41e42783329d96)
 - broker-sdk-build.lock: present (sha256: 8d2f42f75df4c03b709fad24102394a2aa0d6e35778fdeb3b899a2f28e46ff6b)
 - pnpm-lock.yaml: present (sha256: d73c1f675267308293df28e41a3f6a686df0e8e5c3a9a5f9f36667bbbd5d0901)
-- brokers.lock: present (sha256: fd392202bfe7076dc63a1d1e78484e1b15e733c7562763d0a14c5fddd53a8cd6)
+- brokers.lock: present (sha256: 3a9942fd4eaed878263c38519d78b8615435883407ea5c7893536e3d02ae64df)
 - supply-chain/audit-tooling.lock: present (sha256: 8251e08ff28e95108b7fc29e1aea83ed51478b1538badc12c875038cbb37ddd6)

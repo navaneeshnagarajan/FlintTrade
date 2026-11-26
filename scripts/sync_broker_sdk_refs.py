@@ -216,6 +216,43 @@ def latest_pypi_version(package: str, opener: UrlOpener = _open_url) -> str:
     return version
 
 
+_RELEASE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?")
+_PRE_RANK = {"a": 0, "b": 1, "rc": 2}
+
+
+def _release_key(version: str) -> tuple[int, ...] | None:
+    """Order plain ``X.Y.Z`` releases and their a/b/rc pre-releases."""
+
+    match = _RELEASE_RE.fullmatch(version)
+    if match is None:
+        return None
+    major, minor, patch, pre, number = match.groups()
+    tail = (_PRE_RANK[pre], int(number)) if pre else (3, 0)
+    return (int(major), int(minor), int(patch), *tail)
+
+
+def upstream_pypi_version(data: Mapping[str, Any], locked: str) -> str:
+    """Return the version a pin must match to count as current.
+
+    A stable pin compares with PyPI's ``info.version``. A pre-release pin also
+    considers newer non-yanked pre-releases, so a release candidate ahead of the
+    latest stable release is current until a newer candidate or final ships.
+    """
+
+    latest = str((data.get("info") or {}).get("version") or "").strip()
+    if not latest:
+        raise RuntimeError("PyPI metadata did not include info.version")
+    locked_key = _release_key(locked)
+    if locked_key is None or locked_key[3] == 3:
+        return latest
+    candidates = [latest]
+    for version, files in (data.get("releases") or {}).items():
+        if isinstance(files, list) and files and not all(file.get("yanked") for file in files):
+            candidates.append(str(version))
+    ranked = [(key, version) for version in candidates if (key := _release_key(version)) is not None]
+    return max(ranked)[1] if ranked else latest
+
+
 def select_pypi_artifact(files: list[Mapping[str, Any]]) -> Mapping[str, Any]:
     """Pick the best audit artifact from a PyPI release file list."""
 
@@ -423,7 +460,7 @@ def sync(
                     )
         if source.pypi_name:
             release_version = entry.get("release_version", entry["version"])
-            latest = latest_pypi_version(source.pypi_name, opener)
+            latest = upstream_pypi_version(pypi_release_json(source.pypi_name, opener), release_version)
             sdk_record["pypi_latest_version"] = latest
             sdk_record["pypi_current"] = latest == release_version
             if latest != release_version:
