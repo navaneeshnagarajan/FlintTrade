@@ -43,9 +43,9 @@ class QuestDBWritesDisabledError(Exception):
 def writes_enabled_from_env() -> bool:
     """Return whether ``QUESTDB_WRITE_ENABLED`` explicitly enables writes.
 
-    Unset, empty, unrecognised, and false-like values all stay disabled
-    (fail-closed). Only ``1``, ``true``, ``yes``, and ``on`` (any case) enable
-    writes.
+    Writes stay off unless enabled. Unset, empty, unrecognised, and
+    false-like values all leave them off. Only ``1``, ``true``, ``yes``, and
+    ``on`` (any case) enable writes.
     """
     raw = os.environ.get("QUESTDB_WRITE_ENABLED", "")
     return raw.strip().lower() in _TRUTHY
@@ -130,9 +130,9 @@ def require_writes(allow_writes: bool, operation: str) -> None:
 def is_read_only_sql(sql: str) -> bool:
     """Return ``True`` when ``sql`` is a recognised read-only statement.
 
-    Used to keep ``query()`` safe while writes are disabled. The check is
-    fail-closed: comments and string literals are stripped, the statement must
-    start with a read keyword (``SELECT``, ``SHOW``, ``EXPLAIN``, ``DESCRIBE``,
+    Used to keep ``query()`` safe while writes are disabled. Anything not
+    recognised is treated as a write: comments and string literals are
+    stripped, the statement must start with a read keyword (``SELECT``, ``SHOW``, ``EXPLAIN``, ``DESCRIBE``,
     ``DESC``, or ``WITH``), and it must not contain a write keyword.
     """
     if not isinstance(sql, str) or not sql.strip():
