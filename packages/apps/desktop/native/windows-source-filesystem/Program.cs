@@ -87,12 +87,9 @@ internal static class Program
             EmitError(CodeForNativeError(error.NativeErrorCode), error.NativeErrorCode);
             return IsLockError(error.NativeErrorCode) ? 75 : 5;
         }
-        catch (Exception error)
+        catch
         {
-            // IOException and UnauthorizedAccessException carry the Win32
-            // code in the low word of HResult. Report it so a refusal can be
-            // traced to the failing call.
-            EmitError("FILESYSTEM_ERROR", error.HResult & 0xFFFF);
+            EmitError("FILESYSTEM_ERROR", 0);
             return 5;
         }
     }

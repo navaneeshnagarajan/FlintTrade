@@ -280,7 +280,7 @@ export function createWindowsSourceFilesystemBoundary(
     if (response.ok === false) {
       const message = response.code === "RESERVED_SIDECAR_OCCUPIED"
         ? "Reserved Windows journal .previous sidecar is occupied; refusing to adopt or delete it."
-        : `Windows source filesystem helper refused the operation (${response.code}, Windows error ${response.native}).`;
+        : `Windows source filesystem helper refused the operation (${response.code}).`;
       const error = new Error(message) as NodeJS.ErrnoException;
       if (response.code === "LOCKED") error.code = "EBUSY";
       else error.code = response.code;
