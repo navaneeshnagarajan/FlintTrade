@@ -31,10 +31,10 @@ const sitePackage = JSON.parse(readSite('package.json') || '{}') as {
 describe('homepage honest CTA (PR #157) with Graphite A1 motion', () => {
   it('keeps the current product bands instead of the retired A1 desktop-install IA', () => {
     expect(pageSource).toContain('section className="section hero"');
-    expect(pageSource).toContain('Built for people who read the source.');
-    expect(pageSource).toContain('Docs, API, and contribution paths in one flow.');
+    expect(pageSource).toContain('The site is generated from the repository.');
+    expect(pageSource).toContain('Docs, API, and contribution pages.');
     expect(pageSource).toContain('MCP for development, not trading.');
-    expect(pageSource).toContain('Package map at contributor speed.');
+    expect(pageSource).toContain('Package index.');
     expect(pageSource).not.toContain('Evaluate and install');
     expect(pageSource).not.toContain('Contributor resources');
     expect(pageSource).not.toContain('Start exploring — no install needed');
