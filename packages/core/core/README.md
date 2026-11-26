@@ -2,16 +2,16 @@
 
 > Flask backend, authentication and workspace management with a frozen native broker read facade. Native broker HTTP reads remain unavailable.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 
 ## Public surface
 
-- `src/flinttrade_core/app.py — Flask app factory + blueprint registration`
-- `src/flinttrade_core/broker_client.py — frozen read facade: HTTP reads return 409; background consumers return 503`
-- `src/flinttrade_core/auth_service.py — argon2id passwords + Fernet TOTP + JWT issuance`
-- `src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders`
+- `src/flinttrade_core/app.py`: Flask app factory + blueprint registration
+- `src/flinttrade_core/broker_client.py`: frozen read facade: HTTP reads return 409; background consumers return 503
+- `src/flinttrade_core/auth_service.py`: argon2id passwords + Fernet TOTP + JWT issuance
+- `src/flinttrade_core/config.py` / `src/flinttrade_core/workspace.py`: env + workspace.json loaders
 
 (See the source for the full surface.)
 
@@ -34,7 +34,7 @@ python -m pytest packages/core/core/tests/ -v --import-mode=importlib
 ```
 
 Run one command per line. They work unchanged in bash, zsh and Windows
-PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+PowerShell. Do not join them with `&&`, which Windows PowerShell 5.1 does not
 support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
@@ -42,13 +42,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
