@@ -156,7 +156,7 @@ export function accountResultPresentation(result: AccountSessionResult): { sessi
   const { receipt, runtimeStatus } = result;
   if (runtimeStatus === "read_only_recovery") return {
     sessionPresent: true,
-    message: `${result.recovery.broker} / ${result.recovery.accountId} is Connected (read). Reconcile orders and positions before you trade.`,
+    message: `${result.recovery.broker} / ${result.recovery.accountId} is read-only. Reconcile orders and positions before you trade.`,
   };
   const reason = receipt.reason ? ` Reason: ${receipt.reason}.` : "";
   if (receipt.state === "authentication_unknown") return { sessionPresent: false, message: `Sign-in result unknown. Refresh accounts before you sign in again.${reason}` };

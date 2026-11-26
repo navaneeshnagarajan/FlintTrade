@@ -44,7 +44,7 @@ describe("purpose-safe presets", () => {
     expect(validateAppLayout("terminal", json)).toBe(true);
   });
   it("offers the captured watchlist-left geometry as an explicit repeatable preset", () => {
-    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist-driven", template: true });
+    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist first", template: true });
     const json = buildAppPreset("terminal", "watchlist-driven");
     expect(json.layout.children).toMatchObject([
       { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },

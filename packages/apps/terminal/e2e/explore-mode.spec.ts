@@ -76,7 +76,7 @@ test.describe('Explore mode', () => {
     // Wait for the main landmark — it is always present once AppLayout mounts
     const main = page.getByRole('main', { name: 'Terminal', exact: true });
     await expect(main).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: 'Use Watchlist-driven layout', exact: true }).click();
+    await page.getByRole('button', { name: 'Use Watchlist first layout', exact: true }).click();
     await expect(page.locator('[data-app-chrome="terminal"]')
       .getByRole('button', { name: 'Add widget', exact: true })).toBeVisible();
     await expect(main.getByTestId('app-layout')).toBeVisible();

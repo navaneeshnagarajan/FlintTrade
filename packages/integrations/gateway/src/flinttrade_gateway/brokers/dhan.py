@@ -195,7 +195,7 @@ DHAN_CAPABILITIES = Capabilities(
 
 
 def _build_dhan_client(client_id: str, access_token: str) -> Any:
-    """Construct the pinned dhanhq client (lazy import — SDK optional)."""
+    """Construct the pinned dhanhq client. The SDK is imported lazily and is optional."""
     from dhanhq import DhanContext, dhanhq  # noqa: PLC0415
 
     return dhanhq(DhanContext(client_id, access_token))
@@ -994,11 +994,10 @@ class DhanAdapter(BrokerAdapter):
         if variety in ("regular", ""):
             resp = await invoke(client.place_order, **prepared)
         elif variety == "amo":
-            # After-market order: POST /orders directly via DhanHTTP with the
-            # afterMarketOrder flag + amoTime pump window. We bypass the SDK's
-            # place_order because the pin still rejects PRE_OPEN. Unlike older
-            # versions it does serialise amoTime; retain our reviewed direct
-            # payload to support the documented full timing enum.
+            # After-market orders go to POST /orders through DhanHTTP with the
+            # afterMarketOrder flag and amoTime window. The pinned SDK's
+            # place_order still rejects PRE_OPEN, so the direct payload keeps
+            # the full documented timing enum.
             http = getattr(client, "dhan_http", None)
             if http is None:
                 raise BrokerError("Dhan client exposes no DhanHTTP transport (dhan_http)")

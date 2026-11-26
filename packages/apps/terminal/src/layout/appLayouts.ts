@@ -15,7 +15,7 @@ export const APP_PRESETS: Record<AppId, readonly { id: string; name: string; tem
     { id: "scalper-zone", name: "Scalper zone", template: true },
     { id: "volatility-trading", name: "Volatility trading", template: true },
     { id: "classic", name: "Classic", template: true },
-    { id: "watchlist-driven", name: "Watchlist-driven", template: true },
+    { id: "watchlist-driven", name: "Watchlist first", template: true },
     { id: "market-overview", name: "Market overview", template: true },
     { id: "chart-focus", name: "Chart focus" }, { id: "overview", name: "Overview" },
     { id: "trader", name: "Trader" }, { id: "market-watch", name: "Market watch" },

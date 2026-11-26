@@ -145,7 +145,7 @@ for (const surface of ["setup", "settings"] as const) {
       const unknown = JSON.parse(row.body).receipt.state === "authentication_unknown";
       const notice = await screen.findByText(unknown ? /^Sign-in result unknown\./ : /is Connected \(read\)\. Reconcile orders and positions before you trade\./);
       if (!unknown) {
-        expect(notice).toHaveTextContent(`${row.broker} / ${row.accountId} is Connected (read). Reconcile orders and positions before you trade.`);
+        expect(notice).toHaveTextContent(`${row.broker} / ${row.accountId} is read-only. Reconcile orders and positions before you trade.`);
       }
       expect(screen.queryByText(/Enter your credentials again below|Signed in to /i)).not.toBeInTheDocument();
       await waitFor(() => expect(useBrokerStore.getState().accounts.find(a => a.broker === row.broker && a.account_id === row.accountId)).toMatchObject({ read_only: true, status: "connected" }));
