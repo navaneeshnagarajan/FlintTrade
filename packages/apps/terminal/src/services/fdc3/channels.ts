@@ -7,7 +7,7 @@
  * channel retargets every widget joined to it. A widget pinned by params
  * is simply joined to no channel — the pre-FDC3 semantics, unchanged.
  *
- * State boundary note (CLAUDE.md): channel membership is panel config;
+ * State boundary: channel membership is panel config;
  * the channel CONTEXT is selection state and therefore lives in Jotai —
  * one primitive atom per channel, holding the same `WsInstrument` shape
  * the tick plane keys on. The RED channel atom IS the legacy

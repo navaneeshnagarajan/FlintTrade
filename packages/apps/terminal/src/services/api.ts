@@ -2564,14 +2564,10 @@ async function post<T>(
 //   engine order_bp  at /api/v1/orders : basket, split, options-strategy
 //
 // Practice opens and closes are `place` (an opposite MARKET order for a
-// close). Pre-2026-05-19 this file mixed FT-proxy names (place,
-// openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
-// so half the order endpoints 404'd in production. Codex stop-gate review
-// caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
-// review then flagged that `optionsOrder` / `optionsMultiOrder` had been
-// FT mode/safety gate. Both endpoints are now backed by /options and
-// `optionsorder` and `optionsmultiorder` through `_dispatch_order`, so
-// every options trade is mode-gated identically to a regular order.
+// close). Older proxy leaf names (openposition, basketorder, splitorder,
+// optionsorder, optionsmultiorder) did not match these routes and returned
+// 404. Options orders use /options and /options-multi, which go through
+// `_dispatch_order`, so every options trade is mode-gated like a regular order.
 //
 // `orderStatus` is a read-only query. Native-only workspaces route it through
 // path for bridge parity.

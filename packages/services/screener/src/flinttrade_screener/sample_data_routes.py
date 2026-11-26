@@ -298,8 +298,7 @@ def get_global_indices() -> Any:
 
     Route path matches the frontend caller in
     ``packages/apps/terminal/src/services/ftApi.analysis.ts:245``
-    (``get<...>("market/global_indices")``) — NOT ``/global/indices``,
-    which an earlier draft used and Codex caught before ship.
+    (``get<...>("market/global_indices")``), not ``/global/indices``.
 
     Deliberately, NO ``updated_at`` is returned: stamping ``now()`` on
     hardcoded index levels made them look seconds-fresh on every 30s poll —

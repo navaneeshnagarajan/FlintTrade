@@ -17,14 +17,12 @@ _MANIFESTS = (
 
 _ACTIVE_ARCHITECTURE_SURFACES = (
     ROOT / "readme.md",
-    ROOT / "CLAUDE.md",
     ROOT / "packages" / "services" / "ai" / "README.md",
     ROOT / "packages" / "core" / "core" / "src" / "flinttrade_core" / "app.py",
     ROOT / ".env.example",
     ROOT / "templates" / "package-purposes.yml",
     ROOT / "docs" / "USER_GUIDE.md",
     ROOT / "packages" / "apps" / "terminal" / "src" / "routes" / "AIRoute.tsx",
-    ROOT / "templates" / "agent-context" / "CLAUDE.md.template",
 )
 
 

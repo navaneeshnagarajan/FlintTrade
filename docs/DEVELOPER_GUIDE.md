@@ -140,7 +140,10 @@ the same fail-closed registry as the other Playwright specs, so an
 unmocked `/ft-api` call still fails the fixture.
 
 Reticle does not judge these pictures. Reticle reads network, app state,
-and the console. It cannot see contrast, spacing, or clipping.
+and the console. It cannot see contrast, spacing, or clipping. The procedure
+is [RETICLE.md](../RETICLE.md). When a change is visible in the running
+terminal or site, verify that flow with Reticle before calling the work done.
+Report an unknown verdict as unknown.
 
 The lane is advisory. `.github/workflows/visual-a11y.yml` writes diffs and
 axe results to the job summary, uploads the images, and finishes green
@@ -456,6 +459,12 @@ without presenting them as ready to connect.
    reason. If a hook is broken, fix the hook in the same PR.
 5. **No `dangerouslySkipPermissions`.** Anywhere.
 6. **Sign-off** is optional. Conventional commit format is mandatory.
+
+### Design notes and the changelog
+
+Write the intended behaviour down before changing it. The public roadmap
+is [ROADMAP.md](../ROADMAP.md). [changelog.md](../changelog.md) records
+shipped behaviour only, not in-flight design.
 
 ---
 
@@ -1008,6 +1017,3 @@ screen-reader list, `Positions without a heat map tile`.
 - **Question issue template** — focused usage questions, design questions, and ideas.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
-
-The public roadmap is [ROADMAP.md](../ROADMAP.md). Shipped behaviour
-belongs in the changelog.

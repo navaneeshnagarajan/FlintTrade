@@ -140,12 +140,9 @@ class TestBanUnban:
 
 
 class TestBanExpiry:
-    # NOTE: These two tests previously used `time.sleep(1.05)` to wait for the
-    # ban window to elapse. The Codex / multi-agent audit on 2026-05-19 flagged
-    # the 1-second sleeps as wasted CI wall-time and a flake risk on slow
-    # runners. Replaced with a `monkeypatch` over the `time.time` reference in
-    # `flinttrade_core.security` so the SecurityMonitor sees an artificially
-    # advanced clock without any real wait.
+    # These tests patch the `time.time` reference in `flinttrade_core.security`
+    # so the SecurityMonitor sees an advanced clock without a real sleep, which
+    # would waste CI time and flake on slow runners.
 
     def test_expired_ban_lifted_on_is_banned_call(self, monkeypatch):
         import flinttrade_core.security as sec_mod

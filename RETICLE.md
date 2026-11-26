@@ -4,11 +4,18 @@ Reticle checks a running FlintTrade session in the browser. Use it when a change
 
 Skip Reticle when the change cannot show up in the running app: documentation, comments, tests, build config, CI, dependency bumps with no user-facing effect, and backend or command-line work with no UI. Say in one line that verification was skipped and why.
 
-The short procedure for a contributor session is [.cursor/commands/reticle.md](.cursor/commands/reticle.md). This file is the reference for the results that procedure can return.
+## Procedure
+
+1. Run `reticle_session { action: "list" }`. If no session is listed, check that `.reticle.json` exists (if not, run `npx @reticlehq/server@latest init`), that a dev server started after `init` is serving the app, and open a page with `npx @reticlehq/server open <url>`. `npx @reticlehq/server doctor` compares the daemon port with the port the page dials.
+2. Pick one flow an operator would do first, such as signing in, opening Practice or submitting a sandbox order. When the change touches a specific flow, use that one.
+3. Read the page with `reticle_look { action: "page" }`, walk the flow one step at a time with `reticle_act_and_wait`, and check each effect with `reticle_assert`. Finish with `reticle_observe` for console and network errors. Only `reticle_act_and_wait` and `reticle_assert` produce a verdict.
+4. Report each step and what it produced, any failure with the `file:line` Reticle gave, and any step that could not be verified. Do not weaken an assertion to make a run pass.
+
+The sections below cover the results a run can return.
 
 ## The tools are missing
 
-`init` registers the MCP server, but a client reads its server list at startup. Restart the client (reload the window in Cursor, or start the server from `.vscode/mcp.json` in VS Code), then continue. `npx @reticlehq/server status` reports whether the daemon is up and whether the app has connected.
+`init` registers the MCP server, but a client reads its server list at startup. Restart the editor's MCP client so it rereads the server list, then continue. `npx @reticlehq/server status` reports whether the daemon is up and whether the app has connected.
 
 ## A result carries `verify_next`
 
