@@ -2,15 +2,15 @@
 
 > Trade journal service for entries, trade logging, execution-quality analytics, and realised P&L tracking.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 
 ## Public surface
 
-- `src/flinttrade_journal/trade_journal.py — journal-entry model and storage helpers`
-- `src/flinttrade_journal/order_analytics.py — execution-quality analytics`
-- `src/flinttrade_journal/pnl_tracker.py — realised P&L calculations`
+- `src/flinttrade_journal/trade_journal.py`: journal-entry model and storage helpers
+- `src/flinttrade_journal/order_analytics.py`: execution-quality analytics
+- `src/flinttrade_journal/pnl_tracker.py`: realised P&L calculations
 
 (See the source for the full surface.)
 
@@ -37,13 +37,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
