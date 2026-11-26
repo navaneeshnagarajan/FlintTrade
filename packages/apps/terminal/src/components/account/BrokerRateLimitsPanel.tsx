@@ -3,7 +3,8 @@
  *
  * Reads the live effective limits from the gateway (GET /ft-api/v1/rate-limits)
  * and lets the operator tune each broker's order/data throttle (requests/sec).
- * Data accepts 0 for unlimited. Orders are held to 10 per second per exchange
+ * Data accepts 0, which turns off this limiter; broker limits still apply.
+ * Orders are held to 10 per second per exchange
  * and cannot be switched off. A save applies live to the running
  * limiter and persists to workspace.json. The limiter sits below the safety
  * gate, so it can only delay a dispatch and never affects order validation.
@@ -109,6 +110,7 @@ export function BrokerRateLimitsPanel() {
                     value={row.data}
                     onChange={(e) => setRow({ data: e.target.value })}
                     aria-label={`${broker} data rate per second`}
+                    aria-describedby="data-rate-limit-help"
                     className="h-6 w-16 text-xs font-mono"
                     inputMode="decimal"
                   />
@@ -134,8 +136,11 @@ export function BrokerRateLimitsPanel() {
       <p id="order-rate-limit-help" className="text-xxs text-text-secondary mt-3">
         Max {ORDER_RATE_LIMIT} orders per second per exchange. Higher rates need exchange registration.
       </p>
+      <p id="data-rate-limit-help" className="text-xxs text-text-secondary mt-1">
+        Data requests: 0 turns off this limit. Broker limits still apply.
+      </p>
       {save.isError && (
-        <p className="text-xxs text-loss mt-1">Could not save — {(save.error as Error).message}</p>
+        <p className="text-xxs text-loss mt-1">Couldn't save rate limits. {(save.error as Error).message}</p>
       )}
     </div>
   );

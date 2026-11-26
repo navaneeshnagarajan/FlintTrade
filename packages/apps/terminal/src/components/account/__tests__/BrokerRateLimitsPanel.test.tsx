@@ -66,6 +66,14 @@ describe("BrokerRateLimitsPanel", () => {
     expect(screen.queryByText(/Orders\/s can be/)).not.toBeInTheDocument();
   });
 
+  it("explains that a data rate of 0 turns off only this limit", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    expect(screen.getByLabelText(/dhan data rate/i)).toHaveAccessibleDescription(
+      "Data requests: 0 turns off this limit. Broker limits still apply.",
+    );
+  });
+
   it.each(["20", "10.5", "0"])("blocks saving an order rate of %s", async (value) => {
     renderPanel();
     await screen.findByText("dhan");
