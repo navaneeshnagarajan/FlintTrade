@@ -2,11 +2,13 @@
 
 Usage::
 
-    python scripts/update_shard_durations.py python-0.xml python-1.xml ...
+    uv run python scripts/update_shard_durations.py python-0.xml python-1.xml ...
 
-Pass every JUnit file from one complete CI run (the ``python-shard-*``
-artefacts). Times are summed per test file. Files that took at least
-``--min-seconds`` are written, rounded to tenths of a second, to
+Pass every JUnit file from one or more complete CI runs (the
+``python-shard-*`` artefacts), with ``--runs`` set to the number of runs so
+noisy files are averaged. Times are summed per test file. Files that took at least
+``--min-seconds`` are written, keyed by a hash of their path and rounded to
+tenths of a second, to
 ``scripts/pytest_shard_durations.json``; the quicker files are summarised as
 one average per-test charge (``default_test_seconds``). A new file missing from
 the record still runs and is charged that average until the record is
@@ -22,6 +24,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.pytest_shard import file_key  # noqa: E402
+
 DEFAULT_OUTPUT = REPO_ROOT / "scripts" / "pytest_shard_durations.json"
 
 
@@ -51,8 +58,9 @@ def collect(paths: list[Path], root: Path = REPO_ROOT) -> tuple[dict[str, float]
 
 
 def build_record(totals: dict[str, float], counts: dict[str, int], min_seconds: float) -> dict:
-    kept = {name: round(seconds, 1) for name, seconds in sorted(totals.items()) if seconds >= min_seconds}
-    quick = [name for name in totals if name not in kept]
+    slow = {name for name, seconds in totals.items() if seconds >= min_seconds}
+    kept = dict(sorted((file_key(name), round(totals[name], 1)) for name in slow))
+    quick = [name for name in totals if name not in slow]
     quick_tests = sum(counts[name] for name in quick)
     default = sum(totals[name] for name in quick) / quick_tests if quick_tests else 0.0
     return {"default_test_seconds": round(default, 4), "files": kept}
@@ -63,8 +71,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("junit", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--min-seconds", type=float, default=2.0)
+    parser.add_argument("--runs", type=int, default=1,
+                        help="How many complete CI runs the JUnit files cover; times are averaged over them.")
     args = parser.parse_args(argv)
+    if args.runs < 1:
+        parser.error("--runs must be at least 1")
     totals, counts, unresolved = collect(args.junit)
+    totals = {name: seconds / args.runs for name, seconds in totals.items()}
+    counts = {name: max(1, round(tests / args.runs)) for name, tests in counts.items()}
     if not totals:
         print("No test cases could be mapped to files.", file=sys.stderr)
         return 1

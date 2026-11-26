@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -296,7 +297,9 @@ def test_weighted_plan_ignores_collection_order_and_charges_unknown_files():
 
 
 def test_weighted_shards_cover_every_test_exactly_once(shard_project: Path):
-    durations = _write_durations(shard_project, {"test_sample.py": 3.0})
+    from scripts.pytest_shard import file_key
+
+    durations = _write_durations(shard_project, {file_key("test_sample.py"): 3.0})
     (shard_project / "test_other.py").write_text(
         "def test_one():\n    pass\n\ndef test_two():\n    pass\n", encoding="utf-8")
     seen: list[str] = []
@@ -340,8 +343,16 @@ def test_timing_record_default_charges_unlisted_files(shard_project: Path):
 
 
 def test_duration_record_keeps_slow_files_and_averages_the_rest():
+    from scripts.pytest_shard import file_key
     from scripts.update_shard_durations import build_record
 
     totals = {"slow.py": 40.04, "quick_a.py": 1.0, "quick_b.py": 0.5}
     counts = {"slow.py": 10, "quick_a.py": 100, "quick_b.py": 50}
-    assert build_record(totals, counts, 2.0) == {"default_test_seconds": 0.01, "files": {"slow.py": 40.0}}
+    record = build_record(totals, counts, 2.0)
+    assert record == {"default_test_seconds": 0.01, "files": {file_key("slow.py"): 40.0}}
+    assert "slow" not in json.dumps(record)
+
+
+def test_committed_record_carries_no_file_names():
+    record = (REPO_ROOT / "scripts" / "pytest_shard_durations.json").read_text(encoding="utf-8")
+    assert ".py" not in record and "/" not in record

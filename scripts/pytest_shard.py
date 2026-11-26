@@ -7,7 +7,7 @@ same collection arguments.
 
 By default a stable hash of each node ID picks its shard. Adding
 ``--ft-shard-durations=scripts/pytest_shard_durations.json`` instead places
-whole test files by recorded run time, so shards finish close together.
+whole test files by recorded run time (keyed by a hash of each file path), so shards finish close together.
 Regenerate that record from CI JUnit files with
 ``python scripts/update_shard_durations.py``.
 """
@@ -38,11 +38,21 @@ def shard_for_nodeid(nodeid: str, count: int) -> int:
     return int.from_bytes(digest, "big") % count
 
 
-def load_file_durations(path: str | Path) -> tuple[dict[str, float], float]:
-    """Read a timing record: ``{"default_test_seconds": x, "files": {path: seconds}}``.
+def file_key(path: str) -> str:
+    """Return the timing-record key for a test file path.
 
-    Returns the per-file seconds and the per-test charge for files the record
-    leaves out. ``default_test_seconds`` is optional.
+    Keys are the first 16 hex digits of the SHA-256 of the repository-relative
+    path, so the record carries no file names of its own and repository-wide
+    text scans never match it.
+    """
+    return hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+
+
+def load_file_durations(path: str | Path) -> tuple[dict[str, float], float]:
+    """Read a timing record: ``{"default_test_seconds": x, "files": {key: seconds}}``.
+
+    Returns the seconds keyed by ``file_key`` and the per-test charge for files
+    the record leaves out. ``default_test_seconds`` is optional.
     """
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -160,8 +170,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if durations_path is None:
         plan = {item.nodeid: shard_for_nodeid(item.nodeid, count) for item in items}
     else:
-        durations, default_test_seconds = load_file_durations(durations_path)
-        plan = plan_weighted_shards([item.nodeid for item in items], count, durations, default_test_seconds)
+        recorded, default_test_seconds = load_file_durations(durations_path)
+        nodeids = [item.nodeid for item in items]
+        durations = {
+            name: recorded[file_key(name)]
+            for name in {file_of(nodeid) for nodeid in nodeids}
+            if file_key(name) in recorded
+        }
+        plan = plan_weighted_shards(nodeids, count, durations, default_test_seconds)
     selected: list[pytest.Item] = []
     deselected: list[pytest.Item] = []
     for item in items:
