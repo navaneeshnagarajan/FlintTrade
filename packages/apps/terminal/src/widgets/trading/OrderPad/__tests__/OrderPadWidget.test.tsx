@@ -1277,6 +1277,35 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("reserves a full-width two-line row for the quantity refusal so the pad below does not shift", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot 75 · Max 1,800 per order");
+
+    const errorRow = document.getElementById("orderpad-qty-error");
+    expect(errorRow).toBeInstanceOf(HTMLElement);
+    expect(errorRow).toHaveClass("min-h-8", "text-xxs");
+    expect(errorRow?.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis/);
+    expect(errorRow).not.toHaveAttribute("role");
+    expect(errorRow?.previousElementSibling).toHaveClass("grid", "grid-cols-2");
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const refusal = "Max 1,800 per order for NIFTY28MAR2422000CE. Place smaller orders.";
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBe(errorRow);
+    expect(alert).toHaveTextContent(refusal);
+    expect(alert).toHaveClass("min-h-8", "text-xxs");
+    expect(alert.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis/);
+    expect(alert.previousElementSibling).toHaveClass("grid", "grid-cols-2");
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
   it("uses the selected contract freeze quantity ahead of the index table", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "BANKNIFTY-OCT2026-FUT", name: "BANKNIFTY", exchange: "NFO",
