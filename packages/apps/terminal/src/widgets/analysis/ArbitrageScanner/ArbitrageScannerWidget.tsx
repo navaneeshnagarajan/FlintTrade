@@ -210,7 +210,7 @@ function ArbitrageScannerWidget() {
           className="flex-1 min-w-40 h-7 text-xs"
           disabled={!isConnected}
         />
-        <label className="flex items-center gap-1.5 ft-text-overline text-text-muted">
+        <label className="flex items-center gap-1.5 text-xxs text-text-muted">
           Edge %
           <Input
             type="number"

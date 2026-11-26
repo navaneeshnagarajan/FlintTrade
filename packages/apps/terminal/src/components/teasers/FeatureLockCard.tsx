@@ -91,7 +91,7 @@ export function FeatureLockCard({
               {featureName}
             </h3>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={cn("ft-text-overline", statusColor)}>
+              <span className={cn("text-xxs font-medium uppercase tracking-wider", statusColor)}>
                 {statusLabel}
               </span>
               {version && (

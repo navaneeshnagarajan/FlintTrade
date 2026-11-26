@@ -1692,7 +1692,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
               <PeriodInput label="Choppiness period" value={periods.chop} onChange={(v) => setPeriods((p) => ({ ...p, chop: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showHV} onCheckedChange={(v) => toggleIndicator("showHV", v)} className="text-xs gap-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block shrink-0" />Hist Volatility
+              <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block shrink-0" />Historical volatility
               <PeriodInput label="Historical volatility period" value={periods.hv} onChange={(v) => setPeriods((p) => ({ ...p, hv: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showVortex} onCheckedChange={(v) => toggleIndicator("showVortex", v)} className="text-xs gap-2">

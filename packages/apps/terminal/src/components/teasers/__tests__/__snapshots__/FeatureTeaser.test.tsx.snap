@@ -64,7 +64,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
           Strategy Lab
         </span>
         <span
-          class="shrink-0 rounded px-1.5 py-0.5 font-mono ft-text-overline text-blue-400 bg-current/10"
+          class="shrink-0 rounded px-1.5 py-0.5 font-mono text-xxs font-medium uppercase tracking-wider text-blue-400 bg-current/10"
         >
           Preview
         </span>

@@ -2928,7 +2928,7 @@ export function FlintChartDrawingList<TTime = unknown>({
                 {summary.detail}
               </span>
               {(summary.locked || summary.hidden) && (
-                <span className="mt-0.5 flex items-center gap-1 ft-text-overline">
+                <span className="mt-0.5 flex items-center gap-1 text-xxs">
                   {summary.locked && (
                     <span className="rounded bg-surface-hover px-1 text-text-muted">Locked</span>
                   )}
@@ -3083,7 +3083,7 @@ export function FlintChartDrawingInspector<TTime = unknown>({
         <span className="max-w-44 truncate text-xxs font-medium text-accent">{label}</span>
         <span className="max-w-44 truncate font-mono text-xxs text-text-muted">{detail}</span>
         {(locked || hidden) && (
-          <span className="mt-0.5 flex items-center gap-1 ft-text-overline">
+          <span className="mt-0.5 flex items-center gap-1 text-xxs">
             {locked && <span className="rounded bg-surface-hover px-1 text-text-muted">Locked</span>}
             {hidden && <span className="rounded bg-surface-hover px-1 text-text-muted">Hidden</span>}
           </span>

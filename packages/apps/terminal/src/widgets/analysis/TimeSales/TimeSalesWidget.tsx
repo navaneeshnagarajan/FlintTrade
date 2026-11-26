@@ -397,7 +397,7 @@ function TimeSalesWidget(props: WidgetProps) {
         <button
           type="button"
           onClick={() => setStatsOpen((p) => !p)}
-          className="flex items-center gap-1 ft-text-overline text-text-muted hover:text-text-secondary transition-colors"
+          className="flex items-center gap-1 text-xxs uppercase tracking-wide text-text-muted hover:text-text-secondary transition-colors"
           aria-expanded={statsOpen}
           aria-label="Microstructure statistics"
         >

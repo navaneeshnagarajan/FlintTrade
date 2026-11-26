@@ -86,7 +86,7 @@ export function OrdersCard() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className="inline-block px-1.5 py-0.5 rounded ft-text-overline shrink-0"
+                      className="inline-block px-1.5 py-0.5 rounded text-xxs font-semibold uppercase shrink-0"
                       style={{
                         background: isBuy
                           ? "rgba(34,197,94,0.12)"

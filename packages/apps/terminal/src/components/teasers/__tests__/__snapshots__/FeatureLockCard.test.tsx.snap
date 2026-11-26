@@ -67,7 +67,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
               class="flex items-center gap-1.5 mt-0.5"
             >
               <span
-                class="ft-text-overline text-blue-400"
+                class="text-xxs font-medium uppercase tracking-wider text-blue-400"
               >
                 Preview
               </span>

@@ -137,7 +137,7 @@ export function SymbolSearchTab({
             <span className="block text-sm text-text-primary font-medium truncate">
               {r.symbol}
             </span>
-            <span className="block ft-text-overline text-text-muted">
+            <span className="block text-xxs text-text-muted uppercase">
               {r.exchange}
             </span>
           </span>
