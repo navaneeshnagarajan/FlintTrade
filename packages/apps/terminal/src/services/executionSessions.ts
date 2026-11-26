@@ -68,7 +68,7 @@ function current(fence: AuthSessionFence) {
 async function request(path: string, method: "GET" | "POST", fence: AuthSessionFence, body?: unknown): Promise<unknown> {
   current(fence);
   if (isDemoAuthSession() || useAuthStore.getState().status !== "logged-in" || !useAuthStore.getState().token) {
-    throw new ExecutionSessionError("refused", "An installed operator session is required.");
+    throw new ExecutionSessionError("refused", "Sign in on this computer to use runs.");
   }
   const headers = buildHeaders(body !== undefined);
   delete headers["X-API-Key"];
