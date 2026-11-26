@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, missing_lot_refusal
 
 from .llm_client import LLMClient, LLMMessage
 
@@ -80,7 +80,7 @@ def parse_order_command(text: str) -> MCPToolCall | None:
                 underlying = next((name for name in sorted(_LOT_MAP, key=len, reverse=True) if name in symbol), None)
                 if underlying is None:
                     return MCPToolCall(
-                        LOT_SIZE_UNKNOWN, {"message": lot_size_unknown_message(symbol)}, text, 0.8
+                        LOT_SIZE_UNKNOWN, {"message": missing_lot_refusal(symbol)}, text, 0.8
                     )
                 amount *= _LOT_MAP[underlying]
             quantity = str(amount)

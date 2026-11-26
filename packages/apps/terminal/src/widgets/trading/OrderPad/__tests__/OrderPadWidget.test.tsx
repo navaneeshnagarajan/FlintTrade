@@ -1087,7 +1087,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "The lot size for NIFTY isn't known. Order not placed.";
     const messages = await screen.findAllByText(refusal);
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
@@ -1153,7 +1153,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockGetSymbol.mockRejectedValue(new Error("selected contract unavailable"));
     renderNfoPad();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "The lot size for NIFTY isn't known. Order not placed.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1170,7 +1170,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     renderNfoPad();
     await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "The lot size for NIFTY isn't known. Order not placed.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Lot 75 · Max 1,800 per order")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();

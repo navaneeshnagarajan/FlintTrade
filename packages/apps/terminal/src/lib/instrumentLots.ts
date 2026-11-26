@@ -411,19 +411,20 @@ export function deskContractName(symbol: string): string {
   return text;
 }
 
-export function missingLotRefusal(contract: string): string {
-  return (
-    `Not placed. The lot size for ${contract} isn't verified.`
-  );
-}
-
 const EXPIRY_IN_SYMBOL = /^([A-Z0-9&-]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/;
 
-/** Refusal line for a contract with no known lot, naming its underlying. */
-export function lotUnknownMessage(symbol: string): string {
+function lotUnknownName(symbol: string): string {
   const underlying = underlyingOfDisplayedSymbol(symbol);
   const name = EXPIRY_IN_SYMBOL.exec(underlying)?.[1] ?? underlying;
-  return `The lot size for ${name || symbol.trim().toUpperCase()} isn't known.`;
+  return name || symbol.trim().toUpperCase();
+}
+
+export function lotUnknownMessage(symbol: string): string {
+  return `The lot size for ${lotUnknownName(symbol)} isn't known.`;
+}
+
+export function missingLotRefusal(symbol: string): string {
+  return `${lotUnknownMessage(symbol)} Order not placed.`;
 }
 
 /** Underlying of a desk symbol, so a compact option still finds its master row. */

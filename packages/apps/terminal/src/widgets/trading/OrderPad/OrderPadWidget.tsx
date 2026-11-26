@@ -71,16 +71,11 @@ import {
   quantityAdmissionRefusal,
   quantityCapLabel,
   checkPriceForOrderType,
-  isDerivativeExchange,
   OPTIONS_EXCHANGES,
 } from "@/lib/orderGuards";
 import { visiblePracticeFill, visiblePracticeRefusal } from "@/lib/practicePrice";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
-import {
-  deskContractName,
-  missingLotRefusal,
-} from "@/lib/instrumentLots";
 import { orderPadSessionBadge, tickKeyFor } from "@/lib/market";
 import { muhuratAmoNote } from "@/lib/muhuratSession";
 import {
@@ -1218,10 +1213,7 @@ function OrderPadWidget(props: WidgetProps) {
       values.symbol,
     );
     if (lotRefusal) {
-      const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
-        ? missingLotRefusal(deskContractName(values.symbol))
-        : lotRefusal;
-      setError("qty", { type: QUANTITY_CHECK_ERROR, message: msg });
+      setError("qty", { type: QUANTITY_CHECK_ERROR, message: lotRefusal });
       return;
     }
 

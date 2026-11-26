@@ -26,7 +26,7 @@ import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
-import { lotCountLabel, lotUnknownMessage } from "@/lib/instrumentLots";
+import { lotCountLabel, lotUnknownMessage, missingLotRefusal } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -278,7 +278,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (quantity == null) {
         setStatus({
           type: "error",
-          message: `Not placed. The lot size for ${symbol} isn't verified.`,
+          message: missingLotRefusal(symbol),
         });
         return;
       }
@@ -358,7 +358,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (resolveQuantity() == null) {
         setStatus({
           type: "error",
-          message: `Not placed. The lot size for ${symbol} isn't verified.`,
+          message: missingLotRefusal(symbol),
         });
         return;
       }

@@ -29,7 +29,7 @@ from typing import Any, Callable, Literal
 from flinttrade_core.indian_charges import statutory_mirror_defaults
 from flinttrade_core.models import Order, OrderResponse
 from flinttrade_gateway.log_safety import account_ref
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, missing_lot_refusal
 
 from .account_manager import BrokerAccount
 
@@ -791,7 +791,7 @@ class PositionMirror:
 
         lot_unknown = mode_val == AllocationMode.LOT_BASED.value and _get_lot_size(order.symbol) is None
         skip_error = (
-            lot_size_unknown_message(order.symbol)
+            missing_lot_refusal(order.symbol)
             if lot_unknown
             else "Allocation is zero. Not mirrored."
         )

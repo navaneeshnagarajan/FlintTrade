@@ -183,7 +183,7 @@ def test_order_command_with_lots_refuses_an_unknown_lot(monkeypatch) -> None:
     call = parse_order_command("Buy SENSEX26DEC85000CE 2 lots")
     assert call is not None
     assert call.tool_name == "lot_size_unknown"
-    assert call.arguments == {"message": "The lot size for SENSEX isn't known."}
+    assert call.arguments == {"message": "The lot size for SENSEX isn't known. Order not placed."}
     assert parse_order_command("Buy RELIANCE 10 shares") is not None
 
 

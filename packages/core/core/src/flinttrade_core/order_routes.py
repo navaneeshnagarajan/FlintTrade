@@ -47,7 +47,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
-from .instrument_lots import lot_size_from_master
+from .instrument_lots import lot_size_from_master, missing_lot_refusal
 from .order_input import json_object_body, normalise_order_type_fields
 from .order_outcome import (
     ORDER_CANCELLED,
@@ -4647,7 +4647,7 @@ def place_options_strategy() -> tuple[Any, int]:
             {
                 "status": "error",
                 "code": "lot_size_unknown",
-                "message": f"The lot size for {underlying.strip().upper()} isn't known.",
+                "message": missing_lot_refusal(underlying),
             }
         ), 422
     if requested_lot is not None and requested_lot != lot_size:

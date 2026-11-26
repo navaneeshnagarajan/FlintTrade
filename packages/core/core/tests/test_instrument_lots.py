@@ -13,6 +13,8 @@ import pytest
 from flinttrade_core.indian_charges import round_trip
 from flinttrade_core.instrument_lots import (
     contract_quantity_message,
+    lot_unknown_message,
+    missing_lot_refusal,
     fixture_path,
     future_index_rows,
     load_fixture_rows,
@@ -97,11 +99,28 @@ def test_charges_and_validation_use_each_contracts_lot() -> None:
         "Quantity must be a multiple of the lot size (65)."
     )
     assert contract_quantity_message("missing", 75, rows, as_of=_AS_OF, contract="NIFTY 24500 CE") == (
-        "Not placed. The lot size for NIFTY 24500 CE isn't verified."
+        "The lot size for NIFTY isn't known. Order not placed."
     )
     assert contract_quantity_message("missing", 65, rows, as_of=_AS_OF, contract="NIFTY24APR2524500CE") == (
-        "Not placed. The lot size for NIFTY 24500 CE isn't verified."
+        "The lot size for NIFTY isn't known. Order not placed."
     )
+
+
+@pytest.mark.unit
+def test_lot_unknown_copy_names_the_underlying() -> None:
+    cases = (
+        ("NIFTY26DEC24000CE", "NIFTY"),
+        ("NIFTY 24500 CE", "NIFTY"),
+        ("NIFTYNXT5026DECFUT", "NIFTYNXT50"),
+        ("BANKNIFTY26JUN56000CE", "BANKNIFTY"),
+        ("m&m26decfut", "M&M"),
+        ("NIFTY-OCT2026-FUT", "NIFTY"),
+    )
+    for symbol, underlying in cases:
+        fact = f"The lot size for {underlying} isn't known."
+        assert lot_unknown_message(symbol) == fact
+        assert missing_lot_refusal(symbol) == f"{fact} Order not placed."
+
 
 
 @pytest.mark.unit
@@ -332,7 +351,7 @@ def test_expired_contracts_are_dropped_when_the_date_is_frozen() -> None:
     assert scalper_lot_label("NIFTY", rows, as_of=october) == "65 · Nov expiry"
     assert lot_size_from_master("BANKNIFTY", rows, as_of=date(2026, 9, 25)) is None
     assert contract_quantity_message("13", 75, rows, as_of=october) == (
-        "Not placed. The lot size for NIFTY-OCT2026-FUT isn't verified."
+        "The lot size for NIFTY isn't known. Order not placed."
     )
 
 

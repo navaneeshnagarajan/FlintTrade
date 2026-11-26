@@ -19,6 +19,7 @@
  * inline field error, status line).
  */
 
+import { missingLotRefusal } from "@/lib/instrumentLots";
 import type { SessionMode } from "@/lib/modeClaim";
 
 // ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ export function checkLotSizeVerified(
 ): string | null {
   if (!isDerivativeExchange(exchange)) return null;
   if (!verified || lotSize == null || lotSize <= 0) {
-    return `Not placed. The lot size for ${symbol} isn't verified.`;
+    return missingLotRefusal(symbol);
   }
   return null;
 }

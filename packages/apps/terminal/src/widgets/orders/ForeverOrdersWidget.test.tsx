@@ -621,7 +621,7 @@ describe("ForeverOrdersWidget", () => {
     await selectExchange("NFO");
 
     await waitFor(() =>
-      expect(screen.getByText(/Not placed\. The lot size for NIFTY isn't verified\./)).toBeInTheDocument(),
+      expect(screen.getByText(/The lot size for NIFTY isn't known\. Order not placed\./)).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
   });

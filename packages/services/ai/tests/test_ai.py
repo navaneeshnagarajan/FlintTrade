@@ -470,10 +470,10 @@ class TestMCPBridge:
         call = parse_order_command("Buy NOTLISTED26DECFUT 2 lots")
         assert call is not None
         assert call.tool_name == LOT_SIZE_UNKNOWN
-        assert call.arguments == {"message": "The lot size for NOTLISTED isn't known."}
+        assert call.arguments == {"message": "The lot size for NOTLISTED isn't known. Order not placed."}
         result = MCPBridge().execute("Buy NOTLISTED26DECFUT 2 lots")
         assert result.success is False
-        assert result.error == "The lot size for NOTLISTED isn't known."
+        assert result.error == "The lot size for NOTLISTED isn't known. Order not placed."
 
     def test_parse_with_price(self):
         from flinttrade_ai.mcp_bridge import parse_order_command

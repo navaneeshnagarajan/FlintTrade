@@ -98,6 +98,9 @@ _YY_MONTH = re.compile(
 _ISO_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # Desk label: underlying, strike, CE/PE. No thousands separator.
 _DESK_OPTION = re.compile(r"^(?P<underlying>[A-Z][A-Z0-9&]*)\s+(?P<strike>\d+(?:\.\d+)?)\s+(?P<option_type>CE|PE)$")
+_EXPIRY_IN_SYMBOL = re.compile(
+    r"^([A-Z0-9&-]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)"
+)
 
 
 @dataclass(frozen=True)
@@ -429,9 +432,23 @@ def _listed_symbol(
     return ""
 
 
-def missing_lot_refusal(contract: str) -> str:
-    """Refusal when the instrument master has no lot for this contract."""
-    return f"Not placed. The lot size for {contract} isn't verified."
+def _lot_unknown_name(symbol: str) -> str:
+    desk = desk_contract_name(symbol)
+    spaced = _DESK_OPTION.fullmatch(desk)
+    if spaced is not None:
+        return spaced.group("underlying")
+    head = re.split(r"[^A-Z0-9&]", desk)[0] if desk else ""
+    match = _EXPIRY_IN_SYMBOL.match(head)
+    name = match.group(1) if match else head
+    return name or symbol.strip().upper()
+
+
+def lot_unknown_message(symbol: str) -> str:
+    return f"The lot size for {_lot_unknown_name(symbol)} isn't known."
+
+
+def missing_lot_refusal(symbol: str) -> str:
+    return f"{lot_unknown_message(symbol)} Order not placed."
 
 
 def contract_quantity_message(

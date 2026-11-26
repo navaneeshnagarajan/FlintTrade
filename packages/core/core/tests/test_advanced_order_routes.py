@@ -255,7 +255,7 @@ def test_options_strategy_refuses_an_unknown_lot(monkeypatch):
         monkeypatch,
     )
     assert status == 422
-    assert body == {"status": "error", "code": "lot_size_unknown", "message": "The lot size for NIFTY isn't known."}
+    assert body == {"status": "error", "code": "lot_size_unknown", "message": "The lot size for NIFTY isn't known. Order not placed."}
     assert seen == []
 
 
