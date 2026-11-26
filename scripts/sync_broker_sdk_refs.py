@@ -194,6 +194,13 @@ def sync_git_mirror(source: BrokerSdkSource, audit_root: Path) -> dict[str, str]
         result["latest_stable_tag"] = latest
         result["release_commit"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{commit}}"])
         result["release_tree"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{tree}}"])
+    else:
+        latest = latest_final_git_tag(_run(["git", "-C", str(repo), "tag", "--list"]).splitlines())
+        if latest:
+            result["latest_final_tag"] = latest
+            result["latest_final_commit"] = _run(
+                ["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{commit}}"]
+            )
     return result
 
 
@@ -237,6 +244,23 @@ def _final_release_key(version: str) -> tuple[int, int, int] | None:
     if match is None:
         return None
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def latest_final_git_tag(tags: list[str]) -> str | None:
+    """Return the newest final release tag, skipping pre-releases."""
+
+    ranked: list[tuple[tuple[int, int, int], str]] = []
+    for raw in tags:
+        tag = raw.strip()
+        if not tag:
+            continue
+        version = tag[1:] if tag.startswith(("v", "V")) else tag
+        key = _final_release_key(version)
+        if key is not None:
+            ranked.append((key, tag))
+    if not ranked:
+        return None
+    return max(ranked)[1]
 
 
 def upstream_pypi_version(data: Mapping[str, Any], locked: str) -> str:
@@ -377,7 +401,7 @@ def build_readme(manifest: dict[str, Any]) -> str:
                 if entry["package"] == "kotakneoapi":
                     status = "current" if entry["git_current"] else "locked behind the pinned release"
                 else:
-                    status = "current" if entry["git_current"] else "locked behind upstream HEAD"
+                    status = "current" if entry["git_current"] else "locked behind the latest final release"
                 lines.append(f"  - git status: {status}")
         if entry.get("pypi"):
             lines.append(f"  - pypi: {entry['pypi']['path']}")
@@ -459,7 +483,9 @@ def sync(
                             {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
                         )
             elif entry["source_commit"]:
-                current = str(git.get("head", "")) == entry["source_commit"]
+                # Freshness follows the latest final release tag, not default-branch HEAD.
+                upstream = str(git.get("latest_final_commit") or git.get("head", ""))
+                current = upstream == entry["source_commit"]
                 sdk_record["git_current"] = current
                 if not current:
                     manifest["drift"].append(
@@ -467,7 +493,7 @@ def sync(
                             "package": entry["name"],
                             "source": "git",
                             "locked": entry["source_commit"],
-                            "upstream": str(git.get("head", "")),
+                            "upstream": upstream,
                         }
                     )
         if source.pypi_name:
