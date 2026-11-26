@@ -2,14 +2,14 @@
 
 > Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** Python
 
 ## Public surface
 
-- `src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs`
-- `src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch`
+- `src/flinttrade_automation/cron_manager.py`: workspace.json-backed scheduled jobs
+- `src/flinttrade_automation/telegram_bot.py`: passive notifications + emergency kill switch
 
 (See the source for the full surface.)
 
@@ -32,7 +32,7 @@ python -m pytest packages/services/automation/tests/ -v --import-mode=importlib
 ```
 
 Run one command per line. They work unchanged in bash, zsh and Windows
-PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+PowerShell. Do not join them with `&&`, which Windows PowerShell 5.1 does not
 support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
@@ -40,13 +40,13 @@ For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.

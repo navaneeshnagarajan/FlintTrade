@@ -1,6 +1,6 @@
 # Desktop
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** —
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):**
 the Electron 45 shell for the self-hosted terminal.
 
 **Language:** TypeScript (strict) · **Runtime:** Electron 45.2.3 (Node 24.22.2)
