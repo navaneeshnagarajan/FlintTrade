@@ -143,7 +143,7 @@ for (const surface of ["setup", "settings"] as const) {
     it.each(wire.samples)("renders literal $id without inferring write readiness", async sample => {
       select(sample); mount(); await submit();
       const unknown = JSON.parse(row.body).receipt.state === "authentication_unknown";
-      const notice = await screen.findByText(unknown ? /^Sign-in result unknown\./ : /is Connected \(read\)\. Reconcile orders and positions before you trade\./);
+      const notice = await screen.findByText(unknown ? /^Sign-in result unknown\./ : /is read-only\. Reconcile orders and positions before you trade\./);
       if (!unknown) {
         expect(notice).toHaveTextContent(`${row.broker} / ${row.accountId} is read-only. Reconcile orders and positions before you trade.`);
       }
@@ -161,7 +161,7 @@ for (const surface of ["setup", "settings"] as const) {
     it.each(corruptions.filter(([name]) => ["absent recovery", "foreign account", "reordered response operation", "missing reconciliation", "unknown status"].includes(name)))("renders %s refusal without fresh credentials or auth retry", async (_name, path, value) => {
       corrupt(path, value); mount(); await submit();
       expect(await screen.findByText(/^Sign-in result unknown\./)).toBeInTheDocument();
-      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
+      expect(screen.queryByText(/is read-only\. Reconcile|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
     });
     it("does not clear an independent broker fault on restricted recovery", async () => {
       const fault = { message: "Book source unavailable", httpStatus: 503, broker: "dhan" };
@@ -172,7 +172,7 @@ for (const surface of ["setup", "settings"] as const) {
       nextAccounts = () => new Promise(resolve => { release = resolve; });
       try {
         await submit();
-        expect(await screen.findByText(/is Connected \(read\)\. Reconcile orders and positions before you trade\./)).toBeInTheDocument();
+        expect(await screen.findByText(/is read-only\. Reconcile orders and positions before you trade\./)).toBeInTheDocument();
         await waitFor(() => expect(release).toBeTypeOf("function"));
         // The mutation result alone cannot clear a read fault. The existing
         // independent account-query recovery policy is tested separately.
@@ -185,7 +185,7 @@ for (const surface of ["setup", "settings"] as const) {
       select(wire.samples.find(s => s.key === JSON.parse(wire.restartReplay.body).receipt.operationId)!);
       body = wire.restartReplay.body; mount(); await submit();
       expect(await screen.findByText(/^Account updated\. Session unavailable\./)).toBeInTheDocument();
-      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
+      expect(screen.queryByText(/is read-only\. Reconcile|Enter your credentials again below/i)).not.toBeInTheDocument(); soleWrite();
     });
     it.each(["account-return", "hidden-return"])("fences late recovery across %s", async retirement => {
       let resolve!: (value: Response) => void;
@@ -202,7 +202,7 @@ for (const surface of ["setup", "settings"] as const) {
       }
       const reads = requests.filter(r => r.method === "GET").length;
       await act(async () => { resolve(response(row)); });
-      expect(screen.queryByText(/is Connected \(read\)|Enter your credentials again below|Signed in to /i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/is read-only\. Reconcile|Enter your credentials again below|Signed in to /i)).not.toBeInTheDocument();
       expect(requests.filter(r => r.method === "GET")).toHaveLength(reads); soleWrite();
     });
   });
