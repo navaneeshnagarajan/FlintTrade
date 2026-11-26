@@ -155,7 +155,7 @@ python scripts/ft.py start
 
 ## 6. Start Building
 
-Read [`contributing.md`](../../contributing.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR.
+Read [`contributing.md`](../../contributing.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues). Issues labelled `good first issue` are a good place to start.
 
 ---
 
