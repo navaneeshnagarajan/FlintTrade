@@ -650,7 +650,7 @@ capabilities and workspace overrides. Place, modify and cancel share a cap of
 10 per second per broker per exchange. A lower value applies. 0 or a value
 above 10 is used as 10, with a warning in the log. NFO and CDS count as NSE.
 BFO and BCD count as BSE. A data limit of 0 turns off FlintTrade's own limiter
-for that category. "Data: 0 turns off this limit. Broker limits still apply."
+for that category. "Data requests: 0 turns off this limit. Broker limits still apply."
 Every Live write still needs a one-shot
 `SafetyContext` from `gate_order` or `gate_broker_write`.
 
