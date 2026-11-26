@@ -256,3 +256,92 @@ def test_randomisation_and_xdist_keep_consistent_shard_collection(shard_project:
     )
     assert result.returncode == pytest.ExitCode.OK, result.stdout
     assert f"{len(shard_nodeids)} passed" in result.stdout
+
+
+def _write_durations(project: Path, files: dict[str, float]) -> Path:
+    import json
+
+    path = project / "durations.json"
+    path.write_text(json.dumps({"files": files}), encoding="utf-8")
+    return path
+
+
+def test_weighted_plan_balances_recorded_file_time():
+    from scripts.pytest_shard import plan_weighted_shards
+
+    durations = {"a.py": 10.0, "b.py": 6.0, "c.py": 5.0, "d.py": 4.0, "e.py": 1.0}
+    nodeids = [f"{name}::test_{index}" for name in durations for index in range(3)]
+    plan = plan_weighted_shards(nodeids, 2, durations)
+    loads = Counter()
+    for name, seconds in durations.items():
+        shards = {plan[nodeid] for nodeid in nodeids if nodeid.startswith(f"{name}::")}
+        assert len(shards) == 1, "a file must stay on one shard"
+        loads[shards.pop()] += seconds
+    # Longest first: a(10) | b(6)+c(5) -> d(4) joins a -> e(1) joins b, c.
+    assert sorted(loads.values()) == [12.0, 14.0]
+
+
+def test_weighted_plan_ignores_collection_order_and_charges_unknown_files():
+    from scripts.pytest_shard import DEFAULT_TEST_SECONDS, plan_weighted_shards
+
+    nodeids = [f"new_{index}.py::test" for index in range(7)] + ["known.py::test_a", "known.py::test_b"]
+    durations = {"known.py": 100.0}
+    forward = plan_weighted_shards(nodeids, 3, durations)
+    assert forward == plan_weighted_shards(list(reversed(nodeids)), 3, durations)
+    assert set(forward.values()) == {0, 1, 2}
+    known = forward["known.py::test_a"]
+    assert forward["known.py::test_b"] == known
+    assert all(shard != known for nodeid, shard in forward.items() if nodeid.startswith("new_"))
+    assert DEFAULT_TEST_SECONDS > 0
+
+
+def test_weighted_shards_cover_every_test_exactly_once(shard_project: Path):
+    durations = _write_durations(shard_project, {"test_sample.py": 3.0})
+    (shard_project / "test_other.py").write_text(
+        "def test_one():\n    pass\n\ndef test_two():\n    pass\n", encoding="utf-8")
+    seen: list[str] = []
+    for index in range(2):
+        nodeids, _ = _collect(shard_project, f"--ft-shard-index={index}", "--ft-shard-count=2",
+                              f"--ft-shard-durations={durations}")
+        seen.extend(nodeids)
+    everything, _ = _collect(shard_project)
+    assert sorted(seen) == sorted(everything)
+    assert len(seen) == len(set(seen))
+
+
+@pytest.mark.parametrize("content,message", [
+    ("not json", "could not be read"),
+    ('{"other": {}}', "must contain a 'files' mapping"),
+    ('{"files": {"a.py": -1}}', "invalid entry"),
+])
+def test_weighted_shards_reject_a_bad_timing_record(shard_project: Path, content: str, message: str):
+    path = shard_project / "durations.json"
+    path.write_text(content, encoding="utf-8")
+    result = _run_pytest(shard_project, "--ft-shard-index=0", "--ft-shard-count=2", f"--ft-shard-durations={path}")
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, result.stdout
+    assert message in result.stdout
+
+
+def test_timing_record_requires_shard_arguments(shard_project: Path):
+    path = _write_durations(shard_project, {})
+    result = _run_pytest(shard_project, f"--ft-shard-durations={path}")
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, result.stdout
+    assert "requires --ft-shard-index and --ft-shard-count" in result.stdout
+
+
+def test_timing_record_default_charges_unlisted_files(shard_project: Path):
+    import json
+
+    from scripts.pytest_shard import load_file_durations
+
+    path = shard_project / "durations.json"
+    path.write_text(json.dumps({"default_test_seconds": 0.01, "files": {"a.py": 3}}), encoding="utf-8")
+    assert load_file_durations(path) == ({"a.py": 3.0}, 0.01)
+
+
+def test_duration_record_keeps_slow_files_and_averages_the_rest():
+    from scripts.update_shard_durations import build_record
+
+    totals = {"slow.py": 40.04, "quick_a.py": 1.0, "quick_b.py": 0.5}
+    counts = {"slow.py": 10, "quick_a.py": 100, "quick_b.py": 50}
+    assert build_record(totals, counts, 2.0) == {"default_test_seconds": 0.01, "files": {"slow.py": 40.0}}
