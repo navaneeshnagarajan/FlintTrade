@@ -32,13 +32,12 @@ export default function ContributePage() {
     <main className="site-shell">
       <SiteHeader />
       <section className="subpage">
-        <h1>Contribute without getting lost.</h1>
+        <h1>How to contribute.</h1>
         <p>
           FlintTrade spans Python services, a React terminal, Rust tick processing,
           an evidence-gated native broker gateway, and a desktop shell. A broker session
           cannot be started from the terminal today. Practice mode works without a broker.
-          The public docs and MCP tools are designed
-          to get contributors to the right package, tests, and context quickly.
+          The public docs and MCP tools name the package, tests, and context for a change.
         </p>
 
         <div className="feature-grid">

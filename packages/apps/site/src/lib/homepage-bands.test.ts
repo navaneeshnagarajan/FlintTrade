@@ -32,7 +32,10 @@ describe('product-led homepage with the preserved signature', () => {
     expect(pageSource).toContain('section className="section hero"');
     expect(pageSource).toContain('<ProductOverview />');
     expect(pageSource).not.toContain('ProductIntroduction');
+    expect(pageSource).toContain('The site is generated from the repository.');
+    expect(pageSource).toContain('Docs, API, and contribution pages.');
     expect(pageSource).toContain('MCP for development, not trading.');
+    expect(pageSource).toContain('Package index.');
     expect(pageSource).not.toContain('Evaluate and install');
     expect(pageSource).not.toContain('Start exploring — no install needed');
     expect(pageSource).not.toContain('Download desktop app');

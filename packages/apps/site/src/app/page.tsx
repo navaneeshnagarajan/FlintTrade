@@ -178,17 +178,17 @@ export default async function HomePage() {
           </div>
           <div>
             <strong>AGPL</strong>
-            <span>Network-use source sharing keeps the self-hosted stack accountable.</span>
+            <span>AGPL-3.0: if you share a copy, or run a modified copy as a network service, make its source available to the people who receive or use it.</span>
           </div>
         </div>
       </section>
 
       <section className="section">
         <div className="section-heading">
-          <h2>Built for people who read the source.</h2>
+          <h2>The site is generated from the repository.</h2>
           <p>
-            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
-            contribution commands are generated into the site rather than rewritten in a second place.
+            Root docs, package READMEs, screenshots, and
+            contribution commands are generated into the site.
           </p>
         </div>
         <div className="feature-grid">
@@ -207,7 +207,7 @@ export default async function HomePage() {
 
       <section className="section two-column">
         <div className="section-heading">
-          <h2>Docs, API, and contribution paths in one flow.</h2>
+          <h2>Docs, API, and contribution pages.</h2>
           <p>
             Start with product usage, move into architecture and endpoint contracts, then use the MCP
             tools to orient local development work.
@@ -257,7 +257,7 @@ export default async function HomePage() {
 
       <section className="section" data-scroll-chapter="5">
         <div className="section-heading">
-          <h2>Package map at contributor speed.</h2>
+          <h2>Package index.</h2>
           <p>
             Each package README becomes a docs page and MCP resource, so agent-assisted development starts
             from the same public source a human contributor reads.
