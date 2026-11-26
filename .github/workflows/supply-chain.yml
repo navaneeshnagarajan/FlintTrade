@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  group: supply-chain-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 
 permissions:

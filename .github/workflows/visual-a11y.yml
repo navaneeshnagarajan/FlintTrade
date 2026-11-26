@@ -38,7 +38,7 @@ on:
       - '.github/actions/**'
 
 concurrency:
-  group: visual-a11y-${{ github.ref }}
+  group: visual-a11y-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 
 permissions:
