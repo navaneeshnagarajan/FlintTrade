@@ -223,7 +223,7 @@ def test_kotak_requires_positive_namespace_ownership(tmp_path, monkeypatch, owne
     assert (result in required_failures([result])) is (expected != "ok")
 
 
-@pytest.mark.parametrize(("installed_version", "expected"), [("3.0.9", "ok"), ("3.0.7", "version_mismatch")])
+@pytest.mark.parametrize(("installed_version", "expected"), [("3.0.13", "ok"), ("3.0.7", "version_mismatch")])
 def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
     tmp_path, monkeypatch, installed_version, expected
 ):
@@ -242,9 +242,9 @@ def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
     info = next(tmp_path.glob("kotakneoapi-*.dist-info"))
     (info / "direct_url.json").write_text(selected.read_text("direct_url.json"))
     metadata_path = info / "METADATA"
-    if installed_version != "3.0.9":
+    if installed_version != "3.0.13":
         metadata_path.write_bytes(
-            metadata_path.read_bytes().replace(b"Version: 3.0.9", f"Version: {installed_version}".encode("ascii"), 1)
+            metadata_path.read_bytes().replace(b"Version: 3.0.13", f"Version: {installed_version}".encode("ascii"), 1)
         )
     package_files = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file())
     (info / "RECORD").write_text("".join(f"{path},,\n" for path in package_files))
@@ -255,6 +255,6 @@ def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
 
     result = next(row for row in attestation.attest_all() if row.broker == "kotakneoapi")
 
-    assert result.pinned_version == "3.0.9"
+    assert result.pinned_version == "3.0.13"
     assert result.status == expected
     assert (result in required_failures([result])) is (expected != "ok")

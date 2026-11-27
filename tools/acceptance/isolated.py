@@ -22,7 +22,7 @@ GUARD = """import json, os, pathlib, subprocess, sys
 expected=json.loads(sys.argv[1]); host_ns=json.loads(sys.argv[2]); hidden=json.loads(sys.argv[3]); command=sys.argv[4:]
 assert dict(os.environ)==expected, (set(os.environ)-set(expected),set(expected)-set(os.environ))
 assert all(not pathlib.Path(p).exists() for p in hidden)
-assert not pathlib.Path('.local/specs').exists()
+assert not pathlib.Path('.local').exists()
 assert pathlib.Path('.venv/bin/python').exists()
 ns={k:os.readlink('/proc/self/ns/'+k) for k in host_ns}
 assert all(ns[k]!=host_ns[k] for k in ns)

@@ -199,7 +199,7 @@ def test_portable_inventory_does_not_weaken_source_refusals(tmp_path, monkeypatc
     assert attestation.required_failures([result]) == [result]
 
 
-@pytest.mark.parametrize("installed_version", ["3.0.9", "3.0.7"])
+@pytest.mark.parametrize("installed_version", ["3.0.13", "3.0.7"])
 @pytest.mark.parametrize("newlines", ["lf", "crlf", "mixed"])
 def test_copied_metadata_preserves_unrelated_bytes(tmp_path, monkeypatch, installed_version, newlines):
     from packages.core.core.tests import test_broker_sdk_attest as original
@@ -207,8 +207,8 @@ def test_copied_metadata_preserves_unrelated_bytes(tmp_path, monkeypatch, instal
     source = tmp_path / "source"
     source.mkdir()
     with monkeypatch.context() as setup:
-        pin, info, _ = make_source_install(source, setup, "kotakneoapi", version="3.0.9")
-    before = b"Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.9\nSummary: caf\xc3\xa9\n\nKeep: exact\n"
+        pin, info, _ = make_source_install(source, setup, "kotakneoapi", version="3.0.13")
+    before = b"Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.13\nSummary: caf\xc3\xa9\n\nKeep: exact\n"
     if newlines == "crlf":
         before = before.replace(b"\n", b"\r\n")
     elif newlines == "mixed":
@@ -234,11 +234,11 @@ def test_copied_metadata_preserves_unrelated_bytes(tmp_path, monkeypatch, instal
         return real_write_text(path, data, encoding=encoding, errors=errors, newline=newline)
 
     monkeypatch.setattr(Path, "write_text", windows_text_write)
-    expected = "ok" if installed_version == "3.0.9" else "version_mismatch"
+    expected = "ok" if installed_version == "3.0.13" else "version_mismatch"
     original.test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
         copied, monkeypatch, installed_version, expected
     )
-    expected_bytes = before.replace(b"Version: 3.0.9", f"Version: {installed_version}".encode("ascii"), 1)
+    expected_bytes = before.replace(b"Version: 3.0.13", f"Version: {installed_version}".encode("ascii"), 1)
     assert target.read_bytes() == expected_bytes
     assert text_writes == []
     assert (info / "METADATA").read_bytes() == before
@@ -251,7 +251,7 @@ def test_copied_record_uses_wheel_keys(tmp_path, monkeypatch):
     copied = tmp_path / "copied"
     copied.mkdir()
     original.test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
-        WindowsRelativePath(copied), monkeypatch, "3.0.9", "ok"
+        WindowsRelativePath(copied), monkeypatch, "3.0.13", "ok"
     )
     record = next(copied.glob("*.dist-info/RECORD"))
     keys = [row[0] for row in csv.reader(record.read_text(encoding="utf-8").splitlines())]
