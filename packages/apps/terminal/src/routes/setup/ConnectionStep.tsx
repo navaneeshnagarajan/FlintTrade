@@ -155,7 +155,7 @@ export function ConnectionStep({
     <div className="space-y-5">
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
-          Practice — simulated fills, no real money. You do not
+          Practice. Simulated fills, no real money. You do not
           need a broker for Practice.
         </p>
         <Button

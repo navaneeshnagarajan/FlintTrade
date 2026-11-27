@@ -122,8 +122,8 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     } catch {
       setToggleError(
         mode === "live"
-          ? "Could not downgrade to Practice — try again."
-          : "Could not switch to Practice — try again.",
+          ? "Could not downgrade to Practice. Try again."
+          : "Could not switch to Practice. Try again.",
       );
       return false;
     }
