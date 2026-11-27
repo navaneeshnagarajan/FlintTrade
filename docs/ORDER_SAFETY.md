@@ -319,7 +319,7 @@ does not add a second deny under a Live control that is already muted.
 Other Live write verbs still reach SafetySystem without this admission.
 Other Practice verbs go straight to the sandbox. The managed decision-model process install is in
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#decision-model-process).
-Operator steps are in [Start decision model](USER_GUIDE.md#start-decision-model).
+Operator steps are in [Start the decision model](USER_GUIDE.md#start-the-decision-model).
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Decision model |
 | --- | --- | --- | --- | --- |

@@ -423,7 +423,7 @@ The decision model's value is **Ready**, **Degraded**, **Down**, **Still loading
 **Downloading**, or **Checking**. The decision model starts **Down**, including before a heartbeat and when
 the ping omits `decision_model`. Missing status is never painted **Ready**. While the
 value is **Checking**, the row reads `Checking decision model…`. Download and model
-lines, and how to start the managed decision-model process, are in [Start decision model](#start-decision-model):
+lines, and how to start the managed decision-model process, are in [Start the decision model](#start-the-decision-model):
 `Downloading the model · X of Y GB`, `Can't download the model`,
 `Wrong model version`, and `Can't verify the model`. The Status line while
 new orders are paused is `Decision model is down. New orders are paused until it's ready. Closing positions still works.`
@@ -448,7 +448,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked for a slower request rate. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Decision model (`decision_model`) | Blocked: the decision model is Down ("Decision model is down. New orders are paused until it's ready. Closing positions still works."). New Live orders stay blocked. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with `Not placed. Decision model is down. Start it from Status.` A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The order button does not also show **Denied by decision model** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place Live orders. The strip also says **Kill All stays available.** Cancel-all only cancels. The decision model starts Down. The desk ping publishes Live-facing `decision_model`, sidecar `decision_model_practice`, and `decision_model_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Decision model degraded. Tighter limits apply.** The decision-model chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed decision-model process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start decision model, until the ping confirms the new state, the chip says Checking and the popover says Checking decision model…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed decision-model process is up and Live is not qualified. See [Start decision model](#start-decision-model). A base checkpoint leaves Live unqualified. | While the strip is open, new Live orders stay muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice order is refused when Practice itself is Down, with "Not placed. Decision model is down. Start it from Status." Live-facing Ready or Degraded allows a Live order. Do not treat Chat as a substitute. |
+| Decision model (`decision_model`) | Blocked: the decision model is Down ("Decision model is down. New orders are paused until it's ready. Closing positions still works."). New Live orders stay blocked. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with `Not placed. Decision model is down. Start it from Status.` A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The order button does not also show **Denied by decision model** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place Live orders. The strip also says **Kill All stays available.** Cancel-all only cancels. The decision model starts Down. The desk ping publishes Live-facing `decision_model`, sidecar `decision_model_practice`, and `decision_model_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Decision model degraded. Tighter limits apply.** The decision-model chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed decision-model process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start decision model, until the ping confirms the new state, the chip says Checking and the popover says Checking decision model…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed decision-model process is up and Live is not qualified. See [Start the decision model](#start-the-decision-model). A base checkpoint leaves Live unqualified. | While the strip is open, new Live orders stay muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice order is refused when Practice itself is Down, with "Not placed. Decision model is down. Start it from Status." Live-facing Ready or Degraded allows a Live order. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info: Chat is unavailable. Trading chrome stays as it was. A decision-model denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -461,9 +461,9 @@ regulator's. They are not a FlintTrade claims desk:
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
 - SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
 
-<a id="start-decision-model"></a>
+<a id="start-the-decision-model"></a>
 
-### Start decision model
+### Start the decision model
 
 The decision model is opt-in and starts **Down**. The desk does not paint it **Ready**
 until a health probe says so. While the decision model is
@@ -778,7 +778,7 @@ itself is Degraded. Practice Degraded applies the tighter ceiling to a
 Practice order.
 
 **Down.** The decision model starts **Down**. The chip label follows the current mode.
-See [Start decision model](#start-decision-model). In Practice it shows the managed decision-model state and
+See [Start the decision model](#start-the-decision-model). In Practice it shows the managed decision-model state and
 does not read Down while a Practice order can be admitted. **Not qualified
 for Live** is the chip tooltip. Only Live-facing **Down** opens the blocked strip and mutes new Live orders. Practice is
 not muted by that strip. While that mute is up, the Live order button
@@ -991,7 +991,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 
-- [ ] In Live, the decision model chip is **Ready** or **Degraded** if you intend to send a Live order. The chip follows the current mode and does not invent Ready. In Practice it shows the managed decision-model state. **Not qualified for Live** is the tooltip when Live has no matching qualification record. **Down** shows **Decision model is down. New orders are paused until it's ready. Closing positions still works.** and mutes a new Live order. Close and Square off stay available. A base checkpoint leaves Live unqualified. **Degraded** keeps Live open and shows **Decision model degraded. Tighter limits apply.** A Practice order is refused when Practice itself is Down. After Start decision model, until the ping confirms the new state, the chip says **Checking** and the popover says **Checking decision model…**. See [Start decision model](#start-decision-model).
+- [ ] In Live, the decision model chip is **Ready** or **Degraded** if you intend to send a Live order. The chip follows the current mode and does not invent Ready. In Practice it shows the managed decision-model state. **Not qualified for Live** is the tooltip when Live has no matching qualification record. **Down** shows **Decision model is down. New orders are paused until it's ready. Closing positions still works.** and mutes a new Live order. Close and Square off stay available. A base checkpoint leaves Live unqualified. **Degraded** keeps Live open and shows **Decision model degraded. Tighter limits apply.** A Practice order is refused when Practice itself is Down. After Start decision model, until the ping confirms the new state, the chip says **Checking** and the popover says **Checking decision model…**. See [Start the decision model](#start-the-decision-model).
 
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 
@@ -1004,7 +1004,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 An operator Live order and an automation Live order run Mode guard → `Laya.admit` →
 SafetySystem → gate_order → BrokerRouter. The decision model does not place the
 order. A refusal or a quantity clamp stops before SafetySystem.
-See [Start decision model](#start-decision-model) and [Decision model on an order](#decision-model-on-an-order).
+See [Start the decision model](#start-the-decision-model) and [Decision model on an order](#decision-model-on-an-order).
 
 ### Walkthrough
 
@@ -1756,7 +1756,7 @@ loading**, or **Checking**. The chip follows the current mode. In Practice it sh
 managed decision-model process and does not read Down while Practice orders are being admitted.
 During the first load the label is **Still loading**. **Not qualified for
 Live** is the tooltip. The decision model starts **Down** and does not invent Ready.
-How to start it is [Start decision model](#start-decision-model). A
+How to start it is [Start the decision model](#start-the-decision-model). A
 base checkpoint leaves Live unqualified. Only Live-facing **Down** closes
 Live orders and mirror start.
 Practice is not muted by that strip. A Practice order is refused when
@@ -2283,7 +2283,7 @@ as a toast.
    qualified. A Live order while Ready or Degraded, without a matching
    qualification record, says **Decision model not qualified for Live. Use Practice.** A base checkpoint leaves Live
    unqualified. The decision model starts **Down** and does not invent Ready. Start it
-   from [Start decision model](#start-decision-model). Chat cannot place Live orders.
+   from [Start the decision model](#start-the-decision-model). Chat cannot place Live orders.
 2. **Not placed. Decision model allows up to N.** Nothing was placed. A clamp is
    only when the requested quantity is greater than the allowed one.
    The decision model does not auto-place. **Place N** sends that quantity through

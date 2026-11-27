@@ -535,7 +535,7 @@ around them.
 ### Decision model process
 
 Operator steps, the chip, and the reason codes are in
-[Start decision model](USER_GUIDE.md#start-decision-model). Desk place surfaces go through
+[Start the decision model](USER_GUIDE.md#start-the-decision-model). Desk place surfaces go through
 this admission. Place admission asks the decision model only after Down and
 the hard rules.
 The host is opt-in. Install and supervise it with the FlintTrade
