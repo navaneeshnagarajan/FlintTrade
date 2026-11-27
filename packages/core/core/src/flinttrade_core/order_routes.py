@@ -61,6 +61,10 @@ from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
 
+# HTTP backstop above the 10-per-second-per-exchange cap, so an NSE burst and
+# a BSE order in the same second reach the order rate limiter.
+_ORDER_ROUTE_USER_RATE = 30
+
 
 @dataclass
 class _LiveWriteProgress:
@@ -3394,6 +3398,45 @@ def _order_rule_refusal(results: list[Any]) -> tuple[Any, int] | None:
     ), 400
 
 
+def _order_rate_limiter() -> Any:
+    """The process order rate limiter, or a Practice-only fallback."""
+    router = current_app.config.get("BROKER_ROUTER")
+    limiter = getattr(router, "rate_limiter", None) if router is not None else None
+    if limiter is None:
+        limiter = current_app.config.get("ORDER_RATE_LIMITER")
+    if limiter is None:
+        from flinttrade_gateway.rate_limiter import BrokerRateLimiter  # noqa: PLC0415
+
+        limiter = BrokerRateLimiter({})
+        current_app.config["ORDER_RATE_LIMITER"] = limiter
+    return limiter
+
+
+def _order_rate_refusal(body: Mapping[str, Any], *, broker: str) -> tuple[Any, int] | None:
+    """Refuse the eleventh order in one second on one exchange, else None."""
+    from flinttrade_core.order_rules import OrderBudgetExceeded, results_payload  # noqa: PLC0415
+
+    limiter = _order_rate_limiter()
+    admit = getattr(limiter, "admit_order", None)
+    if not callable(admit):
+        return None
+    exchange = str(body.get("exchange") or "").strip() or None
+    try:
+        admit(broker, exchange=exchange)
+    except OrderBudgetExceeded as exc:
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(exc),
+                "code": "order_rule_blocked",
+                "dispatch_outcome": "refused_before_dispatch",
+                "retry_safe": False,
+                "rule_results": results_payload(exc.results),
+            }
+        ), int(exc.http_status)
+    return None
+
+
 def _with_rule_results(response: tuple[Any, int], results: list[Any]) -> tuple[Any, int]:
     """Attach warn and info results to a JSON order response."""
     from flinttrade_core.order_rules import results_payload  # noqa: PLC0415
@@ -3461,6 +3504,9 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
         practice_refusal = _order_rule_refusal(practice_results)
         if practice_refusal is not None:
             return practice_refusal
+        rate_refusal = _order_rate_refusal(payload_body, broker="practice")
+        if rate_refusal is not None:
+            return _with_rule_results(rate_refusal, practice_results)
         return _with_rule_results(_dispatch_practice_place(payload_body), practice_results)
     if not _is_live_mode_unlocked():
         return jsonify(
@@ -3561,7 +3607,7 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
 
 
 @orders_bp.route("/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
     """Place a regular order — maps to native broker ``placeorder``.
 
@@ -3650,7 +3696,7 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
 
 
 @orders_bp.route("/<broker>/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_order_routed(broker: str) -> tuple[Any, int]:
     """Place a LIVE order through the safety-gated, selector-bound router (G5).
 
@@ -3690,7 +3736,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def modify_order() -> tuple[Any, int]:
     """Modify an existing open order — maps to native broker ``modifyorder``.
 
@@ -3710,7 +3756,7 @@ def modify_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def modify_order_routed(broker: str) -> tuple[Any, int]:
     """Modify a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -3722,7 +3768,7 @@ def modify_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_order() -> tuple[Any, int]:
     """Cancel an open order — maps to native broker ``cancelorder``.
 
@@ -3739,7 +3785,7 @@ def cancel_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_order_routed(broker: str) -> tuple[Any, int]:
     """Cancel a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -3751,7 +3797,7 @@ def cancel_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel-all", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_all_orders() -> tuple[Any, int]:
     """Cancel all open orders — maps to native broker ``cancelallorder``.
 
@@ -3765,14 +3811,14 @@ def cancel_all_orders() -> tuple[Any, int]:
 
 
 @orders_bp.route("/options", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def options_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options")
 
 
 @orders_bp.route("/options-multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def options_multi_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options-multi")
@@ -3786,21 +3832,21 @@ def options_multi_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/gtt-place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_place_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-place")
 
 
 @orders_bp.route("/gtt-modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_modify_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-modify")
 
 
 @orders_bp.route("/gtt-cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_cancel_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-cancel")
@@ -4351,7 +4397,7 @@ def _check_legs_through_safety(
 
 
 @orders_bp.route("/forever", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_place() -> tuple[Any, int]:
     """Refuse a forever (GTT) place.
 
@@ -4378,7 +4424,7 @@ def forever_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_modify(order_id: str) -> tuple[Any, int]:
     """Modify a resting forever (GTT) order — gated ``modify_forever`` verb.
 
@@ -4435,7 +4481,7 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a resting forever (GTT) order — gated ``cancel_forever`` verb.
 
@@ -4484,7 +4530,7 @@ def super_order_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def super_order_modify(order_id: str) -> tuple[Any, int]:
     """Modify one leg of a pending super order — gated ``modify_super_order`` verb.
 
@@ -4557,7 +4603,7 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def super_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a super order or one leg — gated ``cancel_super_order`` verb.
 
@@ -4597,7 +4643,7 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_place() -> tuple[Any, int]:
     """Refuse a conditional-trigger place.
 
@@ -4626,7 +4672,7 @@ def trigger_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_modify(alert_id: str) -> tuple[Any, int]:
     """Modify a conditional trigger — gated ``modify_conditional_trigger`` verb.
 
@@ -4678,7 +4724,7 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_cancel(alert_id: str) -> tuple[Any, int]:
     """Cancel a conditional trigger — gated ``cancel_conditional_trigger`` verb."""
     payload, err = _require_live_payload(require_unlock=True)
@@ -4702,7 +4748,7 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def multi_order_place() -> tuple[Any, int]:
     """Refuse a batch place. Each leg is posted to ``/api/v1/orders/place``.
 
@@ -4730,7 +4776,7 @@ def multi_order_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def smart_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel one smart resource through broker-specific signed addressing.
 
@@ -4845,7 +4891,7 @@ _ADVANCED_STRATEGY_NAMES = {
 
 @orders_bp.route("/basket", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_basket() -> tuple[Any, int]:
     """Refuse a basket place. Each leg is posted to ``/api/v1/orders/place``.
 
@@ -4908,7 +4954,7 @@ def place_basket() -> tuple[Any, int]:
 
 @orders_bp.route("/split", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_split() -> tuple[Any, int]:
     """Refuse a split place. Each chunk is posted to ``/api/v1/orders/place``.
 

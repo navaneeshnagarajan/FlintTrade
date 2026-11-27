@@ -106,12 +106,10 @@ def _laya_ready_for_open_place() -> None:
 def _reset_rate_limiter(flask_app):
     """Refill the order-route token buckets before each test.
 
-    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10)
-    and Flask-Limiter's default 50/s. ``flask_app`` is module-scoped, so both
-    limiters accumulate state across every test in this file — dozens of order
-    POSTs share one bucket keyed by the test client's remote_addr and would 429
-    after the burst. Production keys per operator and never fires that many
-    orders in one second; tests just need a clean bucket per case.
+    The order routes carry ``@rate_limit("orders")`` and Flask-Limiter's
+    default 50/s. ``flask_app`` is module-scoped, so those limiters and the
+    per-exchange order rate limiter accumulate state across every test in this
+    file. Tests need a clean bucket per case.
     """
     limiter = flask_app.config.get("RATE_LIMITER")
     if limiter is not None:
@@ -119,6 +117,14 @@ def _reset_rate_limiter(flask_app):
     flask_limiter = flask_app.config.get("LIMITER")
     if flask_limiter is not None:
         flask_limiter.reset()
+    router = flask_app.config.get("BROKER_ROUTER")
+    for candidate in (
+        getattr(router, "rate_limiter", None) if router is not None else None,
+        flask_app.config.get("ORDER_RATE_LIMITER"),
+    ):
+        clear = getattr(candidate, "clear", None)
+        if callable(clear):
+            clear()
     yield
 
 
@@ -501,18 +507,12 @@ class TestMissingOrInvalidMode:
 
 
 class TestOrderRateLimiting:
-    """Phase 1 G10 — the reachable order path enforces a per-second rate limit.
+    """The place path refuses an eleventh order in one second on one exchange."""
 
-    SEBI-derived requirement: per-second order rate limiting before broker
-    submission on every order path. The ``orders`` bucket is 10/s per user
-    (100/s global). This test proves the limiter is actually wired to the core
-    ``/orders/place`` route and fires a 429 once the burst is exhausted — the
-    exact property that silently regressed for the login limiter (whose tests
-    skip because the decoration didn't fire). The ``_reset_rate_limiter``
-    autouse fixture gives this test a full burst to start from.
-    """
+    _RATE_TEXT = "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    _RATE_HEADLINE = f"Regulation · {_RATE_TEXT}"
 
-    def test_place_order_429s_after_the_per_second_burst(self, flask_app, client):
+    def _practice_fill(self, flask_app):
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-RL",
@@ -520,31 +520,41 @@ class TestOrderRateLimiting:
             "message": "Practice order filled",
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        return mock_sandbox
 
-        statuses = [
-            client.post(
+    def test_practice_eleventh_nse_order_is_refused_and_bse_is_not(self, flask_app, client):
+        sandbox = self._practice_fill(flask_app)
+        headers = _auth_headers(mode="practice")
+        for index in range(10):
+            response = client.post(
                 "/api/v1/orders/place",
                 json=_SAMPLE_ORDER_BODY,
-                headers=_auth_headers(mode="practice"),
-            ).status_code
-            for _ in range(20)
-        ]
-
-        # The 10-token burst lets the first orders through (200), then the
-        # limiter must start returning 429 — proof it is wired and enforcing.
-        assert 429 in statuses, f"order rate limit never fired across 20 rapid posts: {statuses}"
-        # Everything that was NOT rate-limited reached the sandbox and filled.
-        assert all(s in (200, 429) for s in statuses), statuses
-        assert statuses[0] == 200, "the very first order must not be throttled"
+                headers=headers,
+            )
+            assert response.status_code == 200, (index, response.get_json())
+        refused = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=headers,
+        )
+        assert refused.status_code == 429
+        payload = refused.get_json()
+        assert payload["code"] == "order_rule_blocked"
+        assert payload["message"] == self._RATE_HEADLINE
+        assert payload["rule_results"][0]["rule_id"] == "order-rate-threshold"
+        assert payload["rule_results"][0]["message"] == self._RATE_TEXT
+        assert payload["rule_results"][0]["level"] == "block"
+        other = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "exchange": "BSE", "symbol": "RELIANCE"},
+            headers=headers,
+        )
+        assert other.status_code == 200, other.get_json()
+        assert sandbox.place_order.call_count == 11
 
     def test_reset_gives_a_fresh_burst(self, flask_app, client):
-        """After reset (the autouse fixture), the first order is never 429 —
-        confirms the bucket genuinely refills between test cases rather than the
-        previous test's exhaustion leaking through the module-scoped app.
-        """
-        mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {"order_id": "SB-1", "status": "COMPLETE"}
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        """After reset, the first order is never 429."""
+        self._practice_fill(flask_app)
         resp = client.post(
             "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,

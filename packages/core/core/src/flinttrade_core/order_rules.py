@@ -60,8 +60,8 @@ CHECKS: frozenset[str] = frozenset(
         "market_band",
     }
 )
-# Checks that are not decided per order: the order throttle, the broker budget
-# counters and the Live switch read their rows directly.
+# Checks that are not decided per order: the order rate limiter, the broker
+# budget counters and the Live switch read their rows directly.
 NOT_PER_ORDER_CHECKS: frozenset[str] = frozenset(
     {"order_rate", "order_budget", "modification_cap", "live_acknowledgement"}
 )
@@ -746,6 +746,13 @@ class OrderBudgetExceeded(OrderRuleRefused):
     http_status = 429
 
 
+def order_rate_exceeded() -> OrderBudgetExceeded:
+    """Refusal for the eleventh order in one second on one exchange."""
+    row = rule_by_id("order-rate-threshold")
+    message = _fill(row.message, row.parameters)
+    return OrderBudgetExceeded([RuleResult(row.level, row.source, row.id, message)])
+
+
 # ---------------------------------------------------------------------------
 # Rows read directly: broker order budget and modification cap
 # ---------------------------------------------------------------------------
@@ -898,6 +905,7 @@ def rules_markdown() -> str:
 __all__ = [
     "OrderBudget",
     "OrderBudgetExceeded",
+    "order_rate_exceeded",
     "OrderFacts",
     "OrderRule",
     "OrderRuleRefused",

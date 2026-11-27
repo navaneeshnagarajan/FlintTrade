@@ -11,17 +11,20 @@ keeping latency tight (it only delays a call when genuinely over the limit).
 ``"quote"``. Only order buckets carry an exchange; data and quote buckets are
 per broker.
 Quote admission also consumes the generic data budget atomically. The
-``BrokerRouter`` calls ``await acquire(adapter_id, kind)`` before each dispatch —
-a purely throttling step that sits *below* the gate, so it can only slow a call,
-never skip the safety gate. The clock and sleep are injectable, so the buckets
-are tested deterministically without real time.
+``BrokerRouter`` calls :meth:`BrokerRateLimiter.admit_order` before each order
+write and ``await acquire(adapter_id, kind)`` before each data or quote call.
+Both sit below the gate, so they can only refuse or delay a call, never skip
+the safety gate. The clock and sleep are injectable, so the buckets are tested
+deterministically without real time.
 
-Order writes (place, modify and cancel share one ``"order"`` budget) are held to
-:data:`ORDER_RATE_LIMIT` per second for each broker on each exchange, so NSE
-and BSE orders through one broker each get their own 10 per second. NFO and CDS
-count as NSE, BFO and BCD as BSE. A modify or cancel whose exchange is unknown
-spends from both the NSE and the BSE budget of that broker, so it never takes
-either over the limit. A capability default, workspace override or settings change
+Order writes (place, modify and cancel share one ``"order"`` budget) are
+limited to :data:`ORDER_RATE_LIMIT` per second for each broker on each
+exchange, so NSE and BSE orders through one broker each get their own 10 per
+second. The eleventh order in that second is refused with the
+``order-rate-threshold`` message and is not delayed. NFO and CDS count as NSE,
+BFO and BCD count as BSE. A modify or cancel whose exchange is unknown spends
+from both the NSE and the BSE budget of that broker, so it never takes either
+over the limit. A capability default, workspace override or settings change
 can lower the limit but can never raise it or switch it off: a higher value,
 ``0`` or a missing value is clamped to the limit with a warning.
 """
@@ -217,6 +220,43 @@ class BrokerRateLimiter:
             raise ValueError("rate limits must be finite")
         return value
 
+    def clear(self) -> None:
+        """Drop every token bucket. Tests use this so cases do not share burst state."""
+        with self._lock:
+            self._buckets.clear()
+
+    def admit_order(self, broker_id: str, *, exchange: str | None = None) -> None:
+        """Consume one order token, or refuse with the published rate rule.
+
+        An order spends from the budget of its exchange (see :func:`order_venue`).
+        An order with no exchange spends from both the NSE and the BSE budget
+        of the broker and is refused unless both have a token.
+        """
+        from flinttrade_core.order_rules import order_rate_exceeded  # noqa: PLC0415
+
+        venue = order_venue(exchange)
+        with self._lock:
+            now = self._clock()
+            if venue is None:
+                keys = [(broker_id, "order", name) for name in _UNKNOWN_ORDER_VENUES]
+            else:
+                keys = [(broker_id, "order", venue)]
+            buckets = []
+            for key in keys:
+                rate = self._rate(broker_id, "order")
+                if rate <= 0:
+                    continue
+                bucket = self._buckets.get(key)
+                if bucket is None:
+                    bucket = _Bucket(rate, now)
+                    self._buckets[key] = bucket
+                bucket.refill(now)
+                if bucket.tokens + _TOKEN_EPSILON < 1.0:
+                    raise order_rate_exceeded()
+                buckets.append(bucket)
+            for bucket in buckets:
+                bucket.tokens -= 1.0
+
     async def acquire(
         self,
         broker_id: str,
@@ -225,11 +265,10 @@ class BrokerRateLimiter:
         exchange: str | None = None,
         before_retry: Callable[[], None] | None = None,
     ) -> None:
-        """Wait for and consume a token from every applicable budget.
+        """Consume a token from every applicable budget.
 
-        An order spends from the budget of its exchange (see :func:`order_venue`).
-        An order with no exchange spends from both the NSE and the BSE budget
-        of the broker and waits until both have a token.
+        An order is admitted or refused immediately (see :meth:`admit_order`).
+        Data and quote calls wait for a token.
 
         Quotes (including quote-backed depth) share both quote and generic data
         limits. Tokens are consumed together only when every bucket is ready.
@@ -241,8 +280,11 @@ class BrokerRateLimiter:
         spending tokens. Such waits recheck at least once per second, including
         fractional rates, so retired read grants do not wait through a queue.
         """
+        if kind == "order":
+            self.admit_order(broker_id, exchange=exchange)
+            return
         kinds = ("data", "quote") if kind == "quote" else (kind,)
-        venue = order_venue(exchange) if kind == "order" else ""
+        venue = ""
         while True:
             with self._lock:
                 now = self._clock()

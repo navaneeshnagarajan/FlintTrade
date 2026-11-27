@@ -650,13 +650,16 @@ in `packages/core/core/src/flinttrade_core/auth_state.py`.
 
 ## 5. Rate limits
 
-Native broker throttles are applied by `BrokerRouter` using each adapter’s
+Native broker throttles are applied by `BrokerRouter` using each adapter's
 capabilities and workspace overrides. Place, modify and cancel share a cap of
-10 per second per broker per exchange. A lower value applies. 0 or a value
-above 10 is used as 10, with a warning in the log. NFO and CDS count as NSE.
-BFO and BCD count as BSE. A data limit of 0 turns off FlintTrade's own limiter
-for that category, and broker limits still apply. The API Rate Limits panel
-shows "Data requests: 0 turns off this limit. Broker limits still apply."
+10 per second per broker per exchange. The eleventh order in that second is
+refused with `Regulation · Not placed. Limit is 10 orders per second per
+exchange. Retry in 1 second.` Practice uses the same cap. A lower value
+applies. 0 or a value above 10 is used as 10, with a warning in the log. NFO
+and CDS count as NSE. BFO and BCD count as BSE. A data limit of 0 turns off
+FlintTrade's own limiter for that category, and broker limits still apply. The
+API Rate Limits panel shows "Data requests: 0 turns off this limit. Broker
+limits still apply."
 Every Live write still needs a one-shot
 `SafetyContext` from `gate_order` or `gate_broker_write`.
 
@@ -847,7 +850,7 @@ Not every endpoint emits `code`:
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true`, issued by the Live switch `POST /v1/auth/live`. |
 | `exit_position_unreadable` | An exit ticket (`exit_only: true`) on `POST /api/v1/orders/place` or `POST /api/v1/orders/<broker>/place` when the open position cannot be read just before sending, in Practice or Live. HTTP 409. Body: `status: "error"`, `code: "exit_position_unreadable"`, `message` `Open position could not be read. Order not sent.` Nothing is sent. |
-| `order_rule_blocked` (HTTP 429) | A Live place or modify would exceed the broker's order budget. The broker router checks it after the safety layers and before the adapter call. Only Dhan has budget rows today: 10 orders per second, 250 per minute, 1,000 per hour, 7,000 per day, and 25 modifications per order. The body has the same fields as the HTTP 400 row, plus `affected_item`. `message` is `Dhan · Not placed. Limit is {limit} orders per {window}. Retry in {wait}.`, where `{window}` is `second`, `minute`, `hour` or `day` and `{wait}` reads like `1 second` or `35 seconds`. A 26th change to one order is `Dhan · This order has been modified 25 times. Place a new order.` The rows are listed in [Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md). This is not the `Rate limit exceeded` row below: that is FlintTrade's own per-route limit, with `retry_after_ms` and no `code`. |
+| `order_rule_blocked` (HTTP 429) | A place, modify or cancel would exceed 10 orders per second per exchange, or a broker order budget. The body has the same fields as the HTTP 400 row. A Live refusal also includes `affected_item`. When the per-exchange cap is hit, on Practice and Live, `message` is `Regulation · Not placed. Limit is 10 orders per second per exchange. Retry in 1 second.` The MCP order tools call the same `POST /api/v1/orders/place` endpoint and return that text. The cap is enforced by FlintTrade's order rate limiter, not by evaluating the row per order. A Live place or modify that would exceed Dhan's budget is checked in the broker router after the safety layers and before the adapter call: 10 orders per second, 250 per minute, 1,000 per hour, 7,000 per day, and 25 modifications per order. That `message` is `Dhan · Not placed. Limit is {limit} orders per {window}. Retry in {wait}.`, where `{window}` is `second`, `minute`, `hour` or `day` and `{wait}` reads like `1 second` or `35 seconds`. A 26th change to one order is `Dhan · This order has been modified 25 times. Place a new order.` The rows are listed in [Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md). This is not the `Rate limit exceeded` row below: that is FlintTrade's own per-route HTTP backstop, with `retry_after_ms` and no `code`. |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
 | Safety `message` | A safety layer rejected the order; the message names the layer. There is no `SAFETY_LAYER_BLOCK` code. Operator and automate place reach this only after `Laya.admit` allows the requested quantity. |
 

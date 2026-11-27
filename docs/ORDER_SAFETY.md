@@ -472,7 +472,7 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Orders | 10 per second per broker per exchange | `BrokerRouter`. Place, modify and cancel share one budget. A lower value applies. 0 or a value above 10 is used as 10, with a warning in the log. |
+| Orders | 10 per second per broker per exchange | `BrokerRouter` and the Practice place path. Place, modify and cancel share one budget. The eleventh order in that second is refused with `Not placed. Limit is 10 orders per second per exchange. Retry in 1 second.` A lower value applies. 0 or a value above 10 is used as 10, with a warning in the log. |
 | Data | Per broker | A data limit of 0 turns off FlintTrade's own limiter for that category. "Data requests: 0 turns off this limit. Broker limits still apply." |
 | Smart orders | 2 per second per signed-in user | HTTP 429 from `@rate_limit` on smart-route start. The process limit is 20 per second. Each child order uses the Orders budget. |
 

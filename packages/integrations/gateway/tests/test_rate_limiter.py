@@ -6,9 +6,22 @@ import pytest
 
 from types import SimpleNamespace
 
+from flinttrade_core.order_rules import OrderBudgetExceeded
 from flinttrade_gateway.rate_limiter import ORDER_RATE_LIMIT, BrokerRateLimiter
 
 pytestmark = pytest.mark.unit
+
+ORDER_RATE_TEXT = "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+ORDER_RATE_HEADLINE = f"Regulation · {ORDER_RATE_TEXT}"
+
+
+def _assert_order_rate_refused(excinfo) -> None:
+    error = excinfo.value
+    assert str(error) == ORDER_RATE_HEADLINE
+    assert error.results[0].rule_id == "order-rate-threshold"
+    assert error.results[0].message == ORDER_RATE_TEXT
+    assert error.results[0].level == "block"
+
 
 
 def _cap(order=None, data=None):
@@ -47,8 +60,10 @@ async def test_orders_are_held_to_ten_per_second_without_configured_limits():
     for _ in range(10):
         await rl.acquire("dhan", "order")
     assert clock.slept == []
-    await rl.acquire("dhan", "order")
-    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order")
+    _assert_order_rate_refused(excinfo)
+    assert clock.slept == []
 
 
 @pytest.mark.parametrize("configured", [20, 0, -1])
@@ -79,21 +94,29 @@ def test_settings_change_cannot_raise_or_disable_the_order_limit(configured):
 async def test_override_of_twenty_still_admits_ten_orders_per_second():
     clock = _FakeClock()
     rl = BrokerRateLimiter({"dhan": {"order": 20.0}}, clock=clock.time, sleep=clock.sleep)
-    for _ in range(20):
+    for _ in range(10):
         await rl.acquire("dhan", "order")
-    assert clock.now == pytest.approx(1.0, abs=1e-6)
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order")
+    _assert_order_rate_refused(excinfo)
+    clock.now += 1.0
+    await rl.acquire("dhan", "order")
+    assert clock.slept == []
 
 
 @pytest.mark.asyncio
-async def test_throttles_once_burst_is_exhausted():
+async def test_refuses_once_the_order_burst_is_exhausted():
     clock = _FakeClock()
-    # 2 orders/sec: a burst of 2 is free, the 3rd waits ~0.5s for a refill.
     rl = BrokerRateLimiter({"dhan": {"order": 2.0}}, clock=clock.time, sleep=clock.sleep)
     await rl.acquire("dhan", "order")
     await rl.acquire("dhan", "order")
-    assert clock.slept == []  # burst consumed, no wait yet
+    assert clock.slept == []
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order")
+    _assert_order_rate_refused(excinfo)
+    clock.now += 0.5
     await rl.acquire("dhan", "order")
-    assert len(clock.slept) == 1 and clock.slept[0] == pytest.approx(0.5, abs=1e-6)
+    assert clock.slept == []
 
 
 @pytest.mark.asyncio
@@ -167,8 +190,10 @@ async def test_override_takes_effect_on_the_next_acquire():
     await rl.acquire("x", "order")
     rl.apply_override("x", order=1.0)
     await rl.acquire("x", "order")  # Existing credit is capped to the new capacity.
-    await rl.acquire("x", "order")
-    assert clock.slept == [1.0]
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("x", "order")
+    _assert_order_rate_refused(excinfo)
+    assert clock.slept == []
 
 
 @pytest.mark.asyncio
@@ -217,11 +242,11 @@ def test_concurrent_event_loops_share_one_token_budget():
     from tests.mocks.rate_limit_clock import RateLimitClock
 
     clock = RateLimitClock()
-    limiter = BrokerRateLimiter({"dhan": {"order": 1}}, clock=clock.time, sleep=clock.sleep)
-    asyncio.run(limiter.acquire("dhan"))
+    limiter = BrokerRateLimiter({"dhan": {"data": 1}}, clock=clock.time, sleep=clock.sleep)
+    asyncio.run(limiter.acquire("dhan", "data"))
 
     async def acquire():
-        await asyncio.wait_for(limiter.acquire("dhan"), timeout=5)
+        await asyncio.wait_for(limiter.acquire("dhan", "data"), timeout=5)
         clock.admitted()
 
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -387,8 +412,26 @@ async def test_nse_and_bse_each_get_ten_orders_per_second_per_broker():
         await rl.acquire("dhan", "order", exchange="BSE")
         await rl.acquire("kotakneo", "order", exchange="NSE")
     assert clock.slept == []
-    await rl.acquire("dhan", "order", exchange="BSE")
-    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order", exchange="BSE")
+    _assert_order_rate_refused(excinfo)
+    with pytest.raises(OrderBudgetExceeded):
+        await rl.acquire("dhan", "order", exchange="NSE")
+    with pytest.raises(OrderBudgetExceeded):
+        await rl.acquire("kotakneo", "order", exchange="NSE")
+    assert clock.slept == []
+
+
+async def test_an_eleventh_order_on_one_exchange_leaves_the_other_unaffected():
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(10):
+        rl.admit_order("dhan", exchange="NSE")
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        rl.admit_order("dhan", exchange="NSE")
+    _assert_order_rate_refused(excinfo)
+    rl.admit_order("dhan", exchange="BSE")
+    assert clock.slept == []
 
 
 @pytest.mark.asyncio
@@ -400,8 +443,10 @@ async def test_derivatives_orders_share_the_budget_of_their_exchange(cash, deriv
         await rl.acquire("dhan", "order", exchange=cash)
         await rl.acquire("dhan", "order", exchange=derivatives.lower())
     assert clock.slept == []
-    await rl.acquire("dhan", "order", exchange=derivatives)
-    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order", exchange=derivatives)
+    _assert_order_rate_refused(excinfo)
+    assert clock.slept == []
 
 
 @pytest.mark.asyncio
@@ -415,12 +460,14 @@ async def test_order_override_applies_to_every_exchange_bucket():
 
 
 @pytest.mark.asyncio
-async def test_an_order_with_no_exchange_waits_for_both_nse_and_bse():
+async def test_an_order_with_no_exchange_is_refused_when_either_budget_is_spent():
     clock = _FakeClock()
     rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
     for _ in range(10):
         await rl.acquire("dhan", "order", exchange="BSE")
     assert clock.slept == []
-    await rl.acquire("dhan", "order")
-    assert clock.slept == [pytest.approx(0.1, abs=1e-6)]
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        await rl.acquire("dhan", "order")
+    _assert_order_rate_refused(excinfo)
     assert {key[2] for key in rl._buckets} == {"NSE", "BSE"}
+    assert clock.slept == []

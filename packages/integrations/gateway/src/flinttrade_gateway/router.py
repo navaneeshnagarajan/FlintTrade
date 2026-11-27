@@ -536,9 +536,9 @@ class BrokerRouter:
         # The parsed workspace.json routing config (contract §13). Optional so
         # tests and the legacy explicit-target form work without one.
         self._config = config
-        # Optional per-broker API rate limiter. A pure throttle that runs BELOW
-        # the gate (after verify + gate-consume), so it can only delay a dispatch,
-        # never bypass safety. None → no throttle (unchanged behaviour).
+        # Optional per-broker API rate limiter. It runs below the gate (after
+        # verify + gate-consume), so it can only refuse or delay a dispatch,
+        # never bypass safety. None means no limiter.
         self._rate_limiter = rate_limiter
         # Exchange of each order this router placed, keyed by
         # (adapter_id, account_id, broker order id). A modify or cancel without
@@ -964,7 +964,11 @@ class BrokerRouter:
             return
         exchange = self._order_exchange(order) or self._original_order_exchange(adapter_id, account_id, order)
         # A write whose exchange is still unknown is charged to both the NSE
-        # and the BSE budget of the broker (see BrokerRateLimiter.acquire).
+        # and the BSE budget of the broker (see BrokerRateLimiter.admit_order).
+        admit = getattr(self._rate_limiter, "admit_order", None)
+        if callable(admit):
+            admit(adapter_id, exchange=exchange or None)
+            return
         await self._rate_limiter.acquire(adapter_id, kind, exchange=exchange or None)
 
     def _original_order_exchange(self, adapter_id: str, account_id: str | None, order: Any) -> str:
