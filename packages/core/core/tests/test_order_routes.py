@@ -862,6 +862,84 @@ class TestPracticeMode:
         assert resp.get_json()["message"] == "The last price is outside the limit."
         mock_sandbox.place_order.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "last,action,net_qty",
+        [
+            (0.05, "SELL", 75),
+            (0.10, "SELL", 75),
+            (41.3, "SELL", 75),
+            (100.0, "SELL", 75),
+            (150.0, "SELL", 75),
+            (0.05, "BUY", -75),
+            (41.3, "BUY", -75),
+            (150.0, "BUY", -75),
+        ],
+    )
+    def test_practice_exit_at_the_square_off_cap_fills_without_tick_capture(
+        self, flask_app, client, monkeypatch, last, action, net_qty
+    ):
+        """A Square off / Exit all cap is taken from the last price, so that last still honours the limit."""
+        from datetime import datetime, timedelta
+        from decimal import Decimal
+        from zoneinfo import ZoneInfo
+
+        from flinttrade_core.order_rules import market_price_cap
+
+        cap = market_price_cap(Decimal(str(last)), action)
+        limit = max(1, round(float(cap) * 20 + 1e-7)) / 20
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [{"ts": now - timedelta(days=1), "prev_close": last, "close": last}]
+
+        class Open:
+            def session_active(self, exchange, symbol=None):
+                return True
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "product": "MIS",
+                "net_qty": net_qty,
+            },
+        ]
+        mock_sandbox.get_orders.return_value = []
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-CAP",
+            "status": "COMPLETE",
+            "message": "Practice order filled",
+        }
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Open())
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "action": action,
+                "order_type": "LIMIT",
+                "price": limit,
+                "quantity": 75,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json().get("message") != "The last price is outside the limit."
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == limit
+        assert kwargs["fill_price"] == last
+        assert kwargs["exit_only"] is True
+
     def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {

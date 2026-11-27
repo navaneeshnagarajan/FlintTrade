@@ -616,6 +616,23 @@ def test_an_option_exit_limit_at_the_cap_is_not_refused(broker: str, broker_name
     assert all(result.rule_id != "options-market-order-not-sent" for result in results)
 
 
+def test_option_square_off_cap_includes_the_last_price() -> None:
+    """Square off and Exit all price the limit from last, so last never sits outside it."""
+
+    def option_exit_limit(last: Decimal, action: str) -> Decimal:
+        cap = market_price_cap(last, action)
+        ticks = max(1, round(float(cap) * 20 + 1e-7))
+        return Decimal(str(ticks / 20))
+
+    last = Decimal("0.05")
+    while last <= Decimal("200.00"):
+        sell = option_exit_limit(last, "SELL")
+        buy = option_exit_limit(last, "BUY")
+        assert sell <= last, (last, sell)
+        assert buy >= last, (last, buy)
+        last += Decimal("0.05")
+
+
 def test_docs_page_carries_the_current_rules_table() -> None:
     from pathlib import Path
 
