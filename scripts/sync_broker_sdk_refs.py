@@ -194,6 +194,13 @@ def sync_git_mirror(source: BrokerSdkSource, audit_root: Path) -> dict[str, str]
         result["latest_stable_tag"] = latest
         result["release_commit"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{commit}}"])
         result["release_tree"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{tree}}"])
+    else:
+        latest = latest_final_git_tag(_run(["git", "-C", str(repo), "tag", "--list"]).splitlines())
+        if latest:
+            result["latest_final_tag"] = latest
+            result["latest_final_commit"] = _run(
+                ["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{commit}}"]
+            )
     return result
 
 
@@ -214,6 +221,72 @@ def latest_pypi_version(package: str, opener: UrlOpener = _open_url) -> str:
     if not version:
         raise RuntimeError(f"PyPI metadata for {package} did not include info.version")
     return version
+
+
+_FINAL_RELEASE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+_PRE_RELEASE_RE = re.compile(
+    r"(?i)(?:(?:a|b|rc|c|alpha|beta|preview|pre)\d*|(?:\.dev|dev)\d*)"
+)
+
+
+def _is_prerelease(version: str) -> bool:
+    """Return True when ``version`` carries a pre-release or dev suffix."""
+
+    return _PRE_RELEASE_RE.search(version) is not None
+
+
+def _final_release_key(version: str) -> tuple[int, int, int] | None:
+    """Return a sort key for a final ``X.Y.Z`` version, else ``None``."""
+
+    if _is_prerelease(version):
+        return None
+    match = _FINAL_RELEASE_RE.fullmatch(version)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def latest_final_git_tag(tags: list[str]) -> str | None:
+    """Return the newest final release tag, skipping pre-releases."""
+
+    ranked: list[tuple[tuple[int, int, int], str]] = []
+    for raw in tags:
+        tag = raw.strip()
+        if not tag:
+            continue
+        version = tag[1:] if tag.startswith(("v", "V")) else tag
+        key = _final_release_key(version)
+        if key is not None:
+            ranked.append((key, tag))
+    if not ranked:
+        return None
+    return max(ranked)[1]
+
+
+def upstream_pypi_version(data: Mapping[str, Any], locked: str) -> str:
+    """Return the newest final version a pin must match to count as current.
+
+    Pre-releases (a, b, rc, dev) are ignored. A final pin stays current when a
+    newer candidate exists, and a leading release candidate is not treated as
+    the current version.
+
+    ``locked`` is accepted for call-site compatibility; freshness is taken from
+    the newest final release only.
+    """
+
+    versions: list[str] = []
+    info = str((data.get("info") or {}).get("version") or "").strip()
+    if info:
+        versions.append(info)
+    for version, files in (data.get("releases") or {}).items():
+        if isinstance(files, list) and files and not all(file.get("yanked") for file in files):
+            versions.append(str(version))
+    ranked = [(key, version) for version in versions if (key := _final_release_key(version)) is not None]
+    if ranked:
+        return max(ranked)[1]
+    if info:
+        return info
+    raise RuntimeError("PyPI metadata did not include a usable version")
 
 
 def select_pypi_artifact(files: list[Mapping[str, Any]]) -> Mapping[str, Any]:
@@ -328,7 +401,7 @@ def build_readme(manifest: dict[str, Any]) -> str:
                 if entry["package"] == "kotakneoapi":
                     status = "current" if entry["git_current"] else "locked behind the pinned release"
                 else:
-                    status = "current" if entry["git_current"] else "locked behind upstream HEAD"
+                    status = "current" if entry["git_current"] else "locked behind the latest final release"
                 lines.append(f"  - git status: {status}")
         if entry.get("pypi"):
             lines.append(f"  - pypi: {entry['pypi']['path']}")
@@ -410,7 +483,9 @@ def sync(
                             {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
                         )
             elif entry["source_commit"]:
-                current = str(git.get("head", "")) == entry["source_commit"]
+                # Freshness follows the latest final release tag, not default-branch HEAD.
+                upstream = str(git.get("latest_final_commit") or git.get("head", ""))
+                current = upstream == entry["source_commit"]
                 sdk_record["git_current"] = current
                 if not current:
                     manifest["drift"].append(
@@ -418,12 +493,12 @@ def sync(
                             "package": entry["name"],
                             "source": "git",
                             "locked": entry["source_commit"],
-                            "upstream": str(git.get("head", "")),
+                            "upstream": upstream,
                         }
                     )
         if source.pypi_name:
             release_version = entry.get("release_version", entry["version"])
-            latest = latest_pypi_version(source.pypi_name, opener)
+            latest = upstream_pypi_version(pypi_release_json(source.pypi_name, opener), release_version)
             sdk_record["pypi_latest_version"] = latest
             sdk_record["pypi_current"] = latest == release_version
             if latest != release_version:

@@ -860,7 +860,7 @@ kiwisolver==1.5.1 \
     --hash=sha256:f9b1c4900736e489a812c529100de4b8fb617d4db075e931e213c57424b83d9b \
     --hash=sha256:fc271a6f0a2126958f4090e5507b9da5848927dae331f8f763bd4aa642b3d2cd
     # via matplotlib
-kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3
+kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@62cf511106a0810b9ee9afb011230a34f3a12fcc
     # via flinttrade-gateway
 lets-be-rational==1.1.2 \
     --hash=sha256:cdd55b3e6504be8a2006eedaca7e56c7b9ccdffe9b7b1ad61f06bf8f5552e3aa \
@@ -2168,7 +2168,7 @@ tzlocal==5.4.4 \
     # via
     #   apscheduler
     #   dateparser
-upstox-python-sdk @ git+https://github.com/upstox/upstox-python.git@d88a12ef5738a4c8d71f3b88eb7b79a359277c9d
+upstox-python-sdk @ git+https://github.com/upstox/upstox-python.git@e3989085d2bf377831bde08dd683fe03c6d3414c
     # via flinttrade-gateway
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \

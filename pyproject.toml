@@ -7,7 +7,7 @@ constraint-dependencies = ["plotly==6.9.0"]
 # `pip install --require-hashes -r requirements.lock`. The resulting advisory
 # is time-limited in supply-chain/pip-audit-allowlist.yml.
 
-# Kotak v3 runtime and release baseline both follow the pinned v3.0.9
+# Kotak v3 runtime and release baseline both follow the pinned v3.0.13
 # commit in brokers.lock. Freshness compares that release, not default-branch HEAD.
 build-constraint-dependencies = [
     "packaging==26.3",
@@ -52,9 +52,9 @@ dev = [
 ]
 
 [tool.uv.sources]
-upstox-python-sdk = { git = "https://github.com/upstox/upstox-python.git", rev = "d88a12ef5738a4c8d71f3b88eb7b79a359277c9d" }
+upstox-python-sdk = { git = "https://github.com/upstox/upstox-python.git", rev = "e3989085d2bf377831bde08dd683fe03c6d3414c" }
 
-kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3" }
+kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "62cf511106a0810b9ee9afb011230a34f3a12fcc" }
 flinttrade-ai = { workspace = true }
 flinttrade-automation = { workspace = true }
 flinttrade-backtest = { workspace = true }
