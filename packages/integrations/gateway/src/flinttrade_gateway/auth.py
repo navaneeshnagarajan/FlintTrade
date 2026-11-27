@@ -282,7 +282,10 @@ def _rate_limit_generation_lease(handler: Any) -> Any:
 @gateway_bp.route("/rate-limits", methods=["PUT"])
 @_rate_limit_generation_lease
 def update_rate_limits() -> Any:
-    """Set a broker's order/data API rate limit (requests/sec; 0 = unlimited).
+    """Set a broker's order/data API rate limit (requests/sec).
+
+    ``0`` means unlimited for data. The order rate is capped at 10 per second
+    per exchange: a higher value or ``0`` is saved and applied as 10.
 
     Body: ``{ "broker_id": str, "order"?: number, "data"?: number }``. The change
     is applied live to the running limiter AND persisted to workspace.json
@@ -299,6 +302,10 @@ def update_rate_limits() -> Any:
         return jsonify({"status": "error", "message": "order/data must be non-negative numbers"}), 400
     if order is None and data is None:
         return jsonify({"status": "error", "message": "provide at least one of order/data"}), 400
+    if order is not None:
+        from .rate_limiter import cap_order_rate  # noqa: PLC0415
+
+        order = cap_order_rate(order, broker_id=broker_id)
 
     # Persist first: a rejected authority update must never alter live limits.
     limiter = _live_rate_limiter()

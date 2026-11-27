@@ -230,8 +230,9 @@ def test_frozen_clock_21_call_http_burst_uses_real_sandbox(tmp_path: Path) -> No
 def _frozen_place_burst(
     tmp_path: Path,
     headers_for_index: Callable[[int], dict[str, str]],
+    calls: int = 21,
 ) -> tuple[Flask, list[int]]:
-    """POST /place 21 times under a frozen clock; return (app, statuses).
+    """POST /place ``calls`` times under a frozen clock; return (app, statuses).
 
     Frozen time is an hour ahead so a newly created per-user bucket (whose
     ``last_refill`` default_factory still hits the real clock) starts full
@@ -243,7 +244,7 @@ def _frozen_place_burst(
         app.config["RATE_LIMITER"].reset()
         client = app.test_client()
         statuses: list[int] = []
-        for index in range(21):
+        for index in range(calls):
             payload = {
                 **_PRACTICE_BODY,
                 "price": 100.0 + index,
@@ -303,9 +304,9 @@ def test_invalid_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Path
             "X-User-ID": f"forged-operator-{index}",
         }
 
-    app, statuses = _frozen_place_burst(tmp_path, headers_for_index)
-    assert statuses.count(401) == 10
-    assert statuses.count(429) == 11
+    app, statuses = _frozen_place_burst(tmp_path, headers_for_index, calls=31)
+    assert statuses.count(401) == 30
+    assert statuses.count(429) == 1
     assert set(statuses) <= {401, 429}
     assert app.config["DATA_SANDBOX_ENGINE"].get_orders() == []
     assert app.config["BROKER_ROUTER"].accesses == []
@@ -321,9 +322,9 @@ def test_missing_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Path
             "X-User-ID": f"forged-operator-{index}",
         }
 
-    app, statuses = _frozen_place_burst(tmp_path, headers_for_index)
-    assert statuses.count(401) == 10
-    assert statuses.count(429) == 11
+    app, statuses = _frozen_place_burst(tmp_path, headers_for_index, calls=31)
+    assert statuses.count(401) == 30
+    assert statuses.count(429) == 1
     assert set(statuses) <= {401, 429}
     assert app.config["DATA_SANDBOX_ENGINE"].get_orders() == []
     assert app.config["BROKER_ROUTER"].accesses == []

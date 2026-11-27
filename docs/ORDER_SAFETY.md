@@ -472,10 +472,11 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Smart orders | 2 per second | Same split: proxy 429 plus client-side throttle. |
+| Orders | 10 per second per broker per exchange | `BrokerRouter` in Live, and the Practice order routes (place, modify, cancel). Place, modify and cancel share one budget. The eleventh in that second is refused with HTTP 429 `order_rule_blocked`, and the first words name the action: `Regulation · Not placed. Limit is 10 orders per second per exchange. Retry in 1 second.`, `Regulation · Not modified. Limit is 10 orders per second per exchange. Retry in 1 second.` or `Regulation · Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second.` Practice and Live use the same cap; Practice counts against its own budget. A lower value applies. 0 or a value above 10 is used as 10, with a warning in the log. |
+| Data | Per broker | A data limit of 0 turns off FlintTrade's own limiter for that category. "Data requests: 0 turns off this limit. Broker limits still apply." |
+| Smart orders | 2 per second per signed-in user | HTTP 429 from `@rate_limit` on smart-route start. The process limit is 20 per second. Each child order uses the Orders budget. |
 
-Limits apply across configured exchanges for the running FlintTrade instance.
-Operators should also configure any limits available in their broker dashboard.
+NFO and CDS count as NSE. BFO and BCD count as BSE. The order budget is per broker and per exchange. Operators should also configure any limits available in their broker dashboard.
 
 ## Sessions And Credentials
 

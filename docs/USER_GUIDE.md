@@ -867,7 +867,7 @@ line shows its source, for example
 block result is red and keeps the order button disabled. A warning is amber
 and keeps it enabled. **+N** opens the rest of the list, each row prefixed by
 its source. The server refuses a blocked order with HTTP 400
-`order_rule_blocked`, or HTTP 429 when a broker order-rate window is full. See
+`order_rule_blocked`, or HTTP 429 when an order-rate window is full. See
 [API error responses](API.md#8-error-responses).
 
 **Options.** An option order is a limit or stop-limit order. On the Order Pad,

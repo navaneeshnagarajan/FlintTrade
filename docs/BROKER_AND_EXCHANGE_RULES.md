@@ -7,7 +7,7 @@ sandbox, and backtests.
 
 - **Block** rules stop the order. The ticket shows the message on its reserved
   line and Place stays disabled. The server refuses the same order with HTTP 400
-  (`order_rule_blocked`), or HTTP 429 when a broker order-rate window is full.
+  (`order_rule_blocked`), or HTTP 429 when an order-rate window is full.
 - **Warn** rules keep Place enabled and show the message on the same line.
 - **Info** is shown, never blocks.
 - A rule applies from its effective date. A rule with an end date stops applying
@@ -41,7 +41,7 @@ or the wait before the next order).
 | `bse-lpp-sensex-expiry-day` | Warns | BSE · all brokers · options · LIMIT, SL · SENSEX · expiry day | 2026-03-12 | On SENSEX expiry day the price protection range for low-priced options narrows to ₹10. | Price may be outside the exchange band (₹{low}–₹{high}). |
 | `bse-limit-price-protection` | Warns | BSE · all brokers · options · LIMIT, SL | 2025-12-01 | BSE rejects limit orders outside its price protection range. | Price may be outside the exchange band (₹{low}–₹{high}). |
 | `nse-limit-price-protection-options` | Warns | NSE · all brokers · options · LIMIT, SL | 2026-04-28 | NSE rejects option limit orders priced too far from the last traded price. | Price may be outside the exchange band (₹{low}–₹{high}). |
-| `order-rate-threshold` | Info | all exchanges · all brokers · all instruments | 2026-04-01 | Up to 10 orders per second per exchange. Higher rates need exchange registration. | Limit is 10 orders per second per exchange. |
+| `order-rate-threshold` | Blocks | all exchanges · all brokers · all instruments | 2026-04-01 | Up to 10 orders per second per exchange. Higher rates need exchange registration. | Not placed. Limit is 10 orders per second per exchange. Retry in 1 second. |
 | `self-built-algo-undertaking` | Warns | all exchanges · all brokers · all instruments | 2026-11-20 | Live API trading requires a client undertaking to the broker that the strategy is self-built. Losses from its logic are outside the exchange grievance process. | Orders will be sent from this computer through your broker account. Losses from your own strategy or automation aren't covered by the exchange grievance process. |
 | `kotak-market-order-no-ltp` | Blocks | all exchanges · Kotak Neo · options · MARKET | 2026-04-01 | Kotak rejects market orders on contracts with no traded price for the day. | This contract hasn't traded today. Use a limit price. |
 | `dhan-order-rate-limits` | Blocks | all exchanges · Dhan · all instruments | 2026-04-01 | Dhan limits orders to 10 per second, 250 per minute, 1,000 per hour and 7,000 per day, with 25 modifications per order. | Not placed. Limit is {limit} orders per {window}. Retry in {wait}. |

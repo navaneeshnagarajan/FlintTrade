@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import pytest
 
 from flinttrade_core.exceptions import BrokerError, SafetyBypassError
+from flinttrade_core.order_rules import OrderBudgetExceeded, order_rate_exceeded
 from flinttrade_engine.local_state_provider import (
     DISPATCH_OUTCOME_UNKNOWN,
     OrderLifecycleLedger,
@@ -26,6 +27,7 @@ from flinttrade_engine.safety import (
 )
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.dhan import _ROUTER_TOKEN
+from flinttrade_gateway.rate_limiter import BrokerRateLimiter, order_venue
 from flinttrade_gateway.router import BrokerRouter
 
 SECRET = b"0123456789abcdef0123456789abcdef"
@@ -202,7 +204,7 @@ class _BlockingLimiter:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def acquire(self, _broker_id: str, _kind: str) -> None:
+    async def acquire(self, _broker_id: str, _kind: str, **_kwargs: object) -> None:
         self.entered.set()
         await self.release.wait()
 
@@ -557,10 +559,10 @@ async def test_rate_limiter_throttle_runs_before_dispatch(*, backend_lease_facto
     the broker call, and can only delay (never bypass) a dispatch."""
     class _SpyLimiter:
         def __init__(self) -> None:
-            self.acquired: list[tuple[str, str]] = []
+            self.acquired: list[tuple[str, str, str | None]] = []
 
-        async def acquire(self, broker_id: str, kind: str) -> None:
-            self.acquired.append((broker_id, kind))
+        async def acquire(self, broker_id: str, kind: str, *, exchange: str | None = None) -> None:
+            self.acquired.append((broker_id, kind, exchange))
 
     adapter = _FakeAdapter()
     limiter = _SpyLimiter()
@@ -572,7 +574,7 @@ async def test_rate_limiter_throttle_runs_before_dispatch(*, backend_lease_facto
     order = _order()
     ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     await router.place_order(_request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx)
-    assert limiter.acquired == [("dhan", "order")]
+    assert limiter.acquired == [("dhan", "order", order.exchange)]
     assert adapter.placed == [order]  # throttle did not block the (gated) dispatch
 
 
@@ -901,4 +903,115 @@ async def test_cancel_order_rejects_read_only_session(*, backend_lease_factory) 
             order_id="OID-9",
             safety_ctx=ctx,
         )
+    assert adapter.cancelled == []
+
+
+class _ExchangeSpyLimiter:
+    def __init__(self) -> None:
+        self.orders: list[str | None] = []
+
+    async def acquire(self, _broker_id: str, kind: str, *, exchange: str | None = None) -> None:
+        if kind == "order":
+            self.orders.append(exchange)
+
+
+async def _place(router: BrokerRouter, exchange: str, *, backend_lease_factory) -> str:
+    order = types.SimpleNamespace(symbol="NIFTY26DEC24000CE", quantity=65, side="BUY", exchange=exchange)
+    return await router.place_order(
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order,
+        safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+
+async def _modify(router: BrokerRouter, order_id: str, *, backend_lease_factory) -> None:
+    order = {"_op": "modify", "order_id": order_id, "price": "100"}
+    await router.modify_order(
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, order_id=order_id,
+        changes={"price": "100"}, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+
+async def _cancel(router: BrokerRouter, order_id: str, *, backend_lease_factory) -> None:
+    order = {"_op": "cancel", "order_id": order_id}
+    await router.cancel_order(
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, order_id=order_id,
+        safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+
+async def test_modify_and_cancel_of_an_nfo_order_use_the_nse_budget(*, backend_lease_factory) -> None:
+    clock = types.SimpleNamespace(now=0.0)
+
+    async def _sleep(seconds: float) -> None:
+        clock.now += seconds
+
+    limiter = BrokerRateLimiter({}, clock=lambda: clock.now, sleep=_sleep)
+    router = _router(_FakeAdapter(), rate_limiter=limiter, backend_lease_factory=backend_lease_factory)
+    order_id = await _place(router, "NFO", backend_lease_factory=backend_lease_factory)
+    await _modify(router, order_id, backend_lease_factory=backend_lease_factory)
+    await _cancel(router, order_id, backend_lease_factory=backend_lease_factory)
+
+    order_buckets = {key[2]: bucket.tokens for key, bucket in limiter._buckets.items() if key[1] == "order"}
+    assert order_buckets == {"NSE": pytest.approx(7.0)}
+
+
+async def test_cancel_of_a_bfo_order_uses_the_bse_budget(*, backend_lease_factory) -> None:
+    limiter = _ExchangeSpyLimiter()
+    router = _router(_FakeAdapter(), rate_limiter=limiter, backend_lease_factory=backend_lease_factory)
+    order_id = await _place(router, "BFO", backend_lease_factory=backend_lease_factory)
+    await _cancel(router, order_id, backend_lease_factory=backend_lease_factory)
+    assert limiter.orders == ["BFO", "BFO"]
+    assert order_venue(limiter.orders[-1]) == "BSE"
+
+
+async def test_cancel_of_an_unknown_order_spends_both_nse_and_bse(*, backend_lease_factory) -> None:
+    clock = types.SimpleNamespace(now=0.0)
+
+    async def _sleep(seconds: float) -> None:
+        clock.now += seconds
+
+    limiter = BrokerRateLimiter({}, clock=lambda: clock.now, sleep=_sleep)
+    router = _router(_FakeAdapter(), rate_limiter=limiter, backend_lease_factory=backend_lease_factory)
+    await _cancel(router, "OID-NOT-PLACED-HERE", backend_lease_factory=backend_lease_factory)
+
+    order_buckets = {key[2]: bucket.tokens for key, bucket in limiter._buckets.items() if key[1] == "order"}
+    assert order_buckets == {"NSE": pytest.approx(9.0), "BSE": pytest.approx(9.0)}
+
+
+async def test_live_modify_and_cancel_throttle_refusals_use_action_messages(
+    *, backend_lease_factory
+) -> None:
+    class _RefuseLimiter:
+        def admit_order(self, broker_id: str, *, exchange=None, action: str = "place") -> None:
+            raise order_rate_exceeded(action=action)
+
+    adapter = _FakeAdapter()
+    router = _router(adapter, rate_limiter=_RefuseLimiter(), backend_lease_factory=backend_lease_factory)
+
+    place_order = _order()
+    with pytest.raises(OrderBudgetExceeded) as place:
+        await router.place_order(
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=place_order,
+            safety_ctx=_mint(place_order, backend_lease_factory=backend_lease_factory),
+        )
+    assert str(place.value) == (
+        "Regulation · Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+
+    with pytest.raises(OrderBudgetExceeded) as modify:
+        await _modify(router, "OID-1", backend_lease_factory=backend_lease_factory)
+    assert str(modify.value) == (
+        "Regulation · Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+
+    with pytest.raises(OrderBudgetExceeded) as cancel:
+        await _cancel(router, "OID-1", backend_lease_factory=backend_lease_factory)
+    assert str(cancel.value) == (
+        "Regulation · Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+    assert adapter.placed == []
+    assert adapter.modified == []
     assert adapter.cancelled == []
