@@ -35,6 +35,7 @@ Usage::
         call_short=26000.0,
         call_long=26500.0,
         lots=1,
+        lot_size=65,
     )
     result = await executor.execute(legs, strategy="iron_condor_may")
 """
@@ -102,7 +103,7 @@ class OptionsStrategyBuilder:
         expiry: str,
         strike: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:
@@ -150,7 +151,7 @@ class OptionsStrategyBuilder:
         call_strike: float,
         put_strike: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:
@@ -200,7 +201,7 @@ class OptionsStrategyBuilder:
         call_short: float,
         call_long: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:
@@ -270,7 +271,7 @@ class OptionsStrategyBuilder:
         atm: float,
         wing: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:
@@ -337,7 +338,7 @@ class OptionsStrategyBuilder:
         long_strike: float,
         short_strike: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:
@@ -393,7 +394,7 @@ class OptionsStrategyBuilder:
         long_strike: float,
         short_strike: float,
         lots: int,
-        lot_size: int = 50,
+        lot_size: int,
         exchange: str = "NFO",
         product: str = "NRML",
     ) -> list[BasketLeg]:

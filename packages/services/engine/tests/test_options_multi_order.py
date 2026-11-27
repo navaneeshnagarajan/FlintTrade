@@ -86,7 +86,7 @@ class TestShortStraddle:
         assert all(leg.quantity == 50 for leg in self.legs)
 
     def test_multi_lot_quantity(self):
-        legs = OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, lots=2)
+        legs = OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, lots=2, lot_size=50)
         assert all(leg.quantity == 100 for leg in legs)
 
     def test_correct_strike_in_symbol(self):
@@ -252,11 +252,11 @@ class TestBullCallSpread:
 
     def test_invalid_strikes_raise(self):
         with pytest.raises(ValueError, match="long_strike"):
-            OptionsStrategyBuilder.bull_call_spread("NIFTY", "25MAY25", 26000.0, 25000.0, 1)
+            OptionsStrategyBuilder.bull_call_spread("NIFTY", "25MAY25", 26000.0, 25000.0, 1, lot_size=65)
 
     def test_equal_strikes_raise(self):
         with pytest.raises(ValueError, match="long_strike"):
-            OptionsStrategyBuilder.bull_call_spread("NIFTY", "25MAY25", 25000.0, 25000.0, 1)
+            OptionsStrategyBuilder.bull_call_spread("NIFTY", "25MAY25", 25000.0, 25000.0, 1, lot_size=65)
 
 
 # ---------------------------------------------------------------------------
@@ -293,11 +293,11 @@ class TestBearPutSpread:
 
     def test_invalid_strikes_raise(self):
         with pytest.raises(ValueError, match="long_strike"):
-            OptionsStrategyBuilder.bear_put_spread("NIFTY", "25MAY25", 24000.0, 25000.0, 1)
+            OptionsStrategyBuilder.bear_put_spread("NIFTY", "25MAY25", 24000.0, 25000.0, 1, lot_size=65)
 
     def test_equal_strikes_raise(self):
         with pytest.raises(ValueError, match="long_strike"):
-            OptionsStrategyBuilder.bear_put_spread("NIFTY", "25MAY25", 25000.0, 25000.0, 1)
+            OptionsStrategyBuilder.bear_put_spread("NIFTY", "25MAY25", 25000.0, 25000.0, 1, lot_size=65)
 
 
 # ---------------------------------------------------------------------------
@@ -309,12 +309,16 @@ class TestLegsAreBasketLegs:
     """All strategy builders return valid BasketLeg lists."""
 
     def test_short_straddle_produces_basket_legs(self):
-        legs = OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, 1)
+        legs = OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, 1, lot_size=65)
         assert all(isinstance(leg, BasketLeg) for leg in legs)
 
     def test_iron_condor_produces_basket_legs(self):
-        legs = OptionsStrategyBuilder.iron_condor("NIFTY", "25MAY25", 24500, 24000, 26000, 26500, 1)
+        legs = OptionsStrategyBuilder.iron_condor("NIFTY", "25MAY25", 24500, 24000, 26000, 26500, 1, lot_size=65)
         assert all(isinstance(leg, BasketLeg) for leg in legs)
+
+    def test_lot_size_has_no_default(self):
+        with pytest.raises(TypeError, match="lot_size"):
+            OptionsStrategyBuilder.short_straddle("NIFTY", "25MAY25", 25000.0, 1)
 
     def test_custom_exchange_propagated(self):
         legs = OptionsStrategyBuilder.short_straddle(
