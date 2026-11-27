@@ -13,13 +13,14 @@
  * correlation engine (`/v1/analytics/pairs`) — showing a "Live" badge. The
  * commodity/currency presets (GOLD/USDINR) are skipped server-side when their
  * legs are absent. When no broker is connected, or the engine returns no
- * pairs, the widget falls back to the deterministic SAMPLE_PAIRS with an amber
- * "Sample data" badge so nothing implies the figures are live.
+ * pairs, the widget falls back to the deterministic SAMPLE_PAIRS, labelled by
+ * the Explore Mode line or, outside Explore, the Example data badge.
  */
 
 import { useState, useMemo, memo } from "react";
 import { Link, ArrowUp, ArrowDown, Minus, TrendingUp, TrendingDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
@@ -278,10 +279,8 @@ function CorrelationPairsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Link size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Correlation Pairs</span>
-        {/* Data-source badge — flips to "Live" only when a broker is connected
-            AND the engine returned at least one real pair. Otherwise it stays on
-            the honest amber "Sample data" affordance so a connected user is
-            never misled into trusting fabricated figures. */}
+        {/* "Live" only when a broker is connected AND the engine returned at
+            least one real pair; otherwise the rows are SAMPLE_PAIRS. */}
         {isLive ? (
           <span
             className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
@@ -291,7 +290,9 @@ function CorrelationPairsWidget() {
           >
             Live
           </span>
-        ) : null}
+        ) : (
+          <ExampleDataBadge />
+        )}
         <div className="flex-1" />
       </div>
 

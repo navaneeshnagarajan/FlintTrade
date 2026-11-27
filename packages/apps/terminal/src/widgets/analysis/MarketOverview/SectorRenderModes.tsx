@@ -91,7 +91,7 @@ export function TreemapView({
               {sector.width > 80 && (
                 <span
                   className="font-bold shrink-0 ml-1"
-                  style={{ color: getChangeColor(sector.avgChange), fontSize: 8 }}
+                  style={{ color: getChangeColor(sector.avgChange), fontSize: 12 }}
                 >
                   {sector.avgChange >= 0 ? "+" : ""}{sector.avgChange.toFixed(2)}%
                 </span>
@@ -134,7 +134,7 @@ export function TreemapView({
                       {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%
                     </span>
                     {showPrice && (
-                      <span className="block text-text-secondary" style={{ fontSize: 9 }}>
+                      <span className="block text-text-secondary" style={{ fontSize: 12 }}>
                         {"\u20B9"}{formatPrice(stock.ltp)}
                       </span>
                     )}

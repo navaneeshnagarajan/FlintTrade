@@ -26,6 +26,7 @@ vi.mock("@/hooks/useRRGData", () => ({
   useRRGData: (...args: unknown[]) => mockUseRRGData(...args),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import RotationTab from "../tabs/RotationTab";
 import { RRGCanvas } from "../RRGCanvas";
 import type { RRGResponse } from "@/services/ftApi";
@@ -38,6 +39,7 @@ function renderTab(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  useModeStore.setState({ mode: "practice" });
   // JSDOM has no Canvas 2D implementation; the draw loop bails on a null
   // context, so the surrounding markup is what these tests exercise.
   HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(null);
@@ -119,18 +121,24 @@ describe("RRGCanvas provenance", () => {
     } as RRGResponse;
   }
 
-  it("badges the plot as sample when the response omits is_sample_data", () => {
+  it("badges the plot as example data when the response omits is_sample_data", () => {
     render(<RRGCanvas data={rrgResponse({})} tailLength={2} />);
-    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
   });
 
   it("drops the badge only on an explicit is_sample_data: false", () => {
     render(<RRGCanvas data={rrgResponse({ is_sample_data: false })} tailLength={2} />);
-    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 
-  it("badges the plot as sample on an explicit is_sample_data: true", () => {
+  it("badges the plot as example data on an explicit is_sample_data: true", () => {
     render(<RRGCanvas data={rrgResponse({ is_sample_data: true })} tailLength={2} />);
-    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
+    expect(screen.getByTestId("example-data-badge")).toBeInTheDocument();
+  });
+
+  it("stays hidden in Explore, where the Mode line already says Example data", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<RRGCanvas data={rrgResponse({ is_sample_data: true })} tailLength={2} />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

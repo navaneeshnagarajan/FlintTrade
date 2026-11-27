@@ -12,8 +12,9 @@
  * over the backend's instrument set) and shows a "Live" badge — provided the
  * backend reports `is_sample_data: false`. Otherwise (disconnected, or the
  * backend itself falls back) it renders the deterministic `SAMPLE_MATRIX` +
- * `pseudoCorr` fallback with an amber "Sample data" badge so a trader is never
- * misled into reading sample coefficients as real market data. The live matrix
+ * `pseudoCorr` fallback, labelled by the Explore Mode line or, outside Explore,
+ * the Example data badge, so a trader is never misled into reading sample
+ * coefficients as real market data. The live matrix
  * uses the backend's fixed instrument set, so the add/remove controls apply to
  * the sample (explore) matrix only and are disabled while live.
  */
@@ -21,6 +22,7 @@
 import { useState, useMemo, useCallback, useRef, memo } from "react";
 import { Grid2x2, Plus, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -216,11 +218,9 @@ function CorrelationMatrixWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid2x2 size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Correlation Matrix</span>
-        {/* Data-source badge — flips to "Live" only when a broker is connected
-            AND the backend returns a genuinely-live matrix (is_sample_data
-            false). Otherwise it stays on the honest amber "Sample data"
-            affordance so a connected trader is never misled into reading the
-            sample coefficients as real market data. */}
+        {/* "Live" only when a broker is connected AND the backend returns a
+            genuinely-live matrix (is_sample_data false); otherwise the grid is
+            the built-in sample matrix. */}
         {isLive ? (
           <span
             className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
@@ -230,7 +230,9 @@ function CorrelationMatrixWidget() {
           >
             Live
           </span>
-        ) : null}
+        ) : (
+          <ExampleDataBadge />
+        )}
         <div className="flex-1" />
       </div>
 
