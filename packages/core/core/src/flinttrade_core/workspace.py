@@ -30,6 +30,7 @@ from filelock import FileLock, Timeout as FileLockTimeout
 
 from .installation_state import InstallationState, paths_resolve_same_location
 from .secure_file import (
+    assert_hardened,
     copy_owner_owned_file_durable,
     digest_owner_owned_regular_file,
     digest_owner_owned_regular_file_identity,
@@ -37,6 +38,7 @@ from .secure_file import (
     durable_unlink,
     fsync_parent_directory,
     harden,
+    harden_directory,
     read_hardened_owner_owned_text,
     validate_owner_owned_regular_file,
     write_secret_text,
@@ -1243,15 +1245,19 @@ def _remove_staged_file(path: Path) -> None:
 def _lock_workspace_perms(p: Path) -> None:
     """Best-effort restrict workspace directory perms to owner-only.
 
-    On Linux / macOS the workspace holds the master password, API key
-    pepper, auth DB, credential DB, and DuckDB telemetry logs — any
-    local user on a multi-tenant host could read them otherwise. POSIX
-    ``chmod 0o700`` denies group/other access. Failure is non-fatal
-    (read-only filesystems, Windows ACL paths). Pytest workspaces under
-    ``/tmp`` benefit from this too without breaking the test runner.
+    The workspace holds the master password, API key pepper, auth DB,
+    credential DB, and DuckDB telemetry logs; any local user on a
+    multi-tenant host could read them otherwise. POSIX uses ``chmod 0o700``.
+    Windows installs the owner and SYSTEM DACL from :func:`harden_directory`,
+    only when it is missing, because reinstalling it re-propagates to every
+    child. Failure is non-fatal (read-only filesystems, foreign ACLs).
     """
     try:
-        p.chmod(0o700)
+        if os.name == "nt":
+            if not assert_hardened(p)[0]:
+                harden_directory(p)
+        else:
+            p.chmod(0o700)
     except OSError:
         pass
 
