@@ -89,6 +89,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Expiry dates come from the contract list.** Expiry Countdown and the chart's OI overlay read expiry dates from the exchange's contract list, the same list the option chain uses, instead of assuming a Thursday expiry. NIFTY contracts show their Tuesday expiry and SENSEX contracts their Thursday expiry, and a holiday-shifted expiry shows the date the list carries. Expiry Countdown can switch between NIFTY and SENSEX and shows each date as, for example, "Expires Tue 24 Nov". When the list cannot be loaded it shows "Couldn't load the NIFTY expiry list." (or SENSEX) and no guessed date. The NIFTY and SENSEX toggle buttons are full-size touch targets. The OI overlay profiles the nearest listed contract and stays empty when no contract is listed.
+
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 
 - **Mode chip follows the session.** After a session is restored, the mode chip shows the mode in that session before the desk paints. A saved mode in the browser is only a cache and is written after the session mode is assigned. It does not override the session. Unlocking with a PIN keeps the restored mode and does not change the server mode. A session whose mode is missing or not one of Example, Practice, or Live shows Unavailable, and no order is sent. Connected (read) stays a broker status.
