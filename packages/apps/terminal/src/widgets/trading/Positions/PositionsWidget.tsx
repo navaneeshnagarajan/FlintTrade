@@ -1385,7 +1385,7 @@ function PositionsWidget(props: WidgetProps) {
             </span>
           )}
           <span
-            className={`font-mono tabular-nums font-medium ${
+            className={`font-mono tabular-nums font-medium whitespace-nowrap ${
               showPnl ? (totalPnl >= 0 ? "text-profit" : "text-loss") : "text-text-muted"
             }`}
             title={

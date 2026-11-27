@@ -35,12 +35,12 @@ describe("purpose-safe presets", () => {
   it("starts a fresh Terminal with watchlist on the left and visible books", () => {
     const json = buildAppPreset("terminal", "default");
     expect(json.layout.children).toMatchObject([
-      { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
-      { type: "tabset", weight: 14, children: [{ component: "overview:WelcomeCard" }] },
-      { type: "tabset", weight: 38, active: true, selected: 0, children: [
+      { type: "tabset", weight: 24, children: [{ component: "watchlist" }] },
+      { type: "tabset", weight: 18, children: [{ component: "overview:WelcomeCard" }] },
+      { type: "tabset", weight: 34, active: true, selected: 0, children: [
         { component: "chart", config: { channel: "none" } },
       ] },
-      { type: "tabset", weight: 20, children: [{ component: "positions" }, { component: "orders" }] },
+      { type: "tabset", weight: 24, children: [{ component: "positions" }, { component: "orders" }] },
     ]);
     expect(validateAppLayout("terminal", json)).toBe(true);
   });

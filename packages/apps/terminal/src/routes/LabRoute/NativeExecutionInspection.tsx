@@ -56,7 +56,7 @@ export function NativeExecutionInspection({ native }: { native: NativeProjection
     {native.commands.length ? <ul aria-label="Requests sent" className="space-y-2 break-all">
       {native.commands.map(command => <li key={command.command_id}>
         <p>{command.command_id} · {"operation" in command ? "Cancel" : "Place"} · {command.state} · {command.cause}</p>
-        <p>Broker order: {command.broker_order_id ?? "Unconfirmed"} · Filled: {command.filled_quantity ?? "Unknown"}.</p>
+        <p>Broker order: {command.broker_order_id ?? "Unconfirmed"} · Filled: {command.filled_quantity ?? "Unknown"}</p>
         <p className="text-xs">History: {command.events.join(", ")}. Created {expiry(command.created_at)}{command.updated_at ? ` · Updated ${expiry(command.updated_at)}` : ""}</p>
       </li>)}
     </ul> : <p>No requests sent.</p>}

@@ -49,11 +49,10 @@ export function buildAppPreset(app: AppId, preset: string): IJsonModel {
     });
     const books = tabsetJson(20, [tab("positions"), tab("orders")]);
     const watchlist = tabsetJson(28, [tab("watchlist")]);
-    const overview = tabsetJson(14, [tab("overview:WelcomeCard")]);
     const chart = (weight: number) => ({ ...tabsetJson(weight, [tab("chart")]), active: true, selected: 0 });
     if (preset === "chart-focus") return workspaceJson(rowJson(100, [chart(52), books, watchlist]));
     if (preset === "watchlist-driven") return workspaceJson(rowJson(100, [watchlist, chart(52), books]));
-    return workspaceJson(rowJson(100, [watchlist, overview, chart(38), books]));
+    return workspaceJson(rowJson(100, [tabsetJson(24, [tab("watchlist")]), tabsetJson(18, [tab("overview:WelcomeCard")]), chart(34), tabsetJson(24, [tab("positions"), tab("orders")])]));
   }
   if (app === "terminal" && ["market-watch", "options-scalper", "multi-chart"].includes(preset)) {
     const built = buildPresetJsonById(preset);
