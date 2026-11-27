@@ -878,8 +878,9 @@ choosing an option contract moves **MARKET** to **LIMIT** and **SL-M** to
 Both keep the order button disabled, and market-fill notes are not shown next
 to them. Quick Trade switches to **LIMIT** for an option and shows the same
 rule line. The Scalper always sends a limit: a blank **Limit ₹** uses the
-contract's live premium, and with no live premium it shows
-`No live premium for SYMBOL. Enter a limit price.` The server and Practice
+contract's live premium. With no live premium, the Scalper, the option chain
+and the basket builder show `No live premium for SYMBOL. Enter a limit price.`,
+and the option chain opens a **LIMIT** ticket instead. The server and Practice
 refuse an option market or stop-market order with `order_rule_blocked`. On
 BSE, a stop-limit whose limit is too far from its trigger shows
 `Stop-loss limit must be within ₹X of trigger.`
@@ -898,11 +899,17 @@ reduces the position. The position is read again just before sending:
 
 **Option square-off and Exit all.** **Square off** on an option position sends
 a **LIMIT** at the cap price: 3% below the last price for a sell, 3% above it
-for a buy, on the 5-paise tick. The confirm line reads
-`Exit at ₹{price} limit (within 3% of last)`. When any option position is
-open, **Exit all** sends each exit on its own the same way and lists those
-lines. An option position with no last price is not sent. Its confirm line
-reads `Open Exit now`, Exit all lists
+for a buy, on the 5-paise tick. The dialog reads
+`Exit at ₹{price} limit (within 3% of last price).` and
+`Fills at ₹{price} or better. May not fill in a fast move.`, and the confirm
+button reads `Exit at ₹{price}`. When any option position is open,
+**Exit all** sends each exit on its own the same way, lists
+`{symbol}: Exit at ₹{price} limit (within 3% of last price).` for each option
+and shows
+`Option exits fill at their limit or better and may not fill in a fast move.`
+An option position with no last price is not sent. Square off then reads
+`No last price is available. Exit now opens a limit ticket.` with the button
+`Open Exit now`, Exit all lists
 `{symbol}: no last price. Exit now opens a limit ticket.`, and the Exit now
 ticket opens instead.
 
