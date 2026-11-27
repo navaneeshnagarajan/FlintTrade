@@ -356,7 +356,7 @@ class Laya:
         """
         if reason is not None and reason not in LAYA_REASON_CODES:
             raise ValueError("Decision model reason not recognised.")
-        if not 1 <= port <= 65535:
+        if not 1024 <= port <= 65535:
             raise ValueError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.")
         if progress is not None and (
             len(progress) != 2 or isinstance(progress[0], bool) or isinstance(progress[1], bool)

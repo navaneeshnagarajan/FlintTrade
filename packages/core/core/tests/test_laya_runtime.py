@@ -508,6 +508,19 @@ def test_laya_port_selects_the_loopback_origin(tmp_path: Path, monkeypatch: pyte
 
 
 @pytest.mark.unit
+def test_port_below_1024_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", "1023")
+    with pytest.raises(LayaRuntimeError, match="1024–65535"):
+        LayaRuntime(tmp_path)
+    with pytest.raises(LayaRuntimeError, match="1024–65535"):
+        LayaRuntime(tmp_path, port=1023)
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", "1024")
+    assert LayaRuntime(tmp_path).base_url == "http://127.0.0.1:1024"
+    assert LayaRuntime(tmp_path, port=1024).base_url == "http://127.0.0.1:1024"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
 def test_status_reports_a_port_clash_as_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import socket
 

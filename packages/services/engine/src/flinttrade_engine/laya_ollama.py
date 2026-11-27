@@ -886,7 +886,7 @@ def _aliases(name: str) -> set[str]:
 def _ports(snapshot: Mapping[str, Any] | None) -> tuple[int, bool]:
     if isinstance(snapshot, Mapping):
         port = snapshot.get("port")
-        if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535:
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
             return port, True
     return _UNBOUND_PORT, False
 

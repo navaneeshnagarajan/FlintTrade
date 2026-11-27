@@ -376,7 +376,7 @@ def resolve_laya_port(port: int | None = None) -> int:
             port = int(text)
         except ValueError as exc:
             raise LayaRuntimeError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.") from exc
-    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
         raise LayaRuntimeError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.")
     return port
 
