@@ -928,7 +928,7 @@ be ordered.
 sentence once, inline, when a derivative has no verified lot. The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
 A quantity that is not a positive multiple of the lot is refused before
-Laya, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
+the decision model, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
 FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each
 refuse an order above the cap with that HTTP 400 and code
 `quantity_admission`. A broker `freeze_qty` on the body refuses the same

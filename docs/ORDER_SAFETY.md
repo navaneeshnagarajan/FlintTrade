@@ -44,7 +44,7 @@ Settings → Practice does not place.
    ACL, and consumes the one-shot gate.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
-does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before Laya,
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before the decision model,
 a quantity that is not a positive multiple of the lot is refused with
 HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
 once, inline:
