@@ -972,7 +972,7 @@ function OrdersWidget(_props: WidgetProps) {
               {table.getRowModel().rows.map((row, idx) => (
                 <TableRow
                   key={row.id}
-                  className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
+                  className={`h-8 border-t border-border-subtle hover:bg-surface-hover/50 ${
                     idx % 2 === 1 ? "bg-surface-stripe" : ""
                   }`}
                 >

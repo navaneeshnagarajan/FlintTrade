@@ -21,6 +21,7 @@ html[data-mode="dark"] .ft-workspace.ft-workspace {
   --color-text-secondary: #b4c3c7;
   --color-text-muted: #96adb3;
   --color-accent: #9bc5c0;
+  --color-loss: #f87171;
   --chart-bg: #1b2e34;
   --chart-grid: #3b5157;
   --chart-text: #b6c5c9;

@@ -1997,6 +1997,25 @@ def _dispatch_live_order(
         if exit_results:
             g.exit_rule_results = exit_results
             typed_order = typed_order.model_copy(update={"quantity": str(_quantity_from_body(body))})
+            if preflight_targets:
+                from flinttrade_core.exceptions import BrokerError  # noqa: PLC0415
+
+                preflight_targets.clear()
+                try:
+                    router.preflight_order(
+                        typed_order,
+                        adapter_id=adapter_id,
+                        request_ctx=request_ctx,
+                        account_id=account_id,
+                        capture_target=preflight_targets.append,
+                    )
+                except BrokerError as exc:
+                    if str(adapter_id).strip().lower() == "kotakneo":
+                        return jsonify({
+                            "status": "error",
+                            "message": "Kotak Neo placement intent is unsupported or invalid.",
+                        }), 501
+                    raise ValueError("Dhan ordinary placement intent is unsupported or invalid") from exc
 
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)

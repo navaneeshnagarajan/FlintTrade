@@ -591,7 +591,7 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last price).")).toBeInTheDocument();
     expect(screen.getByText("Option exits fill at their limit or better and may not fill in a fast move.")).toBeInTheDocument();
-    expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
+    expect(screen.getByText("Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
     await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));
@@ -987,7 +987,7 @@ describe("PositionsWidget", () => {
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
-      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
+      expect(screen.getByText("Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed."))
         .toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
@@ -1359,7 +1359,7 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
       expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last price).")).toBeInTheDocument();
       expect(screen.getByText("Option exits fill at their limit or better and may not fill in a fast move.")).toBeInTheDocument();
-      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
+      expect(screen.getByText("Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
       await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));

@@ -173,6 +173,7 @@ describe("OrdersWidget", () => {
       renderWidget();
       const slot = await screen.findByTestId("stop-loss-not-filled");
       expect(slot).toHaveClass("inline-flex", "items-center", "gap-1", "-my-1");
+      expect(slot.closest("tr")).toHaveClass("h-8");
       expect(slot).toHaveTextContent("Stop-loss triggered · not filled");
       fireEvent.click(screen.getByRole("button", { name: "Exit now NIFTY24APR24000CE" }));
       expect(opened).toEqual([{

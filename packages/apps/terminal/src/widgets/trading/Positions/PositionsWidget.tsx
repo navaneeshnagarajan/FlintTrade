@@ -842,12 +842,16 @@ function ExitAllDialog({
             ))}
           </ul>
         )}
-        {openRows.some((row) => !isOptionPosition(row)) && (
-          <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
-        )}
         {optionLines.length > 0 && (
           <p className="text-xs text-warning">
             Option exits fill at their limit or better and may not fill in a fast move.
+          </p>
+        )}
+        {openRows.some((row) => !isOptionPosition(row)) && (
+          <p className="text-xs text-warning">
+            {optionLines.length > 0
+              ? "Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed."
+              : EXECUTION_FIRST_WARNING}
           </p>
         )}
         <div className="space-y-1.5">
