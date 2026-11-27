@@ -60,6 +60,40 @@ def test_stopped_proof_watch_cannot_request_late_shutdown(backend_lease_proof):
     assert not called.is_set()
 
 
+def test_idle_proof_watch_disarms_within_a_zero_budget(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+
+    called = threading.Event()
+    watch = _BackendLeaseRuntimeWatch(Flask("synthetic-zero-budget"), backend_lease_proof, called.set)
+    watch.start()
+    assert watch.stop(timeout=0)
+    backend_lease_proof.revoke()
+    watch._thread.join(5)
+    assert not watch._thread.is_alive()
+    assert not called.is_set()
+
+
+def test_firing_proof_watch_reports_an_unfinished_callback(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def shutdown():
+        entered.set()
+        assert release.wait(5)
+
+    watch = _BackendLeaseRuntimeWatch(Flask("synthetic-firing"), backend_lease_proof, shutdown)
+    watch.start()
+    try:
+        backend_lease_proof.revoke()
+        assert entered.wait(5)
+        assert not watch.stop(timeout=0)
+    finally:
+        release.set()
+    assert watch.stop(timeout=5)
+
+
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
     monkeypatch,
