@@ -21,11 +21,8 @@ Target logic:
     - Target is placed AFTER the 5th candle close, if Supertrend is still stable
       (direction unchanged) and unbroken
 
-Exchange lot sizes:
-    - NIFTY:      25
-    - BANKNIFTY:  15
-    - FINNIFTY:   25
-    - MIDCPNIFTY: 50
+Exchange lot sizes come from the shared lot lookup
+(``flinttrade_screener.lot_sizes``), not from this module.
 
 This module is a backtest-engine strategy. It extends BaseStrategy via the
 _BacktestStrategyMixin and processes bars sequentially through on_bar().
@@ -41,7 +38,7 @@ import numpy as np
 from flinttrade_backtest.strategies import _BacktestStrategyMixin
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, missing_lot_refusal
 
 logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 
@@ -50,28 +47,27 @@ logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 # Lot-size registry
 # ---------------------------------------------------------------------------
 
-# Contract sizes come from the instrument master (this file's private copy
-# pre-dated the 2024 SEBI lot revisions, when its NIFTY figure was 25).
-# Historical backtests over pre-revision periods should override per run.
-LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
+# Contract sizes come from the shared lot table (seeded from the instrument
+# master). This module keeps no copy. Historical backtests over earlier
+# contract sizes should override per run.
 
-DEFAULT_LOT_SIZE: int = 1
+_CASH_EXCHANGES = frozenset({"NSE", "BSE"})
 
 
-def lot_size_for(symbol: str) -> int:
+def lot_size_for(symbol: str) -> int | None:
     """Return the standard lot size for an F&O underlying symbol.
 
     Args:
         symbol: Underlying symbol name (case-insensitive check).
 
     Returns:
-        Lot size integer. Falls back to 1 for unknown symbols.
+        Lot size integer, or ``None`` for unknown symbols.
     """
     upper = symbol.upper()
-    for key, size in LOT_SIZES.items():
+    for key, size in FALLBACK_LOT_SIZES.items():
         if upper.startswith(key):
             return size
-    return DEFAULT_LOT_SIZE
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +82,7 @@ class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
     Stop-loss: Static at Supertrend value at entry; becomes dynamic (trailing)
                after price exceeds entry; triggered on candle close below ST.
     Target: DEMA 15 level at entry bar, placed after 5th candle if ST stable.
-    Lots: NIFTY 25, BANKNIFTY 15, FINNIFTY 25, MIDCPNIFTY 50.
+    Lots: from the shared lot lookup.
 
     Usage in backtest::
 
@@ -137,7 +133,12 @@ class EMASuperTrendDEMA(BaseStrategy, _BacktestStrategyMixin):
         self.dema_period = dema_period
 
         self.lots = lots
-        self._quantity = str(lots * lot_size_for(symbol))
+        lot_size = lot_size_for(symbol)
+        if lot_size is None:
+            if exchange.strip().upper() not in _CASH_EXCHANGES:
+                raise ValueError(missing_lot_refusal(symbol))
+            lot_size = 1
+        self._quantity = str(lots * lot_size)
 
         # Entry state
         self._entry_price: float = 0.0
