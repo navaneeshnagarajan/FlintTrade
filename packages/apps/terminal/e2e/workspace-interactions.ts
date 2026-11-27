@@ -26,7 +26,7 @@ export async function interactions(page: Page, info: TestInfo) {
   expect(await add.evaluate(el=>el.closest('[role="tablist"]'))).toBeNull();
   await expect(watchlist.getByRole("group",{name:"Watchlist columns"})).toHaveText("SymbolTrendLTP% change");
   await expect(list.getByRole("listitem")).toHaveCount(5);
-  record("rowOrder",await list.getByRole("listitem").locator(':scope > button:first-child').evaluateAll(els=>els.map(el=>el.getAttribute('aria-label'))));
+  record("rowOrder",await list.getByRole("listitem").locator(':scope > button:first-child').evaluateAll(els=>els.map(el=>el.querySelector(':scope > div:first-child > span:first-child')?.textContent)));
   expect(evidence["rowOrder"]).toEqual(["NIFTY","BANKNIFTY","SBIN","RELIANCE","HDFCBANK"]);
   await first.focus();await page.keyboard.press("Tab");await expect(add).toBeFocused();
   await page.keyboard.press("Shift+Tab");await expect(first).toBeFocused();
@@ -58,7 +58,7 @@ export async function interactions(page: Page, info: TestInfo) {
     await page.keyboard.press("Space");await expect(control).toHaveAccessibleName("Link channel: Green — click to change");
     await page.keyboard.press("ArrowRight");await expect(control).toBeFocused();
   }
-  await watchlist.getByRole("button",{name:"BANKNIFTY",exact:true}).focus();
+  await watchlist.getByRole("button",{name:/^BANKNIFTY NSE_INDEX /}).focus();
   await page.keyboard.press("Enter");
   await settle(page,()=>page.getByRole("tabpanel",{name:"Chart",exact:true}).getByText("BANKNIFTY",{exact:true}).isVisible());
   record("channelPropagation",{chart:"BANKNIFTY",channel:"Green",nativeEnterAndSpace:true});

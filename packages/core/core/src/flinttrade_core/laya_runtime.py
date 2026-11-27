@@ -45,6 +45,30 @@ from .secure_file import harden, harden_directory
 
 _LOG = logging.getLogger("flinttrade.laya")
 
+# Memory-hard witness of the current API key. A fast hash is not a credential binding.
+_CREDENTIAL_KDF_N = 2**15
+_CREDENTIAL_KDF_R = 8
+_CREDENTIAL_KDF_P = 1
+_CREDENTIAL_KDF_DKLEN = 32
+_CREDENTIAL_KDF_MAXMEM = 64 * 1024 * 1024
+
+
+def credential_witness(witness_key: bytes, api_key: str) -> str:
+    """Bind a credential into a qualification witness.
+
+    The raw key never enters the identity digest. The witness key is the salt
+    and stays in the runtime object.
+    """
+    return hashlib.scrypt(
+        api_key.encode(),
+        salt=witness_key,
+        n=_CREDENTIAL_KDF_N,
+        r=_CREDENTIAL_KDF_R,
+        p=_CREDENTIAL_KDF_P,
+        dklen=_CREDENTIAL_KDF_DKLEN,
+        maxmem=_CREDENTIAL_KDF_MAXMEM,
+    ).hex()
+
 # laya-serve 0.3.21 only preloads a checkpoint name. A verified boot does not
 # pass a repo id or revision: the child reads LAYA_WEIGHTS_PATH and loads
 # that file's directory, with hub lookups switched off.
@@ -1096,6 +1120,10 @@ class LayaRuntime:
         self._downloader = downloader
         self._process: Any | None = None
         self._attached = False
+        # Bind credentials without exposing an offline guessing oracle for
+        # attached keys. This private key lives only in this runtime object;
+        # never persist it or include it in status/qualification reports.
+        self._credential_witness_key = secrets.token_bytes(32)
         self._api_key = ""
         self._watched_key: Path | None = None
         self._key_rejected = False
@@ -1413,6 +1441,61 @@ class LayaRuntime:
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
             engine.set_runtime_reason(reason, self._port)
             return engine.status
+
+    def qualification_identity(self, gate: Any) -> str:
+        """Return the exact current process/model/config witness, never a verdict.
+
+        Injected artifact or health-result suppliers cannot qualify a runtime.
+        Missing files, replacement clients and stopped or foreign process
+        owners refuse before any qualification can be reused.
+
+        Args:
+            gate: Existing process-wide gate whose current decision client is verified.
+
+        Returns:
+            Digest of the current process, model, client, configuration and artifact witness.
+
+        Raises:
+            LayaRuntimeError: Runtime custody, artifact identity or the current gate/client binding is unavailable.
+        """
+        from dataclasses import asdict
+
+        from flinttrade_engine.laya import process_laya
+        from flinttrade_engine.laya_decision import SystemOneClient, load_policy
+
+        with self._lock:
+            client = gate._decision_client
+            check = self.ensure_artifact_check()
+            if (process_runtime() is not self or process_laya() is not gate
+                    or not self._owns_live_process() or not isinstance(self._process, subprocess.Popen)
+                    or self._artifact_checker is not None or self._health_reader is not None
+                    or self._key_rejected or self._launch_refusal is not None
+                    or not check.ok or not _has_weight_identity(check) or self._weight_drift_now() is not None
+                    or type(client) is not SystemOneClient or client.base_url != self.base_url):
+                raise LayaRuntimeError("current owned Laya runtime qualification identity unavailable")
+            policy = load_policy()
+            if not self._record_belongs_to_running_sidecar(check, policy):
+                raise LayaRuntimeError("Laya artifact belongs to a different runtime")
+            value = [id(self), id(client), self._generation, asdict(check), self.base_url, self._device,
+                     credential_witness(self._credential_witness_key, self._api_key),
+                     self._watched_signature()]
+            return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+    def qualification_client(self, gate: Any) -> Any:
+        """Resolve the existing HTTP client only after exact runtime validation.
+
+        Args:
+            gate: Existing gate whose client must match current runtime custody.
+
+        Returns:
+            The gate's existing decision client after runtime identity validation.
+
+        Raises:
+            LayaRuntimeError: The runtime or its current gate/client binding cannot be validated.
+        """
+        with self._lock:
+            self.qualification_identity(gate)
+            return gate._decision_client
 
     def status(self) -> dict[str, Any]:
         """Report the sidecar. Does not include the API key.

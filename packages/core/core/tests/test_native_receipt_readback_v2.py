@@ -1,0 +1,123 @@
+"""Producer readback binds full durable custody receipts, not ACK references."""
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from packages.core.core.tests.test_native_custody_owner import _preview, _selection
+from packages.core.core.tests.test_native_financial_owner import RUN, _qualify
+from packages.core.core.tests.test_native_model_producer_v2 import model_desk, response
+from packages.core.core.tests.test_native_model_safety_v2 import _option_plan
+from packages.core.core.tests.test_native_producer_v2 import _plan
+from packages.core.core.tests.test_native_workflow_v2 import MountedDesk
+from packages.core.core.tests.test_native_workflow_v2 import mounted_desk as mounted_desk
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("options", [False, True], ids=["cash", "options"])
+def test_complete_receipt_readback_preserves_current_and_historical_acceptance(
+    mounted_desk: MountedDesk, options: bool,
+) -> None:
+    """The ordinary exact-run GET corroborates every field without another fetch.
+
+    Args:
+        mounted_desk: Normal-factory native workflow fixture with inert external transports.
+        options: Whether the synthetic run uses the nominal options rather than cash profile.
+    """
+    desk = mounted_desk
+    source, registration = model_desk(desk, response, options=options)
+    (_option_plan if options else _plan)(source, registration, mark="5")
+    selected = _selection(_qualify(desk))
+    selected["limits"]["instruments"] = [{
+        "instrument_id": registration.order["symbol"], "exchange": registration.order["exchange"],
+        "product": registration.order["product"],
+    }]
+    preview = _preview(desk, selected)
+    acknowledgement = desk.client.post(RUN + "/autonomy-v2/transfer-accept", json={
+        "schema_version": "2", "preview_ref": preview["preview_ref"],
+        "expected_duty_revision": preview["duty"]["duty_ref"]["revision"],
+    }, headers=desk.headers)
+    assert acknowledgement.status_code == 200, acknowledgement.get_json()
+    receipt = acknowledgement.get_json()["data"]
+    readback = desk.client.get(RUN + "/autonomy-v2", headers=desk.headers)
+    assert readback.status_code == 200, readback.get_json()
+    view = readback.get_json()["data"]
+    assert view.get("transfer_receipts") == [receipt]
+    assert view["duty"]["receiving_acceptance_ref"] == receipt["transfer_ref"]
+    # A newly observed synthetic cash fill or option duty makes old acceptance
+    # historical, not current. The complete accepted payload must remain.
+    from packages.core.core.tests.test_native_financial_owner import _cash_filled, _facts
+
+    facts: dict[str, Any] = _facts()
+    if not options:
+        _cash_filled(facts, mark="4")
+    else:
+        # Canonical commands are not manufactured to force an options obligation.
+        facts["tariff_ref"] = None
+    source.publish("mounted-native", facts)
+    _qualify(desk)
+    later = desk.client.get(RUN + "/autonomy-v2", headers=desk.headers)
+    assert later.status_code == 200, later.get_json()
+    historical = later.get_json()["data"]
+    assert historical["transfer_receipts"] == [receipt]
+    assert historical["effective_authority"] == "none"
+    if not options:
+        assert historical["duty"]["receiving_acceptance_ref"] is None
+        from packages.core.core.tests.test_native_financial_owner import _financial, _settle_cash
+
+        _settle_cash(desk, source, facts)
+        financial = _financial(desk)
+        assert financial.get("unresolved_entry_ids") == [], financial.get("assessment")
+    assert desk.calls == []
+
+
+def test_aged_settled_cash_does_not_keep_an_unresolved_entry(mounted_desk: MountedDesk) -> None:
+    """A completed exit is not an unresolved entry when the mark has aged out."""
+    from packages.core.core.tests.test_native_financial_owner import _cash_filled, _facts, _financial, _settle_cash
+
+    desk = mounted_desk
+    source, _registration = model_desk(desk, response, options=False)
+    facts = _facts()
+    entry = _cash_filled(facts, mark="4")
+    facts["observed_at_ms"] -= 61_000
+    entry["mark_at_ms"] = facts["observed_at_ms"]
+    for fee in facts["fees"]:
+        fee["as_of_ms"] = facts["observed_at_ms"]
+    source.publish("mounted-native", facts)
+    _qualify(desk)
+    _settle_cash(desk, source, facts)
+    assert _financial(desk).get("unresolved_entry_ids") == []
+    assert desk.app.config["EXECUTION_SESSIONS"].shutdown(0) is True
+
+
+def test_generation_move_after_unadmitted_prepare_is_not_an_unresolved_duty(mounted_desk: MountedDesk) -> None:
+    """A prepare that has not been admitted must not pin a duty onto a moved generation."""
+    from dataclasses import replace
+
+    from packages.core.core.tests.test_native_financial_owner import _financial
+
+    test_complete_receipt_readback_preserves_current_and_historical_acceptance(mounted_desk, False)
+    before_ids = list(_financial(mounted_desk).get("unresolved_entry_ids") or [])
+    ledger = mounted_desk.app.extensions["flinttrade_broker_dependencies"].lifecycle_store
+    before = ledger.latest_snapshot_generation(adapter_id="dhan", account_id="Mounted")
+    with ledger._connection(write=True) as connection:
+        ledger._append_native_writer_manifest(
+            connection, "dhan", "Mounted", "2026-01-01T00:00:00+00:00",
+            {"kind": "prepared", "attempt_id": "unadmitted-race", "facts": {"source": "unadmitted"}},
+        )
+    assert ledger.latest_snapshot_generation(adapter_id="dhan", account_id="Mounted") == before
+    original = ledger.observation_snapshot
+
+    def moved(selector: object, **kwargs: object) -> object:
+        snapshot = original(selector, **kwargs)
+        return replace(snapshot, generation=snapshot.generation + 1)
+
+    ledger.observation_snapshot = moved
+    try:
+        _qualify(mounted_desk)
+    finally:
+        ledger.observation_snapshot = original
+    after_ids = list(_financial(mounted_desk).get("unresolved_entry_ids") or [])
+    assert after_ids == [], (before_ids, after_ids)

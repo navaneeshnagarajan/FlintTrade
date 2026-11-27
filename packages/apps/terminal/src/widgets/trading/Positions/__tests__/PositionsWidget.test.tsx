@@ -531,7 +531,9 @@ describe("PositionsWidget", () => {
     // (100 − 90) × 10 = +100, (50 − 65) × 20 = −300 → −200. The broker's own
     // `pnl` fields would have summed to +700; totalPositionMtm is the single
     // definition, so the header, the net total and the heat cells agree.
-    expect(screen.getByText("P&L: -₹200")).toBeInTheDocument();
+    const pnl = screen.getByText("P&L: -₹200");
+    expect(pnl).toBeInTheDocument();
+    expect(pnl).toHaveClass("whitespace-nowrap");
   });
 
   it("falls back to the broker P&L when the row cannot be marked to market", () => {

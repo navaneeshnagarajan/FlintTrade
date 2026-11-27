@@ -137,6 +137,30 @@ function makeBookOrder(orderId: string, status: string): Order {
 // ---------------------------------------------------------------------------
 
 describe("generateLadderLevels", () => {
+  it("retires the ladder status timeout on unmount and preserves its three-second duration", async () => {
+    vi.useFakeTimers();
+    const view = render(<OrderLadderWidget />);
+    try {
+      await act(async () => {});
+      const sell = screen.getAllByRole("button").find((button) => button.title.startsWith("SELL"));
+      expect(sell).toBeDefined();
+      fireEvent.click(sell!);
+      expect(screen.getByRole("status").textContent).toContain("broker");
+      act(() => { vi.advanceTimersByTime(2999); });
+      expect(screen.getByRole("status")).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(screen.queryByRole("status")).toBeNull();
+      fireEvent.click(sell!);
+      expect(screen.getByRole("status")).toBeTruthy();
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
   it("generates 41 levels (20 above + centre + 20 below)", () => {
     const levels = generateLadderLevels(22000, 0.25);
     expect(levels).toHaveLength(41);

@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import json
 import math
 import re
+import threading
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Mapping
+from weakref import WeakKeyDictionary
 
 from flinttrade_core.broker_read_port import (
     BalanceEvidence,
@@ -43,6 +47,15 @@ from flinttrade_gateway.capabilities import (
 from . import kotakneo_mapping as M
 from ._balance import _balance_number, _balance_record
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+from .kotakneo_contracts import KotakContractResolver, KotakListedContract, is_selected_option_symbol
+from .kotakneo_preparation import (
+    KotakOrderPreparation,
+    _PreparationCapture,
+    _SessionCapture,
+    intent_json,
+    session_values,
+    snapshot_order,
+)
 from .kotakneo_sdk import KotakNeoSdkSession as KotakNeoClient, validate_read_envelope
 from .kotakneo_streaming import MAX_STREAM_TOKENS, STREAM_RUNTIME_KEY, KotakNeoStreamRuntime
 
@@ -173,6 +186,33 @@ KOTAKNEO_CAPABILITIES = Capabilities(
 )
 
 
+class KotakNeoTradeBook:
+    """Per-call day observation; legacy readers still receive a literal list.
+
+    Args:
+        rows: Validated native fill projections for this one response.
+        received_count: Raw response cardinality before scoped deduplication.
+        account_id: Bound-session query scope, not an observed provider identity.
+
+    Attributes:
+        rows: Exact per-call projections; absent provider account IDs stay absent.
+        coverage: Resource, scope, timing and identity-completeness observations,
+            never a claim of lifetime completeness or settlement.
+    """
+
+    def __init__(self, rows: list[dict], *, received_count: int, account_id: str) -> None:
+        self.rows: list[dict[str, Any]] = rows
+        self.coverage: dict[str, Any] = {
+            "resource": "quick/user/trades", "scope": "trading_day",
+            "pagination": "unpaged_documented", "lifetime_complete": False,
+            "account_id": account_id, "received_count": received_count,
+            "returned_count": len(rows), "as_of": datetime.now(UTC).isoformat(),
+            "trade_dates": sorted({row["trade_date"] for row in rows if "trade_date" in row}),
+            "fill_identity_complete": all("fill_id" in row and "trade_date" in row for row in rows),
+            "provider_uniqueness_domain": "not_established_beyond_observation_scope",
+        }
+
+
 class KotakNeoAdapter(BrokerAdapter):
     """Native Kotak Neo adapter.
 
@@ -190,6 +230,10 @@ class KotakNeoAdapter(BrokerAdapter):
             against. Defaults to EMPTY local state (every broker-side row then
             surfaces as ``exists_only_on_broker``) until the engine wave wires
             the journal-backed provider.
+        contract_resolver: Immutable, versioned selected-option snapshot. None
+            leaves selected options unavailable; it does not enable an implicit
+            fetch, alias fallback, lot default or eligibility grant. The factory
+            owns acquisition and explicit compare-and-swap replacement.
     """
 
     _BROKER_READ_UNSUPPORTED: frozenset[str] = frozenset()
@@ -201,11 +245,20 @@ class KotakNeoAdapter(BrokerAdapter):
         symbol_resolver: Callable[[str, str], str] | None = None,
         token_resolver: Callable[[str, str], str] | None = None,
         local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
+        contract_resolver: KotakContractResolver | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._symbol_resolver = symbol_resolver
         self._token_resolver = token_resolver
         self._local_state_provider = local_state_provider
+        if contract_resolver is not None and type(contract_resolver) is not KotakContractResolver:
+            raise TypeError("Kotak exact contract resolver required")
+        self._contract_resolver = contract_resolver
+        self._contract_refresh_lock = threading.Lock()
+        self._sdk_transport_lock = threading.Lock()
+        self._contract_inflight = 0
+        self._contract_generation = 0
+        self._preparations: WeakKeyDictionary[KotakOrderPreparation, _PreparationCapture] = WeakKeyDictionary()
 
     # ---------- identity + capabilities ----------
 
@@ -218,6 +271,252 @@ class KotakNeoAdapter(BrokerAdapter):
         return KOTAKNEO_CAPABILITIES
 
     # ---------- helpers ----------
+
+    def _listed_read_contract(self, symbol: str, exchange: str) -> KotakListedContract | None:
+        resolver = self._contract_resolver
+        selected = is_selected_option_symbol(symbol, exchange)
+        listed = resolver is not None and resolver.contains(symbol, exchange)
+        if not selected and not listed:
+            return None
+        if resolver is None:
+            raise UnsupportedCapabilityError(
+                "Kotak selected options require a fresh exact listed contract", broker_id="kotakneo",
+            )
+        return resolver.resolve(symbol, exchange, now=datetime.now(UTC))
+
+    def replace_contract_resolver(self, resolver: KotakContractResolver, *, expected_revision: str | None) -> None:
+        """Publish a fresh snapshot only when no bound invocation owns the old one.
+
+        Args:
+            resolver: Qualified immutable replacement; no download is performed.
+            expected_revision: Current revision, or None for initial installation.
+
+        Raises:
+            BrokerReadResponseInvalid: The revision changed, the replacement is
+                older, or an admitted SDK invocation is still in flight. Busy
+                refresh callers must retry with the same expected revision;
+                publication never waits for a client-loop or transport result.
+        """
+        if type(resolver) is not KotakContractResolver:
+            raise BrokerReadResponseInvalid from None
+        with self._contract_refresh_lock:
+            if self._contract_inflight:
+                raise BrokerReadResponseInvalid from None
+            previous = self._contract_resolver
+            if (previous.revision if previous is not None else None) != expected_revision:
+                raise BrokerReadResponseInvalid from None
+            if previous is not None and (
+                resolver.revision == previous.revision or resolver.observed_at < previous.observed_at
+            ):
+                raise BrokerReadResponseInvalid from None
+            self._contract_resolver = resolver
+            self._contract_generation += 1
+
+    async def _contract_call(self, fn: Callable, params: dict, order: Any, contract: dict | None) -> Any:
+        if contract is None:
+            return await self._call(fn, params)
+
+        def checked() -> Any:
+            if self.preflight_order(order) != contract:
+                raise UnsupportedCapabilityError(
+                    "Kotak listed contract changed before dispatch; re-propose", broker_id="kotakneo",
+                )
+            # Preflight may yield to a refresh before returning its evidence.
+            # Claim the final exact revision under the publication lock, then
+            # retain that claim through the real SDK call without holding a
+            # lock across I/O or a client-loop callback. Concurrent old-version
+            # calls may proceed; publication must refuse until all have left.
+            with self._contract_refresh_lock:
+                resolver = self._contract_resolver
+                try:
+                    if resolver is None or resolver.resolve(
+                        str(order.symbol), str(order.exchange), now=datetime.now(UTC),
+                    ).evidence() != contract:
+                        raise BrokerReadResponseInvalid from None
+                except BrokerReadResponseInvalid:
+                    raise UnsupportedCapabilityError(
+                        "Kotak listed contract changed or expired before dispatch; re-propose", broker_id="kotakneo",
+                    ) from None
+                self._contract_inflight += 1
+            try:
+                return fn(params)
+            finally:
+                # Release ownership only, never reinterpret a post-call error
+                # as a completed no-write refusal or retry the uncertain call.
+                with self._contract_refresh_lock:
+                    self._contract_inflight -= 1
+
+        return await self._call(checked)
+
+    def prepare_order(
+        self, order: Order, *, tag: str | None = None, session: Session | None = None,
+    ) -> KotakOrderPreparation:
+        """Capture full intent and an exact already-acquired listing without I/O.
+
+        Args:
+            order: Canonical proposal or explicit primitive legacy terms.
+            tag: Exact native tag, or None for omission.
+            session: Retained canonical session; None binds only at direct placement.
+
+        Returns:
+            The broker-issued immutable receipt. No resolver result may replace it.
+
+        Raises:
+            UnsupportedCapabilityError: Invalid intent or no qualified exact listing.
+        """
+        try:
+            M.validate_v3_order(order)
+            snapshot, intent = snapshot_order(order)
+            with self._contract_refresh_lock:
+                listed = self._listed_read_contract(str(snapshot.symbol), str(snapshot.exchange))
+                if listed is None:
+                    raise BrokerReadResponseInvalid from None
+                evidence = listed.evidence()
+                M.validate_v3_order(snapshot, lot_size=listed.lot_size, selected=True)
+                params = M.to_place_order_params(snapshot, listed.symbol, tag=tag)
+                # Pure capture never calls a potentially lazy client/symbol factory.
+                binding = None
+                if session is not None:
+                    client = session.extra.get("client")
+                    if client is None or tag != (session.algo_id or None):
+                        raise BrokerReadResponseInvalid from None
+                    binding = _SessionCapture(session, client, session_values(session))
+                wire = json.dumps(params, sort_keys=True, allow_nan=False)
+                contract_json = json.dumps(evidence, sort_keys=True, allow_nan=False)
+                prepared = KotakOrderPreparation(self, intent, wire, tag, contract_json)
+                self._preparations[prepared] = _PreparationCapture(
+                    intent, wire, tag, contract_json, self._contract_resolver,
+                    self._contract_generation, listed, binding,
+                )
+                return prepared
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        except BrokerReadResponseInvalid:
+            raise UnsupportedCapabilityError(
+                "Kotak preparation requires an available exact listed contract and session", broker_id="kotakneo",
+            ) from None
+
+    def _checked_preparation(self, prepared: KotakOrderPreparation, order: Order) -> _PreparationCapture:
+        """Check actual issuance and full intent, never trust constructible receipt fields."""
+        with self._contract_refresh_lock:
+            capture = self._preparations.get(prepared) if type(prepared) is KotakOrderPreparation else None
+            if (capture is None or prepared._owner is not self
+                    or prepared.intent_json != capture.intent or prepared.wire_json != capture.wire
+                    or prepared.tag != capture.tag or prepared._contract_json != capture.evidence
+                    or intent_json(order) != capture.intent):
+                raise UnsupportedCapabilityError("Kotak preparation owner or full intent changed", broker_id="kotakneo")
+            return capture
+
+    async def _prepared_place(
+        self, session: Session, order: Order, prepared: KotakOrderPreparation,
+        verify_session: Callable[[], None] | None,
+    ) -> Any:
+        """Adopt the exact receipt and hold publication exclusion through actual completion."""
+        capture = self._checked_preparation(prepared, order)
+        client = self._client(session)
+        client_slot, client_factory = session.extra.get("client"), self._client_factory
+        bound = capture.session or _SessionCapture(session, client, session_values(session))
+
+        def checked() -> Any:
+            from flinttrade_gateway.registry import ConnectedRegistrySession  # noqa: PLC0415
+
+            # This callback constrains the existing canonical owner; it never
+            # mints a grant, consumes a ticket or replaces the retained session.
+            if type(session) is ConnectedRegistrySession and verify_session is None:
+                raise UnsupportedCapabilityError("Kotak managed preparation needs its current owner check",
+                                                 broker_id="kotakneo")
+            if verify_session is not None:
+                result = verify_session()
+                if result is not None:
+                    if inspect.iscoroutine(result) and inspect.getcoroutinestate(result) == inspect.CORO_CREATED:
+                        result.close()
+                    raise UnsupportedCapabilityError("Kotak session check must complete synchronously",
+                                                     broker_id="kotakneo")
+            self._checked_preparation(prepared, order)
+            if (bound.session is not session or bound.client is not client
+                    or session_values(session) != bound.values
+                    or session.extra.get("client") is not client_slot
+                    or self._client_factory is not client_factory
+                    or client_slot is not None and client_slot is not client
+                    or capture.tag != (session.algo_id or None)
+                    or session.expires_at <= datetime.now(UTC).timestamp() or session.is_read_only):
+                raise UnsupportedCapabilityError("Kotak captured account or session changed", broker_id="kotakneo")
+            with self._contract_refresh_lock:
+                try:
+                    if (self._contract_resolver is not capture.resolver
+                            or self._contract_generation != capture.generation):
+                        raise BrokerReadResponseInvalid from None
+                    capture.resolver.check_captured(capture.contract, now=datetime.now(UTC))
+                    if json.dumps(capture.contract.evidence(), sort_keys=True, allow_nan=False) != capture.evidence:
+                        raise BrokerReadResponseInvalid from None
+                except BrokerReadResponseInvalid:
+                    raise UnsupportedCapabilityError(
+                        "Kotak captured listing changed or expired before dispatch; re-propose", broker_id="kotakneo",
+                    ) from None
+                self._contract_inflight += 1
+            try:
+                return client.place_order(json.loads(capture.wire))
+            finally:
+                with self._contract_refresh_lock:
+                    self._contract_inflight -= 1
+
+        return await self._call(checked)
+
+    def preflight_order(
+        self, order: Order, *, tag: str | None = None, session: Session | None = None,
+        _capture_preparation: Callable[[KotakOrderPreparation], None] | None = None,
+    ) -> dict | None:
+        """Pure validation; selected listings may retain the exact preparation.
+
+        Args:
+            order: Complete canonical or legacy intent, never wire kwargs.
+            tag: Exact captured native tag, or None for omission.
+            session: Optional retained canonical session; never resolved here.
+            _capture_preparation: Synchronous private consumer for selected listings.
+
+        Returns:
+            Legacy detached contract evidence, or None for validation-only legacy
+            instruments. Those cannot obtain preparation by a lazy alias lookup.
+        """
+        if _capture_preparation is not None:
+            resolver = self._contract_resolver
+            if (is_selected_option_symbol(str(order.symbol), str(order.exchange))
+                    or resolver is not None and resolver.contains(str(order.symbol), str(order.exchange))):
+                prepared = self.prepare_order(order, tag=tag, session=session)
+                _capture_preparation(prepared)
+                return prepared.contract_evidence()
+        try:
+            M.validate_v3_order(order)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        symbol, exchange = str(order.symbol), str(order.exchange)
+        try:
+            listed = self._listed_read_contract(symbol, exchange)
+            if listed is None:
+                return None
+            evidence = listed.evidence()
+            M.validate_v3_order(order, lot_size=evidence["lot_size"], selected=True)
+            return evidence
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        except BrokerReadResponseInvalid:
+            raise UnsupportedCapabilityError(
+                "Kotak listed contract is unavailable, ambiguous or stale", broker_id="kotakneo",
+            ) from None
+
+    async def instrument_lot_sizes(self, session: Session, request: Any) -> list[dict]:
+        """Read the injected versioned master; never infer lot one or fetch implicitly."""
+        from flinttrade_core.broker_read_port import LotSizeRequest  # noqa: PLC0415
+        if (type(request) is not LotSizeRequest or not request.symbols
+                or len(set(request.symbols)) != len(request.symbols)):
+            raise BrokerReadResponseInvalid from None
+        resolver = self._contract_resolver
+        if resolver is None:
+            raise UnsupportedCapabilityError("Kotak listed instrument master is unavailable", broker_id="kotakneo")
+        now = datetime.now(UTC)
+        contracts = [resolver.resolve(symbol, request.exchange, now=now) for symbol in request.symbols]
+        return [{"symbol": c.symbol, "exchange": c.exchange, "lot_size": c.lot_size,
+                 "instrument_id": c.token, "contract": c.evidence()} for c in contracts]
 
     def _client(self, session: Session) -> Any:
         client = session.extra.get("client")
@@ -235,10 +534,14 @@ class KotakNeoAdapter(BrokerAdapter):
 
     async def _resolve_trading_symbol(self, session: Session, symbol: str, exchange: str) -> str:
         """Resolve a FlintTrade symbol to NEO's trading symbol (``pTrdSymbol``)."""
+        contract = self._listed_read_contract(symbol, exchange)
+        if contract is not None:
+            return contract.symbol
         if self._symbol_resolver is not None:
             return str(self._symbol_resolver(symbol, exchange))
         scrips = await self.search_scrip(session, symbol, exchange)
-        if not scrips or not scrips[0].get("trading_symbol"):
+        scrips = self._exact_scrips(scrips, symbol, exchange)
+        if len(scrips) != 1 or not scrips[0].get("trading_symbol"):
             raise BrokerError(
                 f"Cannot resolve Kotak Neo trading_symbol for {symbol}/{exchange} — "
                 "configure a symbol resolver or check the symbol"
@@ -254,19 +557,24 @@ class KotakNeoAdapter(BrokerAdapter):
         otherwise a live ``search_scrip`` lookup. Index names are the caller's
         responsibility (they pass through by name); this always resolves a token.
         """
+        contract = self._listed_read_contract(name, exchange)
+        if contract is not None:
+            return contract.token
         if self._token_resolver is not None:
             try:
                 return M.canonical_instrument_token(self._token_resolver(name, exchange))
             except (M.KotakNeoMappingError, TypeError, ValueError):
                 raise UnsupportedCapabilityError(
-                    "Kotak Neo resolved instrument token must be a positive numeric instrument_token (instrument token)",
+                    "Kotak Neo resolved instrument token must be a positive numeric "
+                    "instrument_token (instrument token)",
                     broker_id="kotakneo",
                 ) from None
         try:
             scrips = await self.search_scrip(session, name, exchange)
         except BrokerReadResponseInvalid as exc:
             raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
-        if not scrips or not scrips[0].get("token"):
+        scrips = self._exact_scrips(scrips, name, exchange)
+        if len(scrips) != 1 or not scrips[0].get("token"):
             raise BrokerError(
                 f"Cannot resolve Kotak Neo instrument token for {name}/{exchange} — "
                 "configure a token resolver or check the symbol"
@@ -277,8 +585,22 @@ class KotakNeoAdapter(BrokerAdapter):
             raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
 
     @staticmethod
-    async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        return await run_blocking_sdk_call(fn, *args, **kwargs)
+    def _exact_scrips(rows: list[dict], symbol: str, exchange: str) -> list[dict]:
+        # An underlying-name hit never identifies a derivative contract.
+        return [row for row in rows if row.get("exchange") == exchange and (
+            row.get("trading_symbol") == symbol
+            or exchange not in {"NFO", "BFO", "MCX", "CDS"} and row.get("name") == symbol
+        )]
+
+    async def _call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        def locked_call() -> Any:
+            from flinttrade_gateway.read_frontier import verify_read_invocation  # noqa: PLC0415
+
+            with self._sdk_transport_lock:
+                verify_read_invocation()
+                return fn(*args, **kwargs)
+
+        return await run_blocking_sdk_call(locked_call)
 
     @staticmethod
     def _rows(resp: Any) -> list[dict[str, Any]]:
@@ -286,7 +608,9 @@ class KotakNeoAdapter(BrokerAdapter):
         return data if isinstance(data, list) else []
 
     @staticmethod
-    def _fixed_rows(resp: object, *, operation: str = "order_report", allow_data_only_holdings: bool = False) -> list[dict[str, Any]]:
+    def _fixed_rows(
+        resp: object, *, operation: str = "order_report", allow_data_only_holdings: bool = False,
+    ) -> list[dict[str, Any]]:
         """Validate the broker envelope before normalising any book rows."""
         del allow_data_only_holdings  # retained for injected legacy facades
         validated = validate_read_envelope(resp, operation=operation)
@@ -679,9 +1003,31 @@ class KotakNeoAdapter(BrokerAdapter):
 
     # ---------- trading: writes (router-only) ----------
 
-    async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
-        """Place one exact v3 regular/AMO order through the gated path."""
+    async def place_order(
+        self, session: Session, order: Order, *, _router_token: object | None = None,
+        preparation: KotakOrderPreparation | None = None,
+        _verify_session: Callable[[], None] | None = None,
+    ) -> str:
+        """Place one gated order, optionally adopting its exact broker-issued preparation.
+
+        Args:
+            session: Actual retained session, never selected by receipt metadata.
+            order: Full signed canonical intent.
+            _router_token: Existing process router capability, not a preparation.
+            preparation: Actual prior capture; None preserves direct legacy callers.
+            _verify_session: Existing canonical owner's synchronous current-pin
+                check at the final SDK frontier. It constrains, never grants.
+
+        Returns:
+            An acknowledgement ID, never a fill or safe-retry assertion.
+        """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if preparation is not None:
+            resp = await self._prepared_place(session, order, preparation, _verify_session)
+            try:
+                return M.extract_order_id(M.require_write_success(resp))
+            except M.KotakNeoMappingError as exc:
+                raise BrokerInternal("Kotak Neo place response is invalid", broker_id="kotakneo") from exc
         variety = "".join(
             ch for ch in str(getattr(order, "variety", "") or "").casefold() if ch.isalnum()
         )
@@ -699,13 +1045,21 @@ class KotakNeoAdapter(BrokerAdapter):
                 "Kotak Neo MTF placement is documented, but segment/instrument/account eligibility is unverified",
                 broker_id="kotakneo",
             )
-        trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
+        contract = self.preflight_order(order)
+        trading_symbol = (
+            contract["symbol"] if contract is not None
+            else await self._resolve_trading_symbol(session, order.symbol, order.exchange)
+        )
+        if contract is None and self._listed_read_contract(trading_symbol, str(order.exchange)) is not None:
+            raise UnsupportedCapabilityError(
+                "Kotak selected option must use its exact listed symbol, not a legacy alias", broker_id="kotakneo",
+            )
         tag = session.algo_id or None
         try:
             params = M.to_place_order_params(order, trading_symbol, tag=tag)
         except M.KotakNeoMappingError as exc:
             raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
-        resp = await self._call(self._client(session).place_order, params)
+        resp = await self._contract_call(self._client(session).place_order, params, order, contract)
         try:
             return M.extract_order_id(M.require_write_success(resp))
         except M.KotakNeoMappingError as exc:
@@ -720,7 +1074,25 @@ class KotakNeoAdapter(BrokerAdapter):
             params = M.to_modify_order_params(order_id, changes)
         except M.KotakNeoMappingError as exc:
             raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
-        resp = await self._call(self._client(session).modify_order, params)
+        contract = None
+        order = None
+        if "symbol" in changes and "exchange" in changes:
+            order = SimpleNamespace(
+                symbol=changes["symbol"], exchange=changes["exchange"], action=changes.get("action", ""),
+                product=changes.get("product", ""), pricetype=M.KOTAK_TO_ORDER_TYPE[params["order_type"]],
+                quantity=params["quantity"], price=params["price"], trigger_price=params["trigger_price"],
+                disclosed_quantity=params["disclosed_quantity"], validity=params["validity"],
+                variety=changes.get("variety", "regular"),
+            )
+            symbol = str(changes["symbol"])
+            try:
+                if self._listed_read_contract(symbol, str(changes["exchange"])) is not None:
+                    contract = self.preflight_order(order)
+            except BrokerReadResponseInvalid:
+                raise UnsupportedCapabilityError(
+                    "Kotak listed contract is unavailable or stale", broker_id="kotakneo",
+                ) from None
+        resp = await self._contract_call(self._client(session).modify_order, params, order, contract)
         try:
             M.require_write_success(resp, expected_order_id=str(order_id))
         except M.KotakNeoMappingError as exc:
@@ -1200,7 +1572,10 @@ class KotakNeoAdapter(BrokerAdapter):
         )
         response = await self._call(
             self._client(session).place_order,
-            M.to_place_order_params(order, symbol, tag=tag),
+            # The separately verified manual emergency owner keeps its existing
+            # MKT intent. Broker protected-LIMIT conversion is not a fill guarantee;
+            # ordinary selected-option ingress cannot opt into this builder switch.
+            M.to_place_order_params(order, symbol, tag=tag, allow_market_conversion=True),
         )
         try:
             return M.extract_order_id(M.require_write_success(response))
@@ -1226,15 +1601,37 @@ class KotakNeoAdapter(BrokerAdapter):
         return [M.from_kotak_order(r) for r in M.order_history_rows(resp)]
 
     async def trade_book(self, session: Session) -> list[Trade]:
+        """Return the literal legacy list from this session's day-scoped observation."""
+        return (await self.trade_book_observation(session)).rows
+
+    async def trade_book_observation(
+        self, session: Session, *, order_evidence: list[dict] | None = None,
+    ) -> KotakNeoTradeBook:
+        """Complete within the documented day resource only, never lifetime history."""
         resp = await self._call(self._client(session).trade_book)
-        return [M.from_kotak_trade(r) for r in self._fixed_rows(resp, operation="trade_report")]  # type: ignore[misc]
+        rows = self._fixed_rows(resp, operation="trade_report")
+        trades: list[dict] = []
+        seen: dict[tuple, dict] = {}
+        for row in rows:
+            trade = M.from_kotak_trade(row, order_evidence=order_evidence, expected_account_id=session.account_id)
+            if "broker_account_id" in trade and trade["broker_account_id"] != session.account_id:
+                raise BrokerReadResponseInvalid from None
+            if "fill_id" in trade and "trade_date" in trade:
+                key = (session.account_id, trade["trade_date"], trade["broker_exchange_segment"],
+                       trade["orderid"], trade["fill_id"])
+                if key in seen:
+                    # Compare native observations too, including independent fill leg.
+                    if seen[key] != trade:
+                        raise BrokerReadResponseInvalid from None
+                    continue
+                seen[key] = trade
+            trades.append(trade)
+        return KotakNeoTradeBook(trades, received_count=len(rows), account_id=session.account_id)
 
     async def order_trades(self, session: Session, order_id: str) -> list[dict]:
         """Return every fill for one order from v3's unfiltered trade report."""
-        resp = await self._call(self._client(session).trade_book)
-        rows = self._fixed_rows(resp, operation="trade_report")
         target = str(order_id)
-        trades = [M.from_kotak_trade(row) for row in rows]
+        trades = await self.trade_book(session)
         return [trade for trade in trades if trade["orderid"] == target]
 
     async def positions(self, session: Session) -> list[Position]:
@@ -1286,7 +1683,10 @@ class KotakNeoAdapter(BrokerAdapter):
         resolved: list[tuple[str, str]] = []
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            if M.is_index_name(name):
+            contract = self._listed_read_contract(name, exchange)
+            if contract is not None:
+                resolved.append((contract.token, exchange))
+            elif M.is_index_name(name):
                 resolved.append((M.canonical_index_name(name), exchange))  # indexes key by case-sensitive name
             else:
                 resolved.append((await self._resolve_token(session, name, exchange), exchange))
@@ -1329,7 +1729,10 @@ class KotakNeoAdapter(BrokerAdapter):
             exchange, name = _split_symbol(raw)
             segment = M.EXCHANGE_TO_KOTAK.get(exchange.upper(), exchange.lower())
             expected_symbol: str | None = None
-            if M.is_index_name(name):
+            contract = self._listed_read_contract(name, exchange)
+            if contract is not None:
+                token, expected_symbol = contract.token, contract.symbol
+            elif M.is_index_name(name):
                 token = M.canonical_index_name(name)
             elif self._token_resolver is not None:
                 resolved_token = self._token_resolver(name, exchange)
@@ -1415,7 +1818,8 @@ class KotakNeoAdapter(BrokerAdapter):
                         continue
                     if returned_provider_segment is not None and returned_provider_segment != segment:
                         continue
-                    if expected_symbol is not None and returned_symbol is not None and returned_symbol != expected_symbol:
+                    if (expected_symbol is not None and returned_symbol is not None
+                            and returned_symbol != expected_symbol):
                         continue
                     matches.append(index)
                 elif (
@@ -1479,17 +1883,26 @@ class KotakNeoAdapter(BrokerAdapter):
                 "Kotak Neo MTF margin eligibility is unverified by the local policy",
                 broker_id="kotakneo",
             )
-        instrument_token = await self._resolve_token(session, order.symbol, order.exchange)
+        contract = self.preflight_order(order)
+        instrument_token = (
+            contract["instrument_id"] if contract is not None
+            else await self._resolve_token(session, order.symbol, order.exchange)
+        )
         try:
             params = M.to_margin_params(order, instrument_token)
         except M.KotakNeoMappingError as exc:
             raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = validate_read_envelope(
-            await self._call(self._client(session).margin, params),
+            await self._contract_call(self._client(session).margin, params, order, contract),
             operation="margin_required",
         )
         try:
-            return M.from_kotak_margin(resp)
+            result = M.from_kotak_margin(resp)
+            if contract is not None:
+                result["contract"] = contract
+                result["proposal"] = dict(params)
+                result["estimate_only"] = True
+            return result
         except BrokerReadResponseInvalid as exc:
             raise BrokerInternal("Kotak Neo margin response is invalid", broker_id="kotakneo") from exc
 
@@ -1576,6 +1989,13 @@ class KotakNeoAdapter(BrokerAdapter):
         """kotakneoapi 3.x option chain (REST). Neo has no Practice sandbox."""
         from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
 
+        mapped = await self.option_chain_observation(session, req)
+        # The shared typed owner must explicitly adopt broker_fields. Do not
+        # substitute a subclass: its exact-type admission would reject the read.
+        return OptionChain(**{**mapped, "strikes": [OptionChainStrike(**row) for row in mapped["strikes"]]})
+
+    async def option_chain_observation(self, session: Session, req: dict) -> dict:
+        """Lossless contract metadata producer for the shared typed read owner."""
         try:
             request = M.to_option_chain_request(req)
         except M.KotakNeoMappingError as exc:
@@ -1595,7 +2015,7 @@ class KotakNeoAdapter(BrokerAdapter):
             sdk_exchange=request["sdk_exchange"],
             requested_expiry=request["expiry"],
         )
-        return OptionChain(**{**mapped, "strikes": [OptionChainStrike(**row) for row in mapped["strikes"]]})
+        return mapped
 
     # ---------- market data: streaming ----------
 

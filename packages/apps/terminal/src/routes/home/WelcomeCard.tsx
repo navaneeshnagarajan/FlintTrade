@@ -53,7 +53,7 @@ export function WelcomeCard() {
               {isExplore || accountReadsEnabled ? "Today's P&L" : "Broker required"}
             </p>
             <p
-              className={cn("font-mono text-2xl font-semibold", !hasAggregate ? "text-text-muted" : pnlPositive ? "text-bullish-text" : "text-bearish-text")}
+              className={cn("font-mono text-2xl font-semibold whitespace-nowrap", !hasAggregate ? "text-text-muted" : pnlPositive ? "text-bullish-text" : "text-bearish-text")}
             >
               {hasAggregate ? `${pnlPositive ? "+" : ""}${totalPnl.toLocaleString("en-IN", {
                 style: "currency",

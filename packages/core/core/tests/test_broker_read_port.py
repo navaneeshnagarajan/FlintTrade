@@ -31,6 +31,9 @@ EXPECTED_METHODS = (
     "margin",
     "order_states",
     "trades",
+    # Explicit bounded statement reads; no generic broker-method escape hatch.
+    "trade_history",
+    "ledger",
 )
 
 
@@ -51,6 +54,10 @@ def test_closed_domain_public_fields_publish_exact_literal_annotations() -> None
 
 
 def test_protocol_exposes_exactly_thirteen_async_fixed_reads() -> None:
+    """Check all fifteen fixed reads; preserve the original regression identity.
+
+    The legacy name predates the two explicit history/account-posting reads.
+    """
     BrokerReadPort = _contract().BrokerReadPort
     methods = tuple(
         name
