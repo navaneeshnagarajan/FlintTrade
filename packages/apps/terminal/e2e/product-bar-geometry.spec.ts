@@ -5,7 +5,7 @@ function geometry(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     const topbar = document.querySelector("[data-testid='topbar-v2']")!.getBoundingClientRect();
     const bar = document.querySelector(".ft-product-bar")!.getBoundingClientRect();
-    const nav = document.querySelector(".ft-app-nav")!.getBoundingClientRect();
+    const nav = document.querySelector("nav[aria-label='Apps']")!.getBoundingClientRect();
     const layout = document.querySelector("[data-testid='app-layout']")!.getBoundingClientRect();
     return {
       topbarH: Math.round(topbar.height),
