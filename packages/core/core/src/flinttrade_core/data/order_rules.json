@@ -1,28 +1,7 @@
 {
   "version": 1,
-  "notes": "One dated table of order rules for Indian markets. Rows are data: the evaluator in flinttrade_core.order_rules applies them the same way for the order ticket, Practice, backtests and the order API. authority orders the rows (regulatory, exchange, broker, then FlintTrade's own product rules). level is what the operator sees: block refuses the order, warn lets it through with a note, info explains what will happen. message is shown verbatim after its placeholders are filled. Rows that share a family are alternatives: the first matching row in file order wins. A rule that is not confirmed is not listed here, or is listed as info. Lot sizes stay in the instrument master and charges stay in indian_charges.json. How a broker attaches a stop-loss and target is the broker capability profile.",
+  "notes": "One dated table of order rules for Indian markets. Rows are data: the evaluator in flinttrade_core.order_rules applies them the same way for the order ticket, Practice, backtests and the order API. authority orders the rows (regulatory, exchange, broker, then FlintTrade's own product rules). level is what the operator sees: block refuses the order, warn lets it through with a note, info explains what will happen. message is shown verbatim after its placeholders are filled. Rows that share a family are alternatives: the first matching row in file order wins. A rule that is not confirmed is not listed here, or is listed as info. Lot sizes stay in the instrument master and charges stay in indian_charges.json.",
   "rules": [
-    {
-      "id": "sl-m-not-allowed-options",
-      "authority": "exchange",
-      "level": "block",
-      "source": "Exchange",
-      "description": "Stop-loss market orders are not allowed on options. Use stop-loss limit.",
-      "check": "order_type_not_allowed",
-      "scope": {
-        "exchange": "NSE",
-        "broker": "all",
-        "instrument": "option",
-        "order_types": [
-          "SL-M"
-        ]
-      },
-      "effective_from": "2026-04-28",
-      "effective_to": null,
-      "parameters": {},
-      "message": "Stop-market isn't available for options; use stop-limit.",
-      "family": "option_stop_market"
-    },
     {
       "id": "options-stop-market-not-sent",
       "authority": "product",
@@ -41,8 +20,7 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Stop-market isn't available for options; use stop-limit.",
-      "family": "option_stop_market"
+      "message": "Stop-market orders aren't accepted on options. Use stop-limit."
     },
     {
       "id": "options-market-order-not-sent",
@@ -88,7 +66,7 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Market orders in F&O are not accepted — use a limit price."
+      "message": "Market orders in F&O are not accepted. Use a limit price."
     },
     {
       "id": "market-order-needs-trade-today",
@@ -109,7 +87,7 @@
       "effective_from": "2026-04-28",
       "effective_to": null,
       "parameters": {},
-      "message": "This contract hasn't traded today — use a limit price.",
+      "message": "This contract hasn't traded today. Use a limit price.",
       "family": "no_trade_today"
     },
     {
@@ -254,7 +232,7 @@
       "parameters": {
         "max_per_second": 10
       },
-      "message": "Wait a moment — the limit is {max_per_second} orders per second per exchange."
+      "message": "Wait a moment. The limit is {max_per_second} orders per second per exchange."
     },
     {
       "id": "self-built-algo-undertaking",
@@ -294,7 +272,7 @@
       "effective_from": "2026-04-01",
       "effective_to": null,
       "parameters": {},
-      "message": "This contract hasn't traded today — use a limit price.",
+      "message": "This contract hasn't traded today. Use a limit price.",
       "family": "no_trade_today"
     },
     {
@@ -320,7 +298,7 @@
         "per_hour": 1000,
         "per_day": 7000
       },
-      "message": "Wait {wait} — the limit is {limit} orders per {window}."
+      "message": "Wait {wait}. The limit is {limit} orders per {window}."
     },
     {
       "id": "dhan-modifications-per-order",
@@ -342,7 +320,7 @@
       "parameters": {
         "max_modifications": 25
       },
-      "message": "This order has already been modified {limit} times — place a new order."
+      "message": "This order has already been modified {limit} times. Place a new order."
     },
     {
       "id": "dhan-market-price-protection",
@@ -458,7 +436,7 @@
         "square_off_from": "15:25",
         "warn_minutes_before": 5
       },
-      "message": "Intraday F&O positions are closed from {square_off_from} — exit before then."
+      "message": "Intraday F&O positions are closed from {square_off_from}. Exit before then."
     },
     {
       "id": "practice-market-price-cap",
@@ -484,11 +462,32 @@
       "message": "Practice fills a market order only within {cap_pct}% of the last price."
     },
     {
+      "id": "practice-bracket-unsupported",
+      "authority": "product",
+      "level": "block",
+      "source": "Practice",
+      "description": "Practice does not place a stop-loss or target. A Practice bracket is refused.",
+      "check": "separate_stop_loss_target",
+      "scope": {
+        "exchange": "all",
+        "broker": "practice",
+        "instrument": "all",
+        "order_types": [
+          "all"
+        ]
+      },
+      "family": "stop_loss_target",
+      "effective_from": "2025-08-04",
+      "effective_to": null,
+      "parameters": {},
+      "message": "Stop-loss and target aren't supported in Practice."
+    },
+    {
       "id": "broker-separate-stop-loss-target",
       "authority": "broker",
       "level": "info",
       "source": "{broker_name}",
-      "description": "Brokers without attached orders get the stop-loss and target as separate orders.",
+      "description": "A stop-loss and target are placed as separate orders.",
       "check": "separate_stop_loss_target",
       "scope": {
         "exchange": "all",
@@ -498,6 +497,7 @@
           "all"
         ]
       },
+      "family": "stop_loss_target",
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},

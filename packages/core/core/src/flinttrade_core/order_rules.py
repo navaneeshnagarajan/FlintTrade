@@ -13,9 +13,8 @@ effective-from date and the on-screen message with placeholders. Precedence is
 regulatory, then exchange, then broker; within that a block outranks a warn and
 a warn outranks an info.
 
-This module does not hold lot sizes (instrument master), charges
-(``indian_charges``) or broker behaviour such as attached stop-loss and target
-orders (the broker capability profile). Callers pass those facts in.
+This module does not hold lot sizes (instrument master) or charges
+(``indian_charges``).
 """
 
 from __future__ import annotations
@@ -177,7 +176,6 @@ class OrderFacts:
     broker_name: str = ""
     expiry_day: bool | None = None
     has_stop_loss_or_target: bool = False
-    stop_loss_target_placement: str = "attached"
     instrument: str | None = None
     product: str = ""
     traded_today: bool | None = None
@@ -447,7 +445,7 @@ def _evaluate_row(row: OrderRule, facts: OrderFacts, order_type: str) -> RuleRes
     if row.check in {"note", "market_price_cap"}:
         return RuleResult(row.level, source, row.id, _fill(row.message, row.parameters))
     if row.check == "separate_stop_loss_target":
-        if facts.has_stop_loss_or_target and facts.stop_loss_target_placement == "separate":
+        if facts.has_stop_loss_or_target:
             return RuleResult(row.level, source, row.id, row.message)
         return None
     if row.check == "circuit_band":
@@ -598,6 +596,15 @@ def _field(order: object, *names: str) -> Any:
     return None
 
 
+
+_PRACTICE_BROKERS = frozenset({"practice", "sandbox", "mock"})
+
+
+def _rules_broker(broker: str) -> str:
+    key = str(broker or "").strip().lower() or "all"
+    return "practice" if key in _PRACTICE_BROKERS else key
+
+
 def facts_from_order(
     order: object,
     *,
@@ -605,7 +612,6 @@ def facts_from_order(
     broker_name: str = "",
     last_price: object = None,
     expiry_day: bool | None = None,
-    stop_loss_target_placement: str = "attached",
     traded_today: bool | None = None,
     at_minutes: int | None = None,
     circuit_low: object = None,
@@ -629,11 +635,10 @@ def facts_from_order(
         price=_positive(_decimal(_field(order, "price", "limit_price"))),
         trigger_price=_positive(_decimal(_field(order, "trigger_price", "stop_price", "triggerPrice"))),
         last_price=_positive(_decimal(last_price)),
-        broker=broker or "all",
+        broker=_rules_broker(broker),
         broker_name=broker_name,
         expiry_day=expiry_day,
         has_stop_loss_or_target=bool((stop_loss and stop_loss > 0) or (target and target > 0)),
-        stop_loss_target_placement=stop_loss_target_placement,
         product=str(getattr(_field(order, "product"), "value", _field(order, "product")) or "").upper(),
         traded_today=traded_today,
         at_minutes=at_minutes,

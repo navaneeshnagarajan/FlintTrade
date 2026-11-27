@@ -16,7 +16,7 @@ test("a market option order is refused on the reserved line, Place stays disable
   await page.getByTestId("order-rule-more").click();
   await expect(page.getByTestId("order-rule-list")).toBeVisible();
   await page.getByLabel("Type").selectOption("SL-M");
-  await expect(line).toContainText("Exchange · Stop-market isn't available for options; use stop-limit.");
+  await expect(line).toContainText("FlintTrade · Stop-market orders aren't accepted on options. Use stop-limit.");
   await expect(place).toBeDisabled();
 });
 
@@ -51,7 +51,7 @@ test("a triggered stop that did not fill shows the chip, and Exit now opens a li
   expect(opened).toEqual({
     widgetId: "orderpad",
     props: {
-      symbol: "NIFTY25NOV2624000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 150, product: "MIS", price: 41.3,
+      symbol: "NIFTY25NOV2624000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 150, product: "MIS", price: 41.3, exitOnly: true, openQuantity: 150,
     },
   });
   await page.getByRole("button", { name: "Stop fills" }).click();

@@ -18,7 +18,9 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 - **Turn on Live.** The first switch to Live asks once for acknowledgement that orders are sent from this computer through the user's broker account. It is asked again only when the text changes. Practice never asks.
 
-- **Broker wording.** Order messages name the selected broker. With brokers that place stop-loss and target as separate orders, the ticket says so.
+- **Broker wording.** Order messages name the selected broker. A stop-loss and target are placed as separate orders, and the ticket says so. Practice does not place them.
+
+- **Option square-off and exit-all.** An option exit goes out as a reduce-only limit at the cap price, taken from the position's last price. The confirm line shows that price. If a position has no last price, Exit now opens a limit ticket for that position only.
 
 - **AI Centre tab renamed to Analysis.** The AI Centre tab and panel title that read Signals now read Analysis, and the panel no longer repeats a "Trading Signals" heading. The signal list and the signals API are unchanged.
 

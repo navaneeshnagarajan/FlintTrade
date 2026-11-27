@@ -126,7 +126,7 @@ async def test_dhan_order_budget_refuses_the_eleventh_order_in_a_second(*, backe
             safety_ctx=_mint(order, "dhan", backend_lease_factory),
         )
     order = _order("RELIANCE", Exchange.NSE, PriceType.LIMIT, price="100")
-    with pytest.raises(OrderBudgetExceeded, match="the limit is 10 orders per second"):
+    with pytest.raises(OrderBudgetExceeded, match=r"Wait 1 second\. The limit is 10 orders per second\."):
         await router.place_order(
             _request_ctx(),
             adapter_id="dhan",

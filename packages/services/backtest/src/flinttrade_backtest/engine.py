@@ -725,7 +725,7 @@ class BacktestEngine:
             return True
         rule_ids = {result.rule_id for result in blocks}
         market_rules = {"options-market-order-not-sent"}
-        stop_market_rules = {"sl-m-not-allowed-options", "options-stop-market-not-sent"}
+        stop_market_rules = {"options-stop-market-not-sent"}
         side = order.side.value
         if rule_ids <= market_rules and order.order_type == OrderType.MARKET:
             reference = self._last_price(order.symbol or self.config.symbol)

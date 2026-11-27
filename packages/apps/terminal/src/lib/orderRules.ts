@@ -59,7 +59,6 @@ export interface OrderRuleInput {
   brokerName?: string;
   expiryDay?: boolean | null;
   hasStopLossOrTarget?: boolean;
-  stopLossTargetPlacement?: "attached" | "separate";
   product?: string;
   tradedToday?: boolean | null;
   atMinutes?: number | null;
@@ -295,7 +294,7 @@ function evaluateRow(row: RuleRow, facts: Facts): RuleResult | null {
     case "market_price_cap":
       return result(fill(row.message, params));
     case "separate_stop_loss_target":
-      return facts.hasStopLossOrTarget && facts.stopLossTargetPlacement === "separate" ? result(row.message) : null;
+      return facts.hasStopLossOrTarget ? result(row.message) : null;
     case "circuit_band": {
       const low = positive(facts.circuitLow);
       const high = positive(facts.circuitHigh);
@@ -333,12 +332,11 @@ export function evaluateOrderRules(input: OrderRuleInput, on: string = istToday(
   }
   const facts: Facts = {
     ...input,
-    broker: input.broker || "all",
+    broker: rulesBroker(input.broker),
     kind,
     venue: exchangeFamily(input.exchange),
     orderType: normaliseOrderType(input.orderType),
     expiryDay,
-    stopLossTargetPlacement: input.stopLossTargetPlacement ?? "attached",
   };
   const scored: { key: [number, number, number]; result: RuleResult }[] = [];
   const settled = new Set<string>();
@@ -418,7 +416,7 @@ export function stopLossLimitPrice(input: StopLossLimitInput, on: string = istTo
     exchange: input.exchange,
     orderType: "SL",
     product: input.product ?? undefined,
-    broker: input.broker || "all",
+    broker: rulesBroker(input.broker),
     kind,
     venue: exchangeFamily(input.exchange),
     expiryDay: expiry !== null && expiry === on,
@@ -490,17 +488,18 @@ const BROKER_NAMES: Record<string, string> = {
   deltaexchange: "Delta Exchange",
 };
 
+const PRACTICE_BROKERS = new Set(["practice", "sandbox", "mock"]);
+
+function rulesBroker(broker: string | null | undefined): string {
+  const id = String(broker ?? "").trim().toLowerCase();
+  if (!id) return "all";
+  return PRACTICE_BROKERS.has(id) ? "practice" : id;
+}
+
 /** Name shown as the source of a broker rule. */
 export function brokerDisplayName(broker: string | null | undefined): string {
   const id = String(broker ?? "").trim().toLowerCase();
   return BROKER_NAMES[id] ?? "Broker";
-}
-
-/** Brokers that hold a stop-loss and target with the entry order (mirrors the broker profile). */
-const ATTACHED_STOP_LOSS_TARGET = new Set(["dhan", "practice", "sandbox", "mock"]);
-
-export function stopLossTargetPlacement(broker: string | null | undefined): "attached" | "separate" {
-  return ATTACHED_STOP_LOSS_TARGET.has(String(broker ?? "").trim().toLowerCase()) ? "attached" : "separate";
 }
 
 /** A desk premium as a limit price on the 5-paise tick, or null without one. */
@@ -508,4 +507,31 @@ export function optionLimitPrice(premium: number | null | undefined): number | n
   if (typeof premium !== "number" || !Number.isFinite(premium) || premium <= 0) return null;
   const ticks = Math.max(1, Math.round(premium * 20 + 1e-7));
   return ticks / 20;
+}
+
+/** Cap percent from the Practice market-fill row. */
+export function marketPriceCapPct(): number {
+  const row = ROWS.find((item) => item.id === "practice-market-price-cap");
+  return num(row?.parameters?.cap_pct, 3);
+}
+
+/** Worst fill from ``last``: cap percent above a buy, or below a sell, in paise. */
+export function marketPriceCap(last: number, action: string): number | null {
+  const reference = positive(last);
+  if (reference === null) return null;
+  const pct = marketPriceCapPct();
+  const factor = String(action).toUpperCase() === "BUY" ? 1 + pct / 100 : 1 - pct / 100;
+  return Math.round(reference * factor * 100 + 1e-7) / 100;
+}
+
+/** Option exit limit at the cap, on the 5-paise tick, or null without a last price. */
+export function optionExitLimitPrice(last: number, action: string): number | null {
+  const cap = marketPriceCap(last, action);
+  return cap === null ? null : optionLimitPrice(cap);
+}
+
+/** Confirm line for an option exit priced from last. */
+export function optionExitConfirmLine(price: number, capPct: number = marketPriceCapPct()): string {
+  const rupees = price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `Exit at ₹${rupees} limit (within ${capPct}% of last)`;
 }

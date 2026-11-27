@@ -154,7 +154,13 @@ import {
 } from "./positionBook";
 import { SAMPLE_POSITION_BOOK } from "./sampleBook";
 import { StopLossNotFilledChip as SharedStopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
-import { contractKeyOf, exitNowTicket, stopLossNotFilledKeys } from "@/lib/stopLossState";
+import { contractKeyOf, exitNowTicket, openExitTicket, stopLossNotFilledKeys } from "@/lib/stopLossState";
+import {
+  instrumentKind,
+  marketPriceCapPct,
+  optionExitConfirmLine,
+  optionExitLimitPrice,
+} from "@/lib/orderRules";
 import NetPositionView from "./NetPositionView";
 import HeatMapView, {
   GROUP_LABELS,
@@ -176,6 +182,19 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   net: "Net",
   heat: "Heat",
 };
+
+
+function exitRequestedBody(
+  action: string,
+  qty: number,
+  symbol: string,
+  order: { orderType: string; price: number },
+): string {
+  const how = order.orderType === "LIMIT"
+    ? `at ₹${order.price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} limit`
+    : "at market";
+  return `Exit requested: ${action} ${qty} ${symbol} ${how}. Check positions and orders for the outcome.`;
+}
 
 function OutcomeCopy({ message }: { message: string }) {
   const uncertain = orderOutcomeIsUncertain(message);
@@ -401,6 +420,41 @@ function squareOffMark(position: PositionRow, practice: boolean): number {
   return 0;
 }
 
+function positionLastPrice(position: PositionRow): number | null {
+  return position.ltp > 0 ? position.ltp : null;
+}
+
+function isOptionPosition(position: PositionRow): boolean {
+  return instrumentKind(position.symbol, position.exchange) === "option";
+}
+
+type OptionExitPlan = { price: number; capPct: number; confirm: string };
+
+function optionExitPlan(position: PositionRow): OptionExitPlan | "ticket" | null {
+  if (!isOptionPosition(position)) return null;
+  const last = positionLastPrice(position);
+  const action = position.quantity > 0 ? "SELL" : "BUY";
+  const price = last === null ? null : optionExitLimitPrice(last, action);
+  if (price === null) return "ticket";
+  const capPct = marketPriceCapPct();
+  return { price, capPct, confirm: optionExitConfirmLine(price, capPct) };
+}
+
+function squareOffOrder(
+  position: PositionRow,
+  practice: boolean,
+): { orderType: "LIMIT" | "MARKET"; price: number } | "ticket" {
+  const plan = optionExitPlan(position);
+  if (plan === "ticket") return "ticket";
+  if (plan) return { orderType: "LIMIT", price: plan.price };
+  return { orderType: "MARKET", price: squareOffMark(position, practice) };
+}
+
+function openPositionExitTicket(position: PositionRow): void {
+  const ticket = exitNowTicket(position, { ltp: positionLastPrice(position) });
+  if (ticket) openExitTicket(ticket);
+}
+
 function SquareOffDialog({
   position,
   openingIdentity,
@@ -421,9 +475,21 @@ function SquareOffDialog({
   // The counter-order must carry the position's own product, or the broker
   // opens a fresh position in a different product instead of squaring off.
   const product = squareOffProduct(position);
+  const exitPlan = optionExitPlan(position);
+  const exitOrder = squareOffOrder(position, practice);
+  const confirmLine = exitPlan === "ticket"
+    ? "Open Exit now"
+    : exitPlan
+      ? exitPlan.confirm
+      : `${exitAction} ${exitQty} at market`;
 
   const handleSquareOff = useCallback(async () => {
     if (!product || !isActionAllowed()) return;
+    if (exitOrder === "ticket") {
+      openPositionExitTicket(position);
+      onClose();
+      return;
+    }
     const mutationIdentity = runWithMatchingAccountAuthority(
       openingIdentity,
       getCurrentIdentity,
@@ -441,9 +507,9 @@ function SquareOffDialog({
         exchange: position.exchange,
         action: exitAction,
         product,
-        orderType: "MARKET",
+        orderType: exitOrder.orderType,
         quantity: exitQty,
-        price: squareOffMark(position, practice),
+        price: exitOrder.price,
         triggerPrice: 0,
         strategy: "FlintPositions",
         rationale: admissionRationale(note),
@@ -458,7 +524,7 @@ function SquareOffDialog({
         title: exitWhileDown ? EXIT_REQUESTED : "Square-off submitted",
         body: exitWhileDown
           ? EXIT_REQUESTED
-          : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
+          : exitRequestedBody(exitAction, exitQty, position.symbol, exitOrder),
       });
       onSquaredOff(mutationIdentity);
       onClose();
@@ -482,6 +548,7 @@ function SquareOffDialog({
     product,
     exitAction,
     exitQty,
+    exitOrder,
     openingIdentity,
     isActionAllowed,
     getCurrentIdentity,
@@ -501,13 +568,27 @@ function SquareOffDialog({
         <DialogHeader>
           <DialogTitle>Square off position?</DialogTitle>
           <DialogDescription>
-            This places a {exitAction} market order for {exitQty} {position.symbol} (
-            {position.exchange}
-            {position.product ? `, ${position.product}` : ""}) to close your{" "}
-            {position.quantity > 0 ? "long" : "short"} position.
+            {exitPlan === "ticket"
+              ? "No last price is available. Exit now opens a limit ticket."
+              : exitPlan
+                ? (
+                    <>
+                      This closes your {position.quantity > 0 ? "long" : "short"} {position.symbol} (
+                      {position.exchange}
+                      {position.product ? `, ${position.product}` : ""}) position. {exitPlan.confirm}.
+                    </>
+                  )
+                : (
+                    <>
+                      This places a {exitAction} market order for {exitQty} {position.symbol} (
+                      {position.exchange}
+                      {position.product ? `, ${position.product}` : ""}) to close your{" "}
+                      {position.quantity > 0 ? "long" : "short"} position.
+                    </>
+                  )}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
+        {exitPlan !== "ticket" && <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>}
         {!product && (
           <p className="text-xs text-loss" role="alert">
             Cannot square off: unrecognised product
@@ -533,7 +614,7 @@ function SquareOffDialog({
             aria-label={`Confirm square off ${position.symbol}`}
             className="bg-loss hover:bg-loss/90 text-white"
           >
-            {isSubmitting ? "Squaring off…" : `${exitAction} ${exitQty} at market`}
+            {isSubmitting ? "Squaring off…" : confirmLine}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -586,6 +667,14 @@ function ExitAllDialog({
   const confirmed = confirmText.trim() === "EXIT";
   const openRows = positions.filter((row) => row.quantity !== 0);
   const positionCount = openRows.length;
+  const optionLines = openRows.flatMap((row) => {
+    const plan = optionExitPlan(row);
+    if (plan === "ticket") {
+      return [`${row.symbol}: no last price. Exit now opens a limit ticket.`];
+    }
+    return plan ? [`${row.symbol}: ${plan.confirm}.`] : [];
+  });
+  const placeEachExit = practice || openRows.some(isOptionPosition);
 
   const close = useCallback(
     (next: boolean) => {
@@ -613,7 +702,7 @@ function ExitAllDialog({
     setRowFailures([]);
     setSubmittedExits([]);
     try {
-      if (practice) {
+      if (placeEachExit) {
         const failures: ExitAllRowFailure[] = [];
         const done: string[] = [];
         for (const position of openRows) {
@@ -639,15 +728,20 @@ function ExitAllDialog({
             });
             continue;
           }
+          const exitOrder = squareOffOrder(position, practice);
+          if (exitOrder === "ticket") {
+            openPositionExitTicket(position);
+            continue;
+          }
           try {
             await placeOrder({
               symbol: position.symbol,
               exchange: position.exchange,
               action: position.quantity > 0 ? "SELL" : "BUY",
               product,
-              orderType: "MARKET",
+              orderType: exitOrder.orderType,
               quantity: Math.abs(position.quantity),
-              price: squareOffMark(position, true),
+              price: exitOrder.price,
               triggerPrice: 0,
               strategy: "FlintPositions",
             }, mutationIdentity, { exit: true });
@@ -714,6 +808,7 @@ function ExitAllDialog({
     confirmed,
     openRows,
     practice,
+    placeEachExit,
     openingIdentity,
     isActionAllowed,
     getCurrentIdentity,
@@ -729,10 +824,17 @@ function ExitAllDialog({
           <DialogTitle>Exit all positions?</DialogTitle>
           <DialogDescription>
             {practice
-              ? `This requests an opposite market order for every open Practice position (${positionCount}). A refusal is shown on that row.`
-              : `This requests a market exit for every open position (${positionCount}) in your live broker account.`}
+              ? `This requests an opposite order for every open Practice position (${positionCount}). A refusal is shown on that row.`
+              : `This requests an exit for every open position (${positionCount}) in your live broker account.`}
           </DialogDescription>
         </DialogHeader>
+        {optionLines.length > 0 && (
+          <ul className="space-y-1 text-xs text-text-primary">
+            {optionLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
         <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
         <div className="space-y-1.5">
           <Label htmlFor="exit-all-confirm">Type EXIT (in capitals) to confirm</Label>
@@ -1099,15 +1201,20 @@ function PositionsWidget(props: WidgetProps) {
     const identity = captureAccountAuthority(readIdentityRef.current);
     const exitAction = position.quantity > 0 ? "SELL" : "BUY";
     const exitQty = Math.abs(position.quantity);
+    const exitOrder = squareOffOrder(position, appMode === "practice");
+    if (exitOrder === "ticket") {
+      openPositionExitTicket(position);
+      return;
+    }
     try {
       await placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
         action: exitAction,
         product,
-        orderType: "MARKET",
+        orderType: exitOrder.orderType,
         quantity: exitQty,
-        price: squareOffMark(position, appMode === "practice"),
+        price: exitOrder.price,
         triggerPrice: 0,
         strategy: "FlintPositions",
       }, identity, { exit: true });
@@ -1118,7 +1225,7 @@ function PositionsWidget(props: WidgetProps) {
         title: exitWhileDown ? EXIT_REQUESTED : "Square-off submitted",
         body: exitWhileDown
           ? EXIT_REQUESTED
-          : `Exit requested: ${exitAction} ${exitQty} ${position.symbol} at market. Check positions and orders for the outcome.`,
+          : exitRequestedBody(exitAction, exitQty, position.symbol, exitOrder),
       });
       refreshPositions(identity, getCurrentReadIdentity);
     } catch (err) {
@@ -1160,7 +1267,7 @@ function PositionsWidget(props: WidgetProps) {
               void closeReduced(position);
             }}
             aria-label={`Close ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Close ${position.symbol} at market`}
+            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Close ${position.symbol}`}
             className="h-5 px-1.5 text-xxs gap-1 text-text-primary hover:bg-surface-hover"
           >
             Close
@@ -1179,7 +1286,7 @@ function PositionsWidget(props: WidgetProps) {
               });
             }}
             aria-label={`Square off ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Square off ${position.symbol} at market`}
+            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Square off ${position.symbol}`}
             className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
           >
             <SquareX size={10} aria-hidden="true" /> Square off
@@ -1481,7 +1588,7 @@ function PositionsWidget(props: WidgetProps) {
                 identity: captureAccountAuthority(readIdentity),
               })}
               aria-label="Exit all positions"
-              title="Square off every open position at market"
+              title="Square off every open position"
               className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
             >
               <LogOut size={10} aria-hidden="true" /> Exit all…

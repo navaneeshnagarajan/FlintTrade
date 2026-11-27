@@ -106,7 +106,7 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
         in table
     )
     # Parameters already known from the row are filled in; sources are not listed.
-    assert "Intraday F&O positions are closed from 15:25 — exit before then." in table
+    assert "Intraday F&O positions are closed from 15:25. Exit before then." in table
     assert "Regulation" not in table
 
 
@@ -116,10 +116,6 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
 
 # One order that the rule decides, for every per-order rule id.
 _TRIGGERS: dict[str, tuple[dict, dict]] = {
-    "sl-m-not-allowed-options": (
-        {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "SL-M", "trigger_price": "80"},
-        {},
-    ),
     "options-stop-market-not-sent": (
         {"symbol": SENSEX_CE, "exchange": "BFO", "pricetype": "SL-M", "trigger_price": "80"},
         {},
@@ -198,9 +194,13 @@ _TRIGGERS: dict[str, tuple[dict, dict]] = {
         {"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "MARKET"},
         {"broker": "practice", "broker_name": "Practice"},
     ),
+    "practice-bracket-unsupported": (
+        {"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "LIMIT", "price": "100", "stop_loss_price": "90"},
+        {"broker": "practice", "broker_name": "Practice"},
+    ),
     "broker-separate-stop-loss-target": (
         {"symbol": "RELIANCE", "exchange": "NSE", "pricetype": "LIMIT", "price": "100", "stop_loss_price": "90"},
-        {"broker": "kotakneo", "broker_name": "Kotak Neo", "stop_loss_target_placement": "separate"},
+        {"broker": "kotakneo", "broker_name": "Kotak Neo"},
     ),
 }
 
@@ -418,7 +418,7 @@ def test_results_are_ordered_block_warn_info_then_authority() -> None:
     # The two no-trade-today rows share one sentence, so only the exchange's fires.
     assert [r.level for r in results] == ["block", "block"]
     assert [r.source for r in results] == ["Exchange", "FlintTrade"]
-    assert results[0].message == "This contract hasn't traded today — use a limit price."
+    assert results[0].message == "This contract hasn't traded today. Use a limit price."
 
 
 def test_refusal_carries_every_result() -> None:
@@ -489,7 +489,7 @@ def test_order_budget_windows_and_wait_message() -> None:
     # 250 orders inside one minute: the next one waits for the minute window.
     refused = budget.check_and_record("dhan", now=25.0, on=on)
     assert refused is not None
-    assert refused.message == "Wait 35 seconds — the limit is 250 orders per minute."
+    assert refused.message == "Wait 35 seconds. The limit is 250 orders per minute."
     assert refused.source == "Dhan"
     # Other brokers have no published budget rows.
     assert budget.check_and_record("upstox", now=25.0, on=on) is None
@@ -501,7 +501,7 @@ def test_order_budget_counts_cancels_without_refusing_them() -> None:
     for _ in range(10):
         budget.record("dhan", now=0.0, on=on)
     refused = budget.check_and_record("dhan", now=0.5, on=on)
-    assert refused is not None and refused.message == "Wait 1 second — the limit is 10 orders per second."
+    assert refused is not None and refused.message == "Wait 1 second. The limit is 10 orders per second."
 
 
 def test_intraday_square_off_follows_the_broker_profile() -> None:
@@ -589,6 +589,31 @@ def test_a_name_ending_in_ce_is_not_an_option() -> None:
     assert instrument_kind("RELIANCE", "NSE") == "equity"
     assert instrument_kind("NIFTY-Nov2026-24000-CE", "NFO") == "option"
     assert evaluate_order({"symbol": "RELIANCE", "exchange": "MCX", "pricetype": "MARKET"}, broker="kotakneo") == []
+
+
+@pytest.mark.parametrize("broker,broker_name", [("practice", "Practice"), ("dhan", "Dhan")])
+def test_an_option_exit_limit_at_the_cap_is_not_refused(broker: str, broker_name: str) -> None:
+    last = Decimal("150")
+    price = market_price_cap(last, "SELL")
+    assert price == Decimal("145.50")
+    results = evaluate_order(
+        {
+            "symbol": NIFTY_CE,
+            "exchange": "NFO",
+            "action": "SELL",
+            "pricetype": "LIMIT",
+            "price": str(price),
+            "quantity": "75",
+            "exit_only": True,
+        },
+        on=date(2026, 11, 22),
+        broker=broker,
+        broker_name=broker_name,
+        last_price=last,
+        open_quantity=75,
+    )
+    assert blocking(results) == []
+    assert all(result.rule_id != "options-market-order-not-sent" for result in results)
 
 
 def test_docs_page_carries_the_current_rules_table() -> None:

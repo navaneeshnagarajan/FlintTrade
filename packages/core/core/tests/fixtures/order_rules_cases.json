@@ -45,9 +45,9 @@
       "expected": [
         {
           "level": "block",
-          "source": "Exchange",
-          "rule_id": "sl-m-not-allowed-options",
-          "message": "Stop-market isn't available for options; use stop-limit."
+          "source": "FlintTrade",
+          "rule_id": "options-stop-market-not-sent",
+          "message": "Stop-market orders aren't accepted on options. Use stop-limit."
         }
       ]
     },
@@ -67,7 +67,7 @@
           "level": "block",
           "source": "FlintTrade",
           "rule_id": "options-stop-market-not-sent",
-          "message": "Stop-market isn't available for options; use stop-limit."
+          "message": "Stop-market orders aren't accepted on options. Use stop-limit."
         }
       ]
     },
@@ -318,7 +318,7 @@
           "level": "block",
           "source": "Exchange",
           "rule_id": "market-order-needs-trade-today",
-          "message": "This contract hasn't traded today — use a limit price."
+          "message": "This contract hasn't traded today. Use a limit price."
         },
         {
           "level": "block",
@@ -387,7 +387,6 @@
       "context": {
         "broker": "kotakneo",
         "broker_name": "Kotak Neo",
-        "stop_loss_target_placement": "separate",
         "last_price": "100"
       },
       "expected": [
@@ -400,7 +399,7 @@
       ]
     },
     {
-      "name": "dhan attached stop loss and target",
+      "name": "dhan separate stop loss and target",
       "on": "2026-11-22",
       "order": {
         "symbol": "NIFTY25NOV2624000CE",
@@ -414,10 +413,68 @@
       "context": {
         "broker": "dhan",
         "broker_name": "Dhan",
-        "stop_loss_target_placement": "attached",
         "last_price": "100"
       },
-      "expected": []
+      "expected": [
+        {
+          "level": "info",
+          "source": "Dhan",
+          "rule_id": "broker-separate-stop-loss-target",
+          "message": "Stop-loss and target are placed as separate orders with this broker."
+        }
+      ]
+    },
+    {
+      "name": "practice stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "practice",
+        "broker_name": "Practice",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Practice",
+          "rule_id": "practice-bracket-unsupported",
+          "message": "Stop-loss and target aren't supported in Practice."
+        }
+      ]
+    },
+    {
+      "name": "sandbox stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "sandbox",
+        "broker_name": "Practice",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Practice",
+          "rule_id": "practice-bracket-unsupported",
+          "message": "Stop-loss and target aren't supported in Practice."
+        }
+      ]
     },
     {
       "name": "dhan intraday near square off",
@@ -440,7 +497,7 @@
           "level": "warn",
           "source": "Dhan",
           "rule_id": "dhan-intraday-square-off",
-          "message": "Intraday F&O positions are closed from 15:25 — exit before then."
+          "message": "Intraday F&O positions are closed from 15:25. Exit before then."
         }
       ]
     },
@@ -480,7 +537,7 @@
           "level": "block",
           "source": "Exchange",
           "rule_id": "algo-market-orders-fo-rejected",
-          "message": "Market orders in F&O are not accepted — use a limit price."
+          "message": "Market orders in F&O are not accepted. Use a limit price."
         }
       ]
     },

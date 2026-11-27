@@ -3116,7 +3116,6 @@ def _order_rule_results(body: Mapping[str, Any], *, broker: str) -> list[Any]:
         normalised,
         broker=profile["broker"],
         broker_name=profile["broker_name"],
-        stop_loss_target_placement=profile["stop_loss_target_placement"],
         last_price=body.get("last_price"),
         at_minutes=ist_minutes(),
     )

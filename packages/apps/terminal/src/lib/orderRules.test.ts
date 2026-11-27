@@ -10,6 +10,10 @@ import {
   exitOpenQuantity,
   ruleResultsFrom,
   stopLossLimitPrice,
+  marketPriceCap,
+  marketPriceCapPct,
+  optionExitConfirmLine,
+  optionExitLimitPrice,
   type OrderRuleInput,
 } from "./orderRules";
 
@@ -38,7 +42,6 @@ function toInput(item: Case): OrderRuleInput {
     broker: (c.broker as string) ?? undefined,
     brokerName: (c.broker_name as string) ?? undefined,
     expiryDay: (c.expiry_day as boolean | undefined) ?? null,
-    stopLossTargetPlacement: c.stop_loss_target_placement as "attached" | "separate" | undefined,
     tradedToday: (c.traded_today as boolean | undefined) ?? null,
     atMinutes: c.at_minutes === undefined ? null : Number(c.at_minutes),
     circuitLow: n(c.circuit_low),
@@ -113,7 +116,7 @@ describe("order rules mirror", () => {
   it("reads the same table the server reads", () => {
     const ids = orderRules().map((row) => row.id);
     expect(ids).toContain("bse-stop-limit-gap");
-    expect(ids).toContain("sl-m-not-allowed-options");
+    expect(ids).toContain("options-stop-market-not-sent");
   });
 
   it("prefixes the headline with its source", () => {
@@ -137,5 +140,32 @@ describe("order rules mirror", () => {
       }),
     ).toHaveLength(1);
     expect(ruleResultsFrom(null)).toEqual([]);
+  });
+
+  it("prices an option exit at the cap and does not refuse the limit", () => {
+    expect(marketPriceCapPct()).toBe(3);
+    expect(marketPriceCap(150, "SELL")).toBe(145.5);
+    expect(marketPriceCap(150, "BUY")).toBe(154.5);
+    expect(optionExitLimitPrice(150, "SELL")).toBe(145.5);
+    expect(optionExitLimitPrice(41.3, "SELL")).toBe(40.05);
+    expect(optionExitLimitPrice(0, "SELL")).toBeNull();
+    expect(optionExitConfirmLine(145.5)).toBe("Exit at ₹145.50 limit (within 3% of last)");
+
+    for (const broker of ["practice", "dhan"] as const) {
+      const results = evaluateOrderRules({
+        symbol: "NIFTY25NOV2624000CE",
+        exchange: "NFO",
+        orderType: "LIMIT",
+        action: "SELL",
+        price: optionExitLimitPrice(150, "SELL"),
+        lastPrice: 150,
+        broker,
+        quantity: 75,
+        exitOnly: true,
+        openQuantity: 75,
+      }, "2026-11-22");
+      expect(hasBlockingRule(results)).toBe(false);
+      expect(results.map((item) => item.rule_id)).not.toContain("options-market-order-not-sent");
+    }
   });
 });

@@ -32,7 +32,6 @@ import {
   optionLimitPrice,
   ruleHeadline,
   stopLossLimitPrice,
-  stopLossTargetPlacement,
   type RuleResult,
 } from "@/lib/orderRules";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -370,7 +369,6 @@ function ScalperWidget(props: WidgetProps) {
       broker: ruleBroker,
       brokerName: brokerDisplayName(ruleBroker),
       product,
-      stopLossTargetPlacement: stopLossTargetPlacement(ruleBroker),
       atMinutes: istMinutes(),
     };
     const results = evaluateOrderRules({

@@ -947,7 +947,6 @@ class BrokerRouter:
             order,
             broker=profile["broker"],
             broker_name=profile["broker_name"],
-            stop_loss_target_placement=profile["stop_loss_target_placement"],
         )
         if blocking(results):
             raise OrderRuleRefused(results)

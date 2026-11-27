@@ -286,6 +286,7 @@ test.describe("dropped Order Pad Close", () => {
     const closeBody = {
       symbol: "INFY", exchange: "NSE", action: "SELL", product: "MIS", orderType: "MARKET",
       quantity: 1, price: 0, triggerPrice: 0, strategy: "FlintOrderPad",
+      exitOnly: true, exit_only: true,
       order_type: "MARKET", trigger_price: 0, broker: "kotakneo", account_id: ERROR_A,
     };
     let posts = 0;

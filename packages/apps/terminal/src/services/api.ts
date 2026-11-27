@@ -36,6 +36,8 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { layaOrderRefused } from "@/lib/layaStatus";
+import { instrumentKind, optionExitLimitPrice } from "@/lib/orderRules";
+import { exitNowTicket, openExitTicket } from "@/lib/stopLossState";
 import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -2639,7 +2641,7 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
   return `${symbol}: ${outcome.message}`;
 }
 
-/** Place one opposite MARKET order per open Practice position. */
+/** Place one opposite exit per open Practice position. */
 async function squareOffPracticePositions(): Promise<void> {
   const pinnedMode = "practice" as const;
   const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
@@ -2662,18 +2664,24 @@ async function squareOffPracticePositions(): Promise<void> {
       );
       continue;
     }
-    const price = position.ltp > 0
-      ? position.ltp
-      : position.averagePrice > 0
-        ? position.averagePrice
-        : 0;
+    const action = position.quantity > 0 ? "SELL" : "BUY";
+    const isOption = instrumentKind(position.symbol, position.exchange) === "option";
+    const last = position.ltp > 0 ? position.ltp : null;
+    if (isOption && last === null) {
+      const ticket = exitNowTicket(position, { ltp: last });
+      if (ticket) openExitTicket(ticket);
+      else failures.push(`${position.symbol}: no last price`);
+      continue;
+    }
+    const limit = isOption && last !== null ? optionExitLimitPrice(last, action) : null;
+    const price = limit ?? (last !== null ? last : position.averagePrice > 0 ? position.averagePrice : 0);
     try {
       await postOrder("place", {
         symbol: position.symbol,
         exchange: position.exchange,
-        action: position.quantity > 0 ? "SELL" : "BUY",
+        action,
         product: product as "MIS" | "CNC" | "NRML",
-        orderType: "MARKET",
+        orderType: limit !== null ? "LIMIT" : "MARKET",
         quantity: Math.abs(position.quantity),
         price,
         triggerPrice: 0,

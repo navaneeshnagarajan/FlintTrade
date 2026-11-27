@@ -502,9 +502,9 @@ describe("PositionsWidget", () => {
       exchange: "NFO",
       action: "SELL",
       product: "NRML",
-      orderType: "MARKET",
+      orderType: "LIMIT",
       quantity: 75,
-      price: 150,
+      price: 145.5,
       triggerPrice: 0,
       strategy: "FlintPositions",
       rationale: "",
@@ -514,6 +514,90 @@ describe("PositionsWidget", () => {
       brokerType: "sandbox",
       accountId: "default",
     }, { exit: true });
+  });
+
+  it("squares off a Practice option as a reduce-only limit at the cap and shows the confirm line", async () => {
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-CAP" });
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+    expect(screen.getByText("Exit at ₹145.50 limit (within 3% of last)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: "NIFTY24APR24000CE",
+      action: "SELL",
+      orderType: "LIMIT",
+      quantity: 75,
+      price: 145.5,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+  });
+
+  it("opens an Exit now ticket when a Practice option has no last price", async () => {
+    mockModeState.mode = "practice";
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 640, quantity: 75, ltp: 0, average_price: 134, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    const opened: unknown[] = [];
+    const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+    window.addEventListener("flinttrade:addWidget", listener);
+    try {
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      expect(screen.getByText("No last price is available. Exit now opens a limit ticket.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+      expect(opened[0]).toEqual({
+        widgetId: "orderpad",
+        props: {
+          symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, product: "NRML",
+          exitOnly: true, openQuantity: 75,
+        },
+      });
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("flinttrade:addWidget", listener);
+    }
+  });
+
+  it("exits every Practice option at the cap limit and leaves non-options as market", async () => {
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-ALL" });
+    mockUsePositions.mockReturnValue(queryResult({
+      data: [
+        { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        { symbol: "RELIANCE", pnl: -200, quantity: -10, ltp: 2900, average_price: 2880, exchange: "NSE", product: "MIS" },
+        { symbol: "BANKNIFTY24APR51000PE", pnl: -800, quantity: -30, ltp: 220, exchange: "NFO", product: "MIS" },
+      ],
+    }));
+    render(<PositionsWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+    expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
+    expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last).")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));
+    expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      symbol: "NIFTY24APR24000CE", action: "SELL", orderType: "LIMIT", price: 145.5, quantity: 75,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+    expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      symbol: "RELIANCE", action: "BUY", orderType: "MARKET", price: 2900, quantity: 10,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+    expect(mockPlaceOrder).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      symbol: "BANKNIFTY24APR51000PE", action: "BUY", orderType: "LIMIT", price: 226.6, quantity: 30,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
   });
 
   it("squares off a Practice position while Laya is Down without an extra confirmation", async () => {
@@ -898,7 +982,6 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed."))
         .toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
-      if (mode === "live") stubFetch();
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
       await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(expect.objectContaining({
         body: "Exit-all requested. Check positions and orders for the outcome.",
@@ -1061,7 +1144,8 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("Convert position")).toBeInTheDocument();
     });
 
-    it("blocks exit-all until the operator types EXIT, then posts the confirmed body", async () => {
+    it("blocks exit-all until the operator types EXIT, then places each live exit", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "EX1" });
       const fetchMock = stubFetch({ status: "success", data: { status: "ok" } });
       const mockRefetch = vi.fn();
       mockUsePositions.mockReturnValue(queryResult({ data: positions, refetch: mockRefetch }));
@@ -1069,12 +1153,14 @@ describe("PositionsWidget", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
+      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
 
       const confirmButton = screen.getByRole("button", { name: "Confirm exit all positions" });
       expect(confirmButton).toBeDisabled();
 
       // Clicking while disabled must never reach the backend.
       fireEvent.click(confirmButton);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
       expect(fetchMock).not.toHaveBeenCalled();
 
       // A wrong phrase keeps it blocked.
@@ -1082,6 +1168,7 @@ describe("PositionsWidget", () => {
       fireEvent.change(input, { target: { value: "exit" } });
       expect(confirmButton).toBeDisabled();
       fireEvent.click(confirmButton);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
       expect(fetchMock).not.toHaveBeenCalled();
 
       // The exact phrase unlocks the action.
@@ -1089,16 +1176,31 @@ describe("PositionsWidget", () => {
       expect(confirmButton).toBeEnabled();
       fireEvent.click(confirmButton);
 
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe("/ft-api/api/v1/positions/exit-all");
-      expect(init.method).toBe("POST");
-      expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
-      expect(JSON.parse(String(init.body))).toStrictEqual({
-        confirm: true,
-        broker: "dhan",
-        account_id: "POSITIONS-A",
-      });
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        symbol: "NIFTY24APR24000CE",
+        action: "SELL",
+        quantity: 75,
+        orderType: "LIMIT",
+        price: 145.5,
+        product: "NRML",
+      }), expect.objectContaining({
+        mode: "live",
+        brokerType: "dhan",
+        accountId: "POSITIONS-A",
+      }), { exit: true });
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        symbol: "RELIANCE",
+        action: "BUY",
+        quantity: 10,
+        orderType: "MARKET",
+        product: "MIS",
+      }), expect.objectContaining({
+        mode: "live",
+        brokerType: "dhan",
+        accountId: "POSITIONS-A",
+      }), { exit: true });
 
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
@@ -1121,9 +1223,8 @@ describe("PositionsWidget", () => {
     });
 
     it("surfaces the mode-guard 403 honestly inside the exit-all dialog", async () => {
-      stubFetch(
-        { status: "error", message: "Live mode is locked — verify your PIN to unlock live trading" },
-        403,
+      mockPlaceOrder.mockRejectedValue(
+        new Error("Live mode is locked — verify your PIN to unlock live trading"),
       );
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
@@ -1135,14 +1236,14 @@ describe("PositionsWidget", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
 
       expect(
-        await screen.findByText("Live mode is locked — verify your PIN to unlock live trading"),
-      ).toBeInTheDocument();
+        await screen.findAllByText("Live mode is locked — verify your PIN to unlock live trading"),
+      ).toHaveLength(2);
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
     });
 
     // ── Per-position square-off (existing gated placeOrder path) ────────────
 
-    it("squares off a long position with an opposite-side market order via placeOrder", async () => {
+    it("squares off a long option with an opposite-side limit at the cap via placeOrder", async () => {
       mockPlaceOrder.mockResolvedValue({ orderId: "SQ1" });
       const mockRefetch = vi.fn();
       mockUsePositions.mockReturnValue(queryResult({ data: positions, refetch: mockRefetch }));
@@ -1153,11 +1254,11 @@ describe("PositionsWidget", () => {
       // Confirm dialog spells out symbol, quantity and side before anything fires.
       expect(screen.getByText("Square off position?")).toBeInTheDocument();
       expect(
-        screen.getByText((_, el) =>
-          (el?.textContent ?? "").includes("SELL market order for 75 NIFTY24APR24000CE") &&
-          el?.tagName === "P",
-        ),
-      ).toBeInTheDocument();
+        screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }),
+      ).toHaveTextContent("Exit at ₹145.50 limit (within 3% of last)");
+      expect(screen.getByText(/This closes your long NIFTY24APR24000CE/)).toHaveTextContent(
+        "Exit at ₹145.50 limit (within 3% of last)",
+      );
       expect(mockPlaceOrder).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
@@ -1168,9 +1269,9 @@ describe("PositionsWidget", () => {
         exchange: "NFO",
         action: "SELL",
         product: "NRML",
-        orderType: "MARKET",
+        orderType: "LIMIT",
         quantity: 75,
-        price: 0,
+        price: 145.5,
         triggerPrice: 0,
         strategy: "FlintPositions",
         rationale: "",
@@ -1184,6 +1285,84 @@ describe("PositionsWidget", () => {
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
       );
+    });
+
+
+    it("squares off a Dhan option as a reduce-only limit at the cap", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "DHAN-CAP" });
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      expect(screen.getByText("Exit at ₹145.50 limit (within 3% of last)")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({
+        symbol: "NIFTY24APR24000CE",
+        action: "SELL",
+        orderType: "LIMIT",
+        quantity: 75,
+        price: 145.5,
+      }), expect.objectContaining({ mode: "live", brokerType: "dhan" }), { exit: true });
+    });
+
+    it("opens an Exit now ticket when a Dhan option has no last price", async () => {
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 640, quantity: 75, ltp: 0, average_price: 134, exchange: "NFO", product: "NRML" },
+        ],
+      }));
+      const opened: unknown[] = [];
+      const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+      window.addEventListener("flinttrade:addWidget", listener);
+      try {
+        render(<PositionsWidget {...defaultProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+        expect(screen.getByText("No last price is available. Exit now opens a limit ticket.")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+        expect(opened[0]).toEqual({
+          widgetId: "orderpad",
+          props: {
+            symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, product: "NRML",
+            exitOnly: true, openQuantity: 75,
+          },
+        });
+        expect(mockPlaceOrder).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener("flinttrade:addWidget", listener);
+      }
+    });
+
+    it("exits every Dhan option at the cap limit and leaves non-options as market", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "DHAN-ALL" });
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+          { symbol: "RELIANCE", pnl: -200, quantity: -10, ltp: 2900, average_price: 2880, exchange: "NSE", product: "MIS" },
+          { symbol: "BANKNIFTY24APR51000PE", pnl: -800, quantity: -30, ltp: 220, exchange: "NFO", product: "MIS" },
+        ],
+      }));
+      const fetchMock = stubFetch();
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
+      expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last).")).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        symbol: "NIFTY24APR24000CE", action: "SELL", orderType: "LIMIT", price: 145.5, quantity: 75,
+      }), expect.objectContaining({ mode: "live", brokerType: "dhan" }), { exit: true });
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        symbol: "RELIANCE", action: "BUY", orderType: "MARKET", quantity: 10,
+      }), expect.objectContaining({ mode: "live", brokerType: "dhan" }), { exit: true });
+      expect(mockPlaceOrder).toHaveBeenNthCalledWith(3, expect.objectContaining({
+        symbol: "BANKNIFTY24APR51000PE", action: "BUY", orderType: "LIMIT", price: 226.6, quantity: 30,
+      }), expect.objectContaining({ mode: "live", brokerType: "dhan" }), { exit: true });
     });
 
     it("sends the square-off admission note with placeOrder", async () => {
@@ -1712,6 +1891,7 @@ describe("PositionsWidget", () => {
         status: "connected",
       }];
       mockBrokerState.activeAccountId = "native:upstox:UP-9";
+      mockPlaceOrder.mockResolvedValue({ orderId: "EX-UP" });
       const fetchMock = stubFetch({ status: "success", data: { status: "ok" } });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
@@ -1722,13 +1902,16 @@ describe("PositionsWidget", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
 
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(JSON.parse(String(init.body))).toStrictEqual({
-        confirm: true,
-        broker: "upstox",
-        account_id: "UP-9",
-      });
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+      expect(fetchMock).not.toHaveBeenCalled();
+      for (const call of mockPlaceOrder.mock.calls) {
+        expect(call[1]).toEqual(expect.objectContaining({
+          mode: "live",
+          brokerType: "upstox",
+          accountId: "UP-9",
+        }));
+        expect(call[2]).toEqual({ exit: true });
+      }
     });
   });
 

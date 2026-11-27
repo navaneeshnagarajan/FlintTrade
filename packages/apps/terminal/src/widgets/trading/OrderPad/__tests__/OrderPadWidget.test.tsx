@@ -1439,7 +1439,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "SL-M" }));
     await waitFor(() => expect(line).toHaveTextContent(
-      "Exchange · Stop-market isn't available for options; use stop-limit.",
+      "FlintTrade · Stop-market orders aren't accepted on options. Use stop-limit.",
     ));
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
