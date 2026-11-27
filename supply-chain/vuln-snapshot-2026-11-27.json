@@ -168,7 +168,7 @@
     },
     {
       "name": "filelock",
-      "version": "4.2.6",
+      "version": "4.3.1",
       "vulns": []
     },
     {
@@ -263,7 +263,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.37.0",
+      "version": "0.37.4",
       "vulns": []
     },
     {
@@ -596,9 +596,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-11-21T05:59:31.782949Z",
-    "audited_at": "2026-11-21T05:59:31.782949Z",
-    "requirements_lock_sha256": "f43223b4160cfd3880e09340fde486d92bf942a19ae63866e369ce6ff4cc871d",
+    "generated_at": "2026-11-27T01:03:03.176195Z",
+    "audited_at": "2026-11-27T01:03:03.176195Z",
+    "requirements_lock_sha256": "aebb1fcf94874834ac06390be7624453ae4c7203fbd776feb8356d007a9b2131",
     "pip_audit_exit_code": 1
   }
 }
