@@ -217,7 +217,7 @@
     {
       "id": "order-rate-threshold",
       "authority": "regulatory",
-      "level": "block",
+      "level": "info",
       "source": "Regulation",
       "description": "Up to 10 orders per second per exchange. Higher rates need exchange registration.",
       "check": "order_rate",
@@ -234,7 +234,7 @@
       "parameters": {
         "max_per_second": 10
       },
-      "message": "Not placed. Limit is {max_per_second} orders per second per exchange. Retry in 1 second."
+      "message": "Limit is {max_per_second} orders per second per exchange."
     },
     {
       "id": "self-built-algo-undertaking",

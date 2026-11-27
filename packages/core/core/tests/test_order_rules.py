@@ -224,11 +224,13 @@ def test_rule_applies_from_its_effective_date_and_not_the_day_before(rule_id: st
 
 
 def test_order_rate_threshold_starts_on_its_effective_date() -> None:
-    # The throttle itself reads this row; here only its dates and value.
+    # evaluate() and OrderBudget skip this check; the row is listed as info.
     row = rules.rule_by_id("order-rate-threshold")
     assert not row.in_force(row.effective_from - timedelta(days=1))
     assert row.in_force(row.effective_from)
     assert row.parameters["max_per_second"] == 10
+    assert row.level == "info"
+    assert row.message == "Limit is {max_per_second} orders per second per exchange."
 
 
 def test_live_acknowledgement_starts_on_its_effective_date() -> None:
