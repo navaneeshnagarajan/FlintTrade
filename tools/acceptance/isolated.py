@@ -30,7 +30,7 @@ GUARD = (
     "assert expected['FLINTTRADE_SANDBOX_PROFILE']==boundary['profile'] and boundary['profile'] in ('full',"
     "'python-tests')\n"
     "assert all(not pathlib.Path(p).exists() for p in hidden)\n"
-    "assert not pathlib.Path('.local/specs').exists()\n"
+    "assert not pathlib.Path('.local').exists()\n"
     "assert pathlib.Path('.venv/bin/python').exists()\n"
     "ns={k:os.readlink('/proc/self/ns/'+k) for k in host_ns}\n"
     "assert all(ns[k]!=host_ns[k] for k in ns)\n"
