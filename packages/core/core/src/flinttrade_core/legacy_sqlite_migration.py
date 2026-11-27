@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from flinttrade_core.secure_file import harden, harden_directory
+from flinttrade_core.secure_file import barrier_directory, harden, harden_directory
 
 
 class MigrationRefused(RuntimeError):
@@ -46,6 +46,9 @@ def file_digest(path: Path) -> str:
 
 def fsync_directory(path: Path) -> None:
     """Fail closed where directory durability cannot be established."""
+    if os.name == "nt":
+        barrier_directory(path)
+        return
     if not hasattr(os, "O_DIRECTORY"):
         raise MigrationRefused("durable directory publication unsupported on this platform")
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)

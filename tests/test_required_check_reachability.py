@@ -96,18 +96,21 @@ def test_protected_branch_pushes_do_not_bypass_the_exhaustive_gate():
 # Classifier behaviours are exercised against the shared implementation in
 # test_check_changes.py; this file checks that the workflow uses that plan.
 
+def _classify_script(job: dict) -> str:
+    return next(step["run"] for step in job["steps"] if step.get("id") == "classify")
+
+
 def test_classifier_outputs_reach_each_required_surface():
     jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
     classifier = jobs["changed-surfaces"]
-    script = next(step["run"] for step in classifier["steps"] if step.get("id") == "classify")
+    script = _classify_script(classifier)
     assert "scripts/check_changes.py" in script
     assert "--full --github-output" in script
     for name, surface in {
         "node-core-tests": "terminal", "node-widget-tests-1": "terminal",
         "node-widget-tests-2a": "terminal", "node-widget-tests-2b": "terminal",
         "node-widget-tests-3": "terminal", "rust-ticks-tests": "rust",
-        "electron-desktop-suite": "desktop", "terminal-e2e-infra-self-tests": "terminal",
-        "python-shards": "python",
+        "electron-desktop-suite": "desktop",
     }.items():
         assert jobs[name]["needs"] == "changed-surfaces"
         assert f"needs.changed-surfaces.outputs.{surface} == 'true'" in jobs[name]["if"]
@@ -115,12 +118,36 @@ def test_classifier_outputs_reach_each_required_surface():
         assert surface in classifier["outputs"]
 
 
+def test_browser_journeys_run_inside_a_terminal_lane():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    assert "terminal-e2e-infra-self-tests" not in jobs
+    runs = "\n".join(step.get("run", "") for step in jobs["node-widget-tests-3"]["steps"])
+    for required in ("e2e:infra:typecheck", "e2e:infra:lint", "playwright install --with-deps chromium",
+                     "e2e/infra-self-tests.spec.ts", "e2e/workspace-lifecycle.spec.ts", "e2e:public-demo"):
+        assert required in runs
+
+
+def _python_lanes(jobs: dict) -> dict[str, dict]:
+    return {"python-tests": jobs["python-tests"], "python-shards": jobs["python-shards"]}
+
+
+def test_python_lanes_classify_without_waiting_on_another_job():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    classifier_script = _classify_script(jobs["changed-surfaces"])
+    for name, job in _python_lanes(jobs).items():
+        assert "needs" not in job, f"{name} must queue as soon as the run starts"
+        assert "github.event.pull_request.draft != true" in job["if"]
+        checkout = job["steps"][0]
+        assert checkout["uses"].startswith("actions/checkout@") and checkout["with"]["fetch-depth"] == 0
+        assert _classify_script(job) == classifier_script
+        selected = "steps.classify.outputs.python == 'true'"
+        for step in job["steps"]:
+            if step.get("run", "").startswith("uv ") or "pytest packages/" in step.get("run", ""):
+                assert selected in step["if"], f"{name}: {step} must only run when Python is selected"
+
+
 def test_required_python_context_retains_all_packages_and_root_invariants():
     jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
-    aggregate = jobs["python-tests"]
-    assert set(aggregate["needs"]) == {"changed-surfaces", "python-invariants", "python-shards"}
-    assert "always()" in aggregate["if"]
-    assert "continue-on-error" not in aggregate
     invariants = jobs["python-invariants"]
     assert "changed-surfaces" not in str(invariants.get("if", ""))
     runs = "\n".join(step.get("run", "") for step in invariants["steps"])
@@ -128,13 +155,40 @@ def test_required_python_context_retains_all_packages_and_root_invariants():
     assert "ruff check packages/ tests/" in runs
     assert "--offline --days 0" in runs
     shards = jobs["python-shards"]
-    assert shards["strategy"]["matrix"]["shard"] == [0, 1, 2, 3]
+    assert shards["strategy"]["matrix"]["shard"] == [1, 2, 3, 4]
     assert shards["strategy"]["fail-fast"] is False
-    run = next(step["run"] for step in shards["steps"] if step.get("name") == "Run Python package shard")
-    for required in ("python -m pytest packages/*/*/tests/", "-p scripts.pytest_shard", "--ft-shard-count=4",
-                     "--ft-shard-index=${{ matrix.shard }}", "--timeout=60", "--timeout-method=thread"):
-        assert required in run
-    assert "--ignore" not in run and " -k " not in run and " -m " not in run.replace("python -m pytest", "pytest")
+    aggregate = jobs["python-tests"]
+    assert "continue-on-error" not in aggregate
+    assert "strategy" not in aggregate
+    indices = []
+    for job in (aggregate, shards):
+        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run Python package shard")
+        for required in ("python -m pytest packages/*/*/tests/", "-p scripts.pytest_shard", "--ft-shard-count=5",
+                         "--ft-shard-durations=scripts/pytest_shard_durations.json",
+                         "--timeout=60", "--timeout-method=thread"):
+            assert required in run
+        assert "--ignore" not in run and " -k " not in run and " -m " not in run.replace("python -m pytest", "pytest")
+        indices.append(run.split("--ft-shard-index=")[1].split()[0])
+    # python-tests runs shard 0; the matrix covers the rest, so together they
+    # cover every index from 0 to count - 1 exactly once.
+    assert indices == ["0", "${{"]
+    assert sorted([0, *shards["strategy"]["matrix"]["shard"]]) == list(range(5))
+    assert (_REPO_ROOT / "scripts" / "pytest_shard_durations.json").is_file()
+
+
+def test_required_python_context_waits_for_every_sibling_lane():
+    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
+    aggregate = jobs["python-tests"]
+    assert aggregate["permissions"] == {"contents": "read", "actions": "read"}
+    step = next(step for step in aggregate["steps"] if step.get("name") == "Require every Python check in this run")
+    assert step["if"] == "always()"
+    assert aggregate["steps"][-1] is step
+    run = step["run"]
+    assert "scripts/ci_require_jobs.py" in run
+    expected = ["python-invariants"] + [f"python-shards ({index})" for index in jobs["python-shards"]["strategy"]["matrix"]["shard"]]
+    for name in expected:
+        assert f"--job {name}" in run or f'--job "{name}"' in run
+    assert "true|false) ;;" in run and "exit 1" in run
 
 
 def test_python_workers_do_not_multiply_native_numerical_threads():
@@ -143,35 +197,16 @@ def test_python_workers_do_not_multiply_native_numerical_threads():
 
     assert len(PYTEST_NATIVE_THREAD_ENV) == 5
     assert set(PYTEST_NATIVE_THREAD_ENV.values()) == {"1"}
-    for name in ("python-invariants", "python-shards"):
+    for name in ("python-invariants", "python-shards", "python-tests"):
         assert jobs[name]["env"] == PYTEST_NATIVE_THREAD_ENV
     nightly = yaml.safe_load((_WORKFLOW_PATH.parent / "nightly-cross-platform.yml").read_text(encoding="utf-8"))
     assert all(nightly["env"].get(name) == value for name, value in PYTEST_NATIVE_THREAD_ENV.items())
 
 
-@pytest.mark.parametrize("selected,invariants,shards,classification,expected", [
-    ("true", "success", "success", "success", 0),
-    ("false", "success", "skipped", "success", 0),
-    ("true", "success", "failure", "success", 1),
-    ("true", "success", "cancelled", "success", 1),
-    ("true", "success", "skipped", "success", 1),
-    ("true", "failure", "success", "success", 1),
-    ("false", "failure", "skipped", "success", 1),
-    ("true", "skipped", "success", "success", 1),
-    ("false", "success", "skipped", "failure", 1),
-    ("", "success", "skipped", "success", 1),
-    ("false", "success", "success", "success", 1),
-])
-def test_actual_python_summary_propagates_every_required_failure(selected, invariants, shards, classification, expected):
-    jobs = yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))["jobs"]
-    step = jobs["python-tests"]["steps"][0]
-    script = textwrap.dedent("\n".join(step["run"].splitlines()[1:-1]))
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, check=False,
-        env=os.environ | {"PYTHON_REQUIRED": selected, "INVARIANTS_RESULT": invariants,
-                          "SHARDS_RESULT": shards, "CLASSIFIER_RESULT": classification},
-    )
-    assert result.returncode == expected, result.stdout + result.stderr
+@pytest.mark.parametrize("workflow", ["test.yml", "supply-chain.yml", "visual-a11y.yml"])
+def test_protected_branch_runs_are_never_cancelled_by_a_newer_push(workflow):
+    document = yaml.safe_load((_WORKFLOW_PATH.parent / workflow).read_text(encoding="utf-8"))
+    assert document["concurrency"]["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
 
 def test_required_electron_context_runs_on_every_pull_request():

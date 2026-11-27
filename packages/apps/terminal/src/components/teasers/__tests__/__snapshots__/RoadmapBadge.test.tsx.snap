@@ -26,7 +26,7 @@ exports[`RoadmapBadge > matches snapshot for testing status 1`] = `
             />
           </div>
           <span
-            class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-secondary"
+            class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-secondary"
           >
             Designed
           </span>
@@ -62,7 +62,7 @@ exports[`RoadmapBadge > matches snapshot for testing status 1`] = `
             />
           </div>
           <span
-            class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-secondary"
+            class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-secondary"
           >
             In Dev
           </span>
@@ -111,7 +111,7 @@ exports[`RoadmapBadge > matches snapshot for testing status 1`] = `
             />
           </div>
           <span
-            class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
+            class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
           >
             Testing
           </span>
@@ -141,7 +141,7 @@ exports[`RoadmapBadge > matches snapshot for testing status 1`] = `
             />
           </div>
           <span
-            class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+            class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
           >
             Live
           </span>
@@ -149,7 +149,7 @@ exports[`RoadmapBadge > matches snapshot for testing status 1`] = `
       </div>
     </div>
     <a
-      class="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+      class="text-xxs font-medium text-blue-400 underline-offset-2 hover:underline"
       href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/ROADMAP.md"
     >
       Product roadmap

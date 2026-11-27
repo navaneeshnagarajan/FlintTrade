@@ -3,6 +3,7 @@
 // are intentional here: Scalper requires interactive one-click orders, not cached REST data.
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
 import { Button } from "@/components/ui/button";
 import {
   placeOrder,
@@ -136,6 +137,7 @@ function ScalperWidget(props: WidgetProps) {
 
   const [expiries, setExpiries] = useState<string[]>([]);
   const [expiriesError, setExpiriesError] = useState(false);
+  const [expiriesBrokerRequired, setExpiriesBrokerRequired] = useState(false);
   const [expiry, setExpiry] = useState("");
   const [atmStrike, setAtmStrike] = useState<number | null>(null);
   const [ceOffset, setCeOffset] = useState(0);
@@ -262,6 +264,7 @@ function ScalperWidget(props: WidgetProps) {
   const fetchExpiries = useCallback(
     async (signal?: { cancelled: boolean }) => {
       setExpiriesError(false);
+      setExpiriesBrokerRequired(false);
       setExpiries([]);
       setExpiry("");
       if (isExplore) {
@@ -277,8 +280,9 @@ function ScalperWidget(props: WidgetProps) {
         const list = Array.isArray(data) ? data : (data?.expiry ?? []);
         setExpiries(list);
         if (list.length > 0) setExpiry(list[0]);
-      } catch {
+      } catch (err) {
         if (signal?.cancelled) return;
+        setExpiriesBrokerRequired(isBrokerRequiredMessage(err));
         setExpiriesError(true);
       }
     },
@@ -612,7 +616,7 @@ function ScalperWidget(props: WidgetProps) {
       className="h-full flex flex-col bg-surface-base text-text-primary focus:outline-none overflow-hidden"
     >
       <div className="flex-none px-2 py-1 border-b border-border-subtle">
-        <AdmissionNoteField id="scalper-admission-note" value={note} onChange={setNote} />
+        <AdmissionNoteField id="scalper-admission-note" value={note} onChange={setNote} collapsible />
       </div>
       {unprotectedBracket && (
         <div
@@ -656,6 +660,7 @@ function ScalperWidget(props: WidgetProps) {
         onSymbolChange={setSymbol}
         expiries={expiries}
         expiriesError={expiriesError}
+        expiriesBrokerRequired={expiriesBrokerRequired}
         expiry={expiry}
         onExpiryChange={setExpiry}
         onRetryExpiries={() => void fetchExpiries()}

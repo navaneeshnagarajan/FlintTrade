@@ -74,7 +74,7 @@ def test_advisory_audits_run_on_every_pull_request() -> None:
 @pytest.mark.parametrize("name", ["test.yml", "supply-chain.yml", "visual-a11y.yml"])
 def test_main_runs_are_never_cancelled_or_superseded(name: str) -> None:
     concurrency = _workflow(name)["concurrency"]
-    assert concurrency["cancel-in-progress"] == "${{ github.ref != 'refs/heads/main' }}"
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert "github.ref == 'refs/heads/main' && github.run_id || github.ref" in concurrency["group"]
 
 

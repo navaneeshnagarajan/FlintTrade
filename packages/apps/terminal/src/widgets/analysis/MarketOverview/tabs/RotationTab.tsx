@@ -57,7 +57,7 @@ function RotationTab({ initialView }: RotationTabProps) {
           </button>
         ))}
         <div className="flex-1" />
-        <span className="text-xxs text-text-disabled">
+        <span className="text-xxs text-text-muted">
           RS-Ratio (x) vs RS-Momentum (y) · 100 = neutral
         </span>
       </div>

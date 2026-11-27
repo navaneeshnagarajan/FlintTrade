@@ -22,10 +22,11 @@ on:
     - cron: "0 3 * * 1"          # weekly Monday 03:00 UTC = 08:30 IST (per §3.4)
   workflow_dispatch:
 
-# Every main run gets its own group, so a later merge never cancels it.
 concurrency:
   group: supply-chain-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Superseded pull request runs are cancelled; protected-branch pushes queue.
+  # Every main run gets its own group, so a later merge never replaces it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
