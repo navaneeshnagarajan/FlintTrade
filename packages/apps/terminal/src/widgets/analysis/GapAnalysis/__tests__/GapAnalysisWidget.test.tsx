@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
@@ -14,6 +14,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import GapAnalysisWidget from "../GapAnalysisWidget";
 import { SAMPLE_GAP_EVENTS } from "../GapAnalysisWidget";
 
@@ -167,5 +168,25 @@ describe("SAMPLE_GAP_EVENTS", () => {
     const unfilled = SAMPLE_GAP_EVENTS.filter((e) => !e.filled);
     expect(filled.length).toBeGreaterThan(0);
     expect(unfilled.length).toBeGreaterThan(0);
+  });
+});
+
+describe("GapAnalysisWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in gap events in Practice, connected or not", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockConnected.mockReturnValue(true);
+    render(<GapAnalysisWidget />);
+    expect(screen.getByTestId("example-data-badge").textContent).toBe("Example");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    mockConnected.mockReturnValue(false);
+    render(<GapAnalysisWidget />);
+    expect(screen.queryByTestId("example-data-badge")).toBeNull();
   });
 });

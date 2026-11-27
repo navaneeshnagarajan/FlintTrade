@@ -25,6 +25,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, useReducer, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
 import { useSyntheticFuture } from "@/hooks/useSyntheticFuture";
 import DataEditor, {
   type DataEditorRef,
@@ -747,15 +748,18 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       />
 
       {/* Error banner */}
-      {error && (
-        <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
-          <AlertCircle size={11} />
-          <span>{error}</span>
-        </div>
-      )}
+      {error &&
+        (isBrokerRequiredMessage(error) ? (
+          <BrokerRequiredNotice what="the option chain" className="flex-none rounded-none border-x-0 border-t-0" />
+        ) : (
+          <div className="flex-none flex items-center gap-2 px-2 py-1 bg-loss/10 border-b border-loss/20 text-loss text-xs">
+            <AlertCircle size={11} />
+            <span>{error}</span>
+          </div>
+        ))}
 
       <div className="flex-none px-2 py-1 border-b border-border-subtle">
-        <AdmissionNoteField id="chain-admission-note" value={note} onChange={setNote} />
+        <AdmissionNoteField id="chain-admission-note" value={note} onChange={setNote} collapsible />
       </div>
 
       {/* Order toast */}

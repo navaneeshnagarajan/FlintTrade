@@ -6,8 +6,9 @@
  * the shared `/api/v1/history` path and runs them through the screener's
  * seasonality analyser (`/v1/analytics/seasonality`) — showing a "Live"
  * badge. Disconnected, it renders the deterministic SAMPLE statistics behind
- * an explicit guard with an amber "Sample data" badge; connected-but-failed
- * fetches show the error instead (fail closed — never sample rows as live).
+ * an explicit guard, labelled by the Explore Mode line or, outside Explore,
+ * the Example data badge; connected-but-failed fetches show the error instead
+ * (sample rows are never treated as live).
  *
  * Follows the instrument broadcast on its FDC3 user channel (red by
  * default) with a local selector fallback, like the other analysis widgets.
@@ -31,6 +32,7 @@ import {
   FlintWeightedHeatmap,
   type FlintWeightedHeatmapEntry,
 } from "@flinttrade/design-system";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import type { WidgetProps } from "@/types/widgets";
 import type { WsInstrument } from "@/types/api";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -236,9 +238,11 @@ function SeasonalityWidget(props: WidgetProps) {
   const live = query.data;
   const isLive = isConnected && live !== undefined && !live.is_sample_data;
   // Fail closed: connected shows ONLY analyser output (or a loading/error
-  // state) — the sample statistics render exclusively behind this guard,
-  // beside the amber badge below.
+  // state). The sample statistics render exclusively behind this guard.
   const data: SeasonalityData | null = isConnected ? live ?? null : SAMPLE_SEASONALITY;
+  // Covers the built-in statistics and a backend payload that flags itself
+  // as sample.
+  const showingExample = data !== null && !isLive;
 
   const entries = useMemo<FlintWeightedHeatmapEntry[]>(() => {
     if (!data) return [];
@@ -281,18 +285,20 @@ function SeasonalityWidget(props: WidgetProps) {
       aria-label="Seasonality widget"
     >
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <CalendarRange size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">Seasonality</span>
+        <span className="whitespace-nowrap text-xs font-semibold text-text-primary">Seasonality</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: seasonality computed from real daily price history"
             title="Live — calendar-return statistics computed from the connected broker's daily bars."
           >
             Live
           </span>
+        ) : showingExample ? (
+          <ExampleDataBadge />
         ) : null}
         {isConnected && query.isLoading && (
           <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />
@@ -332,7 +338,7 @@ function SeasonalityWidget(props: WidgetProps) {
 
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-        <p className="text-[10px] text-text-muted">
+        <p className="text-xxs text-text-muted">
           {instrument.symbol} · average {view === "monthly" ? "monthly" : "daily"} return by{" "}
           {view === "monthly" ? "calendar month" : view === "weekday" ? "trading weekday" : "day of month"}
           

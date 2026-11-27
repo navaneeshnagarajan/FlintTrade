@@ -338,7 +338,7 @@ function HistoricalChainWidget() {
             <span className="text-xs text-text-muted">
               No historical chains captured for {symbol} yet.
             </span>
-            <span className="text-xxs text-text-disabled">
+            <span className="text-xxs text-text-muted">
               Chains are archived as live expiries roll off, or after a
               historical backfill.
             </span>

@@ -707,7 +707,7 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
               <p className="text-xs text-text-muted mt-0.5">
                 {activeDoc.snippet ?? "Selected from documentation search"}
               </p>
-              <p className="mt-2 font-mono text-[10px] text-text-muted/70 truncate">
+              <p className="mt-2 font-mono text-xxs text-text-muted/70 truncate">
                 docs/{activeDoc.path}
               </p>
             </div>

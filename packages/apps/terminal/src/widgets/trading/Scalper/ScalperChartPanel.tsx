@@ -60,7 +60,7 @@ export function ScalperChartPanel({
             <span className="text-xs font-mono text-profit font-bold uppercase tracking-wider">
               {ceSymbol ?? `${symbol} CE`}
             </span>
-            <span className="text-xxs text-text-disabled font-sans uppercase">Call</span>
+            <span className="text-xxs text-text-muted font-sans uppercase">Call</span>
           </div>
           <LtpBlock
             label="LTP"
@@ -121,7 +121,7 @@ export function ScalperChartPanel({
               <span className="text-sm font-heading font-bold text-text-primary">
                 {symbol}
               </span>
-              <span className="text-xxs text-text-disabled font-sans uppercase">{spotExch}</span>
+              <span className="text-xxs text-text-muted font-sans uppercase">{spotExch}</span>
             </div>
             <span className="text-xs font-mono text-text-primary uppercase">Spot</span>
           </div>
@@ -179,7 +179,7 @@ export function ScalperChartPanel({
             <span className="text-xs font-mono text-loss font-bold uppercase tracking-wider">
               {peSymbol ?? `${symbol} PE`}
             </span>
-            <span className="text-xxs text-text-disabled font-sans uppercase">Put</span>
+            <span className="text-xxs text-text-muted font-sans uppercase">Put</span>
           </div>
           <LtpBlock
             label="LTP"

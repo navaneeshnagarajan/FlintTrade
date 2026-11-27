@@ -213,7 +213,7 @@ function InlineMarkdown({ text }: { text: string }) {
       parts.push(
         <code
           key={i++}
-          className="font-mono text-[10px] bg-glass-l2 px-1 py-0.5 rounded text-text-primary"
+          className="font-mono text-xxs bg-glass-l2 px-1 py-0.5 rounded text-text-primary"
         >
           {remaining.slice(codeIdx + 1, endIdx)}
         </code>,
@@ -264,7 +264,7 @@ function SectionAccordion({ section, defaultOpen }: SectionAccordionProps) {
           {section.isUnreleased && (
             <Badge
               variant="outline"
-              className="text-[10px] h-4 px-1.5 border-accent/40 text-accent"
+              className="text-xxs h-4 px-1.5 border-accent/40 text-accent"
             >
               Latest
             </Badge>

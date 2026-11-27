@@ -251,6 +251,27 @@ describe("BreadthTab", () => {
     expect(screen.getByTitle(/no live per-index breadth source/i)).toHaveTextContent("Sample");
   });
 
+  it("pairs the in-bar percentages with readable text instead of white on green", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
+    render(<BreadthTab />);
+
+    const chart = screen.getByRole("img", { name: "Market breadth by index" });
+    expect(chart).toHaveClass(
+      "[&_[data-stacked-bar-segment=Advances]>span]:text-profit-foreground",
+      "[&_[data-stacked-bar-segment=Unchanged]>span]:text-text-primary",
+    );
+
+    // The override keys off the segment hook and its direct label span; if the
+    // chart's markup changes, this fails rather than silently losing contrast.
+    const advances = chart.querySelectorAll<HTMLElement>("[data-stacked-bar-segment=Advances]");
+    expect(advances.length).toBeGreaterThan(0);
+    for (const segment of advances) {
+      expect(segment.style.backgroundColor).toContain("--color-profit-action");
+      expect(segment.querySelector(":scope > span")).not.toBeNull();
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Top movers (from MarketSummary)
   // -------------------------------------------------------------------------

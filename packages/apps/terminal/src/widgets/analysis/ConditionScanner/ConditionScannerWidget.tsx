@@ -497,7 +497,7 @@ function ConditionScannerWidget(props: WidgetProps) {
         <span className="text-xs font-semibold text-text-primary">Condition Scanner</span>
         {view === "scans" && run && (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label={run.is_sample_data === false ? "Scan ran on live broker data" : "Scan uses sample or unknown source data"}
             title={run.is_sample_data === false ? "Live — the backend scanned real OHLCV from the connected broker." : "Sample data — this scan does not have proven native market provenance."}

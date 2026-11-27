@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -24,6 +24,7 @@ vi.mock("@/services/ftApi", () => ({
   getVolatilityCone: (...args: unknown[]) => mockGetVolCone(...args),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import VolatilityConeWidget from "../VolatilityConeWidget";
 
 // 130 ascending closes — enough for the 90-day window; getVolatilityCone is
@@ -124,5 +125,43 @@ describe("VolatilityConeWidget", () => {
 
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(mockGetVolCone).not.toHaveBeenCalled();
+  });
+});
+
+describe("VolatilityConeWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in cone in Practice when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<VolatilityConeWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<VolatilityConeWidget />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("keeps the badge when a connected load fails and the built-in cone stays", async () => {
+    useModeStore.setState({ mode: "practice" });
+    state.connected = true;
+    mockGetHistory.mockRejectedValue(new Error("history unavailable"));
+    render(<VolatilityConeWidget />);
+    await waitFor(() => expect(mockGetHistory).toHaveBeenCalled());
+    expect(await screen.findByTestId("example-data-badge")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("drops the badge once a live cone is built", async () => {
+    useModeStore.setState({ mode: "practice" });
+    state.connected = true;
+    mockGetHistory.mockResolvedValue(SAMPLE_BARS);
+    mockGetVolCone.mockResolvedValue(CONE_ROWS);
+    render(<VolatilityConeWidget />);
+    expect(await screen.findByText("Live")).toBeTruthy();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

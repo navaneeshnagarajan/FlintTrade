@@ -75,9 +75,10 @@ test.describe("dropped Scalper submit", () => {
     await page.clock.runFor(5_000);
     const lot = page.getByText("1 (65)", { exact: true });
     await expect(lot).toBeAttached({ timeout: 15_000 });
-    // The CE buttons sit under the chart. The visible note focuses the Scalper
-    // so Shift+ArrowUp takes the same Buy CE path as the button.
-    await page.getByRole("textbox", { name: "Add a reason (optional)" }).click();
+    // The CE buttons sit under the chart. Opening the folded note moves focus
+    // into the Scalper so Shift+ArrowUp takes the same Buy CE path as the button.
+    await page.getByRole("button", { name: "Add a reason (optional)" }).click();
+    await expect(page.getByRole("textbox", { name: "Add a reason (optional)" })).toBeFocused();
     await page.keyboard.press("Shift+ArrowUp");
     const confirm = page.getByRole("button", { name: "Confirm BUY", exact: true });
     await expect(confirm).toBeVisible();
