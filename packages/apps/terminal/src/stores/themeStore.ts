@@ -310,19 +310,24 @@ const storeImpl: StateCreator<
     // These scoped opaque action roles keep enabled labels stable. Existing
     // global trading/brand colours and disabled opacity remain independent.
     // Old custom themes get the explicit mode foreground; invalid custom pairs
-    // use the existing Graphite palette only on these two action surfaces.
+    // use the existing Graphite palette only on these action surfaces.
     const fallback = CINEMATIC_THEMES[0][resolvedMode];
     const profitBackground = resolvedMode === "light" ? variant.trading.profitText : variant.trading.profit;
     const fallbackProfit = resolvedMode === "light" ? fallback.trading.profitText : fallback.trading.profit;
     const profitForeground = resolvedMode === "light" ? "#ffffff" : "#0a0a0f";
+    const lossBackground = variant.trading.lossAction ?? "#991b1b";
+    const lossForeground = variant.trading.lossForeground ?? "#ffffff";
+    const fallbackLoss = fallback.trading.lossAction ?? "#991b1b";
     const actionPalettes = {
       profit: resolveActionPalette(profitBackground, variant.trading.profitForeground ?? profitForeground,
         { background: fallbackProfit, foreground: profitForeground }),
       confirmation: resolveActionPalette(variant.colors.accent, variant.colors.accentText,
         { background: fallback.colors.accent, foreground: fallback.colors.accentText }),
+      loss: resolveActionPalette(lossBackground, lossForeground,
+        { background: fallbackLoss, foreground: "#ffffff" }),
     };
     for (const [role, palette] of Object.entries(actionPalettes)) {
-      style.setProperty(`--color-${role === "profit" ? "profit-action" : role}`, palette.background);
+      style.setProperty(`--color-${role === "profit" || role === "loss" ? `${role}-action` : role}`, palette.background);
       style.setProperty(`--color-${role}-foreground`, palette.foreground);
       style.setProperty(`--color-${role}-hover`, palette.hover);
       style.setProperty(`--color-${role}-pressed`, palette.pressed);

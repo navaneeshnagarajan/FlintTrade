@@ -612,7 +612,7 @@ function SquareOffDialog({
             onClick={() => void handleSquareOff()}
             disabled={isSubmitting || !product || !canSubmit}
             aria-label={`Confirm square off ${position.symbol}`}
-            className="bg-loss hover:bg-loss/90 text-white"
+            className="bg-loss-action text-loss-foreground hover:bg-loss-hover active:bg-loss-pressed"
           >
             {isSubmitting ? "Squaring off…" : confirmLine}
           </Button>
@@ -875,7 +875,7 @@ function ExitAllDialog({
             onClick={() => void handleExitAll()}
             disabled={!confirmed || isSubmitting || !canSubmit}
             aria-label="Confirm exit all positions"
-            className="bg-loss hover:bg-loss/90 text-white"
+            className="bg-loss-action text-loss-foreground hover:bg-loss-hover active:bg-loss-pressed"
           >
             {isSubmitting ? "Exiting…" : "Exit all positions"}
           </Button>
