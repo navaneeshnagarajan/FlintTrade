@@ -179,8 +179,9 @@ export function BacktestConfigPanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-text-secondary">Symbol</Label>
+                <Label htmlFor="backtest-symbol" className="text-xs text-text-secondary">Symbol</Label>
                 <Input
+                  id="backtest-symbol"
                   value={symbol}
                   onChange={(e) => onSymbol(e.target.value.toUpperCase())}
                   placeholder="NIFTY"
@@ -231,8 +232,9 @@ export function BacktestConfigPanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-text-secondary">Start Date</Label>
+                <Label htmlFor="backtest-start-date" className="text-xs text-text-secondary">Start date</Label>
                 <Input
+                  id="backtest-start-date"
                   type="date"
                   value={startDate}
                   onChange={(e) => onStartDate(e.target.value)}
@@ -241,8 +243,9 @@ export function BacktestConfigPanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-text-secondary">End Date</Label>
+                <Label htmlFor="backtest-end-date" className="text-xs text-text-secondary">End date</Label>
                 <Input
+                  id="backtest-end-date"
                   type="date"
                   value={endDate}
                   onChange={(e) => onEndDate(e.target.value)}

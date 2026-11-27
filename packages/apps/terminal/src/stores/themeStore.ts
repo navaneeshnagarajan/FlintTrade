@@ -524,7 +524,7 @@ const storeImpl: StateCreator<
       style.setProperty("--popover",            "240 8% 11%");
       style.setProperty("--popover-foreground", "240 5% 89%");
       style.setProperty("--muted",              "240 5% 15%");
-      style.setProperty("--muted-foreground",   "240 4% 46%");
+      style.setProperty("--muted-foreground",   "240 5% 64%");
       style.setProperty("--border",             "240 8% 18%");
       style.setProperty("--input",              "240 8% 18%");
     }

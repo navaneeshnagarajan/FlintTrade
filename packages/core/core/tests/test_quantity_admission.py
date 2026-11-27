@@ -42,7 +42,7 @@ def test_admit_place_refuses_before_laya(monkeypatch: pytest.MonkeyPatch, app_co
     assert status == 400
     body = response.get_json()
     assert body["code"] == "quantity_admission"
-    assert body["message"] == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert body["message"] == "Max 1,755 per order for NIFTY. Place smaller orders."
 
 
 @pytest.mark.unit
@@ -72,5 +72,28 @@ def test_admit_place_uses_the_broker_freeze_quantity(app_context: None) -> None:
     response, status = blocked
     assert status == 400
     assert response.get_json()["message"] == (
-        "Max 250 per order for RELIANCE26APRFUT. Place smaller orders."
+        "Max 250 per order for RELIANCE. Place smaller orders."
     )
+
+
+@pytest.mark.unit
+def test_unverified_sensex_limit_warns_and_lets_the_order_continue(
+    app_context: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING"):
+        blocked = order_routes._quantity_admission_response(
+            {"symbol": "SENSEX26DEC85000CE", "exchange": "BFO", "quantity": 1_020, "lot_size": 20}
+        )
+    assert blocked is None
+    assert "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects." in caplog.text
+
+
+@pytest.mark.unit
+def test_broker_freeze_for_sensex_still_refuses(app_context: None) -> None:
+    blocked = order_routes._quantity_admission_response(
+        {"symbol": "SENSEX26DEC85000CE", "exchange": "BFO", "quantity": 1_020, "lot_size": 20, "freeze_qty": 1_000}
+    )
+    assert blocked is not None
+    response, status = blocked
+    assert status == 400
+    assert response.get_json()["message"] == "Max 1,000 per order for SENSEX. Place smaller orders."

@@ -645,10 +645,10 @@ function SectorsTab({ initialView }: SectorsTabProps) {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
               <div className="h-1.5 w-6 rounded" style={{ background: "linear-gradient(to right,#8B3030,#3D8B80,#00C853)" }} />
-              <span className="text-xxs text-text-disabled">-4% → +4%</span>
+              <span className="text-xxs text-text-muted">-4% → +4%</span>
             </div>
           </div>
-          <span className="text-xxs text-text-disabled">
+          <span className="text-xxs text-text-muted">
             {activeView === "treemap"
               ? `Tile = equal weight · Colour = ${metricLabel}`
               : `Colour = ${metricLabel}`}

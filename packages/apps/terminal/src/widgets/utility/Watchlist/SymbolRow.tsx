@@ -149,7 +149,7 @@ export function SymbolRow({
             aria-label={`Buy ${item.symbol}`}
             title={`Buy ${item.symbol}`}
             onClick={(e) => { e.stopPropagation(); onQuickTrade(item, "BUY"); }}
-            className="h-5 w-5 rounded bg-profit/90 text-white text-[10px] font-bold flex items-center justify-center hover:bg-profit"
+            className="h-5 w-5 rounded bg-profit/90 text-white text-xxs font-bold flex items-center justify-center hover:bg-profit"
           >
             B
           </button>
@@ -158,7 +158,7 @@ export function SymbolRow({
             aria-label={`Sell ${item.symbol}`}
             title={`Sell ${item.symbol}`}
             onClick={(e) => { e.stopPropagation(); onQuickTrade(item, "SELL"); }}
-            className="h-5 w-5 rounded bg-loss/90 text-white text-[10px] font-bold flex items-center justify-center hover:bg-loss"
+            className="h-5 w-5 rounded bg-loss/90 text-white text-xxs font-bold flex items-center justify-center hover:bg-loss"
           >
             S
           </button>

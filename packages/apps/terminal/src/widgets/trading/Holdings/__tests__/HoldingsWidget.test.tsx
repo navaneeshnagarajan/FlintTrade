@@ -113,6 +113,15 @@ describe("HoldingsWidget", () => {
     expect(screen.getByText(/failed to load holdings/i)).toBeInTheDocument();
   });
 
+  it("gives the symbol filter an accessible name", () => {
+    mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
+
+    expect(screen.getByRole("textbox", { name: "Filter holdings by symbol" })).toBe(
+      screen.getByPlaceholderText("Filter symbol…"),
+    );
+  });
+
   it("filters holdings by symbol search", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
     render(<HoldingsWidget {...makeWidgetPanelProps()} />);

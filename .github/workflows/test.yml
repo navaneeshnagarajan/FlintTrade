@@ -10,11 +10,12 @@ on:
     - cron: '0 4 * * 0'
   workflow_dispatch:
 
-# Cancel earlier in-flight runs when a new commit lands on the same ref.
-# Back-to-back pushes only need the newest matrix; earlier runs are superseded.
+# Cancel earlier in-flight pull request runs when a new commit lands on the
+# same branch: only the newest matrix matters there. Protected-branch pushes
+# queue instead, so every commit on main and dev keeps a complete result.
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -128,7 +129,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.14' }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
       - run: uv sync --frozen
@@ -212,11 +213,13 @@ jobs:
       # job. Terminal changes select that lane; full runs select every lane.
       # tests/test_terminal_lint_gate_wiring.py fails if that step goes away.
 
-  # All package tests are retained. Stable node IDs partition the collected
-  # suite once across four runners; xdist still isolates each runner's workers.
+  # All package tests are retained. Recorded per-file run times place whole
+  # test files across five runners so they finish close together; xdist still
+  # isolates each runner's workers. Shards classify the diff themselves rather
+  # than waiting on changed-surfaces, so they queue as soon as the run starts.
+  # When Python is not selected each shard reports success without installing.
   python-shards:
-    needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.python == 'true'
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
     # The locked install plus the shard does not finish inside 30 minutes.
     timeout-minutes: 45
@@ -229,61 +232,128 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FULL_CHECK: ${{ github.event_name != 'pull_request' }}
+        run: |
+          if [ "$FULL_CHECK" = "true" ]; then
+            python scripts/check_changes.py --full --github-output
+          else
+            python scripts/check_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
+          fi
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.14' }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - run: uv sync --frozen --extra ml
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - if: steps.classify.outputs.python == 'true'
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - if: steps.classify.outputs.python == 'true'
+        run: uv sync --frozen --extra ml
+      - if: steps.classify.outputs.python == 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - if: steps.classify.outputs.python == 'true'
+        run: pnpm install --frozen-lockfile
       - name: Run Python package shard
-        run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=4 -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
+        if: steps.classify.outputs.python == 'true'
+        run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=5 --ft-shard-durations=scripts/pytest_shard_durations.json -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
       - name: Upload Python timing and failure evidence
-        if: always()
+        if: always() && steps.classify.outputs.python == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-shard-${{ matrix.shard }}
           path: test-results/python-${{ matrix.shard }}.xml
           if-no-files-found: error
 
-  # Branch protection requires this exact name. A failed, missing, cancelled
-  # or unexpectedly skipped shard must never turn into a green summary.
+  # Branch protection requires this exact name. This job runs shard 0 itself,
+  # then waits for the root invariants and shards 1 to 4 in the same run and
+  # fails unless every one of them succeeded. A failed, missing, cancelled,
+  # skipped or unfinished sibling never turns into a green result. Running the
+  # summary here avoids a separate summary job queueing for a fresh runner
+  # after the shards finish.
   python-tests:
-    needs: [changed-surfaces, python-invariants, python-shards]
-    if: always() && github.event.pull_request.draft != true
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    # Own shard (about 15 minutes) plus time for siblings that start later.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      VECLIB_MAXIMUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
     steps:
-      - name: Require every selected Python check
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
         env:
-          CLASSIFIER_RESULT: ${{ needs.changed-surfaces.result }}
-          INVARIANTS_RESULT: ${{ needs.python-invariants.result }}
-          PYTHON_REQUIRED: ${{ needs.changed-surfaces.outputs.python }}
-          SHARDS_RESULT: ${{ needs.python-shards.result }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FULL_CHECK: ${{ github.event_name != 'pull_request' }}
         run: |
-          python - <<'PYTHON'
-          import os
-          import sys
-          selected = os.environ["PYTHON_REQUIRED"]
-          expected = "success" if selected == "true" else "skipped"
-          valid = (
-              selected in {"true", "false"}
-              and os.environ["CLASSIFIER_RESULT"] == "success"
-              and os.environ["INVARIANTS_RESULT"] == "success"
-              and os.environ["SHARDS_RESULT"] == expected
-          )
-          if not valid:
-              print("A required Python check failed, was cancelled or did not run.")
-              sys.exit(1)
-          print("All selected Python checks passed.")
-          PYTHON
+          if [ "$FULL_CHECK" = "true" ]; then
+            python scripts/check_changes.py --full --github-output
+          else
+            python scripts/check_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
+          fi
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '3.14' }
+      - if: steps.classify.outputs.python == 'true'
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - if: steps.classify.outputs.python == 'true'
+        run: uv sync --frozen --extra ml
+      - if: steps.classify.outputs.python == 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - if: steps.classify.outputs.python == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Run Python package shard
+        if: steps.classify.outputs.python == 'true'
+        run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=0 --ft-shard-count=5 --ft-shard-durations=scripts/pytest_shard_durations.json -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-0.xml
+      - name: Upload Python timing and failure evidence
+        if: always() && steps.classify.outputs.python == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-shard-0
+          path: test-results/python-0.xml
+          if-no-files-found: error
+      # Runs even when this job's own shard failed, so the log names every
+      # failing lane. The job still fails if any earlier step failed.
+      - name: Require every Python check in this run
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHON_REQUIRED: ${{ steps.classify.outputs.python }}
+        run: |
+          case "$PYTHON_REQUIRED" in
+            true|false) ;;
+            *) echo "The change classifier did not produce a Python selection."; exit 1 ;;
+          esac
+          python scripts/ci_require_jobs.py --deadline-minutes 75 \
+            --job python-invariants \
+            --job "python-shards (1)" --job "python-shards (2)" \
+            --job "python-shards (3)" --job "python-shards (4)"
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On
@@ -425,6 +495,34 @@ jobs:
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/tools/ src/chrome/ src/widgets/orders/ src/widgets/account/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
+      # Playwright infrastructure and selected browser journeys share this
+      # runner and its dependency install instead of queueing for their own.
+      - name: Type-check Playwright infrastructure
+        run: pnpm --dir packages/apps/terminal run e2e:infra:typecheck
+      - name: Lint Playwright infrastructure
+        run: pnpm --dir packages/apps/terminal run e2e:infra:lint
+      - name: Install the lockfile-pinned Playwright Chromium build
+        run: pnpm --dir packages/apps/terminal exec playwright install --with-deps chromium
+      - name: Run network-independent infrastructure self-tests (Chromium-only)
+        run: pnpm --dir packages/apps/terminal exec playwright test e2e/infra-self-tests.spec.ts --config=playwright.infra.config.ts --project=chromium --reporter=github --workers=1 --retries=0
+        env:
+          CI: true
+      - name: Run selected product journeys (Chromium-only)
+        run: pnpm --dir packages/apps/terminal exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts e2e/agent-practice.spec.ts e2e/learn-ai-polish.spec.ts e2e/about-versions.spec.ts --config=playwright.config.ts --project=chromium --reporter=github --workers=1 --retries=0
+        env:
+          CI: true
+      - name: Run public-demo browser-local preset journey (Chromium-only)
+        run: pnpm --dir packages/apps/terminal run e2e:public-demo
+        env:
+          CI: true
+      - name: Upload synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: terminal-e2e-evidence
+          path: packages/apps/terminal/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   secrets-check:
     if: github.event.pull_request.draft != true
@@ -499,46 +597,5 @@ jobs:
         run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
       - name: Verify packaged Electron security contract
         run: pnpm --filter @flinttrade/desktop verify:package
-
-  terminal-e2e-infra-self-tests:
-    needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.terminal == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Type-check Playwright infrastructure
-        run: pnpm --dir packages/apps/terminal run e2e:infra:typecheck
-      - name: Lint Playwright infrastructure
-        run: pnpm --dir packages/apps/terminal run e2e:infra:lint
-      - name: Install the lockfile-pinned Playwright Chromium build
-        run: pnpm --dir packages/apps/terminal exec playwright install --with-deps chromium
-      - name: Run network-independent fail-closed self-tests (Chromium-only)
-        run: pnpm --dir packages/apps/terminal exec playwright test e2e/infra-self-tests.spec.ts --config=playwright.infra.config.ts --project=chromium --reporter=github --workers=1 --retries=0
-        env:
-          CI: true
-      - name: Run selected fail-closed product journeys (Chromium-only)
-        run: pnpm --dir packages/apps/terminal exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts e2e/agent-practice.spec.ts e2e/learn-ai-polish.spec.ts e2e/about-versions.spec.ts --config=playwright.config.ts --project=chromium --reporter=github --workers=1 --retries=0
-        env:
-          CI: true
-      - name: Run public-demo browser-local preset journey (Chromium-only)
-        run: pnpm --dir packages/apps/terminal run e2e:public-demo
-        env:
-          CI: true
-      - name: Upload synthetic browser evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: terminal-e2e-evidence
-          path: packages/apps/terminal/test-results
-          if-no-files-found: ignore
-          retention-days: 7
 
 # No-op marker. A diff that includes this workflow is classified as code so required Test jobs run.

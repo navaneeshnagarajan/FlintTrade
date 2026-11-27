@@ -229,6 +229,7 @@ function HoldingsWidget(_props: WidgetProps) {
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value.toUpperCase())}
             placeholder="Filter symbol…"
+            aria-label="Filter holdings by symbol"
             className="bg-transparent border-none shadow-none h-auto p-0 text-xs font-mono text-text-primary placeholder:text-text-muted focus-visible:ring-0"
           />
         </div>

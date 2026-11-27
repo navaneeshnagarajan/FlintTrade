@@ -363,6 +363,9 @@ describe("WatchlistWidget", () => {
     // SearchDialog renders with role="dialog" and aria-label="Search symbols"
     expect(screen.getByRole("dialog", { name: /search symbols/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/search symbol/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search symbol" })).toBe(
+      screen.getByPlaceholderText(/search symbol/i),
+    );
   });
 
   it("typing in the symbol search input updates the input value", async () => {
