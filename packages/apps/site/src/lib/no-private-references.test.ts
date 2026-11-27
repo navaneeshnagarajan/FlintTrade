@@ -43,10 +43,9 @@ const ALLOWED_LOCAL_MENTIONS = [
 
 /**
  * Files whose remaining `.local/` mentions are accepted:
- * - AGENTS.md documents the spec-first working convention (design specs live
- *   in the maintainer's gitignored `.local/specs/` tree) — a convention
- *   statement, not a citation of a specific private file.
- * - The 2026-05-20 modernisation design spec is the historical record of the
+ * - AGENTS.md may document the gitignored local working-notes convention
+ *   as a convention statement, not a citation of a specific private file.
+ * - The modernisation design spec is the historical record of the
  *   archive operation itself, so it necessarily describes `.local/archive/`.
  * The 'Nitro' and 'reference-research' checks still apply to these files.
  */

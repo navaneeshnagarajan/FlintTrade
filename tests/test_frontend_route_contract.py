@@ -1,6 +1,6 @@
 """Contract test — every literal ``fetch("/ft-api/…")`` in the terminal resolves.
 
-Ground truth for Phase 1 G8 (`.local/specs/audit/gap-map.md`). The single most
+Ground truth for the Phase 1 route-prefix gap. The single most
 recurrent bug class in this repo's history is a frontend URL whose backend
 route is unregistered or sits under the wrong prefix — the ``/api/v1`` vs
 ``/v1`` 404 (commits ``dcebc35``, ``3208b0b3``, ``c7db123b``, ``e51b40e5``,

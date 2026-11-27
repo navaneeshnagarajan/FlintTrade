@@ -237,7 +237,7 @@ See `docs/REFERENCES.md` for upstream libraries and, when available locally,
 ## Development Workflow
 
 1. Read root `AGENTS.md`, `CLAUDE.md` and the current work queue in `PLAN.md`.
-2. Use `.local/specs/<area>/DESIGN_LOG.md` for design and local evidence.
+2. Keep design and local evidence in gitignored working notes.
 3. Implement within the authorised scope and run the required verification.
 4. Run independent multi-agent review, resolve findings and re-audit.
 5. Follow the fresh-main and maintainer-authorisation requirements before publication.
