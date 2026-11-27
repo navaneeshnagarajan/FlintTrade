@@ -599,10 +599,61 @@ describe("PositionsWidget", () => {
       symbol: "NIFTY24APR24000CE", action: "SELL", orderType: "LIMIT", price: 145.5, quantity: 75,
     }), expect.objectContaining({ mode: "practice" }), { exit: true });
     expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      symbol: "RELIANCE", action: "BUY", orderType: "MARKET", price: 2900, quantity: 10,
+      symbol: "RELIANCE", action: "BUY", orderType: "MARKET", price: 2900, quantity: 10, priceBasis: "ltp",
     }), expect.objectContaining({ mode: "practice" }), { exit: true });
     expect(mockPlaceOrder).toHaveBeenNthCalledWith(3, expect.objectContaining({
       symbol: "BANKNIFTY24APR51000PE", action: "BUY", orderType: "LIMIT", price: 226.6, quantity: 30,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+  });
+
+  it("exits a mixed Practice option and futures book, with priceBasis on the futures market leg", async () => {
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-FUT" });
+    mockUsePositions.mockReturnValue(queryResult({
+      data: [
+        { symbol: "NIFTY26DEC2624000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        { symbol: "NIFTY25NOVFUT", pnl: -200, quantity: 65, ltp: 24010, average_price: 23900, exchange: "NFO", product: "NRML" },
+      ],
+    }));
+    render(<PositionsWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+    expect(screen.getByText("NIFTY26DEC2624000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
+    expect(screen.getByText("Option exits fill at their limit or better and may not fill in a fast move.")).toBeInTheDocument();
+    expect(screen.getByText("Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+    expect(mockPlaceOrder).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      symbol: "NIFTY26DEC2624000CE", action: "SELL", orderType: "LIMIT", price: 145.5, quantity: 75,
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+    expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      symbol: "NIFTY25NOVFUT", action: "SELL", orderType: "MARKET", price: 24010, quantity: 65, priceBasis: "ltp",
+    }), expect.objectContaining({ mode: "practice" }), { exit: true });
+    expect(mockPlaceOrder.mock.results).toHaveLength(2);
+    expect(mockPlaceOrder.mock.results.every((result) => result.type === "return")).toBe(true);
+  });
+
+  it("squares off a Practice futures position as a market order with priceBasis ltp", async () => {
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-FUT-SQ" });
+    mockUsePositions.mockReturnValue(queryResult({
+      data: [
+        { symbol: "NIFTY25NOVFUT", pnl: -200, quantity: 65, ltp: 24010, average_price: 23900, exchange: "NFO", product: "NRML" },
+      ],
+    }));
+    render(<PositionsWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY25NOVFUT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY25NOVFUT" }));
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: "NIFTY25NOVFUT",
+      exchange: "NFO",
+      action: "SELL",
+      product: "NRML",
+      orderType: "MARKET",
+      quantity: 65,
+      price: 24010,
+      priceBasis: "ltp",
     }), expect.objectContaining({ mode: "practice" }), { exit: true });
   });
 

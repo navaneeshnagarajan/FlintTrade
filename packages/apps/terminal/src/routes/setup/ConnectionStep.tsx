@@ -92,7 +92,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         >
           <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
           <span>
-            {CONNECTED_READ_LABEL} only — never placeable Live orders.
+            {CONNECTED_READ_LABEL} only. Never placeable Live orders.
             Neo has no sandbox. {NEO_OPERATOR_COPY}
           </span>
         </div>
@@ -167,7 +167,7 @@ export function ConnectionStep({
           <ArrowRight className="size-4 ml-2" />
         </Button>
         <p className="text-xs text-text-muted text-center">
-          Native brokers stay in Settings as a fallback — not the
+          Native brokers stay in Settings as a fallback. Not the
           primary Practice path.
         </p>
       </div>

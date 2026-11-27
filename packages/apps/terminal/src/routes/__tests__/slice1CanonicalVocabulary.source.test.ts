@@ -160,10 +160,10 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
     expect(src).not.toMatch(/\/settings#brokers/);
   });
 
-  it("PortfolioOptimiser Practice title uses Practice data scope (not sandbox data scope)", () => {
+  it("PortfolioOptimiser Practice title uses the Practice basket history (not sandbox data scope)", () => {
     const path = join(srcRoot, "widgets/analysis/PortfolioOptimiser/PortfolioOptimiserWidget.tsx");
     const src = stripComments(read(path));
-    expect(src).toMatch(/Practice data scope/);
+    expect(src).toMatch(/Practice\. Read-only weights from the Practice basket history\./);
     expect(src).not.toMatch(/sandbox data scope/i);
   });
 

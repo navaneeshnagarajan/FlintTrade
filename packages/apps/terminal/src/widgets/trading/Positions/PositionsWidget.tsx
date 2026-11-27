@@ -445,11 +445,16 @@ function optionExitPlan(position: PositionRow): OptionExitPlan | "ticket" | null
 function squareOffOrder(
   position: PositionRow,
   practice: boolean,
-): { orderType: "LIMIT" | "MARKET"; price: number } | "ticket" {
+): { orderType: "LIMIT" | "MARKET"; price: number; priceBasis?: "ltp" } | "ticket" {
   const plan = optionExitPlan(position);
   if (plan === "ticket") return "ticket";
   if (plan) return { orderType: "LIMIT", price: plan.price };
-  return { orderType: "MARKET", price: squareOffMark(position, practice) };
+  const price = squareOffMark(position, practice);
+  return {
+    orderType: "MARKET",
+    price,
+    ...(practice && position.ltp > 0 ? { priceBasis: "ltp" as const } : {}),
+  };
 }
 
 function openPositionExitTicket(position: PositionRow): void {
@@ -515,6 +520,7 @@ function SquareOffDialog({
         triggerPrice: 0,
         strategy: "FlintPositions",
         rationale: admissionRationale(note),
+        ...(exitOrder.priceBasis ? { priceBasis: exitOrder.priceBasis } : {}),
       }, mutationIdentity, { exit: true });
       if (
         !isActionAllowed()
@@ -751,6 +757,7 @@ function ExitAllDialog({
               price: exitOrder.price,
               triggerPrice: 0,
               strategy: "FlintPositions",
+              ...(exitOrder.priceBasis ? { priceBasis: exitOrder.priceBasis } : {}),
             }, mutationIdentity, { exit: true });
             done.push(label);
           } catch (err) {
