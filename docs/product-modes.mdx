@@ -17,7 +17,7 @@ These are different facts. None of them implies the others.
 | Mode | **Practice** and **Live** | Only these two are session Modes. **Example** is not a Mode. **Connected (read)** is not a claim. |
 | Broker read connectivity | Status row **Connected**, **Connected (read)**, or **Unavailable** | Not a Mode and not the decision model. A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503. Native HTTP reads return HTTP 409. |
 | Lock | Idle headings `Practice desk locked`, `Live desk locked`, or `Locked` | Quick Unlock reopens the same Mode. The Live menu lock reasons are a separate list. |
-| Decision model | **Ready**, **Degraded**, **Down**, **Still loading**, **Checking**, or **Downloading** | The Status row is labelled **Decision model**. The value is the readiness word, including **Downloading**. It starts **Down**. Settings shows the section **Decision model**, and the model as `Model: {id} (pinned)`. `GET /api/v1/operator/status` reports this section as the decision model. It is not the Mode and it is not broker connectivity. |
+| Decision model | **Ready**, **Degraded**, **Down**, **Still loading**, **Checking**, or **Downloading** | The Status row is labelled **Decision model**. The value is the readiness word, including **Downloading**. It starts **Down**. `GET /api/v1/operator/status` reports this section as the decision model. It is not the Mode and it is not broker connectivity. |
 
 ## Modes
 

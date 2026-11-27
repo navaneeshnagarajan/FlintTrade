@@ -28,7 +28,7 @@ Practice or Live on the session. The Mode chip is taken from the JWT `mode` clai
 _Avoid_: paper, App
 
 **Decision model**:
-The order-admission check. The Status row is labelled **Decision model**, and the value is Ready, Degraded, Down, Still loading, Checking, or Downloading. It starts Down. Settings shows the section **Decision model**, and the model as `Model: {id} (pinned)`. `GET /api/v1/operator/status` reports this section as the decision model.
+The order-admission check. The Status row is labelled **Decision model**, and the value is Ready, Degraded, Down, Still loading, Checking, or Downloading. It starts Down. `GET /api/v1/operator/status` reports this section as the decision model.
 _Avoid_: treating the decision model as a Mode or as broker connectivity
 
 **Trading permission**:

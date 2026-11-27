@@ -400,7 +400,7 @@ does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
 The TopBar **Status** menu is the one home for **Broker**, the decision model, and
-**LLM**. The decision-model row is labelled **Decision model**. The value is the readiness word. Settings shows the section **Decision model**, and the model as `Model: {id} (pinned)`. Each row has its own label, value, and one-line description.
+**LLM**. The decision-model row is labelled **Decision model**. The value is the readiness word. Each row has its own label, value, and one-line description.
 Broker's line is `Your broker account for live orders and holdings.`
 The decision model's line is the current reason, or `Checks every order before it is placed.`
 LLM's line is `Optional AI model for chat and suggestions.` The same three
@@ -2267,7 +2267,7 @@ Order Pad and Quick Trade show this under the order buttons. Scalper,
 Positions, Order Ladder, and Option Chain may still show an order error
 as a toast.
 
-1. **Denied by decision model.** Read the server reason under the headline. The
+1. **Denied by decision model**: read the server reason under the headline. The
    denial is one alert (`role="alert"`), the only live region. The reason
    line is named **Decision model check** and is not its own status. Order
    buttons stay off until the decision model or the mode changes. **Max quantity N.**

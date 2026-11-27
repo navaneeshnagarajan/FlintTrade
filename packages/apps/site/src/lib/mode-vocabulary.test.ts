@@ -62,7 +62,9 @@ describe('public mode vocabulary', () => {
     expect(guide).not.toContain('session claim is example or demo');
     expect(api).toContain('`GET /api/v1/operator/status`');
     expect(api).toContain('the decision model');
-    expect(modes).toContain('Settings shows the section **Decision model**, and the model as `Model: {id} (pinned)`');
+    expect(modes).not.toContain('(pinned)');
+    expect(glossary).not.toContain('(pinned)');
+    expect(guide).not.toContain('(pinned)');
     expect(modes).not.toContain('**Laya decision model**');
     expect(modes).not.toContain('Laya is the shipped name of this row');
     expect(glossary).toContain('The Status row is labelled **Decision model**');
