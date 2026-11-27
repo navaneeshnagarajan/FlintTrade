@@ -247,7 +247,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "practice");
     expect(bar).toHaveTextContent(
-      "Practice — simulated fills, no real money.",
+      "Practice. Simulated fills, no real money.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });

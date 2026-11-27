@@ -177,3 +177,41 @@ def test_practice_path_cannot_submit_live_broker_orders(practice_app: Flask) -> 
     assert sandbox.get_trades() == []
 
     _assert_live_path_dark(practice_app)
+
+
+def _exit_ticket(quantity: int) -> dict:
+    return {**_PRACTICE_BODY, "action": "SELL", "quantity": quantity, "exit_only": True}
+
+
+@pytest.mark.unit
+def test_practice_exit_ticket_is_cut_to_the_open_position(practice_app: Flask) -> None:
+    client = practice_app.test_client()
+    sandbox = practice_app.config["DATA_SANDBOX_ENGINE"]
+    assert client.post("/api/v1/orders/place", json={**_PRACTICE_BODY, "quantity": 2}, headers=_practice_headers()).status_code == 200
+
+    resp = client.post("/api/v1/orders/place", json=_exit_ticket(5), headers=_practice_headers())
+
+    assert resp.status_code == 200, resp.get_json()
+    assert {
+        "level": "warn",
+        "source": "FlintTrade",
+        "rule_id": "exit-quantity-capped",
+        "message": "Quantity reduced to 2, the open position.",
+    } in resp.get_json()["rule_results"]
+    assert [order["quantity"] for order in sandbox.get_orders() if order["action"] == "SELL"] == [2]
+    assert sandbox.get_positions() == []
+    _assert_live_path_dark(practice_app)
+
+
+@pytest.mark.unit
+def test_practice_exit_ticket_on_a_flat_position_is_not_sent(practice_app: Flask) -> None:
+    client = practice_app.test_client()
+    sandbox = practice_app.config["DATA_SANDBOX_ENGINE"]
+
+    resp = client.post("/api/v1/orders/place", json=_exit_ticket(1), headers=_practice_headers())
+
+    assert resp.status_code == 400, resp.get_json()
+    assert resp.get_json()["message"] == "FlintTrade · Position is closed. Order not sent."
+    assert resp.get_json()["rule_results"][0]["rule_id"] == "exit-position-closed"
+    assert sandbox.get_orders() == []
+    _assert_live_path_dark(practice_app)

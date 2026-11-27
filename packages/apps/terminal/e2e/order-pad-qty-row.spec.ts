@@ -339,6 +339,8 @@ test.describe("Order Pad reserved quantity row", () => {
 
     await bootPad(page, SENSEX_WARN, "BFO");
     await expect(page.getByText("Lot: 20", { exact: true })).toBeVisible();
+    await page.getByRole("radio", { name: "LIMIT" }).click();
+    await page.locator("#orderpad-price").fill("200");
     const sensexQty = page.getByRole("spinbutton", { name: "Quantity" });
     for (const width of WIDTHS) {
       await constrainPad(page, width);

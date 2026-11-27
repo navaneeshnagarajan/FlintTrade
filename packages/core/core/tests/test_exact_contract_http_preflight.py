@@ -430,7 +430,6 @@ def test_unavailable_contract_refuses_before_books_and_authority(
 @pytest.mark.parametrize("changes", [
     pytest.param({"product": "CNC"}, id="cash-product"),
     pytest.param({"product": "MTF"}, id="unqualified-mtf"),
-    pytest.param({"pricetype": "SL-M", "trigger_price": "100"}, id="unsupported-stop-market"),
     pytest.param({"price": "0"}, id="zero-limit"),
     pytest.param({"price": "-1"}, id="negative-limit"),
     pytest.param({"price": "NaN"}, id="nonfinite-limit"),
@@ -461,6 +460,40 @@ def test_actual_adapter_terms_refuse_before_admission(
     _no_admission(phase)
     assert len(phase["preflights"]) == 1
     assert response.status_code == (400 if broker == "dhan" else 501), response.get_json()
+
+
+@pytest.mark.parametrize("broker", ["dhan", "kotakneo"])
+@pytest.mark.parametrize("exchange", ["NFO", "BFO"])
+def test_options_stop_market_is_refused_before_preflight(
+    exact_stack: Callable[..., SimpleNamespace], broker: str, exchange: str,
+) -> None:
+    """Refuse a stop-market option order before the adapter preflight runs.
+
+    Args:
+        exact_stack: Normal-factory fixture builder with inert SDK transports.
+        broker: Exact broker selected by the configured or named route.
+        exchange: Canonical venue bound to the synthetic listed contract.
+
+    Returns:
+        None; assertions inspect the actual HTTP and detached phase observations.
+
+    Raises:
+        AssertionError: If the refusal, authority, custody or wire contract differs.
+    """
+    stack = exact_stack(broker, exchange)
+    response, phase = _post(stack, {"pricetype": "SL-M", "trigger_price": "100"}, named=True)
+    body = response.get_json()
+    _no_admission(phase)
+    assert phase["preflights"] == []
+    assert response.status_code == 400, body
+    assert body["code"] == "order_rule_blocked"
+    assert body["dispatch_outcome"] == "refused_before_dispatch"
+    assert {
+        "level": "block",
+        "source": "FlintTrade",
+        "rule_id": "options-stop-market-not-sent",
+        "message": "Stop-market orders aren't accepted on options. Use stop-limit.",
+    } in body["rule_results"]
 
 
 @pytest.mark.parametrize("broker", ["dhan", "kotakneo"])

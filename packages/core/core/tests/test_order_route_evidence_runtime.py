@@ -663,3 +663,75 @@ def test_missing_filled_evidence_counts_the_full_exit_and_cannot_bypass_full_saf
     assert process_laya().decision_log()[-1].quantity == 6
     assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
     assert sdk.writes == []
+
+
+def _place_exit_ticket(app, quantity: int):
+    return app.test_client().post(
+        "/api/v1/orders/place",
+        json={
+            "broker": "dhan", "account_id": "route-account", "symbol": "INFY", "exchange": "NSE",
+            "action": "SELL", "quantity": quantity, "price": 100, "product": "MIS", "order_type": "LIMIT",
+            "exit_only": True,
+        },
+        headers=_headers(),
+    )
+
+
+def _broker_net(router, quantity: str) -> None:
+    from flinttrade_core.models import Position
+
+    async def positions(_session):
+        return [Position(symbol="INFY", exchange="NSE", product="MIS", quantity=quantity)]
+
+    router._adapters["dhan"].positions = positions
+
+
+def test_exit_ticket_above_the_position_is_sent_for_the_open_quantity(route_stack) -> None:
+    app, _source, sdk, router = route_stack
+    _broker_net(router, "10")
+
+    response = _place_exit_ticket(app, 15)
+
+    assert response.status_code == 200, response.get_json()
+    assert [write["quantity"] for write in sdk.writes] == [10]
+    assert {
+        "level": "warn",
+        "source": "FlintTrade",
+        "rule_id": "exit-quantity-capped",
+        "message": "Quantity reduced to 10, the open position.",
+    } in response.get_json()["rule_results"]
+
+
+def test_exit_ticket_on_a_flat_position_is_refused_before_any_write(route_stack) -> None:
+    app, source, sdk, router = route_stack
+    source.position_rows = []
+    _broker_net(router, "0")
+
+    response = _place_exit_ticket(app, 10)
+
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json()["code"] == "order_rule_blocked"
+    assert response.get_json()["message"] == "FlintTrade · Position is closed. Order not sent."
+    assert sdk.writes == []
+
+
+def test_exit_ticket_refused_when_a_fill_closes_the_position_before_dispatch(route_stack) -> None:
+    app, _source, sdk, router = route_stack
+    _broker_net(router, "0")
+
+    response = _place_exit_ticket(app, 10)
+
+    assert response.status_code == 400, response.get_json()
+    assert "Position is closed. Order not sent." in response.get_json()["message"]
+    assert sdk.writes == []
+
+
+def test_exit_ticket_refused_when_positions_cannot_be_read(route_stack) -> None:
+    app, source, sdk, _router = route_stack
+    source.position_rows = RuntimeError("positions unavailable")
+
+    response = _place_exit_ticket(app, 10)
+
+    assert response.status_code == 409, response.get_json()
+    assert response.get_json()["code"] == "exit_position_unreadable"
+    assert sdk.writes == []

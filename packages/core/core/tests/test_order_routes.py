@@ -585,6 +585,7 @@ class TestPracticeMode:
             trigger_price=0.0,
             strategy="",
             instrument_token="",
+            exit_only=False,
         )
 
     def test_practice_rejection_is_an_http_error(self, flask_app, client):
@@ -609,6 +610,14 @@ class TestPracticeMode:
             "order_outcome": "rejected",
             "reason": "broker_rejected",
             "retry_safe": False,
+            "rule_results": [
+                {
+                    "level": "info",
+                    "message": "Market orders fill within 3% of the last price.",
+                    "rule_id": "practice-market-price-cap",
+                    "source": "Practice",
+                }
+            ],
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
@@ -709,7 +718,7 @@ class TestPracticeMode:
         assert kwargs["price"] == 812.40
         assert kwargs["price_source"] == "last_close"
 
-    def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
+    def test_option_market_order_is_refused_before_the_sandbox(self, flask_app, client, monkeypatch):
         class Closed:
             def session_active(self, exchange, symbol=None):
                 return False
@@ -732,8 +741,9 @@ class TestPracticeMode:
 
         assert resp.status_code == 400
         assert resp.get_json()["message"] == (
-            "Option prices go stale outside market hours. Try again when the market opens."
+            "FlintTrade · Market orders aren't accepted on options. Use a limit price."
         )
+        assert resp.get_json()["code"] == "order_rule_blocked"
         mock_sandbox.place_order.assert_not_called()
 
     def test_pending_order_requires_a_running_tick_source(self, flask_app, client, monkeypatch):
@@ -750,6 +760,185 @@ class TestPracticeMode:
         assert resp.status_code == 503
         assert "tick capture" in resp.get_json()["message"].lower()
         mock_sandbox.place_order.assert_not_called()
+
+    def test_practice_exit_limit_fills_without_tick_capture(self, flask_app, client, monkeypatch):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [
+                    {
+                        "ts": now - timedelta(days=2),
+                        "prev_close": 100.0,
+                        "close": 99.0,
+                    }
+                ]
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {"symbol": "SBIN", "exchange": "NSE", "product": "MIS", "net_qty": 50},
+        ]
+        mock_sandbox.get_orders.return_value = []
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-EXIT",
+            "status": "COMPLETE",
+            "message": "Practice order filled",
+        }
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "SBIN",
+                "action": "SELL",
+                "order_type": "LIMIT",
+                "price": 97.0,
+                "quantity": 50,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        mock_sandbox.place_order.assert_called_once()
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == 97.0
+        assert kwargs["fill_price"] == 100.0
+        assert kwargs["order_type"] == "LIMIT"
+        assert kwargs["action"] == "SELL"
+        assert kwargs["exit_only"] is True
+        assert kwargs["price_source"] == "last_close"
+
+    def test_practice_exit_limit_refuses_when_last_is_outside_the_limit(
+        self, flask_app, client, monkeypatch
+    ):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [
+                    {
+                        "ts": now - timedelta(days=1),
+                        "prev_close": 90.0,
+                        "close": 89.0,
+                    }
+                ]
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {"symbol": "SBIN", "exchange": "NSE", "product": "MIS", "net_qty": 50},
+        ]
+        mock_sandbox.get_orders.return_value = []
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "SBIN",
+                "action": "SELL",
+                "order_type": "LIMIT",
+                "price": 97.0,
+                "quantity": 50,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "The last price is outside the limit."
+        mock_sandbox.place_order.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "last,action,net_qty",
+        [
+            (0.05, "SELL", 75),
+            (0.10, "SELL", 75),
+            (41.3, "SELL", 75),
+            (100.0, "SELL", 75),
+            (150.0, "SELL", 75),
+            (0.05, "BUY", -75),
+            (41.3, "BUY", -75),
+            (150.0, "BUY", -75),
+        ],
+    )
+    def test_practice_exit_at_the_square_off_cap_fills_without_tick_capture(
+        self, flask_app, client, monkeypatch, last, action, net_qty
+    ):
+        """A Square off / Exit all cap is taken from the last price, so that last still honours the limit."""
+        from datetime import datetime, timedelta
+        from decimal import Decimal
+        from zoneinfo import ZoneInfo
+
+        from flinttrade_core.order_rules import market_price_cap
+
+        cap = market_price_cap(Decimal(str(last)), action)
+        limit = max(1, round(float(cap) * 20 + 1e-7)) / 20
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [{"ts": now - timedelta(days=1), "prev_close": last, "close": last}]
+
+        class Open:
+            def session_active(self, exchange, symbol=None):
+                return True
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "product": "MIS",
+                "net_qty": net_qty,
+            },
+        ]
+        mock_sandbox.get_orders.return_value = []
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-CAP",
+            "status": "COMPLETE",
+            "message": "Practice order filled",
+        }
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Open())
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "action": action,
+                "order_type": "LIMIT",
+                "price": limit,
+                "quantity": 75,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json().get("message") != "The last price is outside the limit."
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == limit
+        assert kwargs["fill_price"] == last
+        assert kwargs["exit_only"] is True
 
     def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
@@ -788,6 +977,7 @@ class TestPracticeMode:
             order_type="LIMIT",
             trigger_price=1_490.0,
             instrument_token="",
+            exit_only=False,
             strategy="mean-revert",
         )
         recorder.add_symbols.assert_called_once_with(

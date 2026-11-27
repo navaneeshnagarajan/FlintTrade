@@ -185,6 +185,27 @@ describe("QuickTradeWidget", () => {
     expect(screen.queryByLabelText("Limit price")).toBeNull();
   });
 
+
+  it("defaults an option ticket to LIMIT and shows the market refusal before submit", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "BANKNIFTY26JUN56000CE",
+      exchange: "NFO",
+      lotsize: 30,
+      tick_size: 0.05,
+    });
+    renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
+    await screen.findByText(/Qty: 1 × 30 = 30/);
+    expect(screen.getByLabelText("Limit price")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /MARKET/i }));
+    expect(await screen.findByTestId("order-rule-line")).toHaveTextContent(
+      "Market orders aren't accepted on options. Use a limit price.",
+    );
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+
   it("sends quantity = lots × lot size for a derivatives contract", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "BANKNIFTY26JUN56000CE",
@@ -196,8 +217,9 @@ describe("QuickTradeWidget", () => {
 
     // Wait for the lot size to be confirmed (the qty summary appears)
     await screen.findByText(/Qty: 1 × 30 = 30/);
+    expect(screen.getByLabelText("Limit price")).toBeInTheDocument();
 
-    // Select 2 lots, then BUY
+    fireEvent.change(screen.getByLabelText("Limit price"), { target: { value: "120.5" } });
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     fireEvent.click(screen.getByRole("button", { name: /buy 2 lots/i }));
 
@@ -209,7 +231,8 @@ describe("QuickTradeWidget", () => {
           action: "BUY",
           quantity: 60, // 2 lots × 30 — NOT the raw preset number
           product: "MIS",
-          orderType: "MARKET",
+          orderType: "LIMIT",
+          price: 120.5,
         }),
       );
     });

@@ -213,7 +213,7 @@ def _writer(handle: Any, adapter: Any, ledger: Any, proof: Any) -> Any:
         consume_gate=SafetyGate().consume, lifecycle_store=ledger, backend_lease_proof=proof)
     context = replace(handle.context[0], mode="live")
     order = Order(symbol="SYNTHETIC-OPTION", action="BUY", exchange="NFO", product="NRML",
-                  quantity="2", price="12.5")
+                  quantity="2", price="12.5", pricetype="LIMIT")
     signed = SafetyContext.mint(order, mode="live", user_jti=context.jti, actor_type="human",
         adapter_id=handle.selector.adapter_id, account_id="AliasCase", backend_lease_proof=proof)
     return router, context, order, signed

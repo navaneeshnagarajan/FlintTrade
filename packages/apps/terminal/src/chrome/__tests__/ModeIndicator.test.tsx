@@ -14,6 +14,7 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import ModeIndicator, { ENROL_AUTHENTICATOR_LINK } from "../ModeIndicator";
 import { CREATE_A_PIN } from "../liveLockReasons";
+import { pendingLiveAcknowledgement, recordLiveAcknowledgement } from "@/lib/liveAcknowledgement";
 
 function LocationProbe() {
   const location = useLocation();
@@ -367,10 +368,56 @@ describe("ModeIndicator", () => {
   });
 
   describe("eligible Live unlock", () => {
-    function armLive() {
+    function armLive(acknowledged = true) {
       resetStore("practice");
       connectBroker();
+      localStorage.removeItem("flinttrade.liveAcknowledgement");
+      if (acknowledged) recordLiveAcknowledgement(pendingLiveAcknowledgement());
     }
+
+    it("asks for the one-time Live acknowledgement before the PIN, once", async () => {
+      armLive(false);
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/v1/auth/status")) return statusResponse(true);
+        return jsonResponse({ status: "success", data: { token: "unused" } });
+      });
+      render(<ModeIndicator />);
+      await chooseLive();
+
+      const dialog = await screen.findByTestId("live-acknowledgement");
+      expect(dialog).toHaveTextContent("Turn on Live");
+      expect(dialog).toHaveTextContent(
+        "Orders will be sent from this computer through your broker account. Losses from your own strategy or automation aren't covered by the exchange grievance process.",
+      );
+      expect(dialog).not.toHaveTextContent(/undertaking|algo|regulation/i);
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+      const turnOn = screen.getByRole("button", { name: "Turn on Live" });
+      expect(turnOn).toBeDisabled();
+      fireEvent.click(screen.getByLabelText("I understand"));
+      expect(turnOn).toBeEnabled();
+      fireEvent.click(turnOn);
+
+      expect(await screen.findByText("Switch to Live Trading?")).toBeInTheDocument();
+      expect(pendingLiveAcknowledgement()).toBe("");
+    });
+
+    it("does not switch anything when the acknowledgement is cancelled", async () => {
+      armLive(false);
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/v1/auth/status")) return statusResponse(true);
+        return jsonResponse({ status: "success", data: { token: "unused" } });
+      });
+      render(<ModeIndicator />);
+      await chooseLive();
+      await screen.findByTestId("live-acknowledgement");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByTestId("live-acknowledgement")).not.toBeInTheDocument());
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+      expect(useModeStore.getState().mode).toBe("practice");
+      expect(pendingLiveAcknowledgement()).not.toBe("");
+    });
 
     async function chooseLive() {
       const user = await openMenu();

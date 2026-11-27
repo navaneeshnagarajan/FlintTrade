@@ -11,6 +11,10 @@ regulatory responsibilities remain with the operator and their broker.
 
 ## Order-Gating Model
 
+Exchange, broker, and product order rules (option market and stop-market
+orders, BSE stop-loss gap, price bands, broker order-rate windows) are listed
+in [Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md).
+
 **Placement.** Every order FlintTrade submits goes through admission
 when it's placed. The HTTP routes that submit an order are
 `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,

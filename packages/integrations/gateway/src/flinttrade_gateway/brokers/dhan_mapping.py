@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -128,6 +129,45 @@ DHAN_TO_PRODUCT = {
 
 class DhanMappingError(ValueError):
     """Raised when an order cannot be translated to / from the Dhan API."""
+
+
+STATIC_IP_REJECTED = "Dhan rejected the order. Send it from your registered static IP."
+STATIC_IP_OR_SEGMENT = "Dhan rejected the order. Check static IP and segment activation."
+_IP_TEXT = re.compile(r"\bIP(?:v[46])?s?\b", re.IGNORECASE)
+_DH_9XX = re.compile(r"DH-9\d\d")
+
+
+def dhan_rejection_reason(code: object, message: object) -> str | None:
+    """Plain sentence for a Dhan API rejection, or ``None`` to show Dhan's text alone.
+
+    Any DH-9xx whose message names the IP is a static-IP rejection. A bare
+    DH-903 points at static IP or segment activation. A bare DH-905 is an
+    input error and gets no static-IP sentence.
+    """
+    code_text = str(code or "").strip().upper()
+    if not _DH_9XX.fullmatch(code_text):
+        return None
+    if _IP_TEXT.search(str(message or "")):
+        return STATIC_IP_REJECTED
+    if code_text == "DH-903":
+        return STATIC_IP_OR_SEGMENT
+    return None
+
+
+class DhanApiRejection(DhanMappingError):
+    """Dhan answered with ``status: failure``.
+
+    ``broker_code`` and ``broker_message`` are Dhan's own; ``reason`` is the
+    sentence from :func:`dhan_rejection_reason`, shown above Dhan's message.
+    """
+
+    def __init__(self, broker_code: str, broker_message: str, detail: str) -> None:
+        self.broker_id = "dhan"
+        self.broker_code = broker_code
+        self.broker_message = broker_message
+        self.reason = dhan_rejection_reason(broker_code, broker_message)
+        text = f"{self.reason}\n{broker_message}" if self.reason and broker_message else f"Dhan API error: {detail}"
+        super().__init__(text)
 
 
 _RESPONSE_MISSING = object()
@@ -1528,7 +1568,12 @@ def unwrap(resp: Any) -> Any:
         if resp.get("status") == "failure":
             remarks = resp.get("remarks")
             msg = remarks.get("error_message") if isinstance(remarks, dict) else remarks
-            raise DhanMappingError(f"Dhan API error: {msg or resp}")
+            code = remarks.get("error_code") if isinstance(remarks, dict) else None
+            raise DhanApiRejection(
+                code if isinstance(code, str) else "",
+                msg if isinstance(msg, str) else "",
+                str(msg or resp),
+            )
         if "data" in resp:
             return resp["data"]
     return resp

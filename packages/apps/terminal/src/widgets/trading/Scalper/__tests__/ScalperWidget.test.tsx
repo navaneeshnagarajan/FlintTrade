@@ -365,6 +365,10 @@ describe("ScalperWidget", () => {
   // ── Order safety tests ─────────────────────────────────────────────────────
 
   /** Wait for the CE contract to resolve, click Buy CE, confirm the modal. */
+  function setLimit(value: string): void {
+    fireEvent.change(screen.getByLabelText("Limit ₹"), { target: { value } });
+  }
+
   async function buyCeWithConfirm(): Promise<void> {
     await waitFor(() => {
       const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
@@ -383,6 +387,7 @@ describe("ScalperWidget", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Add a reason (optional)" }), {
       target: { value: "Scalp the open" },
     });
+    setLimit("150");
     await buyCeWithConfirm();
     await waitFor(() => {
       expect(mockPlaceOrder).toHaveBeenCalledWith(
@@ -415,11 +420,12 @@ describe("ScalperWidget", () => {
     await screen.findByText("1 (99)");
     expect(mockGetSymbol).toHaveBeenCalledWith(expect.stringMatching(/CE$/), "NFO");
 
+    setLimit("150");
     await buyCeWithConfirm();
 
     await waitFor(() => {
       expect(mockPlaceOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ action: "BUY", quantity: 99, price: 0, orderType: "MARKET" }),
+        expect.objectContaining({ action: "BUY", quantity: 99, price: 150, orderType: "LIMIT" }),
       );
     });
   });
@@ -436,6 +442,7 @@ describe("ScalperWidget", () => {
 
     await screen.findByText("1 (80)");
 
+    setLimit("150");
     await buyCeWithConfirm();
 
     await waitFor(() => {
@@ -473,26 +480,40 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("blocks a LIMIT order without a limit price instead of sending ₹0", async () => {
+  it("refuses a blank limit when the contract has no live premium", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    // Switch to LIMIT — the price input appears; leave it empty
-    fireEvent.click(screen.getByText("LIMIT"));
     expect(screen.getByText("Limit ₹")).toBeInTheDocument();
 
     await buyCeWithConfirm();
 
-    await screen.findByText(/price above zero before placing a LIMIT order/);
+    await screen.findByText(/^No live premium for .+\. Enter a limit price\.$/);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("sends a blank limit at the contract's live premium", async () => {
+    mockTicks.current = new Proxy(
+      {},
+      { get: () => ({ ltp: 123.42, close: 120 }) },
+    ) as Record<string, { ltp?: number; close?: number }>;
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderType: "LIMIT", price: 123.4, quantity: 75 }),
+      );
+    });
   });
 
   it("sends the entered limit price with a LIMIT order", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
 
     await buyCeWithConfirm();
 
@@ -507,6 +528,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
+    setLimit("150");
     await buyCeWithConfirm();
 
     await screen.findByText(/placed$/);
@@ -519,6 +541,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
+    setLimit("150");
     await buyCeWithConfirm();
 
     await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
@@ -529,8 +552,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -555,8 +577,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
 
     await buyCeWithConfirm();
@@ -568,38 +589,25 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("anchors a MARKET bracket to the option's live LTP", async () => {
-    // Every tick key answers with ₹200 — the CE contract included.
+  it("does not offer a market order type", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+    expect(screen.queryByRole("button", { name: "MARKET" })).not.toBeInTheDocument();
+    expect(screen.queryByText("MARKET")).not.toBeInTheDocument();
+  });
+
+  it("shows the preset's refusal and warning on the rule line before any order", async () => {
     mockTicks.current = new Proxy(
       {},
-      { get: () => ({ ltp: 200, close: 200 }) },
+      { get: () => ({ ltp: 100, close: 100 }) },
     ) as Record<string, { ltp?: number; close?: number }>;
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
+    const line = document.getElementById("scalper-rule-line") as HTMLElement;
 
-    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
-
-    await buyCeWithConfirm();
-
-    await waitFor(() => {
-      expect(mockPlaceBracketOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ stoploss: 180 }),
-      );
-    });
-    const arg = mockPlaceBracketOrder.mock.calls[0][0] as { entry: { price: number } };
-    expect(arg.entry.price).toBe(0); // MARKET entry
-  });
-
-  it("fails closed on a MARKET bracket when no live price is available", async () => {
-    render(<ScalperWidget {...defaultProps} />);
-    await screen.findByText("1 (75)");
-
-    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
-
-    await buyCeWithConfirm();
-
-    await screen.findByText(/Live price unavailable to anchor SL\/Target/);
-    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+    setLimit("200");
+    await waitFor(() => expect(line).toHaveTextContent("Price may be outside the exchange band (₹60–₹140)."));
+    expect(line).toHaveAttribute("data-level", "warn");
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -610,6 +618,7 @@ describe("ScalperWidget", () => {
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
     fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
 
+    setLimit("150");
     await buyCeWithConfirm();
 
     await screen.findByText(/SL and Target together are not supported yet — enter exactly one/);
@@ -621,8 +630,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -644,8 +652,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -660,8 +667,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();
@@ -681,8 +687,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
     await buyCeWithConfirm();

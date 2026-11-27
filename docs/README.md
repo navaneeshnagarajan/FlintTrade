@@ -29,6 +29,7 @@ in the repository notice and source headers.
 | [API.md](API.md) | Integrator | FlintTrade `/ft-api/v1/*` reference, native broker contracts, auth model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Operator / Contributor | Supported brokers, exchanges, operating systems, and Python / Node versions. |
 | [ORDER_SAFETY.md](ORDER_SAFETY.md) | Operator / Contributor | Audit logging, rate limits, retention, and kill-switch design notes. |
+| [BROKER_AND_EXCHANGE_RULES.md](BROKER_AND_EXCHANGE_RULES.md) | Operator / Contributor | Dated exchange, broker, and product order rules checked before an order is sent. |
 | [CI.md](CI.md) | Contributor | How the GitHub Actions pipeline runs, what each job covers, and how to read CI failures. |
 | [REFERENCES.md](REFERENCES.md) | Everyone | Public attribution and project influence notes. |
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |

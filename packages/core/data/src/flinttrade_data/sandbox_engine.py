@@ -32,6 +32,7 @@ from typing import Any
 from flinttrade_core.db import open_sqlite
 from flinttrade_core.indian_charges import estimate_practice_fill
 from flinttrade_core.instrument_lots import contract_quantity_message
+from flinttrade_core.order_rules import blocking, evaluate_order, exit_admission, headline, results_payload
 from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
@@ -113,6 +114,45 @@ def _parse_charges_json(raw: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _practice_rule_refusal(
+    *,
+    symbol: str,
+    exchange: str,
+    action: str,
+    order_type: str,
+    price: Any,
+    trigger_price: Any,
+) -> dict[str, Any] | None:
+    """Refuse a Practice order the shared order rules block, in the rules' own words.
+
+    Practice reads the same rule rows as the ticket, the API and backtests, so
+    an option market order or an out-of-range stop-loss limit is refused here
+    exactly as it would be for a broker.
+    """
+    results = evaluate_order(
+        {
+            "symbol": symbol,
+            "exchange": exchange,
+            "action": action,
+            "pricetype": order_type,
+            "price": price,
+            "trigger_price": trigger_price,
+        },
+        broker="practice",
+        broker_name="Practice",
+    )
+    blocks = blocking(results)
+    if not blocks:
+        return None
+    return {
+        "order_id": "",
+        "status": "REJECTED",
+        "message": headline(blocks),
+        "code": "order_rule_blocked",
+        "rule_results": results_payload(results),
+    }
 
 
 @dataclass(slots=True)
@@ -574,12 +614,19 @@ class SandboxEngine:
         instrument_token: str = "",
         price_source: str | None = None,
         price_age_s: int | None = None,
+        exit_only: bool = False,
+        fill_price: float | None = None,
     ) -> dict[str, Any]:
         """Validate a paper order and either fill it or leave it pending.
 
-        MARKET orders fill immediately at ``price``. LIMIT, SL and SL-M orders
+        Orders the shared order rules block (a market or stop-market order on an
+        option, a stop-loss limit too far from its trigger) are rejected with
+        the rule's message. Other MARKET orders fill immediately at ``price``,
+        the live reference price. LIMIT, SL and SL-M orders
         remain pending until :meth:`check_pending_fills` receives a matching
-        live tick. Pending buys reserve margin and pending sells reserve covered
+        live tick, unless ``fill_price`` is a positive price — then the order
+        completes immediately at that fill, still honouring ``price`` as the
+        limit. Pending buys reserve margin and pending sells reserve covered
         quantity.
 
         Args:
@@ -594,6 +641,12 @@ class SandboxEngine:
             strategy: Optional strategy label retained on the order and trade.
             instrument_token: Security id of the listed contract. When set, the
                 quantity must be a positive multiple of that contract's lot size.
+            fill_price: When set to a positive finite price, a LIMIT or stop
+                order completes immediately at this fill instead of waiting for
+                a tick. ``price`` remains the limit.
+            exit_only: The order may only reduce the open position. The position
+                is read under the engine lock; a flat or same-side position
+                refuses the order and a larger quantity is cut to the open size.
 
         Returns:
             Dict with keys:
@@ -628,6 +681,16 @@ class SandboxEngine:
                 "status": "REJECTED",
                 "message": f"Invalid order type: {order_type}",
             }
+        rule_refusal = _practice_rule_refusal(
+            symbol=symbol,
+            exchange=exchange,
+            action=action,
+            order_type=order_type,
+            price=price,
+            trigger_price=trigger_price,
+        )
+        if rule_refusal is not None:
+            return rule_refusal
         try:
             price = float(price)
             trigger_price = float(trigger_price)
@@ -653,7 +716,24 @@ class SandboxEngine:
             }
 
         margin_price = price if price > 0 else trigger_price
+        exit_results: list[dict[str, str]] = []
         with self._lock:
+            if exit_only:
+                pos = self._get_position(symbol, exchange, product)
+                net = int(pos["net_qty"]) if pos else 0
+                capped, results = exit_admission(
+                    {"symbol": symbol, "exchange": exchange, "action": action, "quantity": quantity}, net
+                )
+                exit_results = results_payload(results)
+                if capped < 1:
+                    return {
+                        "order_id": "",
+                        "status": "REJECTED",
+                        "message": headline(blocking(results)),
+                        "code": "order_rule_blocked",
+                        "rule_results": exit_results,
+                    }
+                quantity = capped
             if action == "BUY":
                 required_margin = self._estimate_margin(
                     quantity=quantity,
@@ -687,8 +767,17 @@ class SandboxEngine:
 
             order_id = str(uuid.uuid4())
             now = time.time()
-            status = "COMPLETE" if order_type == "MARKET" else "PENDING"
-            fill_price = price if status == "COMPLETE" else None
+            immediate_fill = None
+            if fill_price is not None:
+                try:
+                    candidate = float(fill_price)
+                except (TypeError, ValueError, OverflowError):
+                    candidate = None
+                if candidate is not None and math.isfinite(candidate) and candidate > 0:
+                    immediate_fill = candidate
+            status = "COMPLETE" if order_type == "MARKET" or immediate_fill is not None else "PENDING"
+            complete_price = immediate_fill if immediate_fill is not None else (price if status == "COMPLETE" else None)
+            fill_price = complete_price
             fill_time = now if status == "COMPLETE" else None
             stored_source, stored_age = _fill_provenance(
                 price_source if status == "COMPLETE" else None,
@@ -732,7 +821,7 @@ class SandboxEngine:
                         exchange=exchange,
                         action=action,
                         quantity=quantity,
-                        price=price,
+                        price=complete_price if complete_price is not None else price,
                         product=product,
                         strategy=strategy,
                         traded_at=now,
@@ -754,19 +843,22 @@ class SandboxEngine:
             fill_price if fill_price is not None else price,
             status,
         )
+        reported = complete_price if complete_price is not None else price
         message = (
-            f"Practice order filled: {action} {quantity} {symbol} @ {price:.2f}"
+            f"Practice order filled: {action} {quantity} {symbol} @ {reported:.2f}"
             if status == "COMPLETE"
             else f"Practice {order_type} order is pending a matching live tick"
         )
         if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
             from flinttrade_data.practice_price import last_close_fill_label
 
-            message = last_close_fill_label(price, stored_age)
+            message = last_close_fill_label(reported, stored_age)
         result: dict[str, Any] = {"order_id": order_id, "status": status, "message": message}
+        if exit_results:
+            result["rule_results"] = exit_results
         if stored_source:
             result["price_source"] = stored_source
-            result["price"] = price
+            result["price"] = reported
         if stored_age is not None:
             result["price_age_s"] = stored_age
         return result
@@ -977,6 +1069,16 @@ class SandboxEngine:
                 new_type = "SL-M"
             if new_type not in {"LIMIT", "SL", "SL-M"}:
                 return {"order_id": "", "status": "REJECTED", "message": "Invalid modification"}
+            rule_refusal = _practice_rule_refusal(
+                symbol=str(symbol),
+                exchange=str(exchange),
+                action=str(action),
+                order_type=new_type,
+                price=new_price,
+                trigger_price=new_trigger,
+            )
+            if rule_refusal is not None:
+                return rule_refusal
             if not all(math.isfinite(value) for value in (new_price, new_trigger)):
                 return {"order_id": "", "status": "REJECTED", "message": "Prices must be finite"}
             if new_type in {"LIMIT", "SL"} and new_price <= 0:

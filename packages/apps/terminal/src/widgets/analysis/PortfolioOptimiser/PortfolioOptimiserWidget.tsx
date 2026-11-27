@@ -195,7 +195,7 @@ function PortfolioOptimiserWidget() {
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xxs font-medium text-amber-400"
             role="status"
             aria-label="Practice: weights optimised from the Practice basket history"
-            title="Practice — read-only weights from the current Practice data scope."
+            title="Practice. Read-only weights from the Practice basket history."
           >
             Practice
           </span>

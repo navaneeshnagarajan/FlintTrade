@@ -19,6 +19,8 @@ from packages.core.core.tests.test_practice_agent_adapter import _context, _orde
 from packages.core.core.tests.test_practice_agent_adapter import runtime as runtime
 
 _SYMBOL = "NIFTY30SEP2625000CE"
+_FUTURE = "NIFTY30SEP26FUT"
+_OPTION_MARKET_REFUSAL = "FlintTrade · Market orders aren't accepted on options. Use a limit price."
 
 
 def _receipt(context):
@@ -29,14 +31,14 @@ def _receipt(context):
     return context
 
 
-def _derivative(exchange="NFO", lot_size=65):
-    context = _context(_SYMBOL, exchange)
+def _derivative(exchange="NFO", lot_size=65, symbol=_SYMBOL):
+    context = _context(symbol, exchange)
     context.market_data["schema_version"] = 1
     provenance = {"selector": {"adapter_id": "dhan", "account_id": "Quotes"}, "requested_role": "quote"}
     context.market_data["quote"]["provenance"] = deepcopy(provenance)
     context.market_data["lot_size"] = {
-        "request": {"exchange": exchange, "symbols": [_SYMBOL]},
-        "value": {"symbol": _SYMBOL, "exchange": exchange, "lot_size": lot_size, "instrument_id": None},
+        "request": {"exchange": exchange, "symbols": [symbol]},
+        "value": {"symbol": symbol, "exchange": exchange, "lot_size": lot_size, "instrument_id": None},
         "provenance": provenance,
         "observed_at": datetime.now(UTC).isoformat(),
         "source_as_of": None,
@@ -44,8 +46,8 @@ def _derivative(exchange="NFO", lot_size=65):
     return _receipt(context)
 
 
-def _derivative_order(**kwargs):
-    return _order(symbol=_SYMBOL, exchange="NFO", quantity="65", admission_note="Exit below the prior range.", **kwargs)
+def _derivative_order(symbol=_SYMBOL, **kwargs):
+    return _order(symbol=symbol, exchange="NFO", quantity="65", admission_note="Exit below the prior range.", **kwargs)
 
 
 @pytest.mark.parametrize("quantity", [1, 64, 66, 99])
@@ -60,59 +62,39 @@ async def test_non_lot_quantity_refuses_before_laya(runtime, monkeypatch, quanti
 
 
 async def test_exact_lot_receipt_allows_canonical_sandbox_fill(runtime):
-    runtime.context = _derivative()
-    calls = []
-
-    def market_open(exchange, *, symbol):
-        calls.append((exchange, symbol))
-        return True
-
-    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=market_open)
-    result = await runtime.create().route_order(_derivative_order())
+    runtime.context = _derivative(symbol=_FUTURE)
+    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=lambda *_args, **_kwargs: True)
+    result = await runtime.create().route_order(_derivative_order(symbol=_FUTURE))
     assert result.passed, result.response
     assert runtime.sandbox.get_positions()[0]["net_qty"] == 65
     assert result.response["price_source"] == "ltp"
-    assert calls == [("NFO", _SYMBOL)]
 
 
-@pytest.mark.parametrize("session", ["missing", "closed", "unavailable"])
-async def test_option_receipt_cannot_bypass_canonical_market_session(runtime, session):
-    from flinttrade_data.practice_price import OPTION_PRICE_STALE
-
+@pytest.mark.parametrize("session", ["missing", "closed", "open"])
+async def test_option_market_order_is_refused_before_the_sandbox(runtime, session):
     runtime.context = _derivative()
     if session != "missing":
-
-        def market_open(*_args, **_kwargs):
-            if session == "unavailable":
-                raise RuntimeError("synthetic scheduler failure")
-            return False
-
-        runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=market_open)
+        runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(
+            session_active=lambda *_args, **_kwargs: session == "open"
+        )
     adapter = runtime.create()
     result = await adapter.route_order(_derivative_order())
     assert not result.passed
     assert result.response["http_status"] == 400
-    assert result.response["message"] == OPTION_PRICE_STALE
+    assert result.response["message"] == _OPTION_MARKET_REFUSAL
     assert not adapter.reconciliation_required
     assert runtime.sandbox.get_orders() == []
 
 
-async def test_exact_option_reduction_retains_canonical_closed_session_refusal(runtime):
-    from flinttrade_data.practice_price import OPTION_PRICE_STALE
-
+async def test_option_market_exit_is_refused_like_an_entry(runtime):
     runtime.context = _derivative()
     runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=lambda *_args, **_kwargs: True)
     adapter = runtime.create()
-    assert (await adapter.route_order(_derivative_order())).passed
-    runtime.app.config["TIME_SCHEDULER"] = SimpleNamespace(session_active=lambda *_args, **_kwargs: False)
-    runtime.app.config["SAFETY"].l5_kill.activate("synthetic closed-session reduction")
-
     result = await adapter.route_order(_derivative_order(action=Action.SELL))
     assert not result.passed
-    assert result.response["message"] == OPTION_PRICE_STALE
+    assert result.response["message"] == _OPTION_MARKET_REFUSAL
     assert not adapter.reconciliation_required
-    assert runtime.sandbox.get_positions()[0]["net_qty"] == 65
-    assert len(runtime.sandbox.get_trades()) == 1
+    assert runtime.sandbox.get_trades() == []
 
 
 @pytest.mark.parametrize(
