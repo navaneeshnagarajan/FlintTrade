@@ -584,7 +584,7 @@
           "level": "block",
           "source": "Exchange",
           "rule_id": "nse-options-operating-range",
-          "message": "Enter a price within ₹0.05–₹250."
+          "message": "Not placed. Price is outside the exchange band (₹0.05–₹250)."
         },
         {
           "level": "warn",

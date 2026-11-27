@@ -852,6 +852,8 @@ class OrderBudget:
 
 _BROKER_LABELS = {"dhan": "Dhan", "kotakneo": "Kotak Neo", "practice": "Practice"}
 
+_LEVEL_LABELS = {"block": "Blocks", "warn": "Warns", "info": "Info"}
+
 
 def _scope_label(row: OrderRule) -> str:
     parts = []
@@ -878,17 +880,17 @@ def _scope_label(row: OrderRule) -> str:
 
 
 def rules_markdown() -> str:
-    """Markdown table of every rule: id, scope, effective-from, description and message."""
+    """Markdown table of every rule: id, level, scope, effective-from, description and message."""
     lines = [
-        "| Rule id | Scope | Effective from | Description | Message |",
-        "|---|---|---|---|---|",
+        "| Rule id | Level | Scope | Effective from | Description | Message |",
+        "|---|---|---|---|---|---|",
     ]
     for row in load_rules():
         until = f" to {row.effective_to.isoformat()}" if row.effective_to else ""
         message = _fill(row.message, row.parameters).replace("|", "\\|")
         description = row.description.replace("|", "\\|")
         lines.append(
-            f"| `{row.id}` | {_scope_label(row)} | {row.effective_from.isoformat()}{until} | {description} | {message} |"
+            f"| `{row.id}` | {_LEVEL_LABELS[row.level]} | {_scope_label(row)} | {row.effective_from.isoformat()}{until} | {description} | {message} |"
         )
     return "\n".join(lines) + "\n"
 

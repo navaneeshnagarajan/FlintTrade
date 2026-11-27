@@ -99,10 +99,11 @@ def test_raw_rows_carry_no_reference_or_verification_fields() -> None:
 def test_markdown_generator_lists_id_scope_date_and_message() -> None:
     table = rules_markdown()
     lines = table.strip().splitlines()
-    assert lines[0] == "| Rule id | Scope | Effective from | Description | Message |"
+    assert lines[0] == "| Rule id | Level | Scope | Effective from | Description | Message |"
+    assert set(line.split("|")[2].strip() for line in lines[2:]) <= {"Blocks", "Warns", "Info"}
     assert len(lines) == len(load_rules()) + 2
     assert (
-        "| `bse-stop-limit-gap` | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price"
+        "| `bse-stop-limit-gap` | Blocks | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price"
         in table
     )
     # Parameters already known from the row are filled in; sources are not listed.
@@ -446,7 +447,7 @@ def test_exact_circuit_blocks_and_estimated_band_only_warns() -> None:
         ("block", "nse-options-operating-range"),
         ("warn", "nse-limit-price-protection-options"),
     ]
-    assert exact[0].message == "Enter a price within ₹0.05–₹250."
+    assert exact[0].message == "Not placed. Price is outside the exchange band (₹0.05–₹250)."
     estimated = evaluate_order(order, on=on, last_price="100")
     assert [r.level for r in estimated] == ["warn"]
 
@@ -489,7 +490,7 @@ def test_order_budget_windows_and_wait_message() -> None:
     # 250 orders inside one minute: the next one waits for the minute window.
     refused = budget.check_and_record("dhan", now=25.0, on=on)
     assert refused is not None
-    assert refused.message == "Wait 35 seconds. The limit is 250 orders per minute."
+    assert refused.message == "Not placed. Limit is 250 orders per minute. Retry in 35 seconds."
     assert refused.source == "Dhan"
     # Other brokers have no published budget rows.
     assert budget.check_and_record("upstox", now=25.0, on=on) is None
@@ -501,7 +502,7 @@ def test_order_budget_counts_cancels_without_refusing_them() -> None:
     for _ in range(10):
         budget.record("dhan", now=0.0, on=on)
     refused = budget.check_and_record("dhan", now=0.5, on=on)
-    assert refused is not None and refused.message == "Wait 1 second. The limit is 10 orders per second."
+    assert refused is not None and refused.message == "Not placed. Limit is 10 orders per second. Retry in 1 second."
 
 
 def test_intraday_square_off_follows_the_broker_profile() -> None:

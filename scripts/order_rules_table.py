@@ -4,8 +4,8 @@ Usage:
     python scripts/order_rules_table.py
     python scripts/order_rules_table.py --check docs/BROKER_AND_EXCHANGE_RULES.md
 
-The table lists each rule's id, scope, effective-from date and on-screen
-message, generated from flinttrade_core/data/order_rules.json. ``--check``
+The table lists each rule's id, level (Blocks, Warns, or Info), scope,
+effective-from date and on-screen message, generated from flinttrade_core/data/order_rules.json. ``--check``
 exits 1 when the page does not contain the current table.
 """
 

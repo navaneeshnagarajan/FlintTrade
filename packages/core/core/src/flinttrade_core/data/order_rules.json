@@ -114,14 +114,14 @@
         "min_gap_inr": 10,
         "flat_gap_up_to_trigger_inr": 50
       },
-      "message": "Stop-loss limit must be within \u20b9{max_gap} of trigger."
+      "message": "Stop-loss limit must be within ₹{max_gap} of trigger."
     },
     {
       "id": "nse-options-operating-range",
       "authority": "exchange",
       "level": "block",
       "source": "Exchange",
-      "description": "NSE options trade within a daily operating range. Prices outside it are rejected.",
+      "description": "NSE options trade within a daily operating range taken from the contract's exchange circuit limits. Prices outside it are rejected.",
       "check": "circuit_band",
       "scope": {
         "exchange": "NSE",
@@ -135,14 +135,14 @@
       "effective_from": "2026-04-28",
       "effective_to": null,
       "parameters": {},
-      "message": "Enter a price within \u20b9{low}\u2013\u20b9{high}."
+      "message": "Not placed. Price is outside the exchange band (₹{low}–₹{high})."
     },
     {
       "id": "bse-lpp-sensex-expiry-day",
       "authority": "exchange",
       "level": "warn",
       "source": "Exchange",
-      "description": "On SENSEX expiry day the price protection range for low-priced options narrows to \u20b910.",
+      "description": "On SENSEX expiry day the price protection range for low-priced options narrows to ₹10.",
       "check": "price_band",
       "scope": {
         "exchange": "BSE",
@@ -161,7 +161,7 @@
         "band_pct": 40,
         "min_band_inr": 10
       },
-      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
       "family": "option_price_band"
     },
     {
@@ -186,7 +186,7 @@
         "band_pct": 40,
         "min_band_inr": 20
       },
-      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
       "family": "option_price_band"
     },
     {
@@ -211,7 +211,7 @@
         "band_pct": 40,
         "min_band_inr": 20
       },
-      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
+      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
       "family": "option_price_band"
     },
     {
@@ -234,7 +234,7 @@
       "parameters": {
         "max_per_second": 10
       },
-      "message": "Wait a moment. The limit is {max_per_second} orders per second per exchange."
+      "message": "Not placed. Limit is {max_per_second} orders per second per exchange. Retry in 1 second."
     },
     {
       "id": "self-built-algo-undertaking",
@@ -300,7 +300,7 @@
         "per_hour": 1000,
         "per_day": 7000
       },
-      "message": "Wait {wait}. The limit is {limit} orders per {window}."
+      "message": "Not placed. Limit is {limit} orders per {window}. Retry in {wait}."
     },
     {
       "id": "dhan-modifications-per-order",
