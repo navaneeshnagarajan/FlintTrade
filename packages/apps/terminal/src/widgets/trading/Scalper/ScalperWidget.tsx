@@ -30,7 +30,6 @@ import {
   evaluateOrderRules,
   hasBlockingRule,
   optionLimitPrice,
-  ruleHeadline,
   stopLossLimitPrice,
   type RuleResult,
 } from "@/lib/orderRules";
@@ -453,7 +452,8 @@ function ScalperWidget(props: WidgetProps) {
 
       const ruleResults = presetRuleResults(sym, exch, action, ruleLastPrice, orderType === "LIMIT" ? price : undefined);
       if (hasBlockingRule(ruleResults)) {
-        showStatus(ruleHeadline(ruleResults.filter((item) => item.level === "block")), "error", 6000);
+        const blocked = ruleResults.find((item) => item.level === "block");
+        showStatus(blocked?.message ?? "", "error", 6000);
         return;
       }
 

@@ -1103,7 +1103,7 @@ describe("OrderPadWidget options premium prefill", () => {
 
     const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
     expect(priceInput.value).toBe("");
-    expect(screen.getByText(/enter the limit price manually/i)).toBeInTheDocument();
+    expect(screen.getByText(/premium unavailable\. Enter a limit price\./i)).toBeInTheDocument();
   });
 
   it("does not render the removed strike-offset selector", () => {
@@ -1576,13 +1576,13 @@ describe("OrderPadWidget F&O lot-size validation", () => {
       instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
     });
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
-      "Exchange · Not placed. Price is outside the exchange band (₹0.05–₹250).",
+      "FlintTrade · Position is closed. Order not sent.",
       400,
       {
         code: "order_rule_blocked",
-        message: "Exchange · Not placed. Price is outside the exchange band (₹0.05–₹250).",
+        message: "FlintTrade · Position is closed. Order not sent.",
         rule_results: [
-          { level: "block", source: "Exchange", rule_id: "nse-options-operating-range", message: "Not placed. Price is outside the exchange band (₹0.05–₹250)." },
+          { level: "block", source: "FlintTrade", rule_id: "exit-position-closed", message: "Position is closed. Order not sent." },
           { level: "warn", source: "Exchange", rule_id: "nse-limit-price-protection-options", message: "Price may be outside the exchange band (₹60–₹140)." },
         ],
       },
@@ -1592,7 +1592,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "300" } });
     await reviewAndConfirmPractice(/practice buy/i);
     const line = document.getElementById("orderpad-rule-line") as HTMLElement;
-    await waitFor(() => expect(line).toHaveTextContent("Not placed. Price is outside the exchange band (₹0.05–₹250)."));
+    await waitFor(() => expect(line).toHaveTextContent("Position is closed. Order not sent."));
     fireEvent.click(screen.getByTestId("order-rule-more"));
     expect(screen.getByTestId("order-rule-list")).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140).");
   });

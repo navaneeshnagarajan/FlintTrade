@@ -86,9 +86,11 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>((props, ref) =>
       assertNativeWriteTargetReadyOrThrow(activeMode);
       setBusy(true); setMessage(null);
       // Options are never sent at market: each leg goes as a limit at its premium.
-      if (legs.some(leg => optionLimitPrice(leg.premium) == null)) {
+      const missingPremium = legs.find(leg => optionLimitPrice(leg.premium) == null);
+      if (missingPremium) {
+        const missingSymbol = buildCompactOptionSymbol(props.symLabel, props.expiry, missingPremium.strike, missingPremium.optionType);
         setBusy(false);
-        setMessage({ text: 'A leg has no live premium. Place it from the order ticket with a price.', urgent: true });
+        setMessage({ text: `No live premium for ${missingSymbol ?? props.symLabel}. Enter a limit price.`, urgent: true });
         return;
       }
       const orders = legs.map(leg => {

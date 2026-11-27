@@ -352,6 +352,7 @@ describe("PositionsWidget", () => {
     try {
       render(<PositionsWidget {...defaultProps} />);
       const chips = await screen.findAllByTestId("stop-loss-not-filled");
+      expect(chips[0]).toHaveClass("inline-flex", "items-center", "gap-1", "-my-1");
       expect(chips[0]).toHaveTextContent("Stop-loss triggered · not filled");
       fireEvent.click(screen.getAllByRole("button", { name: "Exit now NIFTY24APR24000CE" })[0]);
       expect(opened[0]).toEqual({
@@ -529,7 +530,10 @@ describe("PositionsWidget", () => {
     render(<PositionsWidget {...defaultProps} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
-    expect(screen.getByText("Exit at ₹145.50 limit (within 3% of last)")).toBeInTheDocument();
+    expect(screen.getByText(/Exit at ₹145\.50 limit \(within 3% of last price\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" })).toHaveTextContent("Exit at ₹145.50");
+    expect(screen.getByText("Fills at ₹145.50 or better. May not fill in a fast move.")).toBeInTheDocument();
+    expect(screen.queryByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
 
     await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
@@ -584,8 +588,10 @@ describe("PositionsWidget", () => {
     }));
     render(<PositionsWidget {...defaultProps} />);
     fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
-    expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
-    expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last).")).toBeInTheDocument();
+    expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
+    expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last price).")).toBeInTheDocument();
+    expect(screen.getByText("Option exits fill at their limit or better and may not fill in a fast move.")).toBeInTheDocument();
+    expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
     await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));
@@ -1155,7 +1161,7 @@ describe("PositionsWidget", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
-      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
+      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
 
       const confirmButton = screen.getByRole("button", { name: "Confirm exit all positions" });
       expect(confirmButton).toBeDisabled();
@@ -1257,9 +1263,9 @@ describe("PositionsWidget", () => {
       expect(screen.getByText("Square off position?")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }),
-      ).toHaveTextContent("Exit at ₹145.50 limit (within 3% of last)");
+      ).toHaveTextContent("Exit at ₹145.50");
       expect(screen.getByText(/This closes your long NIFTY24APR24000CE/)).toHaveTextContent(
-        "Exit at ₹145.50 limit (within 3% of last)",
+        "Exit at ₹145.50 limit (within 3% of last price)",
       );
       expect(mockPlaceOrder).not.toHaveBeenCalled();
 
@@ -1299,7 +1305,7 @@ describe("PositionsWidget", () => {
       }));
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
-      expect(screen.getByText("Exit at ₹145.50 limit (within 3% of last)")).toBeInTheDocument();
+      expect(screen.getByText(/Exit at ₹145\.50 limit \(within 3% of last price\)/)).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
       await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
       expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({
@@ -1350,8 +1356,10 @@ describe("PositionsWidget", () => {
       const fetchMock = stubFetch();
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
-      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last).")).toBeInTheDocument();
-      expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last).")).toBeInTheDocument();
+      expect(screen.getByText("NIFTY24APR24000CE: Exit at ₹145.50 limit (within 3% of last price).")).toBeInTheDocument();
+      expect(screen.getByText("BANKNIFTY24APR51000PE: Exit at ₹226.60 limit (within 3% of last price).")).toBeInTheDocument();
+      expect(screen.getByText("Option exits fill at their limit or better and may not fill in a fast move.")).toBeInTheDocument();
+      expect(screen.getByText("This prioritises execution. The fill price may differ significantly, and execution isn't guaranteed.")).toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
       await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(3));

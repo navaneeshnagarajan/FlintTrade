@@ -119,7 +119,7 @@
     {
       "id": "nse-options-operating-range",
       "authority": "exchange",
-      "level": "block",
+      "level": "warn",
       "source": "Exchange",
       "description": "NSE options trade within a daily operating range taken from the contract's exchange circuit limits. Prices outside it are rejected.",
       "check": "circuit_band",
@@ -135,7 +135,7 @@
       "effective_from": "2026-04-28",
       "effective_to": null,
       "parameters": {},
-      "message": "Not placed. Price is outside the exchange band (₹{low}–₹{high})."
+      "message": "Price may be outside the exchange band (₹{low}–₹{high})."
     },
     {
       "id": "bse-lpp-sensex-expiry-day",
@@ -523,7 +523,7 @@
       "parameters": {
         "default_buffer_pct": 5
       },
-      "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+      "message": "Limit equals the trigger and may not fill. Set it past the trigger."
     },
     {
       "id": "exit-position-closed",

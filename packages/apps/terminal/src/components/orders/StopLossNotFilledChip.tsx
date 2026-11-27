@@ -20,7 +20,7 @@ interface StopLossNotFilledChipProps {
 
 export function StopLossNotFilledChip({ symbol, ticket, textClassName = "text-xxs" }: StopLossNotFilledChipProps) {
   return (
-    <span className="inline-flex items-center gap-1" data-testid="stop-loss-not-filled" role="status">
+    <span className="inline-flex items-center gap-1 -my-1" data-testid="stop-loss-not-filled" role="status">
       <span className={`${textClassName} font-medium text-loss`}>{STOP_LOSS_NOT_FILLED}</span>
       <Button
         type="button"

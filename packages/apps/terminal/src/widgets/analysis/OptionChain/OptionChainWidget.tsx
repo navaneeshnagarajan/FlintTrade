@@ -477,7 +477,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
             props: { symbol: orderSymbol, exchange: orderExchange, action: side, orderType: "LIMIT", qty: quantity, product: "MIS" },
           },
         }));
-        setOrderMsg({ text: `No live premium for ${orderSymbol}. Set a price on the order ticket.`, ok: false });
+        setOrderMsg({ text: `No live premium for ${orderSymbol}. Enter a limit price.`, ok: false });
         clearTimeout(orderMsgTimerRef.current);
         orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
         return;

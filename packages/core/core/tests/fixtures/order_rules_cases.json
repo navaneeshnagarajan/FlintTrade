@@ -581,10 +581,10 @@
       },
       "expected": [
         {
-          "level": "block",
+          "level": "warn",
           "source": "Exchange",
           "rule_id": "nse-options-operating-range",
-          "message": "Not placed. Price is outside the exchange band (₹0.05–₹250)."
+          "message": "Price may be outside the exchange band (₹0.05–₹250)."
         },
         {
           "level": "warn",
@@ -611,7 +611,7 @@
           "level": "warn",
           "source": "FlintTrade",
           "rule_id": "stop-loss-limit-at-trigger",
-          "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+          "message": "Limit equals the trigger and may not fill. Set it past the trigger."
         }
       ]
     },
@@ -634,7 +634,7 @@
           "level": "warn",
           "source": "FlintTrade",
           "rule_id": "stop-loss-limit-at-trigger",
-          "message": "Stop-loss limit equals the trigger and may not fill in a fast move. Set it past the trigger."
+          "message": "Limit equals the trigger and may not fill. Set it past the trigger."
         }
       ]
     },

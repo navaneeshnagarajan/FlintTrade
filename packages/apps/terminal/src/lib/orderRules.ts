@@ -545,8 +545,17 @@ export function optionExitLimitPrice(last: number, action: string): number | nul
   return cap === null ? null : optionLimitPrice(cap);
 }
 
-/** Confirm line for an option exit priced from last. */
+/** Rupee amount on the ticket and confirm lines. */
+export function formatRupees(price: number): string {
+  return price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Confirm-button label for an option exit priced from last. */
+export function optionExitButtonLine(price: number): string {
+  return `Exit at ₹${formatRupees(price)}`;
+}
+
+/** Confirm-dialog body line for an option exit priced from last. */
 export function optionExitConfirmLine(price: number, capPct: number = marketPriceCapPct()): string {
-  const rupees = price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `Exit at ₹${rupees} limit (within ${capPct}% of last)`;
+  return `${optionExitButtonLine(price)} limit (within ${capPct}% of last price)`;
 }

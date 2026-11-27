@@ -158,6 +158,8 @@ import { contractKeyOf, exitNowTicket, exitTicketQuote, openExitTicket, stopLoss
 import {
   instrumentKind,
   marketPriceCapPct,
+  formatRupees,
+  optionExitButtonLine,
   optionExitConfirmLine,
   optionExitLimitPrice,
 } from "@/lib/orderRules";
@@ -480,7 +482,7 @@ function SquareOffDialog({
   const confirmLine = exitPlan === "ticket"
     ? "Open Exit now"
     : exitPlan
-      ? exitPlan.confirm
+      ? optionExitButtonLine(exitPlan.price)
       : `${exitAction} ${exitQty} at market`;
 
   const handleSquareOff = useCallback(async () => {
@@ -544,7 +546,6 @@ function SquareOffDialog({
     }
   }, [
     position,
-    practice,
     product,
     exitAction,
     exitQty,
@@ -588,7 +589,13 @@ function SquareOffDialog({
                   )}
           </DialogDescription>
         </DialogHeader>
-        {exitPlan !== "ticket" && <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>}
+        {exitPlan && exitPlan !== "ticket" ? (
+          <p className="text-xs text-warning">
+            Fills at ₹{formatRupees(exitPlan.price)} or better. May not fill in a fast move.
+          </p>
+        ) : exitPlan === null ? (
+          <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
+        ) : null}
         {!product && (
           <p className="text-xs text-loss" role="alert">
             Cannot square off: unrecognised product
@@ -835,7 +842,14 @@ function ExitAllDialog({
             ))}
           </ul>
         )}
-        <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
+        {openRows.some((row) => !isOptionPosition(row)) && (
+          <p className="text-xs text-warning">{EXECUTION_FIRST_WARNING}</p>
+        )}
+        {optionLines.length > 0 && (
+          <p className="text-xs text-warning">
+            Option exits fill at their limit or better and may not fill in a fast move.
+          </p>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="exit-all-confirm">Type EXIT (in capitals) to confirm</Label>
           <Input

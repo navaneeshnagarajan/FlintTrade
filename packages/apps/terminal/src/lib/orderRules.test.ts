@@ -12,6 +12,7 @@ import {
   stopLossLimitPrice,
   marketPriceCap,
   marketPriceCapPct,
+  optionExitButtonLine,
   optionExitConfirmLine,
   optionExitLimitPrice,
   type OrderRuleInput,
@@ -149,7 +150,8 @@ describe("order rules mirror", () => {
     expect(optionExitLimitPrice(150, "SELL")).toBe(145.5);
     expect(optionExitLimitPrice(41.3, "SELL")).toBe(40.05);
     expect(optionExitLimitPrice(0, "SELL")).toBeNull();
-    expect(optionExitConfirmLine(145.5)).toBe("Exit at ₹145.50 limit (within 3% of last)");
+    expect(optionExitConfirmLine(145.5)).toBe("Exit at ₹145.50 limit (within 3% of last price)");
+    expect(optionExitButtonLine(145.5)).toBe("Exit at ₹145.50");
 
     for (const broker of ["practice", "dhan"] as const) {
       const results = evaluateOrderRules({

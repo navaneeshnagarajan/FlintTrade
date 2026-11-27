@@ -441,15 +441,16 @@ def test_equity_and_futures_limit_orders_pass() -> None:
     )
 
 
-def test_exact_circuit_blocks_and_estimated_band_only_warns() -> None:
+def test_exact_circuit_warns_and_does_not_refuse() -> None:
     order = {"symbol": NIFTY_CE, "exchange": "NFO", "pricetype": "LIMIT", "price": "300"}
     on = date(2026, 11, 22)
     exact = evaluate_order(order, on=on, last_price="100", circuit_low="0.05", circuit_high="250")
     assert [(r.level, r.rule_id) for r in exact] == [
-        ("block", "nse-options-operating-range"),
+        ("warn", "nse-options-operating-range"),
         ("warn", "nse-limit-price-protection-options"),
     ]
-    assert exact[0].message == "Not placed. Price is outside the exchange band (₹0.05–₹250)."
+    assert exact[0].message == "Price may be outside the exchange band (₹0.05–₹250)."
+    assert blocking(exact) == []
     estimated = evaluate_order(order, on=on, last_price="100")
     assert [r.level for r in estimated] == ["warn"]
 
