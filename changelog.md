@@ -8,6 +8,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **AI Centre tab renamed to Analysis.** The AI Centre tab and panel title that read Signals now read Analysis, and the panel no longer repeats a "Trading Signals" heading. The signal list and the signals API are unchanged.
+
 - **Mode, broker, and decision-model docs.** The Mode chip is taken from the JWT session claim (`explore`, `practice`, or `live`) and shows **Example**, **Practice**, **Live**, or **Unavailable**. An unconfirmed claim shows Unavailable, never Example. Connected (read) is a broker status, not a Mode and not a menu item. Choosing Practice as Guest opens Setup and does not call `POST /v1/auth/mode`. The Status row is labelled Laya. Its value can be Downloading. `GET /api/v1/operator/status` reports that check as the decision model, under `laya`. The market chip reads Transition only from 7 December 2026. The Practice sandbox is no longer described as paper trading. A broker session still cannot be started from the terminal. Bug reports and the security policy list Practice and Live as Modes. The product modes page is published at `/docs/product-modes`, and `/product-modes` opens that same page.
 
 - **Entry admission and the runner session are separate answers.** `accepts_new_entries` is true only when a new risk-increasing order would be admitted, and it matches order admission and market timings. `session_active` stays true through the runner's exit window, including MCX until 23:55 and NCDEX at the 17:00 gate. The practice strategy tick and the autonomous trader keep running through the exit window. A new risk-increasing order needs both the runner session and admission. An exit or square-off needs only the runner session, so cash auction entry does not open a new order after 15:30. Square-off times, NCDEX standard hours, and the timings payload are unchanged. The old scheduler open check remains as a deprecated alias of the runner session.
@@ -88,6 +90,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **Estimated charges on Practice fills.** Every Practice fill runs through the shared Indian statutory calculator and stores the breakdown and the day's charges total. Fills show `Charges ₹X (estimated)`. Positions and Performance show net P&L, with gross and charges in the tooltip. Home and Invest subtract those charges from net worth. The Practice source line is `Practice account, after estimated charges`.
 
 ### Fixed
+
+- **Expiry dates come from the contract list.** Expiry Countdown and the chart's OI overlay read expiry dates from the exchange's contract list, the same list the option chain uses, instead of assuming a Thursday expiry. NIFTY contracts show their Tuesday expiry and SENSEX contracts their Thursday expiry, and a holiday-shifted expiry shows the date the list carries. Expiry Countdown can switch between NIFTY and SENSEX and shows each date as, for example, "Expires Tue 24 Nov". When the list cannot be loaded it shows "Couldn't load the NIFTY expiry list." (or SENSEX) and no guessed date. The NIFTY and SENSEX toggle buttons are full-size touch targets. The OI overlay profiles the nearest listed contract and stays empty when no contract is listed.
 
 - **Practice stop wakes waiting observers.** Stopping a Practice run records the stop, releases its lock, and only then signals observers. An observer that already holds the publication signal and needs that lock is not left waiting for the quote-read allowance.
 

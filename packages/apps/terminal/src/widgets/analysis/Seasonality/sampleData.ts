@@ -2,7 +2,8 @@
  * Deterministic SAMPLE seasonality statistics for Explore mode.
  *
  * Rendered ONLY behind the widget's `!isConnected` guard, always beside the
- * amber "Sample data" badge — never as live output. The values are a
+ * Example data badge (Explore's Mode line carries the label there). Never
+ * as live output. The values are a
  * plausible NIFTY-like calendar pattern (Diwali-quarter strength, a soft
  * September, flat mid-month days) so the widget is explorable without a
  * broker, but every number here is fabricated.

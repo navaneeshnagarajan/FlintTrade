@@ -2,16 +2,16 @@
 
 > Next.js + Fumadocs public website, generated documentation, contribution pages, llms files, and read-only docs MCP.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
 **Language:** TypeScript + React 19
 
 ## Public surface
 
-- `src/app/page.tsx — public landing page`
+- `src/app/page.tsx`: public landing page
 - `/demo` and `/explore` permanently redirect (HTTP 308) to `/demo-app/welcome`
-- `scripts/generate-content.mjs — docs/package/release content generator`
-- `src/lib/mcp/capabilities.ts — docs MCP tools and prompts`
+- `scripts/generate-content.mjs`: docs/package/release content generator
+- `src/lib/mcp/capabilities.ts`: docs MCP tools and prompts
 
 (See the source for the full surface.)
 
@@ -36,7 +36,7 @@ pnpm --filter @flinttrade/site build
 ```
 
 Run one command per line. They work unchanged in bash, zsh and Windows
-PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+PowerShell. Do not join them with `&&`, which Windows PowerShell 5.1 does not
 support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
@@ -70,7 +70,7 @@ pnpm --filter @flinttrade/site start
 | --- | --- |
 | `FLINTTRADE_SITE_URL` | Public https origin for metadata, install one-liners, and the hosted MCP snippet. Also allow-lists that host on incoming requests. No trailing slash. |
 | `NEXT_PUBLIC_SITE_URL` | Accepted alias for the same origin if `FLINTTRADE_SITE_URL` is unset. |
-| `FLINTTRADE_SITE_ORIGINS` | Optional comma-separated extra https origins to trust on the request Host and on `/api/csp-report` `Origin` (for example apex and `www` during a cutover). Allow-list only — not the fallback origin. |
+| `FLINTTRADE_SITE_ORIGINS` | Optional comma-separated extra https origins to trust on the request Host and on `/api/csp-report` `Origin` (for example apex and `www` during a cutover). Allow-list only. It is not the fallback origin. |
 | `FLINTTRADE_SITE_SOURCE_SHA` | 40-character commit SHA for `/web-install.sh` and sibling redirect routes. Without it those routes answer 503. |
 | `FLINTTRADE_SITE_ORIGIN` | Optional extra CSP-report `Origin`. Still accepted when `FLINTTRADE_SITE_URL` is set. Reports are also accepted from loopback, the canonical host, `VERCEL_URL`, and every origin on the configured allow-list. |
 
@@ -94,13 +94,13 @@ endpoint.
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
+[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For the end-user features it provides, see
 [docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
 
 ## Contributing
 
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
+Contributions are welcome. Read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
 
 ## License
 
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0. Same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.

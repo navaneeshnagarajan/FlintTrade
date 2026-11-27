@@ -29,7 +29,7 @@ export function GlobalCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Globe size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="ft-text-overline text-text-muted">
             Global
           </p>
           <ExampleLabel testId="global-example-label" />
@@ -54,7 +54,7 @@ export function GlobalCard() {
                     {idx.value.toLocaleString("en-US")}
                   </span>
                   <span
-                    className="font-mono text-[10px] ml-1.5"
+                    className="font-mono text-xxs ml-1.5"
                     style={{ color: positive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
                   >
                     {positive ? "+" : ""}{idx.change.toFixed(2)}%

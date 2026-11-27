@@ -104,7 +104,7 @@ function StageDot({ stage, activeIndex, index, reduceMotion }: StageDotProps) {
       {/* Stage label */}
       <span
         className={cn(
-          "text-[10px] font-medium whitespace-nowrap transition-colors duration-200",
+          "text-xxs font-medium whitespace-nowrap transition-colors duration-200",
           isActive && "text-blue-400",
           isCompleted && "text-text-secondary",
           isFuture && "text-text-muted",
@@ -185,7 +185,7 @@ export function RoadmapBadge({ status, className }: RoadmapBadgeProps) {
       </div>
       <a
         href={PRODUCT_ROADMAP_HREF}
-        className="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+        className="text-xxs font-medium text-blue-400 underline-offset-2 hover:underline"
       >
         Product roadmap
       </a>

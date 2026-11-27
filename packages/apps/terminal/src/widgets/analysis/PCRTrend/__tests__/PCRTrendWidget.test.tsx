@@ -15,11 +15,13 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import PCRTrendWidget from "../PCRTrendWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  useModeStore.setState({ mode: "practice" });
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -51,6 +53,23 @@ describe("PCRTrendWidget", () => {
   it("labels the Sample data badge as a status disclosing no live source", () => {
     render(<PCRTrendWidget />);
     expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
+  });
+
+  it("labels the built-in series as example data in Practice, connected or not", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    const { unmount } = render(<PCRTrendWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
+    unmount();
+
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<PCRTrendWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
+  });
+
+  it("leaves the example-data label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<PCRTrendWidget />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 
   it("renders the PCR chart through the shared Flint threshold line primitive", () => {

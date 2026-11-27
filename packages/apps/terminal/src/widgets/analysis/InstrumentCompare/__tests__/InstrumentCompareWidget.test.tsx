@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -15,6 +15,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import InstrumentCompareWidget from "../InstrumentCompareWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -119,5 +120,33 @@ describe("InstrumentCompareWidget — no invented series", () => {
 
     expect(screen.getByRole("note").textContent).toContain("RELIANCE");
     expect(screen.getByRole("note").textContent).toMatch(/no live price source/i);
+  });
+});
+
+describe("InstrumentCompareWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels the built-in series in Practice, connected or not", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<InstrumentCompareWidget />);
+    expect(screen.getByTestId("example-data-badge")).toHaveTextContent("Example");
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    render(<InstrumentCompareWidget />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge when no built-in series is charted", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<InstrumentCompareWidget />);
+    for (const clear of screen.getAllByLabelText(/Clear instrument/i)) {
+      fireEvent.click(clear);
+    }
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

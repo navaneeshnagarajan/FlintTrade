@@ -34,7 +34,7 @@ const TABS: TabDef[] = [
 
 function BookFallback({ label }: { label: string }) {
   return (
-    <p role="status" className="text-text-disabled">
+    <p role="status" className="text-text-muted">
       Loading {label}…
     </p>
   );
@@ -98,8 +98,8 @@ export function TradeBottomPanel({ requestedTab }: { requestedTab?: TradeBookTab
             <OrdersWidget {...detachedPanelProps("desk-orders")} />
           </Suspense>
         )}
-        {activeTab === "alerts" && <p className="text-text-disabled">No active alerts</p>}
-        {activeTab === "log" && <p className="text-text-disabled">No recent trades</p>}
+        {activeTab === "alerts" && <p className="text-text-muted">No active alerts</p>}
+        {activeTab === "log" && <p className="text-text-muted">No recent trades</p>}
       </div>
     </div>
   );

@@ -47,7 +47,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
             />
           </svg>
           <span
-            class="text-[10px] text-text-muted font-medium"
+            class="text-xxs text-text-muted font-medium"
           >
             Locked
           </span>
@@ -67,12 +67,12 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
               class="flex items-center gap-1.5 mt-0.5"
             >
               <span
-                class="text-[10px] font-medium uppercase tracking-wider text-blue-400"
+                class="text-xxs font-medium uppercase tracking-wider text-blue-400"
               >
                 Preview
               </span>
               <span
-                class="text-[10px] text-text-muted font-mono"
+                class="text-xxs text-text-muted font-mono"
               >
                 · 
                 v0.3.0
@@ -124,7 +124,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
                     />
                   </div>
                   <span
-                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
+                    class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
                   >
                     Designed
                   </span>
@@ -154,7 +154,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
                     />
                   </div>
                   <span
-                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                    class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
                   >
                     In Dev
                   </span>
@@ -184,7 +184,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
                     />
                   </div>
                   <span
-                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                    class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
                   >
                     Testing
                   </span>
@@ -214,7 +214,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
                     />
                   </div>
                   <span
-                    class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                    class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
                   >
                     Live
                   </span>
@@ -222,7 +222,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
               </div>
             </div>
             <a
-              class="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+              class="text-xxs font-medium text-blue-400 underline-offset-2 hover:underline"
               href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/ROADMAP.md"
             >
               Product roadmap
@@ -283,7 +283,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
             </button>
           </div>
           <span
-            class="text-[10px] text-text-muted pl-0.5"
+            class="text-xxs text-text-muted pl-0.5"
           >
             via 
             Telegram
