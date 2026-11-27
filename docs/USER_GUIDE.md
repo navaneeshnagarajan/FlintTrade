@@ -807,7 +807,7 @@ show an order error as a toast. An automate clamp is a dispatcher error,
 not a desk confirm. Modify, cancel, smart, multi, and similar writes
 are not on this admission. `POST /api/v1/orders/forever`
 does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.`
-No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported`. A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
+No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported` on that route. A Practice `POST /api/v1/orders/place` that carries a `stop_loss_price` or `target_price` above 0 is HTTP 400 `order_rule_blocked` with `Practice · Stop-loss and target aren't supported in Practice.` A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
 with the tooltip `GTT orders aren't supported right now.`
 
 **Feed freshness.** Feed provenance lives on the ticker chip, not in the
@@ -854,7 +854,8 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 The Order Pad checks each order against
 [Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md) before it is
 sent. Quick Trade, the Scalper, the server order routes and Practice check the
-same table.
+same table. Each row there has a Level: **Blocks**, **Warns** or **Info**.
+Info is shown and never blocks.
 
 **Rule line.** Below the Quantity and Price row, the quantity line comes
 first. It shows a quantity refusal in red, or the unverified freeze warning in
@@ -915,7 +916,9 @@ refused with HTTP 400 `The last price is outside the limit.` A new Practice
 **Stop-loss and target.** A Live bracket goes out as separate orders through
 `POST /api/v1/orders/bracket`: the entry plus exactly one stop-loss or one
 target. A stop-loss and a target together are HTTP 422 `oco_unsupported`.
-Practice is HTTP 403 `practice_unsupported`. With a stop-loss or target set,
+Practice is HTTP 403 `practice_unsupported` on that route. A Practice
+`POST /api/v1/orders/place` with a stop-loss or target price is HTTP 400
+`order_rule_blocked`. With a stop-loss or target set,
 the Scalper's rule line reads
 `Stop-loss and target are placed as separate orders with this broker.` in Live
 and `Stop-loss and target aren't supported in Practice.` in Practice.
