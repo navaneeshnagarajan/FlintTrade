@@ -291,7 +291,12 @@ A Live session downgrades with that route. **Connected (read)** is not in the Mo
 A broker session cannot be started from the terminal today.
 Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409.
 Choose **Live** only when the item is enabled. Opening the menu
-does not open the Live dialog. An eligible Live choice opens **Switch to Live
+does not open the Live dialog. The first eligible Live choice opens
+**Turn on Live** with the line `Orders will be sent from this computer through your broker account. Losses from your own strategy or automation aren't covered by the exchange grievance process.`
+**Turn on Live** stays disabled until **I understand** is ticked. **Cancel**
+leaves the current Mode. The dialog is asked once and comes back only when
+that line changes. Practice never shows it. After **Turn on Live**, or straight
+away once it has been accepted, an eligible Live choice opens **Switch to Live
 Trading?** with the line `You are about to switch to Live mode. All orders will be executed with real money through your broker.` Enter
 the 6-digit PIN (`Enter your PIN to confirm`) and choose **Switch to Live**.
 Cancel leaves the current Mode.
@@ -844,6 +849,77 @@ An empty tape omits the badge strip. The marquee runs continuously
 when motion is allowed. With `prefers-reduced-motion: reduce`, the
 tape freezes and shows **Reduced motion**. The feed chip may read **Example**; it must not hide the venue.
 
+### Order ticket rules
+
+The Order Pad checks each order against
+[Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md) before it is
+sent. Quick Trade, the Scalper, the server order routes and Practice check the
+same table.
+
+**Rule line.** Below the Quantity and Price row, the quantity line comes
+first. It shows a quantity refusal in red, or the unverified freeze warning in
+amber. The rule line follows it. Both keep two lines reserved, so the ticket
+does not shift. The rule line shows the most serious message, for example
+`Market orders aren't accepted on options. Use a limit price.` Hovering the
+line shows its source, for example
+`FlintTrade · Market orders aren't accepted on options. Use a limit price.` A
+block result is red and keeps the order button disabled. A warning is amber
+and keeps it enabled. **+N** opens the rest of the list, each row prefixed by
+its source. The server refuses a blocked order with HTTP 400
+`order_rule_blocked`, or HTTP 429 when a broker order-rate window is full. See
+[API error responses](API.md#8-error-responses).
+
+**Options.** An option order is a limit or stop-limit order. On the Order Pad,
+choosing an option contract moves **MARKET** to **LIMIT** and **SL-M** to
+**SL**, once per contract. Choosing **MARKET** again shows
+`Market orders aren't accepted on options. Use a limit price.` Choosing
+**SL-M** shows `Stop-market orders aren't accepted on options. Use stop-limit.`
+Both keep the order button disabled, and market-fill notes are not shown next
+to them. Quick Trade switches to **LIMIT** for an option and shows the same
+rule line. The Scalper always sends a limit: a blank **Limit ₹** uses the
+contract's live premium, and with no live premium it shows
+`No live premium for SYMBOL. Enter a limit price.` The server and Practice
+refuse an option market or stop-market order with `order_rule_blocked`. On
+BSE, a stop-limit whose limit is too far from its trigger shows
+`Stop-loss limit must be within ₹X of trigger.`
+
+**Stop-loss triggered · not filled.** Positions and Orders show
+**Stop-loss triggered · not filled** when a stop-limit order has triggered and
+not filled. **Exit now** opens an Order Pad ticket on the opposite side for
+the full open quantity, as a **LIMIT** at the bid to sell or the ask to buy,
+else at the last price. Nothing is sent until you place it. The ticket only
+reduces the position. The position is read again just before sending:
+
+- A larger quantity is cut to the open size and the line reads
+  `Quantity reduced to N, the open position.` Place again to send it.
+- A flat position is not sent: `Position is closed. Order not sent.`
+- An unreadable position is not sent: `Open position could not be read. Order not sent.`
+
+**Option square-off and Exit all.** **Square off** on an option position sends
+a **LIMIT** at the cap price: 3% below the last price for a sell, 3% above it
+for a buy, on the 5-paise tick. The confirm line reads
+`Exit at ₹{price} limit (within 3% of last)`. When any option position is
+open, **Exit all** sends each exit on its own the same way and lists those
+lines. An option position with no last price is not sent. Its confirm line
+reads `Open Exit now`, Exit all lists
+`{symbol}: no last price. Exit now opens a limit ticket.`, and the Exit now
+ticket opens instead.
+
+In Practice, an exit that only reduces a position fills at once at the last
+price when that price is within its limit. It does not need tick capture.
+When tick capture is off and the last price is outside the limit, the exit is
+refused with HTTP 400 `The last price is outside the limit.` A new Practice
+**LIMIT** or stop order still needs tick capture, and without it is HTTP 503
+`Practice LIMIT and stop orders require tick capture to be running`.
+
+**Stop-loss and target.** A Live bracket goes out as separate orders through
+`POST /api/v1/orders/bracket`: the entry plus exactly one stop-loss or one
+target. A stop-loss and a target together are HTTP 422 `oco_unsupported`.
+Practice is HTTP 403 `practice_unsupported`. With a stop-loss or target set,
+the Scalper's rule line reads
+`Stop-loss and target are placed as separate orders with this broker.` in Live
+and `Stop-loss and target aren't supported in Practice.` in Practice.
+
 ### Walkthrough
 
 1. Open Terminal (http://127.0.0.1:5100/terminal on the installed web app;
@@ -863,9 +939,12 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    auto-fills Quantity from that instrument's current lot size. Do
    not type a remembered number. Learn Glossary follows the loaded instrument master
    rather than fixed example figures. A quantity that is not a whole number of lots is refused once, inline: `Quantity must be a multiple of the lot size (N).` `N` is that contract's lot. If the lot is not verified, the pad shows one line: `Not placed. The lot size for <name> isn't verified.` `<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. Quick Trade shows `The lot size for <name> isn't verified.` and keeps Buy and Sell disabled. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order above the cap, with HTTP 400 and code `quantity_admission`. A broker `freeze_qty` refuses the same way and is used ahead of that table. The line is `Max {cap} per order for {symbol}. Place smaller orders.` `{cap}` is the limit rounded down to a whole number of lots when the lot size is known, and the limit itself when it is not. `{symbol}` is the underlying, or `this contract` when the symbol is empty. The order is not split. SENSEX options 1,000, SENSEX futures 500, and BANKEX options 900 are unverified and do not refuse when the broker sends no `freeze_qty`. Above one of them, the pad shows one line under Quantity, `Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.`, and the order continues. `{symbol}` is that index. `{freeze}` is that value. Choose **MARKET**. Side = **BUY**.
+   The rule line below the quantity line reads `Market orders fill within 3% of the last price.` and Place stays enabled.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
-   The sandbox order appears in the **Positions** widget immediately; the
-   **Orders** widget shows it as filled (simulated). **Example Buy** on
+   A Practice market order fills at once at the last price, so the
+   sandbox order appears in the **Positions** widget immediately; the
+   **Orders** widget shows it as filled (simulated). A **LIMIT** order
+   waits until a live tick reaches its price. **Example Buy** on
    example data opens the example review (`Example only. Nothing is sent to a broker and no order is placed.`).
    **Continue** records a sample fill on this pad: `Example order placed`,
    with an id starting `SAMPLE-`. That fill stays on the pad and does not
