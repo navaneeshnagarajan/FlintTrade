@@ -59,14 +59,14 @@ it.each(Object.entries(retirement.scenarios))("allows canonical retirement of a 
   const region = await screen.findByRole("region", { name: "Live run bounded-one" });
   expect(within(region).getByText("Trading allowed: No")).toBeVisible();
   expect(within(region).getByText("Ready: No")).toBeVisible();
-  expect(within(region).getByText(/Grant grant-one: not marked revoked/)).toBeVisible();
+  expect(within(region).getByText(/Grant grant-one: Not revoked/)).toBeVisible();
   const stop = within(region).getByRole("button", { name: "Stop entries" });
   expect(stop).toBeEnabled();
   for (const name of [/Configure run policy/, /Protection policy/, /Close run positions/, /Start exact run/, /Rearm exact run/]) {
     expect(within(region).queryByRole("button", { name })).not.toBeInTheDocument();
   }
   fireEvent.click(stop);
-  await waitFor(() => expect(within(region).getByText(/Grant grant-one: revoked/)).toBeVisible());
+  await waitFor(() => expect(within(region).getByText(/Grant grant-one: Revoked/)).toBeVisible());
   expect(stop).toBeDisabled();
   expect(within(region).getByText("Trading allowed: No")).toBeVisible();
   expect(within(region).getByText("Ready: No")).toBeVisible();
@@ -129,11 +129,11 @@ it("inspects native receipts separately from Paper and retires effective authori
   const native = await screen.findByRole("region", { name: "Live run bounded-one" });
   expect(within(native).getByText("Trading allowed: Yes")).toBeVisible();
   expect(within(native).getByText(/Requested: place/)).toBeVisible();
-  expect(within(native).getByText(/Grant expiry/)).toBeVisible();
+  expect(within(native).getByText(/Expires .+\. Session expires/)).toBeVisible();
   expect(within(native).getByText(/Qualification expiry/)).toBeVisible();
-  expect(within(native).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
-  expect(within(native).getByRole("list", { name: "Command receipts" })).toHaveTextContent("partial");
-  expect(within(native).getByRole("list", { name: "Command receipts" })).toHaveTextContent("observed filled quantity: 1");
+  expect(within(native).getByRole("list", { name: "Pending orders" })).toHaveTextContent("command-one");
+  expect(within(native).getByRole("list", { name: "Requests sent" })).toHaveTextContent("partial");
+  expect(within(native).getByRole("list", { name: "Requests sent" })).toHaveTextContent("Filled: 1");
   expect(within(native).queryByText(/Entries retired/)).not.toBeInTheDocument();
   for (const name of [/Configure run policy/, /Protection policy/, /Close run positions/, /Start exact run/, /Rearm exact run/]) {
     expect(within(native).queryByRole("button", { name })).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ it("inspects native receipts separately from Paper and retires effective authori
   fireEvent.click(within(native).getByRole("button", { name: "Stop entries" }));
   await waitFor(() => expect(within(native).getByText("Trading allowed: No")).toBeVisible());
   expect(within(native).getByRole("button", { name: "Stop entries" })).toBeDisabled();
-  expect(within(native).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
+  expect(within(native).getByRole("list", { name: "Pending orders" })).toHaveTextContent("command-one");
   expect(within(native).getByText(/Stop entries leaves open orders and positions in place/)).toBeVisible();
   expect(calls.filter(c => c.startsWith("POST"))).toEqual(["POST /api/v1/execution-sessions/bounded-one/stop"]);
   expect(calls.filter(c => c === "GET /api/v1/execution-sessions/bounded-one")).toHaveLength(1);
@@ -179,7 +179,7 @@ it("refuses the whole cancellation census rather than displaying fills against a
   expect(await screen.findByRole("alert")).toHaveTextContent("Runs unavailable");
   expect(screen.queryByRole("region", { name: "Live run bounded-one" })).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Practice run paper-synthetic" })).not.toBeInTheDocument();
-  expect(screen.queryByText(/observed filled quantity: 100/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Filled: 100/)).not.toBeInTheDocument();
   expect(screen.queryByText(/No registered runs/)).not.toBeInTheDocument();
   expect(calls).toEqual(["GET /api/v1/execution-sessions"]);
   mounted.unmount(); client.clear(); expect(failures).toEqual([]);
@@ -220,9 +220,9 @@ it("keeps known fills and obligations visible beside a synthetic late ACK observ
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={client}><ForwardTestSection /></QueryClientProvider>);
   const region = await screen.findByRole("region", { name: "Live run bounded-one" });
-  expect(within(region).getByRole("list", { name: "Command receipts" })).toHaveTextContent("acknowledged");
-  expect(within(region).getByRole("list", { name: "Command receipts" })).toHaveTextContent("observed filled quantity: 1");
-  expect(within(region).getByRole("list", { name: "Unresolved obligations" })).toHaveTextContent("command-one");
+  expect(within(region).getByRole("list", { name: "Requests sent" })).toHaveTextContent("acknowledged");
+  expect(within(region).getByRole("list", { name: "Requests sent" })).toHaveTextContent("Filled: 1");
+  expect(within(region).getByRole("list", { name: "Pending orders" })).toHaveTextContent("command-one");
   expect(within(region).getByText("Ready: No")).toBeVisible();
   expect(within(region).getByText(/Stop entries leaves open orders and positions in place/)).toBeVisible();
   expect(calls).toEqual(["GET /api/v1/execution-sessions"]); expect(failures).toEqual([]);

@@ -39,18 +39,21 @@ export function buildAppPreset(app: AppId, preset: string): IJsonModel {
     if (preset === "volatility-trading") return workspaceJson(rowJson(100, [rowJson(63, [group(50, ["chart", "straddle"]), rowJson(50, [group(52, ["oichart"]), group(48, ["positions", "orders"])])]), group(37, ["optionchain", "watchlist"])]));
     return workspaceJson(rowJson(100, [group(48, ["chart"]), rowJson(52, [group(50, ["straddle"]), group(50, ["oichart"])])]));
   }
-  // Fresh desks follow the captured watchlist-left, chart-right composition.
-  // Persisted Current/named compositions are read before this fallback; no
-  // migration, reset or account/channel mutation. Chart focus is an opt-in mirror.
+  // Fresh desks keep watchlist on the left and the chart to its right, with
+  // positions and orders visible in their own tabset. Persisted Current/named
+  // compositions are read before this fallback; no migration, reset or
+  // account/channel mutation. Chart focus is an opt-in mirror.
   if (app === "terminal" && ["default", "chart-focus", "watchlist-driven"].includes(preset)) {
     const tab = (id: string) => tabJson(id, APP_WIDGETS.find(widget => widget.id === id)!.name, {
       id: `${app}:${id}`, params: { channel: "none" },
     });
-    const chart = { ...tabsetJson(72, [tab("chart"), tab("positions"), tab("orders")]), active: true, selected: 0 };
-    const watchlist = tabsetJson(28, preset === "watchlist-driven"
-      ? [tab("watchlist")]
-      : [tab("watchlist"), tab("overview:WelcomeCard")]);
-    return workspaceJson(rowJson(100, preset === "chart-focus" ? [chart, watchlist] : [watchlist, chart]));
+    const books = tabsetJson(20, [tab("positions"), tab("orders")]);
+    const watchlist = tabsetJson(28, [tab("watchlist")]);
+    const overview = tabsetJson(14, [tab("overview:WelcomeCard")]);
+    const chart = (weight: number) => ({ ...tabsetJson(weight, [tab("chart")]), active: true, selected: 0 });
+    if (preset === "chart-focus") return workspaceJson(rowJson(100, [chart(52), books, watchlist]));
+    if (preset === "watchlist-driven") return workspaceJson(rowJson(100, [watchlist, chart(52), books]));
+    return workspaceJson(rowJson(100, [watchlist, overview, chart(38), books]));
   }
   if (app === "terminal" && ["market-watch", "options-scalper", "multi-chart"].includes(preset)) {
     const built = buildPresetJsonById(preset);

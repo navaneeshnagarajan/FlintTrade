@@ -76,6 +76,6 @@ export function NativeEntryControls({ observation, enabled, busy, uncertain, per
         || view.producer_state !== "not_started" || view.grant?.state !== "active" || view.grant.expires_at_ms <= Date.now()}
         onClick={() => void perform("Starting strategy", client => client.start(observation.session))}>Start strategy</Button>
     </div>
-    <p className="text-xs text-text-secondary">Stop blocks new entries. Open orders and positions stay in place. Chat cannot grant or start trading.</p>
+    <p className="text-xs text-text-secondary">Stop blocks new entries. Open orders and positions stay in place.</p>
   </section>;
 }

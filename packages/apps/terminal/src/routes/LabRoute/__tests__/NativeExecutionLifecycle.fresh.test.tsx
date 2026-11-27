@@ -79,7 +79,7 @@ it("replays the post-ingress-repair producer capture through mounted finite cont
   await studio.findByText("started / running");
   fireEvent.click(studio.getByRole("button", { name: "Stop entries" }));
   await studio.findByText("retired / stopped");
-  expect(studio.getByText("Stop blocks new entries. Open orders and positions stay in place.")).toBeVisible();
+  for (const line of studio.getAllByText("Stop blocks new entries. Open orders and positions stay in place.")) expect(line).toBeVisible();
   expect(queue).toEqual([]);
   expect(failures).toEqual([]);
 });

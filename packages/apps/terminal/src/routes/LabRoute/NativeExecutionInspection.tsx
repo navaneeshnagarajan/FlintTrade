@@ -29,7 +29,7 @@ export function NativeExecutionInspection({ native }: { native: NativeProjection
   const { binding, grant, qualification } = native;
   return <div className="space-y-3 text-sm min-w-0">
     <p className="break-all">Account: {binding.broker} / {binding.account_id} · Run {binding.run_id} · {modeLabel(binding.environment)}</p>
-    <p className="break-all">Operator: {native.operator} · Strategy: {binding.actor}</p>
+    <p className="break-all">Operator: {native.operator} · Source: {binding.actor}</p>
     <p className="break-all">Version: {native.revision}</p>
     <dl className="text-xs break-all">
       <dt>Strategy and settings versions</dt><dd>{binding.strategy_revision} / {binding.config_revision}</dd>
@@ -39,27 +39,27 @@ export function NativeExecutionInspection({ native }: { native: NativeProjection
     <p>Trading allowed: {native.authorised ? "Yes" : "No"}</p>
     <p>Ready: {native.native_ready ? "Yes" : "No"}</p>
     <p>Qualified: {native.qualified ? "Yes" : "No"}</p>
-    <p>Qualification expiry: {qualification ? expiry(qualification.expires_at) : "no current qualification recorded"}.</p>
-    {qualification ? <p className="text-xs break-all">Evidence: {qualification.evidence_id} · {qualification.provenance} · runtime {qualification.runtime_fingerprint}</p> : null}
+    <p>Qualification expiry: {qualification ? expiry(qualification.expires_at) : "None"}.</p>
+    {qualification ? <p className="text-xs break-all">Evidence: {qualification.evidence_id} · {qualification.provenance}</p> : null}
     {grant ? <>
-      <p>Grant {grant.grant_id}: {grant.revoked ? "revoked" : "not marked revoked"}. Grant expiry: {expiry(grant.expires_at)}. Operator session expiry: {expiry(grant.session_expires_at)}.</p>
+      <p>Grant {grant.grant_id}: {grant.revoked ? "Revoked" : "Not revoked"}. Expires {expiry(grant.expires_at)}. Session expires {expiry(grant.session_expires_at)}.</p>
       <p>Qualified until {expiry(grant.qualification.expires_at)}</p>
       <p>Limits: {grant.max_order_quantity} per order · {grant.max_total_quantity} total · ₹{grant.max_total_notional} notional · ₹{grant.max_loss} max loss · {grant.max_commands} orders</p>
       <p>Instruments: {grant.instruments.map(i => `${i.exchange}:${i.symbol}`).join(", ")}</p>
     </> : null}
     <p>Protection: {native.protection}. Stop entries leaves open orders and positions in place.</p>
-    <h5 className="font-medium">Unresolved obligations</h5>
-    {native.obligations.length ? <ul aria-label="Unresolved obligations" className="list-disc pl-5 break-all">
+    <h5 className="font-medium">Pending orders</h5>
+    {native.obligations.length ? <ul aria-label="Pending orders" className="list-disc pl-5 break-all">
       {native.obligations.map(id => <li key={id}>{id}</li>)}
     </ul> : <p>No pending orders for this run.</p>}
-    <h5 className="font-medium">Command receipts</h5>
-    {native.commands.length ? <ul aria-label="Command receipts" className="space-y-2 break-all">
+    <h5 className="font-medium">Requests sent</h5>
+    {native.commands.length ? <ul aria-label="Requests sent" className="space-y-2 break-all">
       {native.commands.map(command => <li key={command.command_id}>
-        <p>{command.command_id} · {"operation" in command ? "cancel request" : "placement request"} · {command.state} · {command.cause}</p>
-        <p>Broker order: {command.broker_order_id ?? "not confirmed"} · observed filled quantity: {command.filled_quantity ?? "not observed"}.</p>
+        <p>{command.command_id} · {"operation" in command ? "Cancel" : "Place"} · {command.state} · {command.cause}</p>
+        <p>Broker order: {command.broker_order_id ?? "Unconfirmed"} · Filled: {command.filled_quantity ?? "Unknown"}.</p>
         <p className="text-xs">History: {command.events.join(", ")}. Created {expiry(command.created_at)}{command.updated_at ? ` · Updated ${expiry(command.updated_at)}` : ""}</p>
       </li>)}
-    </ul> : <p>No command receipts reported.</p>}
+    </ul> : <p>No requests sent.</p>}
   </div>;
 }
 
@@ -171,11 +171,10 @@ function NativeStudioScope({ sessions, census }: NativeStudioProps) {
     <header className="space-y-1">
       <h3 className="text-base font-semibold">Native Studio</h3>
       <p className="text-sm text-text-secondary">Steps: Configure, Inspect, Qualify, Accept, Grant, Start.</p>
-      <p className="text-xs text-text-secondary">Saving settings does not start trading or switch to Live.</p>
       <p className="text-xs break-all">Selected account: {account?.source === "native"
-        ? `${account.broker} / ${account.account_id}` : "select a native account in the account selector"}.</p>
+        ? `${account.broker} / ${account.account_id}.` : "None. Select a broker account."}</p>
     </header>
-    {!online ? <p role="status">Offline. Data shown may be out of date. Reconnect, then read status.</p>
+    {!online ? <p role="status">Offline. Reconnect, then read status.</p>
       : !enabled ? <p>Read-only. Sign in and select a broker account to edit.</p>
       : !canConfigure ? <p>Settings are read-only for this account.</p> : null}
     <form onSubmit={event => {
@@ -237,7 +236,7 @@ function NativeStudioScope({ sessions, census }: NativeStudioProps) {
         onClick={() => void perform("Reading status", client => client.read(runId))}>Read status</Button>
     </section>
     {busy ? <p role="status" className="text-sm">{busy} for {runId}.</p> : null}
-    {error ? <p role="alert" className="break-words text-sm text-text-primary">{error} Data shown may be out of date.</p> : null}
+    {error ? <p role="alert" className="break-words text-sm text-text-primary">{error}</p> : null}
     {view && observation ? <>
       <NativeV2Evidence view={view} generation={observation.session.generation} />
       <NativeEntryControls key={view.scope.run_id} observation={observation} enabled={canConfigure}
@@ -281,8 +280,8 @@ function NativeV2Evidence({ view, generation }: { view: NativeV2View; generation
   const { scope, report, duty, config } = view;
   return <section aria-label="Run details" className="min-w-0 space-y-2 text-sm">
     <h4 className="font-medium break-all">{scope.run_id} · {view.schema_version === "2" ? "Cash" : "Index options"}</h4>
-    <p className="text-xs break-all">{scope.broker} / {scope.account_id} · generation {generation} · binding {scope.binding_revision}</p>
-    <p className="text-xs break-all">Authenticated operator: {scope.operator} · bounded producer: {scope.actor}</p>
+    <p className="text-xs break-all">{scope.broker} / {scope.account_id} · Generation {generation}</p>
+    <p className="text-xs break-all">Operator: {scope.operator} · Source: {scope.actor}</p>
     <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 break-words text-xs">
       <dt>Requested</dt><dd>{view.requested_authority}</dd>
       <dt>Trading allowed</dt><dd>{view.effective_authority}</dd>
@@ -292,11 +291,11 @@ function NativeV2Evidence({ view, generation }: { view: NativeV2View; generation
       <dt>Capital, exposure and loss limits</dt><dd>{config.risk.capital_cap.amount} / {config.risk.exposure_cap.amount}
         {" / "}{config.risk.loss_action_threshold.amount} {config.risk.capital_cap.currency}</dd>
     </dl>
-    <p>Qualification: {report?.status ?? "not evaluated"}</p>
+    <p>Qualification: {report?.status ?? "Not checked"}</p>
     {report ? <>
       <p className="text-xs break-all">Report {report.report_ref.id} · {report.report_ref.revision}</p>
       <p className="text-xs">Report expires {expiry(report.expires_at_ms / 1000)}</p>
-      <ul aria-label="Qualification dimensions" className="space-y-1 text-xs break-words">
+      <ul aria-label="Qualification checks" className="space-y-1 text-xs break-words">
         {Object.entries(report.dimensions).map(([name, fact]) => <li key={name}>
           {name.replaceAll("_", " ")}: {fact.status} · {fact.provenance}
           {fact.evidence_ref ? <span className="break-all"> · {fact.evidence_ref.id} / {fact.evidence_ref.revision}</span> : " · no evidence"}
@@ -306,11 +305,11 @@ function NativeV2Evidence({ view, generation }: { view: NativeV2View; generation
     </> : null}
     <h5 className="font-medium">Fills and open exposure</h5>
     {duty ? <>
-      <p>Entry fills: {duty.cumulative_entry_fill} · Exit fills: {duty.cumulative_exit_fill} · Pending: {duty.possible_entry_quantity ?? "unknown"}</p>
+      <p>Entry fills: {duty.cumulative_entry_fill} · Exit fills: {duty.cumulative_exit_fill} · Pending: {duty.possible_entry_quantity ?? "Unknown"}</p>
       <p>Unconfirmed orders: {duty.unknown_possible_writes ? "Yes" : "No"}</p>
       <ul className="text-xs break-all">{duty.obligations.map(row => <li key={row.obligation_id}>
-        {row.obligation_id}: {row.kind} · possible quantity {row.possible_quantity ?? "unknown"}</li>)}</ul>
+        {row.obligation_id}: {row.kind} · Pending {row.possible_quantity ?? "Unknown"}</li>)}</ul>
     </> : <p>Fill and exposure data unavailable. Read status again.</p>}
-    <p className="text-xs text-text-secondary">Grant: {view.grant?.state ?? "none recorded"}. Mode: {modeLabel(scope.environment)}.</p>
+    <p className="text-xs text-text-secondary">Grant: {view.grant?.state ?? "None"}. Mode: {modeLabel(scope.environment)}.</p>
   </section>;
 }

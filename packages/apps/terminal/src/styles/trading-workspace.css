@@ -168,14 +168,14 @@ html[data-mode="dark"] .ft-workspace.ft-workspace {
   flex: 1 1 28rem;
   border: 0;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ft-workspace .ft-app-scope-row [data-testid="instrument-links"] { margin-left: auto; border: 0; }
 .ft-workspace .ft-app-scope-row [data-testid="instrument-links"][open] { flex-basis: 100%; }
 .ft-workspace .ft-app-panels { margin: 5px 6px 6px; }
 .ft-workspace.ft-workspace .flexlayout__layout.flexlayout__layout {
   --flexlayout-font-family: var(--font-sans);
-  --flexlayout-font-size: 12px;
+  --flexlayout-font-size: 13px;
   --flexlayout-color-focus: var(--color-border-strong);
   --flexlayout-color-splitter: var(--color-surface-elevated);
   --flexlayout-color-tabset-background-selected: var(--color-surface-base);

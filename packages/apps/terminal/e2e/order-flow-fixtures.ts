@@ -374,14 +374,25 @@ export async function captureEvidence(page: Page, info: TestInfo, name: string):
 }
 
 export async function captureNarrow(page: Page, info: TestInfo, name: string, phone = false): Promise<void> {
-  // Keep the real compact/maximised workspace policy. The 800px checkpoint
-  // remains a table; phone-width cards are observed separately at 390px.
+  // 800px stays a table on a wide desk. Phone-width cards are observed
+  // separately at 390px. When a sibling is still docked at 800, keep the
+  // primary book wider than the 480px card breakpoint.
   await page.setViewportSize({ width: phone ? 390 : 800, height: 844 });
   await page.clock.runFor(50);
   const continueButton = page.getByRole("button", { name: "Continue anyway", exact: true });
   if (await continueButton.isVisible()) await continueButton.click();
-  if (await page.locator("#flexlayout-tab-synthetic-narrow-sibling").count()) {
-    await expect(page.getByRole("separator", { name: "Resize", exact: true })).toBeHidden();
+  const splitter = page.getByRole("separator", { name: "Resize", exact: true });
+  if (!phone && await page.locator("#flexlayout-tab-synthetic-narrow-sibling").count() && await splitter.isVisible()) {
+    const divider = await splitter.boundingBox();
+    const workspace = await page.getByTestId("app-layout").boundingBox();
+    expect(divider).not.toBeNull();
+    expect(workspace).not.toBeNull();
+    if (!divider || !workspace) throw new Error("Current narrow workspace has no public splitter");
+    const tableX = workspace.x + Math.min(workspace.width - 80, Math.max(workspace.width * 0.6, 496));
+    await page.mouse.move(divider.x + divider.width / 2, divider.y + divider.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tableX, divider.y + divider.height / 2, { steps: 4 });
+    await page.mouse.up();
   }
   await page.clock.runFor(50);
   await captureEvidence(page, info, name);

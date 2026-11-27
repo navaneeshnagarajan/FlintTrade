@@ -122,14 +122,14 @@ it("keeps Stop available for stale disconnected account evidence and renders ret
   await within(studio).findByText("retired / not_started");
   expect(button).toBeDisabled();
   expect(within(studio).getByText("Fill and exposure data unavailable. Read status again.")).toBeVisible();
-  expect(within(studio).getByText("Stop blocks new entries. Open orders and positions stay in place.")).toBeVisible();
+  for (const line of within(studio).getAllByText("Stop blocks new entries. Open orders and positions stay in place.")) expect(line).toBeVisible();
   expect(calls).toEqual([`GET ${initialCensus.path}`,`GET ${exact}/autonomy-v2`,`GET ${exact}`,
     `POST ${exact}/stop`,`GET ${exact}/autonomy-v2`,`GET ${exact}`]);
   expect(failures).toEqual([]);
   act(() => onlineManager.setOnline(false));
   expect(studio).not.toBeInTheDocument();
   studio = screen.getByRole("region", { name: "Native Studio" });
-  expect(within(studio).getByText(/^Offline\. Data shown may be out of date/)).toBeVisible();
+  expect(within(studio).getByText(/^Offline\. Reconnect, then read status/)).toBeVisible();
   expect(within(studio).queryByRole("region", { name: "Run details" })).not.toBeInTheDocument();
   mounted.unmount();client.clear();
 });

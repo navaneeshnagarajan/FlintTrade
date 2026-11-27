@@ -329,7 +329,7 @@ export function createNativeV2Client() {
       || !equal(parsed.data.report_ref, view.report?.report_ref)
       || parsed.data.expires_at_ms <= Date.now()
       || parsed.data.expires_at_ms - Date.now() > parsed.data.limits.max_duration_ms) {
-      throw new NativeV2PreflightError("Enter every limit and evaluate qualification first.");
+      throw new NativeV2PreflightError("Enter every limit and check qualification first.");
     }
     return { view, selection: parsed.data };
   }

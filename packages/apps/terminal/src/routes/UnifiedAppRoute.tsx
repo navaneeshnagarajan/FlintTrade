@@ -67,11 +67,8 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const [compact, setCompact] = useState(false);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [presetValue, setPresetValue] = useState("");
-  const [linksOpen, setLinksOpen] = useState(false);
-  // An open toolbar panel borrows height from the desk. That must not flip a
-  // wide desk into the one-panel compact view, so only width decides then.
-  const toolbarPanelOpen = useRef(false);
-  toolbarPanelOpen.current = layoutOpen || linksOpen;
+  // Width is the only compact trigger. A 1280x720 desk must keep every
+  // docked book visible; height must not flip a wide desk into one panel.
   const layoutPanelId = useId();
   const importInput = useRef<HTMLInputElement>(null);
   const [revision, setRevision] = useState(0);
@@ -99,7 +96,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }, [active, model, persist]);
   useEffect(() => {
     if (!active || !host.current) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760 || (entry.contentRect.height < 330 && !toolbarPanelOpen.current)));
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760));
     observer.observe(host.current);
     return () => observer.disconnect();
   }, [active]);
@@ -219,7 +216,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       if (validateAppLayout(app, saved)) { setModel(Model.fromJson(saved)); setNotice(`Restored ${name}`); }
     } catch (e) { setError(String(e)); }
   }
-  return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
+  return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app" data-app-chrome={app}>
     <Activity mode={active ? "visible" : "hidden"}>
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border-default bg-surface-base px-3 py-1.5" data-testid="app-toolbar">
       <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-text-primary", compact && "sr-only")}>{meta.name}</h1>
@@ -250,7 +247,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
           <p className="basis-full text-xs text-text-muted">Presentation only. Saved named layouts and all non-layout records are retained.</p>
         </div>
       </div>
-      <InstrumentLinks app={app} compact={compact} onOpenChange={setLinksOpen} />
+      <InstrumentLinks app={app} compact={compact} />
     </div>
     {app === "terminal" && <PracticeLaterSetup />}
     {error && <p role="alert" className="flex shrink-0 items-start gap-2 border-b border-warning/30 bg-warning/[0.08] px-3 py-1.5 text-xs text-[var(--color-warning-text,var(--color-warning))]"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss message" onClick={() => setError("")}><X aria-hidden="true" /></Button></p>}

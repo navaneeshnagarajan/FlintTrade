@@ -32,23 +32,25 @@ describe("purpose-safe presets", () => {
     expect(components).toEqual(expected);
   });
 
-  it("starts a fresh Terminal with the captured watchlist-left geometry and retains the overview tab", () => {
+  it("starts a fresh Terminal with watchlist on the left and visible books", () => {
     const json = buildAppPreset("terminal", "default");
     expect(json.layout.children).toMatchObject([
-      { type: "tabset", weight: 28, children: [{ component: "watchlist" }, { component: "overview:WelcomeCard" }] },
-      { type: "tabset", weight: 72, active: true, selected: 0, children: [
+      { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
+      { type: "tabset", weight: 14, children: [{ component: "overview:WelcomeCard" }] },
+      { type: "tabset", weight: 38, active: true, selected: 0, children: [
         { component: "chart", config: { channel: "none" } },
-        { component: "positions" }, { component: "orders" },
       ] },
+      { type: "tabset", weight: 20, children: [{ component: "positions" }, { component: "orders" }] },
     ]);
     expect(validateAppLayout("terminal", json)).toBe(true);
   });
-  it("offers the captured watchlist-left geometry as an explicit repeatable preset", () => {
+  it("offers the watchlist-left geometry with visible books as an explicit repeatable preset", () => {
     expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist first", template: true });
     const json = buildAppPreset("terminal", "watchlist-driven");
     expect(json.layout.children).toMatchObject([
       { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
-      { type: "tabset", weight: 72, active: true, children: [{ component: "chart" }, { component: "positions" }, { component: "orders" }] },
+      { type: "tabset", weight: 52, active: true, children: [{ component: "chart" }] },
+      { type: "tabset", weight: 20, children: [{ component: "positions" }, { component: "orders" }] },
     ]);
     expect(validateAppLayout("terminal", json)).toBe(true);
     const model = Model.fromJson(json);
