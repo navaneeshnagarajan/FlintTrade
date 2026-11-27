@@ -362,7 +362,8 @@ Closed on its own. Unavailable timings read `Market unavailable`, and
 are never labelled last close. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
-continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
+continuous ends, a secondary F&O chip appears: `F&O open · till 15:30` before
+3 August 2026 and `F&O open · till 15:40` from 3 August 2026. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
@@ -1471,8 +1472,8 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
 09:15–15:30 "open" window. When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
-15:40` through 6 December 2026, and `F&O open · till 15:45` from 7 December
-2026. Non-CAS cash still continuous to 15:30.
+15:30` before 3 August 2026, `F&O open · till 15:40` from 3 August to
+6 December 2026, and `F&O open · till 15:45` from 7 December 2026. Non-CAS cash still continuous to 15:30.
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or
