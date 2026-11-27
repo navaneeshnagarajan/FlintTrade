@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -624,5 +624,23 @@ describe("ForeverOrdersWidget", () => {
       expect(screen.getByText(/The lot size for NIFTY isn't known\. Order not placed\./)).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
+  });
+});
+
+describe("ForeverOrdersWidget order side toggle contrast", () => {
+  it("uses the readable action foreground, not white, on the selected BUY fill", () => {
+    renderWidget();
+    const side = screen.getByRole("group", { name: "Order side" });
+    const buy = within(side).getByRole("button", { name: "BUY" });
+    const sell = within(side).getByRole("button", { name: "SELL" });
+
+    expect(buy).toHaveAttribute("aria-pressed", "true");
+    expect(buy).toHaveClass("bg-profit-action", "text-profit-foreground");
+    expect(buy).not.toHaveClass("text-white");
+
+    fireEvent.click(sell);
+    expect(sell).toHaveAttribute("aria-pressed", "true");
+    expect(buy).not.toHaveClass("bg-profit-action");
+    expect(buy).not.toHaveClass("text-profit-foreground");
   });
 });

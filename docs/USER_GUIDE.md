@@ -1736,7 +1736,7 @@ flashes the outage copy.
 
 ## 9. AI Centre walkthrough
 
-Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
+Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Analysis, Sentiment, and RAG run in your own app, backed by
 `packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list. It is not a live AI fetch. Suggest stays
 labelled illustrative. See
@@ -1812,8 +1812,8 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. It never shows a green **Connected (suggest only)**. Example data does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
-**Sample replies**. Signals **Live** / **Polling** stay separate from Chat
-LLM readiness.
+**Sample replies**. The Analysis panel **Live** / **Polling** badges stay
+separate from Chat LLM readiness.
 
 AI Chat live-read context: when an LLM is configured, Chat may
 use Practice simulated fills and native live-read feeds for
@@ -1865,9 +1865,12 @@ When mood and risk match nothing, the empty state offers
 **Deploy to Strategy Lab** opens `/lab?strategy=<registryKey>` for that
 card.
 
-### Signals
+### Analysis
 
-The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order.
+The **Analysis** panel shows analysis worked out inside your own app from
+market data. Several checks run at the same time, and the panel combines
+their results. It is not a recommendation to trade, and it is not financial
+advice. You decide whether to place any order.
 
 ### Sentiment
 

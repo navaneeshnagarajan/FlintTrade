@@ -87,7 +87,7 @@ import {
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
-import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, ORDER_STATUS_UNKNOWN, liveWritesMuted } from "@/lib/operatorIncident";
@@ -1858,10 +1858,11 @@ function OrderPadWidget(props: WidgetProps) {
           control={control}
           name="note"
           render={({ field }) => (
-            <OrderPadReasonField
+            <AdmissionNoteField
               id="orderpad-admission-note"
               value={field.value ?? ""}
               onChange={field.onChange}
+              collapsible
             />
           )}
         />

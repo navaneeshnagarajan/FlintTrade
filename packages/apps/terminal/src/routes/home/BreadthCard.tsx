@@ -82,7 +82,7 @@ export function BreadthCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <BarChart2 size={13} className="text-text-muted" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="ft-text-overline text-text-muted">
             Market Breadth
           </p>
           {!isLive && <ExampleLabel testId="breadth-example-label" />}
@@ -105,23 +105,23 @@ export function BreadthCard() {
             <p className="font-mono text-sm font-semibold text-bullish-text">
               {breadth.advances.toLocaleString()}
             </p>
-            <p className="text-[10px] text-text-muted">Adv</p>
+            <p className="text-xxs text-text-muted">Adv</p>
           </div>
           <div>
             <p className="font-mono text-sm font-semibold text-text-secondary">
               {breadth.unchanged.toLocaleString()}
             </p>
-            <p className="text-[10px] text-text-muted">Unch</p>
+            <p className="text-xxs text-text-muted">Unch</p>
           </div>
           <div>
             <p className="font-mono text-sm font-semibold text-bearish-text">
               {breadth.declines.toLocaleString()}
             </p>
-            <p className="text-[10px] text-text-muted">Dec</p>
+            <p className="text-xxs text-text-muted">Dec</p>
           </div>
         </div>
 
-        <p className="text-[10px] text-text-muted text-center mt-auto">
+        <p className="text-xxs text-text-muted text-center mt-auto">
           {isLive ? `NSE · ${total.toLocaleString()} total` : `${total.toLocaleString()} total`}
         </p>
       </div>
