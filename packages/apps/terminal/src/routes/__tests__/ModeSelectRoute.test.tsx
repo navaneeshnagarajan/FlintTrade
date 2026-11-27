@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 import ModeSelectRoute from "../ModeSelectRoute";
+import { pendingLiveAcknowledgement, recordLiveAcknowledgement } from "@/lib/liveAcknowledgement";
 
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -14,6 +15,39 @@ function jsonResponse(body: object, status = 200): Response {
 describe("ModeSelectRoute", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.removeItem("flinttrade.liveAcknowledgement");
+    recordLiveAcknowledgement(pendingLiveAcknowledgement());
+  });
+
+  it("asks for the Live acknowledgement once before verifying the PIN", async () => {
+    localStorage.removeItem("flinttrade.liveAcknowledgement");
+    const onSelect = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { token: "live-unlocked-jwt", live_mode_unlocked: true } }),
+    );
+    render(<ModeSelectRoute onSelect={onSelect} />);
+    const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
+    fireEvent.click(liveButton);
+    fireEvent.change(screen.getByLabelText(/enter your 6-digit pin to enable live mode/i), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue with live/i }));
+
+    expect(await screen.findByTestId("live-acknowledgement")).toHaveTextContent("Turn on Live");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("I understand"));
+    fireEvent.click(screen.getByRole("button", { name: "Turn on Live" }));
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("live", "live-unlocked-jwt"));
+  });
+
+  it("never asks in Practice", () => {
+    localStorage.removeItem("flinttrade.liveAcknowledgement");
+    const onSelect = vi.fn();
+    render(<ModeSelectRoute onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: /continue with practice/i }));
+    expect(screen.queryByTestId("live-acknowledgement")).not.toBeInTheDocument();
+    expect(onSelect).toHaveBeenCalledWith("practice");
   });
 
   function clickLiveMode() {

@@ -120,7 +120,7 @@ commit_types = ["feat", "fix", "docs", "style", "refactor", "test", "chore", "pe
 [deploy]
 health_check_endpoint = "/api/v1/ping"
 deploy_freeze_start = "09:15"
-deploy_freeze_end = "15:30"
+deploy_freeze_end = "15:45"
 maintenance_window_start = "15:45"
 maintenance_window_end = "18:00"
 
@@ -131,8 +131,9 @@ maintenance_window_end = "18:00"
 # quote-only and reject orders at the safety layer.
 NSE = { name = "NSE Equity", hours = "09:15-15:30" }
 BSE = { name = "BSE Equity", hours = "09:15-15:30" }
-NFO = { name = "NSE F&O", hours = "09:15-15:30" }
-BFO = { name = "BSE F&O", hours = "09:15-15:30" }
+# NFO and BFO hours depend on the session date; see [[exchanges.fno_sessions]].
+NFO = { name = "NSE F&O", sessions = "fno_sessions" }
+BFO = { name = "BSE F&O", sessions = "fno_sessions" }
 CDS = { name = "Currency Derivatives", hours = "09:00-17:00" }
 BCD = { name = "BSE Currency", hours = "09:00-17:00" }
 MCX = { name = "Commodities", hours = "09:00-23:55" }
@@ -143,9 +144,29 @@ BSE_INDEX = { name = "BSE Indices", hours = "09:15-15:30", quote_only = true }
 MCX_INDEX = { name = "MCX Commodity Indices", hours = "09:00-23:30", quote_only = true }
 GLOBAL_INDEX = { name = "Foreign + IFSC Indices (reference feed)", hours = "24/7", quote_only = true }
 
+# NSE and BSE equity derivatives hours by session date (IST, both dates
+# inclusive). These are labels. Order admission, the scheduler, Practice and the
+# terminal clock read the same windows from market_hours.py and nseSession.ts,
+# always for the date being traded or simulated.
+[[exchanges.fno_sessions]]
+until = "2026-08-02"
+hours = "09:15-15:30"
+
+# Closing auction rules.
+[[exchanges.fno_sessions]]
+from = "2026-08-03"
+until = "2026-12-06"
+hours = "09:15-15:40"
+
+# An index contract stops at 15:30 on its own expiry day.
+[[exchanges.fno_sessions]]
+from = "2026-12-07"
+hours = "09:15-15:45"
+index_expiry_close = "15:30"
+
 [exchanges.deploy_freeze]
 # Deploy freeze must cover ALL active exchanges
-equity_end = "15:30"
+equity_end = "15:45"
 currency_end = "17:00"
 mcx_end = "23:55"
 # Safe deploy window: after MCX close (11:55 PM) until 8:30 AM next day

@@ -72,7 +72,7 @@ export function AITab({ query, onClose }: AITabProps) {
       {/* Quick prompts */}
       {!strippedQuery && (
         <div className="flex flex-col gap-1">
-          <p className="text-[10px] uppercase tracking-widest text-text-muted font-medium px-1">Quick prompts</p>
+          <p className="ft-text-overline text-text-muted font-medium px-1">Quick prompts</p>
           {QUICK_PROMPTS.map((prompt) => (
             <button
               key={prompt}

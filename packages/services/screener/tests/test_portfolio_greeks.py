@@ -510,5 +510,5 @@ def test_client_cannot_reintroduce_implicit_greek_fetch():
 
     client = MagicMock()
     with pytest.raises(RuntimeError, match="admitted typed snapshot"):
-        PortfolioGreeks(client).calculate([OptionPosition("TEST")])
+        PortfolioGreeks(client).calculate([OptionPosition("TEST", lot_size=65)])
     assert client.mock_calls == []

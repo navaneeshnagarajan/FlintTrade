@@ -1,7 +1,7 @@
 # Autonomous agent harness
 
 FlintTrade's existing Autonomous Agent now has an isolated **Practice** runtime.
-It reuses `AutonomousTrader`, configured and authorised market-data reads, Laya
+It reuses `AutonomousTrader`, configured and authorised market-data reads, decision-model
 admission and the real `SandboxEngine`. It does not place real-money orders.
 
 ## Before starting
@@ -12,8 +12,8 @@ admission and the real `SandboxEngine`. It does not place real-money orders.
 - Enable `ai.autonomous_agent.enabled` in the workspace. Configure an LLM using
   the existing AI settings and establish the configured market-data accounts.
 
-- Laya must satisfy the normal Practice admission requirements. A configured
-  chat model is not Laya readiness, and Practice readiness is not Live approval.
+- The decision model must satisfy the normal Practice admission requirements. A configured
+  chat model is not decision-model readiness, and Practice readiness is not Live approval.
 
 - The canonical calendar, rate limiter, sandbox and backend ownership must be
   available. The harness does not remove native-account setup/read-port guards.
@@ -27,7 +27,7 @@ in **units**, stop-loss percentage and take-profit percentage. For derivatives,
 use the exact contract and its valid quantity; the harness does not guess a lot
 size from an underlying name. Start is an explicit operator action. An optional entry rationale (up to 2,000
 characters) records your standing purpose for the entries. This is
-operator-authored text, not model reasoning. Laya still decides each proposal;
+operator-authored text, not model reasoning. The decision model still decides each proposal;
 providing a rationale does not approve a refusal or clamp. Never put credentials
 in this field.
 
@@ -67,7 +67,7 @@ agent limits and submits through canonical Practice admission. New entries
 also require the shared L5 kill switch to be available and clear. A kill latch
 brakes new model work and entries; only server-proven reducing exits remain
 available. Final write admission is held only around the synchronous sandbox
-write, after Laya has decided. Laya refusals
+write, after the decision model has decided. Decision-model refusals
 and quantity clamps do not place an order and are never automatically accepted
 or retried. Orders require a confirmed sandbox fill before they become tracked
 agent positions. Percentage-based stop and target monitoring thresholds are
@@ -173,7 +173,7 @@ qualified trading strategy. Read the lifecycle and last failure together.
 ## Live boundaries and evidence limits
 
 The existing Live agent retains operator-approved entry intentions and the
-Laya → SafetySystem → `gate_order` → `BrokerRouter` chain. A broker order-id
+the decision model → SafetySystem → `gate_order` → `BrokerRouter` chain. A broker order-id
 acknowledgement is not a confirmed fill: an approved Live intention cannot
 rotate into another intention for that symbol without reconciliation.
 

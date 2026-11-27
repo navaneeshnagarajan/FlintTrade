@@ -280,6 +280,7 @@ export function IndicatorSettingsModal({
                       <label className="text-xxs text-text-muted">{p.label}</label>
                       <Input
                         type="number"
+                        aria-label={p.label}
                         min={p.min}
                         max={p.max}
                         step={p.step}

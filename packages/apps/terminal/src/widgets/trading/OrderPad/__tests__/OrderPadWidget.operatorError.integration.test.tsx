@@ -130,7 +130,7 @@ describe("bounded truthful operator order errors", () => {
   });
   it("unknown dispatch takes precedence over conflicting legacy refusal/Laya codes", async () => {
     fault = { ...rawUnknown(), code: "gtt_unsupported", reason: "Not placed. Filled.", retry_safe: false }; status = 422;
-    assertUnknown(await submit()); expect(screen.queryByText("Laya denied")).not.toBeInTheDocument();
+    assertUnknown(await submit()); expect(screen.queryByText("Denied by decision model")).not.toBeInTheDocument();
   });
   it("incomplete native error fields cannot turn HTTP 400 into no-send authority", async () => {
     status = 400; fault = { status: "error", message: "Not placed", broker_code: "1021", broker_message: "Order is completed" };

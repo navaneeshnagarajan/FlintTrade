@@ -435,7 +435,7 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: Per
             </div>
 
             {(strategyStats.length > 0 || restoredLine) && (
-            <section aria-label="Laya and strategy stats">
+            <section aria-label="Decision model and strategy stats">
               {strategyStats.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-xxs font-medium text-text-muted uppercase tracking-wide">

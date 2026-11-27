@@ -18,8 +18,57 @@ it("keeps presentation layouts per app, ignores old layouts and never deletes ot
   expect(APP_LAYOUT_NAMESPACE).not.toBe("flinttrade:layouts");
 });
 describe("purpose-safe presets", () => {
-  it("offers Trader and Option Scalper as layouts, never personas", () => {
-    expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option Scalper"]));
+  it.each([
+    ["scalper-zone", ["scalper", "positions", "orders", "optionchain"]],
+    ["volatility-trading", ["chart", "straddle", "oichart", "positions", "orders", "optionchain", "watchlist"]],
+    ["classic", ["chart", "positions", "orders", "optionchain", "watchlist"]],
+    ["watchlist-driven", ["watchlist", "chart", "positions", "orders"]],
+    ["market-overview", ["chart", "straddle", "oichart"]],
+  ] as const)("builds the captured %s template through the canonical owner", (id, expected) => {
+    const json = buildAppPreset("terminal", id);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+    const components: string[] = [];
+    Model.fromJson(json).visitNodes(node => { if (node.getType() === "tab") components.push((node as TabNode).getComponent()!); });
+    expect(components).toEqual(expected);
+  });
+
+  it("starts a fresh Terminal with watchlist on the left and visible books", () => {
+    const json = buildAppPreset("terminal", "default");
+    expect(json.layout.children).toMatchObject([
+      { type: "tabset", weight: 24, children: [{ component: "watchlist" }] },
+      { type: "tabset", weight: 18, children: [{ component: "overview:WelcomeCard" }] },
+      { type: "tabset", weight: 34, active: true, selected: 0, children: [
+        { component: "chart", config: { channel: "none" } },
+      ] },
+      { type: "tabset", weight: 24, children: [{ component: "positions" }, { component: "orders" }] },
+    ]);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+  });
+  it("offers the watchlist-left geometry with visible books as an explicit repeatable preset", () => {
+    expect(APP_PRESETS.terminal).toContainEqual({ id: "watchlist-driven", name: "Watchlist first", template: true });
+    const json = buildAppPreset("terminal", "watchlist-driven");
+    expect(json.layout.children).toMatchObject([
+      { type: "tabset", weight: 28, children: [{ component: "watchlist" }] },
+      { type: "tabset", weight: 52, active: true, children: [{ component: "chart" }] },
+      { type: "tabset", weight: 20, children: [{ component: "positions" }, { component: "orders" }] },
+    ]);
+    expect(validateAppLayout("terminal", json)).toBe(true);
+    const model = Model.fromJson(json);
+    expect(model.getActiveTabset()?.getSelectedNode()?.getName()).toBe("Chart");
+  });
+  it("does not rewrite a saved Current or named layout when building the fresh default", () => {
+    localStorage.clear();
+    const saved = buildAppPreset("terminal", "overview");
+    saveAppLayout("terminal", "Current", saved);
+    saveAppLayout("terminal", "My overview", saved);
+    const before = localStorage.getItem(`${APP_LAYOUT_NAMESPACE}:terminal`);
+    buildAppPreset("terminal", "default");
+    expect(localStorage.getItem(`${APP_LAYOUT_NAMESPACE}:terminal`)).toBe(before);
+    expect(readAppLayouts("terminal").Current).toEqual(saved);
+    expect(readAppLayouts("terminal")["My overview"]).toEqual(saved);
+  });
+  it("offers Trader and Option scalper as layouts, never personas", () => {
+    expect(APP_PRESETS.terminal.map(preset => preset.name)).toEqual(expect.arrayContaining(["Trader", "Option scalper"]));
     expect(validateAppLayout("terminal", buildAppPreset("terminal", "trader"))).toBe(true);
   });
   for (const app of APPS) it(`${app.name} mounts only compatible widgets`, () => {

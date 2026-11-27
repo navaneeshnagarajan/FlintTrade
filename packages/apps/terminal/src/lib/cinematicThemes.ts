@@ -78,6 +78,12 @@ export interface ThemeVariant {
     profitForeground?: string;
     /** WCAG-safe loss text (same in both modes) */
     lossText: string;
+    /** Opaque loss action fill, darker than `loss`, so white labels meet 4.5:1.
+     * Optional only for persisted pre-contract custom themes; applyTheme
+     * supplies #991b1b when it is missing or the pair is below 4.5:1. */
+    lossAction?: string;
+    /** Stable label on the loss action background. Optional for the same reason. */
+    lossForeground?: string;
     /** WCAG-safe warning text */
     warningText: string;
   };
@@ -182,6 +188,8 @@ const TRADING_DARK: ThemeVariant["trading"] = {
   profitText:  "#22c55e",  // green-500 passes 4.5:1 on dark surfaces
   profitForeground: "#0a0a0f",
   lossText:    "#ef4444",
+  lossAction:  "#991b1b",  // red-800 — white labels clear 4.5:1 on the fill
+  lossForeground: "#ffffff",
   warningText: "#f59e0b",
 };
 
@@ -192,6 +200,8 @@ const TRADING_LIGHT: ThemeVariant["trading"] = {
   profitText:  "#166534",  // green-800 — safe on white and pale green tints
   profitForeground: "#ffffff",
   lossText:    "#991b1b",  // red-800 — safe on white and pale red tints
+  lossAction:  "#991b1b",
+  lossForeground: "#ffffff",
   warningText: "#92400e",  // amber-800 — safe on white and pale amber tints
 };
 

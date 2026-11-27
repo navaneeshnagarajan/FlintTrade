@@ -12,7 +12,7 @@ from statistics import NormalDist
 from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import OptionGreek
 
-from .option_chain import LOT_SIZES
+from .lot_sizes import get_lot_size_sync
 
 
 @dataclass
@@ -22,7 +22,7 @@ class OptionPosition:
     option_type: str = "CE"
     action: str = "BUY"
     lots: int = 1
-    lot_size: int = 65
+    lot_size: int = field(kw_only=True)
     underlying: str = ""
 
     @property
@@ -134,8 +134,9 @@ class PortfolioGreeks:
         return PortfolioGreeksResult(positions=scaled, **totals)
 
     @staticmethod
-    def from_lot_size(underlying: str, lots: int = 1) -> int:
-        return lots * LOT_SIZES.get(underlying.upper(), 1)
+    def from_lot_size(underlying: str, lots: int = 1) -> int | None:
+        lot = get_lot_size_sync(underlying)
+        return None if lot is None else lots * lot
 
     @staticmethod
     def local_greeks(option_type: str, spot: float, strike: float, time_to_expiry: float,

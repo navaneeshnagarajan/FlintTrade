@@ -11,7 +11,7 @@ Provides a Blueprint with these routes:
 - ``GET /api/v1/operator/status`` — authenticated read-only operator status
 - ``GET /api/v1/versions`` — authenticated, read-only About metadata
 - ``GET /api/v1/versions/ollama`` — bounded, observational Ollama version probe
-- ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
+- ``POST /api/v1/decision-model/start``: start or restart the managed decision model
 - ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
   disk, memory) via :class:`HealthAggregator`
 
@@ -151,7 +151,7 @@ def _reconcile_laya_for_desk() -> None:
         if callable(reconcile):
             reconcile()
     except Exception:
-        logger.warning("Laya desk reconcile failed", exc_info=True)
+        logger.warning("Decision model desk reconcile failed", exc_info=True)
 
 
 def _refresh_laya_status() -> None:
@@ -161,13 +161,13 @@ def _refresh_laya_status() -> None:
 
         refresh_process_laya_status()
     except Exception:
-        logger.warning("Laya status probe failed", exc_info=True)
+        logger.warning("Decision model status probe failed", exc_info=True)
         try:
             from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
 
             process_laya().apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
         except Exception:
-            logger.warning("Laya status could not be recorded", exc_info=True)
+            logger.warning("Decision model status could not be recorded", exc_info=True)
 
 
 def reset_health_singletons_for_tests() -> None:
@@ -293,10 +293,11 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
-        ``laya_live_qualified``, ``laya_reason``, ``laya_port``, and, while a
-        model download is in progress, ``laya_download_bytes`` and
-        ``laya_download_total``. ``laya`` starts Down. A ping reconciles the
+        JSON with ``decision_model`` (Live-facing), ``decision_model_practice``
+        (sidecar), ``decision_model_live_qualified``, ``decision_model_reason``,
+        ``decision_model_port``, and, while a model download is in progress,
+        ``decision_model_download_bytes`` and ``decision_model_download_total``.
+        ``decision_model`` starts Down. A ping reconciles the
         watched pid, key, and runtime record the same way an order does, then
         returns that stored status. It does not invent Ready when those files
         have not changed, and it does not probe the port on its own.
@@ -311,20 +312,20 @@ def ping() -> tuple[Any, int]:
     body = {
         "status": "ok",
         "timestamp": datetime.now(_IST).isoformat(),
-        "laya": live.value,
-        "laya_practice": practice.value,
-        "laya_live_qualified": qualified,
-        "laya_reason": reason,
-        "laya_port": port,
-        "laya_download_bytes": None if progress is None else progress[0],
-        "laya_download_total": None if progress is None else progress[1],
+        "decision_model": live.value,
+        "decision_model_practice": practice.value,
+        "decision_model_live_qualified": qualified,
+        "decision_model_reason": reason,
+        "decision_model_port": port,
+        "decision_model_download_bytes": None if progress is None else progress[0],
+        "decision_model_download_total": None if progress is None else progress[1],
     }
     from flinttrade_engine.laya_ollama import laya_backend  # noqa: PLC0415
 
     if laya_backend() == "ollama":
-        body["laya_checking"] = engine.gate_checking()
-        body["laya_route"] = "ollama"
-        body["laya_managed"] = _ollama_install_is_managed()
+        body["decision_model_checking"] = engine.gate_checking()
+        body["decision_model_route"] = "ollama"
+        body["decision_model_managed"] = _ollama_install_is_managed()
     return jsonify(body), 200
 
 
@@ -355,9 +356,9 @@ def _start_managed_ollama_for_gate() -> None:
     runtime.start_async()
 
 
-@health_bp.route("/api/v1/laya/start", methods=["POST"])
+@health_bp.route("/api/v1/decision-model/start", methods=["POST"])
 def start_laya() -> tuple[Any, int]:
-    """Start the runtime behind the current Laya route.
+    """Start the runtime behind the current decision model route.
 
     The sidecar route starts the managed sidecar. The Ollama route starts a
     FlintTrade-managed Ollama install and leaves an unmanaged Ollama alone.
@@ -372,7 +373,7 @@ def start_laya() -> tuple[Any, int]:
         return denied
     backend = laya_backend()
     if backend == "closed":
-        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+        return jsonify({"status": "error", "message": "Decision model failed to start."}), 503
     ollama = backend == "ollama"
     try:
         if ollama:
@@ -385,9 +386,79 @@ def start_laya() -> tuple[Any, int]:
         if ollama:
             logger.warning("Managed Ollama could not be started", exc_info=True)
         else:
-            logger.warning("Laya sidecar could not be started", exc_info=True)
-        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+            logger.warning("Decision model could not be started", exc_info=True)
+        return jsonify({"status": "error", "message": "Decision model failed to start."}), 503
     return jsonify({"status": "ok"}), 200
+
+
+@health_bp.route("/api/v1/decision-model/qualification/configuration", methods=["PUT"])
+@health_bp.route("/api/v1/decision-model/qualification", methods=["POST", "DELETE"])
+def laya_qualification_control() -> tuple[Any, int]:
+    """Configure, explicitly measure or retire the existing qualification owner.
+
+    PUT requires schema_version=1, labelled cases and max_age_seconds. There is
+    no default suite/lifetime or caller-supplied verdict. POST accepts only an
+    empty object and measures the already-running managed runtime. DELETE
+    retires evidence; none of these actions starts a model or a broker session.
+    Only a current operator with admin.services.write may use this control.
+    """
+    from flask import current_app, request
+    from werkzeug.exceptions import Unauthorized
+
+    from .auth_routes import _OperatorSessionVerificationError, verify_operator_session_token
+    from .auth_scopes import _session_token
+    from .laya_qualification import LayaQualificationOwner
+
+    token = _session_token() or ""
+    try:
+        principal = verify_operator_session_token(token)
+    except (Unauthorized, _OperatorSessionVerificationError):
+        return jsonify({"error": "qualification_session_required"}), 401
+    if "admin.services.write" not in principal.scopes:
+        return jsonify({"error": "qualification_scope_required"}), 403
+    owner = current_app.config.get("LAYA_QUALIFICATION_OWNER")
+    if type(owner) is not LayaQualificationOwner or owner.app is not current_app._get_current_object():
+        return jsonify({"error": "qualification_owner_unavailable"}), 503
+
+    def authority() -> None:
+        """Reject changed principals and owners before and after each model read."""
+        current = verify_operator_session_token(token)
+        if (current.actor_ref != principal.actor_ref or current.session_binding != principal.session_binding
+                or "admin.services.write" not in current.scopes
+                or current_app.config.get("LAYA_QUALIFICATION_OWNER") is not owner
+                or current_app.config.get("RUNTIME_ACCEPTING_REQUESTS") is not True):
+            raise ValueError("qualification_authority_changed")
+
+    try:
+        authority()
+        if request.method == "DELETE":
+            owner.retire()
+            result = {"qualified": False}
+        else:
+            if not request.is_json or request.content_length is None or request.content_length > 65536:
+                return jsonify({"error": "qualification_request_invalid"}), 400
+            body = request.get_json(silent=True)
+            if request.method == "PUT":
+                if (type(body) is not dict or set(body) != {"schema_version", "cases", "max_age_seconds"}
+                        or body["schema_version"] != "1" or type(body["cases"]) is not list
+                        or any(type(case) is not list for case in body["cases"])):
+                    return jsonify({"error": "qualification_configuration_invalid"}), 400
+                try:
+                    owner.configure(cases=tuple(tuple(case) for case in body["cases"]),
+                                    max_age_seconds=body["max_age_seconds"])
+                except ValueError:
+                    return jsonify({"error": "qualification_configuration_invalid"}), 400
+                result = {"configured": True, "qualified": False}
+            else:
+                if type(body) is not dict or body:
+                    return jsonify({"error": "qualification_request_invalid"}), 400
+                result = owner.qualify(verify_authority=authority)
+    except (ValueError, RuntimeError, Unauthorized, _OperatorSessionVerificationError):
+        owner.retire()
+        return jsonify({"error": "qualification_unavailable", "qualified": False}), 409
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response, 200
 
 
 @health_bp.route("/api/v1/health", methods=["GET"])

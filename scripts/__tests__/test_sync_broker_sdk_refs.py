@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -144,8 +146,29 @@ def test_sync_records_pypi_drift(tmp_path, monkeypatch) -> None:
     assert manifest["drift"] == [{"package": "dhanhq", "source": "pypi", "locked": "2.2.0", "upstream": "2.3.0"}]
 
 
-def test_non_kotak_git_drift_still_tracks_remote_head(tmp_path, monkeypatch) -> None:
-    digest = hashlib.sha256(b"wheel-bytes").hexdigest()
+def _init_git_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=path, check=True)
+    subprocess.run(["git", "config", "tag.gpgsign", "false"], cwd=path, check=True)
+
+
+def _git(path: Path, *args: str) -> str:
+    result = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
+
+def _commit_and_tag(path: Path, message: str, content: str, tag: str) -> str:
+    (path / "f.txt").write_text(content, encoding="utf-8")
+    _git(path, "add", "f.txt")
+    _git(path, "commit", "-q", "-m", message)
+    _git(path, "tag", "-a", tag, "-m", tag)
+    return _git(path, "rev-parse", "HEAD")
+
+
+def _dhan_pypi_opener(body: bytes = b"wheel-bytes"):
+    digest = hashlib.sha256(body).hexdigest()
     release = {
         "info": {"version": "2.3.0"},
         "releases": {
@@ -165,34 +188,97 @@ def test_non_kotak_git_drift_still_tracks_remote_head(tmp_path, monkeypatch) -> 
         if url == "https://pypi.org/pypi/dhanhq/json":
             return 200, json.dumps(release).encode("utf-8")
         if url == "https://files.example/dhanhq.whl":
-            return 200, b"wheel-bytes"
+            return 200, body
         raise AssertionError(url)
 
-    locked_commit = "a" * 40
-    upstream_head = "b" * 40
+    return opener, digest
+
+
+def test_latest_final_git_tag_skips_prereleases() -> None:
+    tags = ["v2.3.0", "v2.4.0rc1", "v2.4.0a1", "v2.4.0b1", "v2.4.0.dev1"]
+    assert syncer.latest_final_git_tag(tags) == "v2.3.0"
+    assert syncer.latest_final_git_tag(["v2.3.0", "v2.4.0rc1", "v2.4.0"]) == "v2.4.0"
+    assert syncer.latest_final_git_tag(["v2.4.0rc1", "2.3.0"]) == "2.3.0"
+    assert syncer.latest_final_git_tag(["v2.4.0rc1"]) is None
+
+
+def test_git_pin_stays_current_when_newest_tag_is_a_release_candidate(tmp_path, monkeypatch) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _init_git_repo(origin)
+    final_commit = _commit_and_tag(origin, "2.3.0", "final\n", "v2.3.0")
+    rc_commit = _commit_and_tag(origin, "2.4.0rc1", "rc\n", "v2.4.0rc1")
+    assert rc_commit != final_commit
+
+    opener, digest = _dhan_pypi_opener()
+    monkeypatch.setattr(syncer, "REPO", tmp_path)
+    monkeypatch.setitem(
+        syncer.SDK_SOURCES,
+        "dhanhq",
+        syncer.BrokerSdkSource(
+            package="dhanhq",
+            repo_name="dhanhq-py",
+            git_url=str(origin),
+            pypi_name="dhanhq",
+        ),
+    )
+    monkeypatch.setattr(
+        syncer,
+        "load_broker_lock",
+        lambda _path: [{"name": "dhanhq", "version": "2.3.0", "source_commit": final_commit, "sha256": digest}],
+    )
+
+    manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
+    git = manifest["sdks"][0]["git"]
+
+    assert git["head"] == rc_commit
+    assert git["latest_final_tag"] == "v2.3.0"
+    assert git["latest_final_commit"] == final_commit
+    assert manifest["sdks"][0]["git_current"] is True
+    assert manifest["drift"] == []
+    assert "git status: current" in (tmp_path / "audit" / "README.md").read_text(encoding="utf-8")
+
+
+def test_git_pin_flags_drift_when_a_newer_final_tag_exists(tmp_path, monkeypatch) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _init_git_repo(origin)
+    locked_commit = _commit_and_tag(origin, "2.3.0", "final\n", "v2.3.0")
+    newer_final = _commit_and_tag(origin, "2.4.0", "newer\n", "v2.4.0")
+    rc_commit = _commit_and_tag(origin, "2.5.0rc1", "rc\n", "v2.5.0rc1")
+    assert rc_commit != newer_final
+
+    opener, digest = _dhan_pypi_opener()
+    monkeypatch.setattr(syncer, "REPO", tmp_path)
+    monkeypatch.setitem(
+        syncer.SDK_SOURCES,
+        "dhanhq",
+        syncer.BrokerSdkSource(
+            package="dhanhq",
+            repo_name="dhanhq-py",
+            git_url=str(origin),
+            pypi_name="dhanhq",
+        ),
+    )
     monkeypatch.setattr(
         syncer,
         "load_broker_lock",
         lambda _path: [{"name": "dhanhq", "version": "2.3.0", "source_commit": locked_commit, "sha256": digest}],
     )
-    monkeypatch.setattr(
-        syncer,
-        "sync_git_mirror",
-        lambda _source, _audit_root: {
-            "path": "repo",
-            "remote": "origin",
-            "head": upstream_head,
-            "describe": "v2.3.0",
-        },
-    )
 
     manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
+    git = manifest["sdks"][0]["git"]
 
+    assert git["head"] == rc_commit
+    assert git["latest_final_tag"] == "v2.4.0"
+    assert git["latest_final_commit"] == newer_final
     assert manifest["sdks"][0]["git_current"] is False
     assert manifest["drift"] == [
-        {"package": "dhanhq", "source": "git", "locked": locked_commit, "upstream": upstream_head}
+        {"package": "dhanhq", "source": "git", "locked": locked_commit, "upstream": newer_final}
     ]
-    assert "locked behind upstream HEAD" in (tmp_path / "audit" / "README.md").read_text(encoding="utf-8")
+    assert "locked behind the latest final release" in (tmp_path / "audit" / "README.md").read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.parametrize(
@@ -290,3 +376,66 @@ def test_kotak_dual_track_drift_is_independent(
     assert sdk["version"] == "3.0.8"
     assert manifest["sdks"][0]["release_version"] == "3.0.7"
     assert manifest["sdks"][0]["pypi"]["filename"] == "kotakneoapi-3.0.7-py3-none-any.whl"
+
+
+def _release_files(*versions: str, yanked: tuple[str, ...] = ()) -> dict:
+    return {version: [{"filename": f"dhanhq-{version}.tar.gz", "yanked": version in yanked}] for version in versions}
+
+
+@pytest.mark.parametrize(
+    ("locked", "info_version", "versions", "yanked", "expected"),
+    [
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
+        ("2.3.0", "2.4.0rc1", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0a1", "2.4.0b1", "2.4.0.dev1"), (), "2.3.0"),
+        ("2.3.0", "2.4.0", ("2.3.0", "2.4.0rc1", "2.4.0"), (), "2.4.0"),
+        ("2.3.0", "2.3.0", ("2.3.0", "2.4.0"), ("2.4.0",), "2.3.0"),
+        ("2.4.0rc1", "2.3.0", ("2.3.0", "2.4.0rc1"), (), "2.3.0"),
+    ],
+)
+def test_upstream_version_ignores_prereleases(locked, info_version, versions, yanked, expected) -> None:
+    data = {"info": {"version": info_version}, "releases": _release_files(*versions, yanked=yanked)}
+    assert syncer.upstream_pypi_version(data, locked) == expected
+
+
+def test_sync_keeps_final_pin_current_when_release_candidate_exists(tmp_path, monkeypatch) -> None:
+    body = b"wheel-bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    wheel = {
+        "filename": "dhanhq-2.3.0-py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "python_version": "py3",
+        "url": "https://files.example/dhanhq.whl",
+        "digests": {"sha256": digest},
+    }
+    rc_wheel = {
+        "filename": "dhanhq-2.4.0rc1-py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "python_version": "py3",
+        "url": "https://files.example/dhanhq-rc.whl",
+        "digests": {"sha256": digest},
+    }
+    release = {
+        "info": {"version": "2.4.0rc1"},
+        "releases": {"2.3.0": [wheel], "2.4.0rc1": [rc_wheel]},
+    }
+
+    def opener(url: str) -> tuple[int, bytes]:
+        if url == "https://pypi.org/pypi/dhanhq/json":
+            return 200, json.dumps(release).encode("utf-8")
+        if url == "https://files.example/dhanhq.whl":
+            return 200, body
+        raise AssertionError(url)
+
+    monkeypatch.setattr(syncer, "load_broker_lock", lambda _path: [{"name": "dhanhq", "version": "2.3.0"}])
+    monkeypatch.setattr(
+        syncer,
+        "sync_git_mirror",
+        lambda _source, _audit_root: {"path": "repo", "remote": "origin", "head": "abc", "describe": "abc"},
+    )
+
+    manifest = syncer.sync(audit_root=tmp_path / "audit", check_missing=False, opener=opener)
+
+    assert manifest["sdks"][0]["pypi_latest_version"] == "2.3.0"
+    assert manifest["sdks"][0]["pypi_current"] is True
+    assert manifest["drift"] == []

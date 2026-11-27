@@ -22,7 +22,7 @@ def test_pin_rejects_floating_or_noncanonical_commits(
     (tmp_path / "brokers.lock").write_text(
         "[[broker]]\n"
         'name = "kotakneoapi"\n'
-        'version = "3.0.9"\n'
+        'version = "3.0.13"\n'
         f'source_commit = "{commit}"\n'
         'homepage = "https://github.com/Kotak-Neo/kotak-neo-python"\n',
         encoding="utf-8",
@@ -39,8 +39,8 @@ def test_pin_rejects_nonofficial_repository(tmp_path: Path, monkeypatch: pytest.
     (tmp_path / "brokers.lock").write_text(
         "[[broker]]\n"
         'name = "kotakneoapi"\n'
-        'version = "3.0.9"\n'
-        'source_commit = "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"\n'
+        'version = "3.0.13"\n'
+        'source_commit = "62cf511106a0810b9ee9afb011230a34f3a12fcc"\n'
         'homepage = "https://example.invalid/Kotak-Neo/kotak-neo-python"\n',
         encoding="utf-8",
     )
@@ -61,7 +61,7 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(
     monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
 
     state = {
-        "kotakneoapi": {"version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": None},
+        "kotakneoapi": {"version": "3.0.13", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": None},
         "neo-api-client": {"version": "2.0.0", "safe_remove": True},
         "namespace_owners": ["kotakneoapi", "neo-api-client"],
     }
@@ -94,13 +94,13 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(
             return subprocess.CompletedProcess(argv, 0, "", "")
         assert argv[5:9] == ["--break-system-packages", "--no-build-isolation", "--no-deps", "--reinstall"]
         assert argv[9:] == [
-            ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3")
+            ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@62cf511106a0810b9ee9afb011230a34f3a12fcc")
         ]
         state["kotakneoapi"] = {
-            "version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True,
+            "version": "3.0.13", "safe_remove": True, "physical_ok": True, "import_ok": True,
             "direct_url": {
                 "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
+                "vcs_info": {"vcs": "git", "commit_id": "62cf511106a0810b9ee9afb011230a34f3a12fcc", "requested_revision": "62cf511106a0810b9ee9afb011230a34f3a12fcc"},
             },
         }
         state["namespace_owners"] = ["kotakneoapi"]
@@ -158,12 +158,12 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
             state.update(
                 {
                     "kotakneoapi": {
-                        "version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True,
+                        "version": "3.0.13", "safe_remove": True, "physical_ok": True, "import_ok": True,
                         "direct_url": {
                             "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
                             "vcs_info": {
                                 "vcs": "git",
-                                "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3",
+                                "commit_id": "62cf511106a0810b9ee9afb011230a34f3a12fcc", "requested_revision": "62cf511106a0810b9ee9afb011230a34f3a12fcc",
                             },
                         },
                     },
@@ -204,7 +204,7 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
         "--no-build-isolation",
         "--no-deps",
         "--force-reinstall",
-        ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"),
+        ("kotakneoapi @ git+https://github.com/Kotak-Neo/kotak-neo-python.git@62cf511106a0810b9ee9afb011230a34f3a12fcc"),
     ]
 
 
@@ -261,7 +261,7 @@ def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) 
         argv = list(map(str, args))
         commands.append(argv)
         if "-c" in argv:
-            return subprocess.CompletedProcess(argv, 0, json.dumps({"kotakneoapi": {"version": "3.0.9", "safe_remove": True}}), "")
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"kotakneoapi": {"version": "3.0.13", "safe_remove": True}}), "")
         if argv[1:3] == ["-m", "pip"]:
             return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -293,9 +293,9 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(ft, "resolve_python", tracked_resolver)
 
-    dist = tmp_path / "kotakneoapi-3.0.9.dist-info"
+    dist = tmp_path / "kotakneoapi-3.0.13.dist-info"
     dist.mkdir()
-    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.9\n")
+    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.13\n")
     (dist / "RECORD").write_text("neo_api_client/__init__.py,,\n")
     package = tmp_path / "neo_api_client"
     package.mkdir()
@@ -304,7 +304,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
         json.dumps(
             {
                 "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-                "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
+                "vcs_info": {"vcs": "git", "commit_id": "62cf511106a0810b9ee9afb011230a34f3a12fcc", "requested_revision": "62cf511106a0810b9ee9afb011230a34f3a12fcc"},
             }
         )
     )
@@ -313,7 +313,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
     from scripts import broker_sdk_environment as sdk_environment
 
     # Synthetic complete source identity; namespace evidence remains RECORD-only.
-    pin = {"version": "3.0.9", "source_commit": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3",
+    pin = {"version": "3.0.13", "source_commit": "62cf511106a0810b9ee9afb011230a34f3a12fcc",
            "source_url": sdk_environment.KOTAK_REPO, "build_files": {
                "neo_api_client/__init__.py": hashlib.sha256((package / "__init__.py").read_bytes()).hexdigest()}}
     monkeypatch.setattr(sdk_environment, "_pins", lambda _names: {"kotakneoapi": pin})
@@ -355,7 +355,7 @@ def test_malformed_provenance_is_repairable_and_fails_closed_if_persistent(
     monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
 
     commands: list[list[str]] = []
-    state = {"kotakneoapi": {"version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": direct_url}, "namespace_owners": ["kotakneoapi"]}
+    state = {"kotakneoapi": {"version": "3.0.13", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": direct_url}, "namespace_owners": ["kotakneoapi"]}
 
     def run(args, **_kwargs):
         argv = list(map(str, args))
@@ -375,9 +375,9 @@ def test_repair_refuses_unproven_namespace_ownership() -> None:
 
     valid_provenance = {
         "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
-        "vcs_info": {"vcs": "git", "commit_id": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3", "requested_revision": "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"},
+        "vcs_info": {"vcs": "git", "commit_id": "62cf511106a0810b9ee9afb011230a34f3a12fcc", "requested_revision": "62cf511106a0810b9ee9afb011230a34f3a12fcc"},
     }
-    state = {"kotakneoapi": {"version": "3.0.9", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": valid_provenance}}
+    state = {"kotakneoapi": {"version": "3.0.13", "safe_remove": True, "physical_ok": True, "import_ok": True, "direct_url": valid_provenance}}
 
     def run(args, **_kwargs):
         argv = list(map(str, args))

@@ -849,9 +849,8 @@ def list_strategies() -> tuple[Any, int]:
 
     Mounted at ``/backtest/strategies`` (not ``/strategies``) because the
     engine's ``strategy_bp`` owns ``/api/v1/strategies`` for live strategy
-    lifecycle. Pre-2026-05-19 both blueprints registered ``/strategies``
-    and Flask first-match-wins silently shadowed this one; Codex caught
-    it in the duplicate-route audit.
+    lifecycle. When both blueprints registered ``/strategies``, Flask's
+    first match silently shadowed this one.
 
     Returns:
         JSON with ``status`` and ``data.strategies`` — a list of objects

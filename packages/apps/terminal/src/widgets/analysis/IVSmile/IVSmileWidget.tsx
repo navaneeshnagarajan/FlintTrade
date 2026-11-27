@@ -491,7 +491,7 @@ function IVSmileWidget(props: WidgetProps) {
         {/* Provenance badge — live requires explicit provenance AND usable curves. */}
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-profit/40 bg-profit/10 px-1.5 py-0.5 text-[10px] font-medium text-profit"
+            className="inline-flex items-center rounded border border-profit/40 bg-profit/10 px-1.5 py-0.5 text-xxs font-medium text-profit"
             role="status"
             aria-label="Showing the live IV smile from the connected broker"
             title="Live IV curves from the connected broker's IV-smile feed."
@@ -500,14 +500,14 @@ function IVSmileWidget(props: WidgetProps) {
           </span>
         ) : loading ? (
           <span
-            className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
+            className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-xxs font-medium text-text-muted"
             role="status"
           >
             Loading
           </span>
         ) : (
           <span
-            className="inline-flex items-center rounded border border-loss/40 bg-loss/10 px-1.5 py-0.5 text-[10px] font-medium text-loss"
+            className="inline-flex items-center rounded border border-loss/40 bg-loss/10 px-1.5 py-0.5 text-xxs font-medium text-loss"
             role="status"
             aria-label="Live IV curves unavailable"
           >

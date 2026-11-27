@@ -17,14 +17,19 @@ vi.mock("framer-motion", () => ({
   },
 }));
 
-vi.mock("@/lib/motion", () => ({
-  motionConfig: {
-    prefersReducedMotion: () => true,
-    duration: { fast: 0, normal: 0, slow: 0 },
-    ease: { enter: [0, 0, 1, 1] },
-    transitions: { scale: { duration: 0 }, tab: { duration: 0 } },
-  },
-}));
+vi.mock("@/lib/motion", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/motion")>();
+  return {
+    ...actual,
+    motionConfig: {
+      ...actual.motionConfig,
+      prefersReducedMotion: () => true,
+      duration: { ...actual.motionConfig.duration, fast: 0, normal: 0, slow: 0 },
+      ease: { ...actual.motionConfig.ease, enter: [0, 0, 1, 1] },
+      transitions: { ...actual.motionConfig.transitions, scale: { duration: 0 }, tab: { duration: 0 } },
+    },
+  };
+});
 
 // Mock hooks that depend on stores
 vi.mock("@/hooks/useSkillLevel", () => ({

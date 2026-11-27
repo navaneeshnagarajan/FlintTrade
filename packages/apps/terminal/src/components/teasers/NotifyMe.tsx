@@ -150,7 +150,7 @@ export function NotifyMe({ config, className }: NotifyMeProps) {
 
       {/* Channel hint */}
       {!subscribed && (
-        <span className="text-[10px] text-text-muted pl-0.5">
+        <span className="text-xxs text-text-muted pl-0.5">
           via {notifyChannel === "telegram" ? "Telegram" : "email"}
         </span>
       )}

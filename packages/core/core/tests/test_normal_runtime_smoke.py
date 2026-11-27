@@ -368,8 +368,8 @@ async def test_normal_factory_runtime_readiness_refusal_and_clean_stop(
         for path in ("/health", "/health/detail"):
             replies.append(await asyncio.to_thread(_request, port, "GET", path, token=locked_live))
         assert [reply["status"] for reply in replies] == [200, 200, 200, 200, 200], replies
-        assert replies[0]["body"]["laya"] == "down"
-        assert replies[0]["body"]["laya_live_qualified"] is False
+        assert replies[0]["body"]["decision_model"] == "down"
+        assert replies[0]["body"]["decision_model_live_qualified"] is False
         assert replies[2]["body"] == {"status": "ready"}
         assert replies[3]["body"]["status"] == "healthy"
         unauthenticated = await asyncio.to_thread(_request, port, "GET", "/api/v1/orders/forever")
@@ -538,7 +538,7 @@ async def test_normal_factory_startup_failure_rolls_back_listener_and_workers(
         assert listener is not None and flask_app is not None
         port = offline_startup["port"]
         ping = await asyncio.to_thread(_request, port, "GET", "/api/v1/ping")
-        assert ping["status"] == 200 and ping["body"]["laya_live_qualified"] is False
+        assert ping["status"] == 200 and ping["body"]["decision_model_live_qualified"] is False
         threads = _owned_threads(baseline)
         assert any(thread.name == "instrument-master-refresh" for thread in threads)
         _emit("rollback-control-started", ping=ping, owned_threads=[thread.name for thread in threads])
@@ -605,17 +605,6 @@ async def test_normal_stop_retains_a_blocked_public_master_owner_until_retry(
         assert flask_app is not None and listener is not None
         owner = flask_app.config["INSTRUMENT_MASTER_REFRESH_OWNER"]
         threads = _owned_threads(baseline)
-        # The lease watcher only notices stop after its revocation poll returns.
-        # A 0.05s shutdown budget is the same length as that poll, so joining
-        # the watcher inside the short stop races the poll. Wait until the
-        # watcher has actually stopped, then keep the short budget for the
-        # blocked public-master owner.
-        watch = flask_app.extensions["flinttrade.backend_lease_watch"]
-
-        def _stop_lease_watch() -> bool:
-            return watch.stop(timeout=2)
-
-        assert await asyncio.to_thread(_stop_lease_watch)
         with pytest.raises(RuntimeError, match="shutdown encountered errors"):
             await runtime.stop(timeout=0.05)
         with pytest.raises(RuntimeError, match="shutdown encountered errors"):

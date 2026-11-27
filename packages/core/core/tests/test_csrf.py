@@ -163,16 +163,16 @@ class TestPublicEndpointBypass:
         assert set(body) == {
             "status",
             "timestamp",
-            "laya",
-            "laya_practice",
-            "laya_live_qualified",
-            "laya_reason",
-            "laya_port",
-            "laya_download_bytes",
-            "laya_download_total",
+            "decision_model",
+            "decision_model_practice",
+            "decision_model_live_qualified",
+            "decision_model_reason",
+            "decision_model_port",
+            "decision_model_download_bytes",
+            "decision_model_download_total",
         }
         assert body["status"] == "ok"
-        assert body["laya"] in {"ready", "degraded", "down"}
+        assert body["decision_model"] in {"ready", "degraded", "down"}
         text = resp.get_data(as_text=True).lower()
         assert "version" not in text
         assert "/home/" not in text

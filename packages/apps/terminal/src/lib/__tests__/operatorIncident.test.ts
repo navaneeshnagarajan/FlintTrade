@@ -116,7 +116,7 @@ describe("shared exit acknowledgement", () => {
     const pad = readFileSync(join(here, "../../widgets/trading/OrderPad/OrderPadWidget.tsx"), "utf8");
     const positions = readFileSync(join(here, "../../widgets/trading/Positions/PositionsWidget.tsx"), "utf8");
     expect(EXIT_REQUESTED).toBe(
-      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+      "Exit requested. Check Positions and Orders for the result.",
     );
     expect(pad).toContain("EXIT_REQUESTED");
     expect(positions).toContain("EXIT_REQUESTED");
@@ -308,16 +308,16 @@ describe("operator incident classifier", () => {
       llmChrome: "ready",
       decisionStatus: "down",
     }));
-    expect(incident?.failureClass).toBe("laya");
+    expect(incident?.failureClass).toBe("decision_model");
     expect(incident?.failureClass).not.toBe("llm_provider");
     expect(incident?.level).toBe("blocked");
     expect(incident?.moneyPath).toBe(true);
     expect(incident?.headline).toBe(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Decision model is down. New orders are paused until it's ready. Closing positions still works.",
     );
     expect(incident?.headline).not.toContain("Laya — Laya");
-    expect(incident?.headline).not.toContain("Decision");
-    expect(incident?.plainClass).toBe("Laya");
+    expect(incident?.headline).not.toContain("Laya");
+    expect(incident?.plainClass).toBe("decision model");
     expect(liveWritesMuted(incident)).toBe(true);
     expect(brokerSessionDarkened(incident)).toBe(false);
     expect(
@@ -364,12 +364,12 @@ describe("operator incident classifier", () => {
     ).toBe("Connected");
   });
 
-  it("prefers Laya Down over a Chat incident", () => {
+  it("prefers Decision model Down over a Chat incident", () => {
     const incident = classifyOperatorSignals(signals({
       llmChrome: "error",
       decisionStatus: "down",
     }));
-    expect(incident?.failureClass).toBe("laya");
+    expect(incident?.failureClass).toBe("decision_model");
     expect(liveWritesMuted(incident)).toBe(true);
   });
 

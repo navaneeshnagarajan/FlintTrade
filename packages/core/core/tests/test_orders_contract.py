@@ -1,7 +1,7 @@
 """Contract test — `packages/apps/terminal/src/services/api.ts` ↔ Flask order routes.
 
 This file does NOT test runtime behaviour. It is a static parity check that
-catches the exact kind of bug the 2026-05-19 Codex stop-gate review surfaced:
+catches frontend and backend order routes drifting apart, as they did before:
 
 - `dcebc35` flipped the backend ``orders_bp`` prefix from ``/v1/orders`` to
   ``/api/v1/orders`` to match the frontend.

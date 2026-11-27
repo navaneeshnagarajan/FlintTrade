@@ -156,7 +156,7 @@ function useLayaChip() {
     setStarting(true);
     setStartNote(null);
     try {
-      const response = await fetch(`${getBase()}/api/v1/laya/start`, {
+      const response = await fetch(`${getBase()}/api/v1/decision-model/start`, {
         method: "POST",
         headers: buildHeaders(true),
       });
@@ -277,7 +277,7 @@ function LayaActions({
   /** The popover always names the state. The stacked row already shows it as its value. */
   showFallbackReason?: boolean;
 }) {
-  const reason = chip.plainReason ?? (showFallbackReason ? `Laya ${chip.decision}` : null);
+  const reason = chip.plainReason ?? (showFallbackReason ? `Decision model ${chip.decision}` : null);
   return (
     <div className="mt-2 space-y-2">
       {reason ? (
@@ -293,7 +293,7 @@ function LayaActions({
       ) : null}
       {chip.ollamaRoute ? null : (
         <a data-testid="laya-start-docs" href={LAYA_START_DOCS_HREF} className="underline">
-          How to start Laya
+          How to start the decision model
         </a>
       )}
       {chip.offerStart ? (
@@ -319,7 +319,7 @@ export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" |
     return (
       <div
         role="group"
-        aria-label="Broker, Laya, and LLM status"
+        aria-label="Broker, decision model, and LLM status"
         data-testid="desk-status"
         className="divide-y divide-border-subtle"
       >
@@ -332,7 +332,7 @@ export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" |
         />
         <StatusRow
           testId="laya-surface"
-          name="Laya"
+          name="Decision model"
           description={description}
           value={chip.decision}
           tone={decisionDot(chip.decision)}
@@ -355,7 +355,7 @@ export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" |
   return (
     <div
       role="group"
-      aria-label="Broker, Laya, and LLM status"
+      aria-label="Broker, decision model, and LLM status"
       data-testid="desk-status"
       className="flex items-center gap-2 text-xxs text-text-muted"
     >
@@ -368,14 +368,14 @@ export function DeskStatusCluster({ variant = "inline" }: { variant?: "inline" |
             data-testid="laya-surface"
             className={`${decisionTextTone} underline-offset-2 hover:underline`}
             title={chip.tooltip}
-            aria-label={chip.plainReason ? `Laya ${chip.decision}. ${chip.plainReason}` : `Laya ${chip.decision}`}
+            aria-label={chip.plainReason ? `Decision model ${chip.decision}. ${chip.plainReason}` : `Decision model ${chip.decision}`}
             data-laya-reason={chip.shownReason ?? ""}
             data-laya-live-reason={chip.liveReason ?? ""}
           >
-            Laya {chip.decision}
+            Decision model {chip.decision}
           </button>
         </PopoverTrigger>
-        <PopoverContent aria-label="Laya status" className="w-64 space-y-2 p-3 text-xs">
+        <PopoverContent aria-label="Decision model status" className="w-64 space-y-2 p-3 text-xs">
           <LayaActions chip={chip} />
         </PopoverContent>
       </Popover>

@@ -508,7 +508,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
                   <p className="text-xs text-text-muted leading-relaxed">
                     LLM not configured.
                   </p>
-                  <p className="text-[10px] text-text-muted/60 leading-relaxed">
+                  <p className="text-xxs text-text-muted/60 leading-relaxed">
                     Open Settings &rarr; AI to set up your provider.
                   </p>
                 </div>
@@ -558,7 +558,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
 
         {/* Footer */}
         <div className="px-3.5 py-1.5 border-t border-border-default shrink-0">
-          <p className="text-center text-[10px] text-text-muted/60 leading-none">
+          <p className="text-center text-xxs text-text-muted/60 leading-none">
             Powered by FlintTrade AI
           </p>
         </div>

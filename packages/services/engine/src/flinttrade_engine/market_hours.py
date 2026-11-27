@@ -70,9 +70,19 @@ class SpecialTradingSession:
 #: NSE/CMTR/77355 and NSE/FAOP/77356, both 6 Nov 2026, effective 7 Dec 2026,
 #: following SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 (15 Oct 2026).
 _CAS_REVISION = date(2026, 12, 7)
+#: First session date of the closing auction rules, which moved the F&O close
+#: from 15:30 to 15:40.
+_FNO_AUCTION_START = date(2026, 8, 3)
 _NFO_OPEN = time(9, 15)
+_NFO_CLOSE_BEFORE_AUCTION = time(15, 30)
 _NFO_CLOSE_BEFORE_REVISION = time(15, 40)
 _NFO_CLOSE_REVISED = time(15, 45)
+#: NFO and BFO close by session date, latest window first. A session before
+#: every listed date uses the 15:30 close.
+_NFO_CLOSE_WINDOWS: tuple[tuple[date, time], ...] = (
+    (_CAS_REVISION, _NFO_CLOSE_REVISED),
+    (_FNO_AUCTION_START, _NFO_CLOSE_BEFORE_REVISION),
+)
 _NFO_EXPIRING_INDEX_CLOSE = time(15, 30)
 _DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO"})
 _CASH_EXCHANGES = frozenset({"NSE", "BSE"})
@@ -81,8 +91,9 @@ _AUCTION_ORDER_ENTRY_START = time(15, 31)
 _AUCTION_RANDOM_CLOSE = time(15, 38)
 
 #: Standard market hours per exchange segment. Tuple of (open_time, close_time).
-#: NFO and BFO 15:40 are the closes before 7 Dec 2026. ``get_market_hours``
-#: applies the later close from that date to both segments. SEBI circular
+#: NFO and BFO list the 15:40 close used from 3 Aug to 6 Dec 2026.
+#: ``get_market_hours`` applies the close for the session date to both
+#: segments. SEBI circular
 #: HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 sections 4.2.4 and 4.2.5 bind
 #: every recognised exchange.
 STANDARD_HOURS: dict[str, tuple[time, time]] = {
@@ -287,9 +298,10 @@ def cash_auction_order_entry(at: datetime) -> bool | None:
 
 
 def _nfo_segment_close(target_date: date) -> time:
-    if target_date >= _CAS_REVISION:
-        return _NFO_CLOSE_REVISED
-    return _NFO_CLOSE_BEFORE_REVISION
+    for starts, close in _NFO_CLOSE_WINDOWS:
+        if target_date >= starts:
+            return close
+    return _NFO_CLOSE_BEFORE_AUCTION
 
 
 def _contract_parts(symbol: str) -> tuple[str, str] | None:
@@ -379,6 +391,7 @@ def derivative_contract_close(
     """Close for one derivatives contract, or None when that must stay shut.
 
     A special session, including Muhurat, wins over the ordinary close.
+    Before 7 Dec 2026 every contract takes the segment close for its date.
     From 7 Dec 2026, SEBI sections 4.2.4 and 4.2.5 keep stock derivatives
     on NSE and BSE open until 15:45 every day, including expiry day. An
     index contract stops at 15:30 on the expiry read from its symbol.
@@ -401,11 +414,11 @@ def derivative_contract_close(
         return special.close_time
     if venue not in _DERIVATIVE_EXCHANGES:
         try:
-            return get_standard_hours(venue)[1]
+            return get_standard_hours(venue, target_date)[1]
         except ValueError:
             return None
     if target_date < _CAS_REVISION:
-        return _NFO_CLOSE_BEFORE_REVISION
+        return _nfo_segment_close(target_date)
     if symbol is None or not symbol.strip():
         return _NFO_CLOSE_REVISED
     parsed = _contract_parts(symbol)
@@ -435,11 +448,15 @@ def derivative_contract_close(
     return _NFO_CLOSE_REVISED
 
 
-def get_standard_hours(exchange: str) -> tuple[time, time]:
+def get_standard_hours(exchange: str, on: date | None = None) -> tuple[time, time]:
     """Return the standard (open, close) times for an exchange.
+
+    NFO and BFO close by session date, the same as :func:`get_market_hours`
+    without special sessions.
 
     Args:
         exchange: Exchange code (e.g. "NSE", "MCX").
+        on: Session date. Defaults to today in IST.
 
     Returns:
         Tuple of (open_time, close_time) in IST.
@@ -453,6 +470,9 @@ def get_standard_hours(exchange: str) -> tuple[time, time]:
             f"Unknown exchange: {exchange!r}. "
             f"Supported: {', '.join(sorted(STANDARD_HOURS.keys()))}"
         )
+    if exchange in _DERIVATIVE_EXCHANGES:
+        session_date = on if on is not None else datetime.now(_IST).date()
+        return (_NFO_OPEN, _nfo_segment_close(session_date))
     return hours
 
 
@@ -488,10 +508,7 @@ def get_market_hours(
         )
         return (special.open_time, special.close_time)
 
-    if exchange in _DERIVATIVE_EXCHANGES:
-        return (_NFO_OPEN, _nfo_segment_close(target_date))
-
-    return get_standard_hours(exchange)
+    return get_standard_hours(exchange, target_date)
 
 
 def add_special_session(session: SpecialTradingSession) -> None:

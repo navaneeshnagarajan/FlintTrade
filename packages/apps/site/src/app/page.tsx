@@ -1,15 +1,13 @@
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
 import { ArrowRight, Bot, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
-import Image from 'next/image';
 import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
-import SectionEnterController from '@/components/section-enter-controller';
+import { ProductOverview } from '@/components/product-overview';
 import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
-import { flinttradeAsset } from '@/lib/site-assets';
 import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
 import { webInstallCommands } from '@/lib/web-install-commands';
 
@@ -70,13 +68,12 @@ export default async function HomePage() {
   const WEB_INSTALL_COMMANDS = webInstallCommands(origin);
 
   return (
-    <main className="site-shell">
+    <main id="site-content" className="site-shell">
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
         <SiteScrollWorld />
       </div>
       <SiteHeader />
-      <SectionEnterController />
 
       <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
@@ -109,7 +106,7 @@ export default async function HomePage() {
             ))}
           </div>
           <p>
-            Open-source self-hosted trading software for
+            Research, practise and review Indian markets. Open-source self-hosted trading software for
             manual orders, automation, and AI-assisted workflows. Practice mode and
             example data work without a broker. It runs in
             the browser from your own machine. A desktop shell comes after a checksummed
@@ -121,20 +118,6 @@ export default async function HomePage() {
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
               <div key={item}>{item}</div>
-            ))}
-          </div>
-          <div className="hero-install" aria-labelledby="hero-web-install">
-            <p id="hero-web-install">Install the self-hosted web app. Nothing else needs to be installed first.</p>
-            {WEB_INSTALL_COMMANDS.map((entry) => (
-              <div className="code-panel" key={entry.platform}>
-                <header>
-                  <span>{entry.platform}</span>
-                  <span>terminal</span>
-                </header>
-                <pre>
-                  <code>{entry.command}</code>
-                </pre>
-              </div>
             ))}
           </div>
           <div className="hero-actions">
@@ -160,21 +143,24 @@ export default async function HomePage() {
             <Link href="/docs/desktop">Desktop guide</Link>
           </p>
         </div>
-
-        <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
-          <div className="screenshot-stack">
-            <figure className="screen-frame main">
-              <Image src={flinttradeAsset('screenshots/01-welcome.jpg')} alt="FlintTrade cinematic welcome screen" fill priority sizes="(max-width: 900px) 100vw, 58vw" />
-            </figure>
-            <figure className="screen-frame side">
-              <Image src={flinttradeAsset('screenshots/04-trade.png')} alt="FlintTrade trade canvas" fill sizes="(max-width: 900px) 46vw, 22vw" />
-            </figure>
-            <figure className="screen-frame float">
-              <Image src={flinttradeAsset('screenshots/06-lab.png')} alt="Strategy lab" fill sizes="(max-width: 900px) 42vw, 20vw" />
-            </figure>
-          </div>
-        </div>
       </section>
+
+      <section className="install-commands" aria-labelledby="hero-web-install">
+        <p id="hero-web-install">Install the self-hosted web app. Nothing else needs to be installed first.</p>
+        {WEB_INSTALL_COMMANDS.map((entry) => (
+          <div className="code-panel" key={entry.platform}>
+            <header>
+              <span>{entry.platform}</span>
+              <span>terminal</span>
+            </header>
+            <pre>
+              <code>{entry.command}</code>
+            </pre>
+          </div>
+        ))}
+      </section>
+
+      <ProductOverview />
 
       <section className="section">
         <div className="metric-rail" aria-label="Project facts">
@@ -197,7 +183,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="1">
+      <section className="section">
         <div className="section-heading">
           <h2>The site is generated from the repository.</h2>
           <p>
@@ -219,7 +205,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column section-enter" data-scroll-chapter="2">
+      <section className="section two-column">
         <div className="section-heading">
           <h2>Docs, API, and contribution pages.</h2>
           <p>
@@ -237,7 +223,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column section-enter" data-scroll-chapter="3">
+      <section className="section two-column" data-scroll-chapter="4">
         <div className="code-panel">
           <header>
             <span>Contributor MCP</span>
@@ -269,7 +255,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="4">
+      <section className="section" data-scroll-chapter="5">
         <div className="section-heading">
           <h2>Package index.</h2>
           <p>
@@ -287,9 +273,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <div data-scroll-chapter="5">
-        <SiteFooter />
-      </div>
+      <SiteFooter />
     </main>
   );
 }

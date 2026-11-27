@@ -24,6 +24,7 @@ import { Plus, X, RefreshCw, AlertCircle, Target, ArrowLeft } from "lucide-react
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { RRG_QUADRANT_COLOURS } from "./RRGCanvas";
 import type { RRGResponse, SectorConstituentsResponse } from "@/services/ftApi";
 import { getPortfolioRRGData, getSectorConstituents } from "@/services/ftApi";
@@ -510,7 +511,7 @@ const DrillDownPanel = memo(function DrillDownPanel({ sector, onBack }: DrillDow
         </Button>
         <span className="text-xs font-semibold text-text-primary font-mono">{sector}</span>
         <span className="text-xxs text-text-muted">Constituents</span>
-        
+        {data != null && data.is_sample_data !== false && <ExampleDataBadge />}
         <div className="flex-1" />
         <Button
           type="button"
@@ -655,7 +656,7 @@ export const PortfolioRRGView = memo(function PortfolioRRGView() {
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} />
           </Button>
         )}
-        
+        {data != null && data.is_sample_data !== false && <ExampleDataBadge />}
       </div>
 
       {/* Symbol chips */}

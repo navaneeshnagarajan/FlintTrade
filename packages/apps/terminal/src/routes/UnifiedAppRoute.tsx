@@ -66,11 +66,9 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   const [notice, setNotice] = useState("");
   const [compact, setCompact] = useState(false);
   const [layoutOpen, setLayoutOpen] = useState(false);
-  const [linksOpen, setLinksOpen] = useState(false);
-  // An open toolbar panel borrows height from the desk. That must not flip a
-  // wide desk into the one-panel compact view, so only width decides then.
-  const toolbarPanelOpen = useRef(false);
-  toolbarPanelOpen.current = layoutOpen || linksOpen;
+  const [presetValue, setPresetValue] = useState("");
+  // Width is the only compact trigger. A 1280x720 desk must keep every
+  // docked book visible; height must not flip a wide desk into one panel.
   const layoutPanelId = useId();
   const importInput = useRef<HTMLInputElement>(null);
   const [revision, setRevision] = useState(0);
@@ -98,7 +96,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
   }, [active, model, persist]);
   useEffect(() => {
     if (!active || !host.current) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760 || (entry.contentRect.height < 330 && !toolbarPanelOpen.current)));
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 760));
     observer.observe(host.current);
     return () => observer.disconnect();
   }, [active]);
@@ -168,8 +166,14 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       const document: unknown = JSON.parse(await file.text());
       const envelope = document as { version?: unknown; app?: unknown; layout?: unknown };
       if (envelope?.version !== 1 || envelope.app !== app || !validateAppLayout(app, envelope.layout)) throw new Error("Not a compatible fresh app layout. Authority and legacy layouts cannot be imported.");
-      setModel(Model.fromJson(envelope.layout)); setNotice("Imported presentation layout; execution unchanged.");
-    } catch (e) { setError(String(e)); }
+      setModel(Model.fromJson(envelope.layout));
+      setError("");
+      setNotice("Layout imported.");
+      setPresetValue("");
+    } catch (e) {
+      setNotice("");
+      setError(String(e));
+    }
   }
   // Activity belongs INSIDE the ref-dependent docking tree. Hiding Layout
   // itself detaches its ref and makes its next render unmount every widget.
@@ -212,7 +216,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
       if (validateAppLayout(app, saved)) { setModel(Model.fromJson(saved)); setNotice(`Restored ${name}`); }
     } catch (e) { setError(String(e)); }
   }
-  return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app">
+  return <section className="flex h-full min-h-0 flex-col" aria-label={`${meta.name} app`} data-testid="unified-app" data-app-chrome={app}>
     <Activity mode={active ? "visible" : "hidden"}>
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border-default bg-surface-base px-3 py-1.5" data-testid="app-toolbar">
       <h1 className={cn("shrink-0 font-heading text-sm font-semibold text-text-primary", compact && "sr-only")}>{meta.name}</h1>
@@ -227,7 +231,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
         </Button>
         <div id={layoutPanelId} role="group" aria-label={`${meta.name} layout`} hidden={!layoutOpen} className="order-last flex basis-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border-default bg-surface-card px-3 py-2">
           <label className="flex min-w-0 items-center gap-1.5 text-xs text-text-secondary">Preset
-            <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} defaultValue="" onChange={e => { if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
+            <NativeSelect controlSize="sm" aria-label={`${meta.name} preset`} value={presetValue} onChange={e => { setPresetValue(e.target.value); if (e.target.value) setModel(Model.fromJson(buildAppPreset(app, e.target.value))); }}><option value="" disabled>Choose a layout</option>{APP_PRESETS[app].map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</NativeSelect>
           </label>
           <span className="flex min-w-0 items-center gap-1.5">
             <Input aria-label="Layout name" value={layoutName} onChange={e => setLayoutName(e.target.value)} placeholder="Name this layout" className="h-8 w-40 min-w-0 text-xs md:text-xs" />
@@ -243,7 +247,7 @@ export default function UnifiedAppRoute({ app, active = true }: { app: AppId; ac
           <p className="basis-full text-xs text-text-muted">Presentation only. Saved named layouts and all non-layout records are retained.</p>
         </div>
       </div>
-      <InstrumentLinks app={app} compact={compact} onOpenChange={setLinksOpen} />
+      <InstrumentLinks app={app} compact={compact} />
     </div>
     {app === "terminal" && <PracticeLaterSetup />}
     {error && <p role="alert" className="flex shrink-0 items-start gap-2 border-b border-warning/30 bg-warning/[0.08] px-3 py-1.5 text-xs text-[var(--color-warning-text,var(--color-warning))]"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="ghost" size="icon-xs" aria-label="Dismiss message" onClick={() => setError("")}><X aria-hidden="true" /></Button></p>}

@@ -84,9 +84,9 @@ def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> Non
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["code"] == "laya_denied"
+    assert body["code"] == "decision_model_denied"
     assert body["reason"] == body["message"]
-    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert body["reason"] == "Not placed. Decision model is down. Start it from Status."
     assert "Practice orders are blocked" not in body["reason"]
     assert "Live" not in body["reason"]
     assert "limits" not in body
@@ -106,8 +106,8 @@ def test_live_clamp_stops_before_safety_and_names_the_reduced_quantity(backend_l
     )
     body = response.get_json()
     assert response.status_code == 409
-    assert body["code"] == "laya_clamp"
-    assert body["message"] == "Not placed. Laya allows up to 100."
+    assert body["code"] == "decision_model_clamp"
+    assert body["message"] == "Not placed. Decision model allows up to 100."
     assert body["applied_quantity"] == 100
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -125,7 +125,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     # Portfolio state is not stubbed here. Passing Laya reaches that safety
     # gather and stops there, which is past admission and short of a write.
     assert inside.status_code == 503
-    assert inside.get_json().get("code") not in {"laya_denied", "laya_clamp"}
+    assert inside.get_json().get("code") not in {"decision_model_denied", "decision_model_clamp"}
     assert "safety state" in inside.get_json()["message"].lower()
     router.place_order.assert_not_called()
 
@@ -138,8 +138,8 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     )
     over_body = over.get_json()
     assert over.status_code == 409
-    assert over_body["code"] == "laya_clamp"
-    assert over_body["message"] == "Not placed. Laya allows up to 1."
+    assert over_body["code"] == "decision_model_clamp"
+    assert over_body["message"] == "Not placed. Decision model allows up to 1."
     assert over_body["limits"]["max_quantity"] == 1
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -156,7 +156,7 @@ def test_client_cannot_mark_an_operator_place_as_chat(backend_lease_proof) -> No
     )
     assert response.status_code == 503
     body = response.get_json()
-    assert body.get("code") != "laya_denied"
+    assert body.get("code") != "decision_model_denied"
     assert "Chat" not in body["message"]
     assert "safety state" in body["message"].lower()
     router.place_order.assert_not_called()
@@ -229,8 +229,8 @@ def test_practice_down_denies_before_the_sandbox() -> None:
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["code"] == "laya_denied"
-    assert body["reason"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert body["code"] == "decision_model_denied"
+    assert body["reason"] == "Not placed. Decision model is down. Start it from Status."
     assert "Practice orders are blocked" not in json.dumps(body)
     assert "Live" not in body["reason"]
     assert "limits" not in body
@@ -248,8 +248,8 @@ def test_unqualified_ready_live_names_the_qualification_requirement(backend_leas
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["code"] == "laya_denied"
-    assert body["reason"] == "Laya isn't qualified for Live yet. Practice orders are available."
+    assert body["code"] == "decision_model_denied"
+    assert body["reason"] == "Decision model not qualified for Live. Use Practice."
     assert "Orders are paused" not in body["reason"]
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -266,7 +266,7 @@ def test_unqualified_degraded_live_uses_the_same_sentence(backend_lease_proof) -
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["reason"] == "Laya isn't qualified for Live yet. Practice orders are available."
+    assert body["reason"] == "Decision model not qualified for Live. Use Practice."
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
 
@@ -354,9 +354,9 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
     )
     body = response.get_json()
     assert response.status_code == 409
-    assert body["code"] == "laya_clamp"
-    assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
-    assert body["message"] == "Not placed. Laya allows up to 1."
+    assert body["code"] == "decision_model_clamp"
+    assert body["reason"] == "Decision model uncertain. Quantity held to the tighter limit."
+    assert body["message"] == "Not placed. Decision model allows up to 1."
     assert "concrete reason is required" not in json.dumps(body)
     assert "Live" not in body["reason"]
     sandbox.place_order.assert_not_called()
@@ -368,7 +368,7 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
         headers=_headers("practice"),
     )
     assert blank.status_code == 409
-    assert blank.get_json()["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert blank.get_json()["reason"] == "Decision model uncertain. Quantity held to the tighter limit."
     assert host.calls == []
     sandbox.place_order.assert_not_called()
 
@@ -423,8 +423,8 @@ def test_place_one_on_allows_up_to_one_places() -> None:
     )
     body = first.get_json()
     assert first.status_code == 409
-    assert body["code"] == "laya_clamp"
-    assert body["message"] == "Not placed. Laya allows up to 1."
+    assert body["code"] == "decision_model_clamp"
+    assert body["message"] == "Not placed. Decision model allows up to 1."
     sandbox.place_order.assert_not_called()
     second = app.test_client().post(
         "/api/v1/orders/place",
@@ -446,7 +446,7 @@ def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None
     )
     body = first.get_json()
     assert first.status_code == 409
-    assert body["message"] == "Not placed. Laya allows up to 100."
+    assert body["message"] == "Not placed. Decision model allows up to 100."
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
     second = app.test_client().post(
@@ -455,7 +455,7 @@ def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None
         headers=_headers("live", unlocked=True),
     )
     assert second.status_code == 503
-    assert second.get_json().get("code") not in {"laya_denied", "laya_clamp"}
+    assert second.get_json().get("code") not in {"decision_model_denied", "decision_model_clamp"}
     router.place_order.assert_not_called()
 
 
@@ -472,8 +472,8 @@ def test_live_place_without_a_note_denies_as_uncertain(backend_lease_proof) -> N
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["code"] == "laya_denied"
-    assert body["reason"] == "Laya is uncertain. Live stays closed."
+    assert body["code"] == "decision_model_denied"
+    assert body["reason"] == "Decision model uncertain. Live stays closed."
     assert "concrete reason is required" not in json.dumps(body)
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -492,7 +492,7 @@ def test_practice_model_deny_never_reaches_the_sandbox() -> None:
         headers=_headers("practice"),
     )
     assert response.status_code == 403
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     sandbox.place_order.assert_not_called()
     assert host.calls
 
@@ -524,7 +524,7 @@ def test_live_model_deny_stops_before_safety_and_the_router(backend_lease_proof)
         headers=_headers("live", unlocked=True),
     )
     assert response.status_code == 403
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
 

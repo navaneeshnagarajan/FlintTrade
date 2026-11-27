@@ -1,0 +1,864 @@
+{
+  "cases": [
+    {
+      "name": "nfo option market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "options-market-order-not-sent",
+          "message": "Market orders aren't accepted on options. Use a limit price."
+        }
+      ]
+    },
+    {
+      "name": "nfo option market before rule",
+      "on": "2025-08-03",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {},
+      "expected": []
+    },
+    {
+      "name": "nfo option stop market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL-M",
+        "trigger_price": "80"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "options-stop-market-not-sent",
+          "message": "Stop-market orders aren't accepted on options. Use stop-limit."
+        }
+      ]
+    },
+    {
+      "name": "bfo option stop market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL-M",
+        "trigger_price": "80"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "options-stop-market-not-sent",
+          "message": "Stop-market orders aren't accepted on options. Use stop-limit."
+        }
+      ]
+    },
+    {
+      "name": "bse stop limit just inside 20%",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "100",
+        "price": "80"
+      },
+      "context": {},
+      "expected": []
+    },
+    {
+      "name": "bse stop limit just outside 20%",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "100",
+        "price": "79.95"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "block",
+          "source": "Exchange",
+          "rule_id": "bse-stop-limit-gap",
+          "message": "Stop-loss limit must be within ₹20 of trigger."
+        }
+      ]
+    },
+    {
+      "name": "bse stop limit just inside 10 rupees",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "50",
+        "price": "40"
+      },
+      "context": {},
+      "expected": []
+    },
+    {
+      "name": "bse stop limit just outside 10 rupees",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "50",
+        "price": "39.95"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "block",
+          "source": "Exchange",
+          "rule_id": "bse-stop-limit-gap",
+          "message": "Stop-loss limit must be within ₹10 of trigger."
+        }
+      ]
+    },
+    {
+      "name": "bse stop limit day before rule",
+      "on": "2026-02-08",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "50",
+        "price": "39.95"
+      },
+      "context": {},
+      "expected": []
+    },
+    {
+      "name": "nse stop limit wide gap is not checked",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "50",
+        "price": "30"
+      },
+      "context": {},
+      "expected": []
+    },
+    {
+      "name": "nse limit inside band",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "140"
+      },
+      "context": {
+        "last_price": "100"
+      },
+      "expected": []
+    },
+    {
+      "name": "nse limit just outside band",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "140.05"
+      },
+      "context": {
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-limit-price-protection-options",
+          "message": "Price may be outside the exchange band (₹60–₹140)."
+        }
+      ]
+    },
+    {
+      "name": "nse cheap option 20 rupee floor",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "30.05"
+      },
+      "context": {
+        "last_price": "10"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-limit-price-protection-options",
+          "message": "Price may be outside the exchange band (₹0.05–₹30)."
+        }
+      ]
+    },
+    {
+      "name": "bse cheap option 20 rupee floor",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "25"
+      },
+      "context": {
+        "last_price": "10",
+        "expiry_day": false
+      },
+      "expected": []
+    },
+    {
+      "name": "sensex expiry day 10 rupee floor",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "25"
+      },
+      "context": {
+        "last_price": "10",
+        "expiry_day": true
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "bse-lpp-sensex-expiry-day",
+          "message": "Price may be outside the exchange band (₹0.05–₹20)."
+        }
+      ]
+    },
+    {
+      "name": "sensex expiry day inside 10 rupee floor",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "20"
+      },
+      "context": {
+        "last_price": "10",
+        "expiry_day": true
+      },
+      "expected": []
+    },
+    {
+      "name": "sensex expiry day before rule uses 20 floor",
+      "on": "2026-03-11",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "25"
+      },
+      "context": {
+        "last_price": "10",
+        "expiry_day": true
+      },
+      "expected": []
+    },
+    {
+      "name": "kotak option market no trade today",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {
+        "broker": "kotakneo",
+        "broker_name": "Kotak Neo",
+        "traded_today": false
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Exchange",
+          "rule_id": "market-order-needs-trade-today",
+          "message": "This contract hasn't traded today. Use a limit price."
+        },
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "options-market-order-not-sent",
+          "message": "Market orders aren't accepted on options. Use a limit price."
+        }
+      ]
+    },
+    {
+      "name": "dhan future market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOVFUT",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {
+        "broker": "dhan",
+        "broker_name": "Dhan"
+      },
+      "expected": [
+        {
+          "level": "info",
+          "source": "Dhan",
+          "rule_id": "dhan-market-price-protection",
+          "message": "Market orders are sent as limits near the last price and may not fill."
+        }
+      ]
+    },
+    {
+      "name": "practice equity market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {
+        "broker": "practice",
+        "broker_name": "Practice"
+      },
+      "expected": [
+        {
+          "level": "info",
+          "source": "Practice",
+          "rule_id": "practice-market-price-cap",
+          "message": "Market orders fill within 3% of the last price."
+        }
+      ]
+    },
+    {
+      "name": "kotak separate stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "kotakneo",
+        "broker_name": "Kotak Neo",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "info",
+          "source": "Kotak Neo",
+          "rule_id": "broker-separate-stop-loss-target",
+          "message": "Stop-loss and target are placed as separate orders with this broker."
+        }
+      ]
+    },
+    {
+      "name": "dhan separate stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "dhan",
+        "broker_name": "Dhan",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "info",
+          "source": "Dhan",
+          "rule_id": "broker-separate-stop-loss-target",
+          "message": "Stop-loss and target are placed as separate orders with this broker."
+        }
+      ]
+    },
+    {
+      "name": "practice stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "practice",
+        "broker_name": "Practice",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Practice",
+          "rule_id": "practice-bracket-unsupported",
+          "message": "Stop-loss and target aren't supported in Practice."
+        }
+      ]
+    },
+    {
+      "name": "sandbox stop loss and target",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "100",
+        "stop_loss_price": "80",
+        "target_price": "130"
+      },
+      "context": {
+        "broker": "sandbox",
+        "broker_name": "Practice",
+        "last_price": "100"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Practice",
+          "rule_id": "practice-bracket-unsupported",
+          "message": "Stop-loss and target aren't supported in Practice."
+        }
+      ]
+    },
+    {
+      "name": "dhan intraday near square off",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOVFUT",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "24000",
+        "product": "MIS"
+      },
+      "context": {
+        "broker": "dhan",
+        "broker_name": "Dhan",
+        "at_minutes": 920
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Dhan",
+          "rule_id": "dhan-intraday-square-off",
+          "message": "Intraday F&O positions are closed from 15:25. Exit before then."
+        }
+      ]
+    },
+    {
+      "name": "dhan intraday well before square off",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOVFUT",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "24000",
+        "product": "MIS"
+      },
+      "context": {
+        "broker": "dhan",
+        "broker_name": "Dhan",
+        "at_minutes": 900
+      },
+      "expected": []
+    },
+    {
+      "name": "upstox raw future market",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOVFUT",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {
+        "broker": "upstox",
+        "broker_name": "Upstox"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "Exchange",
+          "rule_id": "algo-market-orders-fo-rejected",
+          "message": "Market orders in F&O aren't accepted. Use a limit price."
+        }
+      ]
+    },
+    {
+      "name": "kotak equity market band",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "pricetype": "MARKET"
+      },
+      "context": {
+        "broker": "kotakneo",
+        "broker_name": "Kotak Neo",
+        "last_price": "1500"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Kotak Neo",
+          "rule_id": "kotak-market-price-protection",
+          "message": "Market orders are sent as limits within 0.5% of the last price and may not fill."
+        }
+      ]
+    },
+    {
+      "name": "exact circuit outside",
+      "on": "2026-11-22",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "price": "300"
+      },
+      "context": {
+        "last_price": "100",
+        "circuit_low": "0.05",
+        "circuit_high": "250"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-options-operating-range",
+          "message": "Price may be outside the exchange band (₹0.05–₹250)."
+        },
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-limit-price-protection-options",
+          "message": "Price may be outside the exchange band (₹60–₹140)."
+        }
+      ]
+    },
+    {
+      "name": "nse equity stop-loss limit at trigger",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "100",
+        "price": "100"
+      },
+      "context": {},
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "stop-loss-limit-at-trigger",
+          "message": "Limit equals the trigger and may not fill. Set it past the trigger."
+        }
+      ]
+    },
+    {
+      "name": "bfo option stop-loss limit at trigger",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "SENSEX27NOV2680000CE",
+        "exchange": "BFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "40",
+        "price": "40"
+      },
+      "context": {
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "stop-loss-limit-at-trigger",
+          "message": "Limit equals the trigger and may not fill. Set it past the trigger."
+        }
+      ]
+    },
+    {
+      "name": "nfo option stop-loss limit inside band",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "30",
+        "price": "10"
+      },
+      "context": {
+        "last_price": "30"
+      },
+      "expected": []
+    },
+    {
+      "name": "nfo option stop-loss limit past band",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "SL",
+        "trigger_price": "30",
+        "price": "9.95"
+      },
+      "context": {
+        "last_price": "30"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "Exchange",
+          "rule_id": "nse-limit-price-protection-options",
+          "message": "Price may be outside the exchange band (₹10–₹50)."
+        }
+      ]
+    },
+    {
+      "name": "exit ticket within the position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "75"
+      },
+      "context": {
+        "open_quantity": 150,
+        "last_price": "40"
+      },
+      "expected": []
+    },
+    {
+      "name": "exit ticket above the position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "225"
+      },
+      "context": {
+        "open_quantity": 150,
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "warn",
+          "source": "FlintTrade",
+          "rule_id": "exit-quantity-capped",
+          "message": "Quantity reduced to 150, the open position."
+        }
+      ]
+    },
+    {
+      "name": "exit ticket on a closed position",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "exit_only": true,
+        "quantity": "75"
+      },
+      "context": {
+        "open_quantity": 0,
+        "last_price": "40"
+      },
+      "expected": [
+        {
+          "level": "block",
+          "source": "FlintTrade",
+          "rule_id": "exit-position-closed",
+          "message": "Position is closed. Order not sent."
+        }
+      ]
+    },
+    {
+      "name": "ordinary order ignores open quantity",
+      "on": "2026-11-20",
+      "order": {
+        "symbol": "NIFTY25NOV2624000CE",
+        "exchange": "NFO",
+        "action": "SELL",
+        "pricetype": "LIMIT",
+        "price": "40",
+        "quantity": "225"
+      },
+      "context": {
+        "open_quantity": 0,
+        "last_price": "40"
+      },
+      "expected": []
+    }
+  ],
+  "stop_loss_limits": [
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "50",
+      "on": "2026-11-20",
+      "limit": "40.00"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "BUY",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "40.00"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "50.05",
+      "on": "2026-11-20",
+      "limit": "40.05"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "BUY",
+      "trigger": "250.35",
+      "on": "2026-11-20",
+      "limit": "300.40"
+    },
+    {
+      "symbol": "SENSEX27NOV2680000CE",
+      "exchange": "BFO",
+      "exit_action": "SELL",
+      "trigger": "40",
+      "on": "2026-11-27",
+      "limit": "30.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "10.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "BUY",
+      "trigger": "30",
+      "on": "2026-11-20",
+      "limit": "50.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "250.35",
+      "on": "2026-11-20",
+      "limit": "150.25"
+    },
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "exit_action": "SELL",
+      "trigger": "200",
+      "on": "2026-11-20",
+      "limit": "190.00"
+    },
+    {
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "exit_action": "BUY",
+      "trigger": "33.33",
+      "on": "2026-11-20",
+      "limit": "34.95"
+    },
+    {
+      "symbol": "NIFTY25NOVFUT",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "22000",
+      "on": "2026-11-20",
+      "limit": "20900.00"
+    },
+    {
+      "symbol": "NIFTY25NOV2624000CE",
+      "exchange": "NFO",
+      "exit_action": "SELL",
+      "trigger": "0.10",
+      "on": "2026-11-20",
+      "limit": "0.05"
+    }
+  ]
+}

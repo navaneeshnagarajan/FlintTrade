@@ -95,6 +95,7 @@ vi.mock("@/lib/utils", () => ({
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
+import { useModeStore } from "@/stores/modeStore";
 import OrderFlowWidget from "../OrderFlowWidget";
 
 // ---------------------------------------------------------------------------
@@ -618,13 +619,13 @@ describe("OrderFlowWidget", () => {
     const status = screen.getByTestId("order-flow-menu-status");
     const legend = screen.getByTestId("order-flow-compact-legend");
     const menu = screen.getByTestId("order-flow-compact-menu");
-    // Read the authored declarations directly. jsdom 30 resolves `rem` units
-    // in computed styles and cannot compute Radix's runtime custom property,
-    // while the browser still receives these exact inline constraints.
+    // Read the authored declarations directly. jsdom cannot compute Radix's
+    // runtime custom property, and jsdom 31 serializes `calc(100vw - 1rem)`
+    // as `calc(-1rem + 100vw)` when the inline style is stored.
     expect(menu.style.maxHeight).toBe(
       "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
     );
-    expect(menu.style.maxWidth).toBe("calc(100vw - 1rem)");
+    expect(["calc(100vw - 1rem)", "calc(-1rem + 100vw)"]).toContain(menu.style.maxWidth);
     expect(menu.style.width).toBe("12rem");
     expect(status).toHaveAccessibleName(`Status: Error. ${errorMessage}`);
 
@@ -817,5 +818,57 @@ describe("OrderFlowWidget", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ isLoading: true }));
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Loading order flow data...")).toBeInTheDocument();
+  });
+});
+
+describe("OrderFlowWidget example-data badge", () => {
+  afterEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+
+  it("labels backend sample buckets in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    const status = screen.getByTestId("order-flow-toolbar-status");
+    expect(within(status).getByTestId("example-data-badge")).toHaveTextContent("Example");
+  });
+
+  it("keeps the label visible in the compact toolbar", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(
+      <div style={{ width: "220px", height: "96px" }}>
+        <OrderFlowWidget {...defaultProps} />
+      </div>,
+    );
+    resizeObservedElement(screen.getByTestId("order-flow-panel"), 220, 96);
+
+    const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
+    expect(within(toolbar).getByTestId("example-data-badge")).toHaveTextContent("Example");
+    expect(within(toolbar).getByRole("button", { name: "More order flow controls" })).toBeInTheDocument();
+  });
+
+  it("leaves the label to the Mode line in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
+  });
+
+  it("shows no badge for live aggregator buckets", () => {
+    useModeStore.setState({ mode: "practice" });
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { interval: 60, is_live: true }) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.queryByTestId("example-data-badge")).not.toBeInTheDocument();
   });
 });

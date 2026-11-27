@@ -1,0 +1,330 @@
+{
+  "synthetic": true,
+  "brokerProof": false,
+  "responses": {
+    "cancelRequested": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "reconciliation_required",
+          "admission_required": true,
+          "authorised": true,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [
+            {
+              "body": {
+                "_op": "cancel",
+                "order_id": "inert-order-1"
+              },
+              "broker_order_id": "inert-order-1",
+              "cause": "broker_ack_not_settlement",
+              "command_id": "cancel-one",
+              "created_at": 1792482339.064878,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "cancel_requested"
+              ],
+              "expected_order": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "notional": "0",
+              "operation": "cancel",
+              "placement_command_id": "command-one",
+              "quantity": 0,
+              "request_digest": "f987dccbba24fe0e65a61550133cbe7f00c95a9875f17ebdf9dd2d3bfd7eed97",
+              "run_id": "bounded-one",
+              "source": "bounded:cc1ecf63c0d8eb136f4c35fc3505e12689cb982e5e5142efddaeeca5c18338fe",
+              "state": "cancel_requested",
+              "updated_at": 1792482339.081094
+            },
+            {
+              "body": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "broker_order_id": "inert-order-1",
+              "cause": "broker_ack_not_settlement",
+              "command_id": "command-one",
+              "created_at": 1792482339.0470476,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "acknowledged"
+              ],
+              "notional": "200",
+              "quantity": 2,
+              "request_digest": "8e477bb18aa985987b42ed36323d4825e001aa43979b2669bc22acc175cfba4a",
+              "run_id": "bounded-one",
+              "source": "bounded:c8b35e864091fe91b56f5d5e7d22ebf57d39ce7e191c7b76b9881f36d7c6c5e8",
+              "state": "acknowledged",
+              "updated_at": 1792482339.0623572
+            }
+          ],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place",
+              "cancel"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.037111,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.0328455,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "edc9d3ef63de4593b16193a9d875538c7cf3fe483772bef15ac71d054ebc3142"
+            },
+            "revoked": false,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": false,
+          "obligations": [
+            "cancel-one",
+            "command-one"
+          ],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "operator_handback_required",
+          "qualification": {
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "evidence_id": "inert-external-proof",
+            "expires_at": 1792482639.0328455,
+            "provenance": "synthetic-inert-external-adapter-only",
+            "runtime_fingerprint": "edc9d3ef63de4593b16193a9d875538c7cf3fe483772bef15ac71d054ebc3142"
+          },
+          "qualification_reason": "current_server_evidence",
+          "qualified": true,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "authorised"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": false,
+        "protection": "operator_handback_required",
+        "run_id": "bounded-one",
+        "state": "authorised",
+        "uncertain": false
+      },
+      "status": "success"
+    },
+    "killBlocked": {
+      "data": {
+        "account": "dhan:inert-account",
+        "actor": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+        "autonomy": {
+          "admission_reason": "kill_switch_latched",
+          "admission_required": true,
+          "authorised": false,
+          "binding": {
+            "account": "dhan:inert-account",
+            "account_id": "inert-account",
+            "actor": "bounded:bounded-one",
+            "broker": "dhan",
+            "config_revision": "config-1",
+            "environment": "live",
+            "policy_revision": "policy-1",
+            "provider_revision": "provider-1",
+            "run_id": "bounded-one",
+            "strategy_revision": "strategy-1"
+          },
+          "commands": [
+            {
+              "body": {
+                "_op": "cancel",
+                "order_id": "inert-order-1"
+              },
+              "broker_order_id": "inert-order-1",
+              "cause": "broker_ack_not_settlement",
+              "command_id": "cancel-one",
+              "created_at": 1792482339.064878,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "cancel_requested"
+              ],
+              "expected_order": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "notional": "0",
+              "operation": "cancel",
+              "placement_command_id": "command-one",
+              "quantity": 0,
+              "request_digest": "f987dccbba24fe0e65a61550133cbe7f00c95a9875f17ebdf9dd2d3bfd7eed97",
+              "run_id": "bounded-one",
+              "source": "bounded:cc1ecf63c0d8eb136f4c35fc3505e12689cb982e5e5142efddaeeca5c18338fe",
+              "state": "cancel_requested",
+              "updated_at": 1792482339.081094
+            },
+            {
+              "body": {
+                "account_id": "inert-account",
+                "action": "BUY",
+                "broker": "dhan",
+                "exchange": "NSE",
+                "order_type": "LIMIT",
+                "price": 100,
+                "product": "CNC",
+                "quantity": 2,
+                "strategy": "bounded:bounded-one",
+                "symbol": "INFY"
+              },
+              "broker_order_id": "inert-order-1",
+              "cause": "broker_ack_not_settlement",
+              "command_id": "command-one",
+              "created_at": 1792482339.0470476,
+              "events": [
+                "pending_admission",
+                "admitted",
+                "dispatched",
+                "acknowledged"
+              ],
+              "notional": "200",
+              "quantity": 2,
+              "request_digest": "8e477bb18aa985987b42ed36323d4825e001aa43979b2669bc22acc175cfba4a",
+              "run_id": "bounded-one",
+              "source": "bounded:c8b35e864091fe91b56f5d5e7d22ebf57d39ce7e191c7b76b9881f36d7c6c5e8",
+              "state": "acknowledged",
+              "updated_at": 1792482339.0623572
+            }
+          ],
+          "configured": true,
+          "grant": {
+            "actions": [
+              "place",
+              "cancel"
+            ],
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "expires_at": 1792482399.037111,
+            "grant_id": "grant-one",
+            "instruments": [
+              {
+                "exchange": "NSE",
+                "symbol": "INFY"
+              }
+            ],
+            "max_commands": 2,
+            "max_loss": 220,
+            "max_order_quantity": 2,
+            "max_total_notional": 220,
+            "max_total_quantity": 2,
+            "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+            "qualification": {
+              "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+              "evidence_id": "inert-external-proof",
+              "expires_at": 1792482639.0328455,
+              "provenance": "synthetic-inert-external-adapter-only",
+              "runtime_fingerprint": "edc9d3ef63de4593b16193a9d875538c7cf3fe483772bef15ac71d054ebc3142"
+            },
+            "revoked": false,
+            "session_expires_at": 1792549800
+          },
+          "native_ready": false,
+          "obligations": [
+            "cancel-one",
+            "command-one"
+          ],
+          "operator": "operator:3d2e9f2e943918a87ae98f10f097afe395fef287c2bc37bbd2ffb87beaee5e2c",
+          "protection": "operator_handback_required",
+          "qualification": {
+            "binding_revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+            "evidence_id": "inert-external-proof",
+            "expires_at": 1792482639.0328455,
+            "provenance": "synthetic-inert-external-adapter-only",
+            "runtime_fingerprint": "edc9d3ef63de4593b16193a9d875538c7cf3fe483772bef15ac71d054ebc3142"
+          },
+          "qualification_reason": "current_server_evidence",
+          "qualified": true,
+          "revision": "01664b24ef508821ae955eb768170ac1103dc4cf8f9e9b2508e156be1ca47ecd",
+          "state": "entries_stopped"
+        },
+        "books": null,
+        "config": {
+          "account_id": "inert-account",
+          "broker": "dhan",
+          "config_revision": "config-1",
+          "policy_revision": "policy-1",
+          "provider_revision": "provider-1",
+          "run_id": "bounded-one",
+          "strategy_revision": "strategy-1"
+        },
+        "entries_armed": false,
+        "environment": "live",
+        "generation": 0,
+        "kind": "strategy",
+        "native_ready": false,
+        "protection": "operator_handback_required",
+        "run_id": "bounded-one",
+        "state": "entries_stopped",
+        "uncertain": false
+      },
+      "status": "success"
+    }
+  }
+}

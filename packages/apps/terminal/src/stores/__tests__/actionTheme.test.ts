@@ -16,7 +16,7 @@ const contrast = (a: string, b: string) => {
 };
 function expectPalette(role: string) {
   const foreground = token(`${role}-foreground`);
-  const normal = token(role === "profit" ? "profit-action" : "confirmation");
+  const normal = token(role === "confirmation" ? "confirmation" : `${role}-action`);
   const normalContrast = contrast(foreground, normal);
   expect(normalContrast).toBeGreaterThanOrEqual(4.5);
   for (const state of ["hover", "pressed"]) {
@@ -38,19 +38,25 @@ describe("opaque action palettes", () => {
       expect(token("profit-action")).toBe(token("profit"));
       expect(token("confirmation")).toBe(theme[mode].colors.accent);
       expect(token("confirmation-foreground")).toBe(theme[mode].colors.accentText);
+      expect(token("loss-foreground")).toBe("#ffffff");
+      expect(token("loss-action")).toBe("#991b1b");
       expectPalette("profit");
       expectPalette("confirmation");
+      expectPalette("loss");
     });
     it(`${theme.id}/${mode} falls back for a legacy custom trading definition`, () => {
       const custom = structuredClone(theme);
       custom.id = "custom-legacy";
       // Persisted pre-contract custom themes have no new foreground field.
       Reflect.deleteProperty(custom[mode].trading, "profitForeground");
+      Reflect.deleteProperty(custom[mode].trading, "lossAction");
+      Reflect.deleteProperty(custom[mode].trading, "lossForeground");
       useThemeStore.getState().addCustomTheme(custom);
       useThemeStore.getState().setTheme(custom.id);
       useThemeStore.getState().setMode(mode);
       expectPalette("profit");
       expectPalette("confirmation");
+      expectPalette("loss");
     });
   }
   for (const value of ["#ffffff", "transparent", "#123", "rgba(0,0,0,.2)"]) {
@@ -60,6 +66,8 @@ describe("opaque action palettes", () => {
       custom.light.colors.accent = value;
       custom.light.colors.accentText = "#ffffff";
       custom.light.trading.profitText = value;
+      custom.light.trading.lossAction = value;
+      custom.light.trading.lossForeground = "#ffffff";
       useThemeStore.getState().addCustomTheme(custom);
       useThemeStore.getState().setTheme(custom.id);
       useThemeStore.getState().setMode("light");
@@ -67,8 +75,10 @@ describe("opaque action palettes", () => {
       expect(token("profit")).toBe(value);
       expect(token("profit-action")).toBe("#166534");
       expect(token("confirmation")).toBe("#166534");
+      expect(token("loss-action")).toBe("#991b1b");
       expectPalette("profit");
       expectPalette("confirmation");
+      expectPalette("loss");
     });
   }
   it("declares both pre-hydration mode fallbacks in the shared token stylesheet", () => {
@@ -78,7 +88,9 @@ describe("opaque action palettes", () => {
     for (const [source, fg] of [[dark, "#0a0a0f"], [light, "#ffffff"]]) {
       expect(source).toContain(`--color-profit-foreground: ${fg}`);
       expect(source).toContain(`--color-confirmation-foreground: ${fg}`);
-      for (const role of ["profit", "confirmation"]) for (const state of ["hover", "pressed"]) {
+      expect(source).toContain("--color-loss-foreground: #ffffff");
+      expect(source).toContain("--color-loss-action: #991b1b");
+      for (const role of ["profit", "confirmation", "loss"]) for (const state of ["hover", "pressed"]) {
         expect(source).toContain(`--color-${role}-${state}:`);
       }
     }

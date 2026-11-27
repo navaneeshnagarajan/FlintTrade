@@ -1,7 +1,7 @@
 """Kotak pure preflight at normal HTTP ingress and the real pinned SDK.
 
 All sessions, books, symbols and ACKs
-are synthetic. Real safety/gate/router/adapter and installed 3.0.8 serialisation
+are synthetic. Real safety/gate/router/adapter and installed 3.0.9 serialisation
 run without broker login; ACK-only correspondence is not eligibility or a fill.
 """
 from __future__ import annotations
@@ -9,13 +9,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
+from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from werkzeug.test import TestResponse as WerkzeugTestResponse
 
 from flinttrade_core.auth_routes import _create_token
 from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
@@ -62,7 +66,19 @@ def kotak_source_identity():
 
 
 @pytest.fixture
-def kotak_stack(route_stack, monkeypatch):
+def kotak_stack(
+    route_stack: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> Iterator[SimpleNamespace]:
+    """Yield the real gate/router/adapter with inert SDK I/O and passive call ledgers.
+
+    Args:
+        route_stack: Existing normal-factory fixture with its retained lease.
+        monkeypatch: Scoped observation hooks, never replacement safety decisions.
+        request: Literal pytest identity for per-request diagnostic correspondence.
+
+    Yields:
+        The synthetic stack; its owned router and facade are closed afterwards.
+    """
     import flinttrade_engine.safety as safety_module
 
     app, source, _unused_sdk, old_router = route_stack
@@ -71,7 +87,8 @@ def kotak_stack(route_stack, monkeypatch):
     gate = SafetyGate()
     stack = SimpleNamespace(
         app=app, source=source, safety=safety, gate=gate, reads=[], minted=[], consumed=[], checked=[],
-        validated=[], invoked=[], wire=[], resolved=[], events=[], violations=[], faults=[], outcome="ack",
+        validated=[], validation_calls=[], invoked=[], wire=[], resolved=[], events=[], violations=[], faults=[],
+        outcome="ack", nodeid=request.node.nodeid, request_ordinal=0, request_invocations=0,
     )
     for name in ("positions", "order_book", "funds", "trade_book", "holdings", "quotes", "margin_calculator"):
         original = getattr(source, name)
@@ -153,10 +170,18 @@ def kotak_stack(route_stack, monkeypatch):
 
     original_validate = M.validate_v3_order
     stack.pure_validator = original_validate
-    def validate(order):
+    def validate(order: Order, *args: Any, **kwargs: Any) -> tuple[str, str, str, str, str, str]:
+        """Observe, then delegate every argument to the actual pure validator."""
         stack.validated.append(order.model_dump(mode="json"))
+        stack.validation_calls.append({
+            "caller": sys._getframe(1).f_code.co_name,
+            "phase": ("direct" if stack.request_ordinal == 0 else
+                      "adapter" if len(stack.invoked) > stack.request_invocations else "ingress"),
+            "request_ordinal": stack.request_ordinal,
+            "args": deepcopy(list(args)), "kwargs": deepcopy(kwargs),
+        })
         stack.events.append("validate")
-        return original_validate(order)
+        return original_validate(order, *args, **kwargs)
     monkeypatch.setattr(M, "validate_v3_order", validate)
 
     original_place = adapter.place_order
@@ -209,7 +234,23 @@ def _holds(stack, body):
             "proof_count": len(process_laya().decision_log())}
 
 
-def _request(stack, fields, path=PATHS[1], *, configured_default=False):
+def _request(
+    stack: SimpleNamespace, fields: dict[str, Any], path: str = PATHS[1], *, configured_default: bool = False,
+) -> WerkzeugTestResponse:
+    """Send one synthetic request without clearing earlier authority or call ledgers.
+
+    Args:
+        stack: The current test's real composition and passive observers.
+        fields: Explicit additions to the unchanged synthetic base request.
+        path: Named route by default; ordinary-route controls supply their path.
+        configured_default: False retains explicit broker/account fields. True
+            omits them to exercise the existing configured-default selector.
+
+    Returns:
+        The actual HTTP test-client response, with a separately printed phase ledger.
+    """
+    stack.request_ordinal += 1
+    stack.request_invocations = len(stack.invoked)
     body = {**BASE, **deepcopy(fields)}
     if configured_default:
         del body["broker"], body["account_id"]
@@ -218,9 +259,11 @@ def _request(stack, fields, path=PATHS[1], *, configured_default=False):
         "Authorization": "Bearer " + _create_token("operator", mode="live", live_mode_unlocked=True),
     })
     observed = {
+        "nodeid": stack.nodeid, "request_ordinal": stack.request_ordinal,
         "request": body, "path": path, "status": response.status_code, "response": response.get_json(),
         "minted": [order.model_dump(mode="json") for order, _ctx, _gate in stack.minted],
         "consumed": stack.consumed, "checked": stack.checked, "validated": stack.validated,
+        "validation_calls": stack.validation_calls,
         "invoked": stack.invoked, "reads": stack.reads, "resolved": stack.resolved, "wire": stack.wire,
         "events": stack.events, "faults": stack.faults, **_holds(stack, body),
         "session_client_bound": stack.session.extra["client"] is stack.facade,
@@ -270,7 +313,17 @@ def test_supported_ordinary_intent_keeps_exact_pinned_wire(kotak_stack, fields, 
     assert len(kotak_stack.minted) == 1 and kotak_stack.consumed == [True] and len(kotak_stack.invoked) == 1
     assert len(kotak_stack.checked) == 1 and len(kotak_stack.checked[0]) == 5
     assert all(row["passed"] for row in kotak_stack.checked[0])
-    assert len(kotak_stack.validated) == 3
+    # One pre-read ingress check, then adapter shape, adapter preflight and
+    # actual SDK builder defence. The observer must not drop builder kwargs.
+    assert len(kotak_stack.validated) == 4
+    assert [call["phase"] for call in kotak_stack.validation_calls] == ["ingress", "adapter", "adapter", "adapter"]
+    assert [call["args"] for call in kotak_stack.validation_calls] == [[], [], [], []]
+    assert [call["kwargs"] for call in kotak_stack.validation_calls] == [
+        {}, {}, {}, {"allow_market_conversion": False},
+    ]
+    assert [call["caller"] for call in kotak_stack.validation_calls[1:]] == [
+        "place_order", "preflight_order", "to_place_order_params",
+    ]
     assert all(row == kotak_stack.invoked[0] for row in kotak_stack.validated)
     assert kotak_stack.events[0] == "validate"
     wire = deepcopy(kotak_stack.wire)
@@ -440,3 +493,19 @@ def test_read_only_router_refusal_releases_uninvoked_holds_without_consuming(kot
     kotak_stack.session.read_only_until_at = None  # Synthetic session only, no readiness promotion.
     assert _request(kotak_stack, {}, path).status_code == 200
     assert len(kotak_stack.wire) == 1 and kotak_stack.consumed == [True]
+
+
+def test_validation_observer_forwards_qualified_keyword_terms(kotak_stack: SimpleNamespace) -> None:
+    """The observer delegates actual keyword-sensitive checks without making an SDK request."""
+    order = Order(**BASE)
+    assert M.validate_v3_order(
+        order, allow_market_conversion=False, lot_size=2, selected=True,
+    ) == ("SELL", "LIMIT", "MIS", "NSE", "DAY", "regular")
+    with pytest.raises(M.KotakNeoMappingError, match="exact listed lot"):
+        M.validate_v3_order(order, allow_market_conversion=False, lot_size=3, selected=True)
+    assert len(kotak_stack.validated) == 2
+    assert [call["kwargs"] for call in kotak_stack.validation_calls] == [
+        {"allow_market_conversion": False, "lot_size": 2, "selected": True},
+        {"allow_market_conversion": False, "lot_size": 3, "selected": True},
+    ]
+    _no_admission(kotak_stack, {})

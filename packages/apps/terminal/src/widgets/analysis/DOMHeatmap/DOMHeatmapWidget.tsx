@@ -68,6 +68,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { BrokerRequiredNotice, isBrokerRequiredMessage } from "@/components/ui/BrokerRequiredNotice";
 import { useMarketDataScope } from "@/hooks/useDataScope";
 import type { WidgetProps } from "@/types/widgets";
 import { Badge } from "@/components/ui/badge";
@@ -772,6 +773,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
   const [publishedSource, setPublishedSource] = useState(sourceKey);
   const currentData = publishedSource === sourceKey;
   const error = currentData ? rawError : null;
+  const brokerRequired = isBrokerRequiredMessage(error);
   const ltp = currentData ? rawLtp : 0;
   const snapshotCount = currentData ? rawSnapshotCount : 0;
   const hover = currentData ? rawHover : null;
@@ -1222,7 +1224,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {error && (
+          {error && !brokerRequired && (
             <Badge
               variant="outline"
               className="text-xs border-red-500/40 text-red-400 bg-red-500/10 h-5 px-1.5"
@@ -1359,6 +1361,12 @@ function DOMHeatmapWidget(props: WidgetProps) {
         </div>
       )}
 
+      {/* Sits outside the canvas container: that container is role="img",
+          which would hide the notice's button from assistive technology. */}
+      {brokerRequired && (
+        <BrokerRequiredNotice what="market depth" className="flex-none rounded-none border-x-0 border-t-0" />
+      )}
+
       {/* Canvas */}
       <div
         ref={containerRef}
@@ -1415,7 +1423,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
             <span className="text-xs">Level-2 snapshots will appear here</span>
           </div>
         )}
-        {snapshotCount === 0 && error && (
+        {snapshotCount === 0 && error && !brokerRequired && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-loss/70">
             <AlertCircle className="size-8" aria-hidden="true" />
             <span className="text-sm">{error}</span>

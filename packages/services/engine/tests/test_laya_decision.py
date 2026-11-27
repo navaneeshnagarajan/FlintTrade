@@ -228,7 +228,7 @@ def test_uncertain_answer_denies_in_live(laya_host: FakeLayaHost) -> None:
     laya_host.response_body = _body(_answers(rationale_b=0.60))
     verdict = _engine(laya_host).admit(_proposal(mode="live", quantity=4))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is uncertain. Live stays closed."
+    assert verdict.reason == "Decision model uncertain. Live stays closed."
 
 
 @pytest.mark.unit
@@ -262,7 +262,7 @@ def test_http_failures_are_down(laya_host: FakeLayaHost, code: int, body: bytes,
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="practice"))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert verdict.reason == "Not placed. Decision model is down. Start it from Status."
     assert engine.status is DecisionStatus.DOWN
     assert ("failure", failure) in verdict.evidence
 
@@ -306,7 +306,7 @@ def test_revision_mismatch_is_down(laya_host: FakeLayaHost) -> None:
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="live"))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert verdict.reason == "Not placed. Decision model is down. Start it from Status."
     assert ("failure", "revision_mismatch") in verdict.evidence
 
 
@@ -351,7 +351,7 @@ def test_empty_note_is_uncertain_and_does_not_call_the_host(laya_host: FakeLayaH
     assert laya_host.requests == []
     live = _engine(laya_host).admit(_proposal(mode="live", rationale=""))
     assert live.allow is False
-    assert live.reason == "Laya is uncertain. Live stays closed."
+    assert live.reason == "Decision model uncertain. Live stays closed."
     assert "concrete reason is required" not in live.reason
     assert laya_host.requests == []
     fresh = _engine(laya_host)
@@ -380,7 +380,7 @@ def test_missing_identity_without_a_runtime_record_refuses_that_order(laya_host:
     assert not any(item[0] == "proof" for item in verdict.evidence)
     blocked = place_block(verdict, 4)
     assert blocked is not None
-    assert blocked["code"] == "laya_unverified"
+    assert blocked["code"] == "decision_model_unverified"
     assert blocked["message"] == LAYA_DECISION_UNVERIFIED
     assert "limits" not in blocked
     assert "applied_quantity" not in blocked
@@ -430,7 +430,7 @@ def test_unpatched_decision_uses_the_runtime_record_for_a_clamped_order(laya_hos
     assert engine.runtime_reason()[0] is None
     blocked = place_block(verdict, 4)
     assert blocked is not None
-    assert blocked["code"] == "laya_clamp"
+    assert blocked["code"] == "decision_model_clamp"
     assert blocked["message"] == clamp_place_message(1)
     assert place_block(verdict, 1) is None
 
@@ -565,10 +565,10 @@ def test_key_rejection_sets_down_in_the_same_request(laya_host: FakeLayaHost, co
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert verdict.reason == "Not placed. Decision model is down. Start it from Status."
     assert engine.status is DecisionStatus.DOWN
     assert engine.runtime_reason()[0] == "key_rejected"
-    assert laya_reason_detail("key_rejected", 0) == "Can't reach Laya"
+    assert laya_reason_detail("key_rejected", 0) == "Can't reach the decision model"
     assert ("failure", f"http_{code}") in verdict.evidence
 
 
@@ -581,8 +581,8 @@ def test_laya_unverified_refusal_sentence(laya_host: FakeLayaHost) -> None:
     verdict = _engine(laya_host).admit(_proposal())
     blocked = place_block(verdict, 4)
     assert blocked is not None
-    assert blocked["code"] == "laya_unverified"
-    assert blocked["message"] == "Not placed. Laya's decision couldn't be verified. Try again."
+    assert blocked["code"] == "decision_model_unverified"
+    assert blocked["message"] == "Not placed. Decision model not verified. Try again."
     assert blocked["reason"] == LAYA_DECISION_UNVERIFIED
     assert "limits" not in blocked
     assert "applied_quantity" not in blocked
