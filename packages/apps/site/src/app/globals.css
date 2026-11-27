@@ -16,7 +16,7 @@
 :root {
   --site-background: #f5f5f7;
   --site-foreground: #18181b;
-  --site-muted: #71717a;
+  --site-muted: #6e6e77;
   --site-text-secondary: #52525b;
   --site-surface-card: #ffffff;
   --site-surface-elevated: #eef7f2;
@@ -28,7 +28,7 @@
   --site-accent: #15803d;
   --site-accent-rgb: 21, 128, 61;
   --site-accent-text: #ffffff;
-  --site-accent-2: #0284c7;
+  --site-accent-2: #027ab8;
   --site-warn: #b45309;
   --site-radius: 8px;
   --site-hero-copy: #44524b;
@@ -47,11 +47,11 @@
   --site-particle-3: #4ade80;
   --site-particle-opacity: 0.18;
   --site-slogan-1: #2563eb;
-  --site-slogan-2: #059669;
-  --site-slogan-3: #d97706;
-  --site-slogan-4: #e11d48;
+  --site-slogan-2: #047f59;
+  --site-slogan-3: #a75c05;
+  --site-slogan-4: #d81c45;
   --site-slogan-5: #9333ea;
-  --site-slogan-6: #0891b2;
+  --site-slogan-6: #077995;
   --color-fd-background: var(--site-background);
   --color-fd-foreground: var(--site-foreground);
   --color-fd-muted: var(--site-surface-card);
@@ -363,6 +363,9 @@ kbd {
 .brand-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   gap: 10px;
   border-radius: 999px;
   padding: 8px 14px 8px 10px;
@@ -383,7 +386,12 @@ kbd {
 }
 
 .main-nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 999px;
   padding: 8px 13px;
   color: var(--site-muted);
@@ -399,8 +407,10 @@ kbd {
 
 .github-link {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   place-items: center;
   border-radius: 999px;
 }
@@ -419,8 +429,10 @@ kbd {
 
 .theme-toggle button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -727,6 +739,14 @@ kbd {
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
 }
 
+.install-commands {
+  display: grid;
+  gap: 12px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  text-align: left;
+}
+
 .hero-install > p {
   margin: 0;
   color: var(--site-hero-copy);
@@ -754,6 +774,12 @@ kbd {
 }
 
 .hero-electron-note a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding-inline: 4px;
   color: var(--site-accent);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -818,53 +844,6 @@ kbd {
   width: 40%;
   background: linear-gradient(105deg, transparent, rgba(var(--site-accent-rgb), 0.25), transparent);
   animation: siteShimmerSweep 2.5s linear infinite;
-}
-
-.hero-visual {
-  position: relative;
-  width: min(980px, 100%);
-  min-height: 540px;
-}
-
-.screenshot-stack {
-  position: relative;
-  height: 540px;
-}
-
-.screen-frame {
-  position: absolute;
-  overflow: hidden;
-  border: 1px solid var(--site-line);
-  border-radius: var(--site-radius);
-  background: var(--site-surface-card);
-  box-shadow: 0 32px 90px var(--site-frame-shadow);
-  backdrop-filter: blur(18px);
-}
-
-.screen-frame img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top left;
-}
-
-.screen-frame.main {
-  inset: 0 6% 74px 6%;
-}
-
-.screen-frame.side {
-  left: 0;
-  bottom: 0;
-  width: 35%;
-  height: 38%;
-}
-
-.screen-frame.float {
-  right: 0;
-  bottom: 24px;
-  width: 34%;
-  height: 30%;
 }
 
 .metric-rail {
@@ -1086,6 +1065,7 @@ kbd {
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
   width: min(1180px, calc(100% - 32px));
@@ -1102,7 +1082,24 @@ kbd {
 .site-footer div {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  align-items: center;
+  gap: 0;
+}
+
+.site-footer a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.product-links a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .subpage {
@@ -1127,6 +1124,15 @@ kbd {
   color: var(--site-muted);
   font-size: 18px;
   line-height: 1.7;
+}
+
+.release-history-link {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding-block: calc((44px - 1lh) / 2);
+  margin-block: calc((1lh - 44px) / 2);
 }
 
 .subpage.subpage-tight {
@@ -1178,43 +1184,6 @@ kbd {
   .hero-electron-note {
     opacity: 1;
   }
-
-  /* A1 Graphite Continuity: new section-enter and float rules are static under reduced-motion */
-  .section-enter,
-  .screen-frame.float {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
-}
-
-/* Graphite Continuity A1: fail-open observed reveal — baseline visible (no-JS/SSR/reduced-motion), motion gated by controller-added class */
-.section-enter {
-  opacity: 1;
-  transform: none;
-}
-
-/* Motion only enabled when the tiny client controller mounts and adds the class */
-.js-motion-enabled .section-enter {
-  opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)), transform 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
-}
-
-.js-motion-enabled .section-enter.visible {
-  opacity: 1;
-  transform: none;
-}
-
-/* Optional screenshot side/float gentle drift — amplitude ≤6px, period ≥8s; not LCP */
-.screen-frame.float {
-  animation: screenshotFloat 8s ease-in-out infinite;
-}
-
-@keyframes screenshotFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
 }
 
 /* Quiet below-fold: reduce competing glow/shimmer on package and mcp surfaces */
@@ -1267,12 +1236,6 @@ kbd {
     min-height: auto;
   }
 
-  .hero-visual,
-  .screenshot-stack {
-    min-height: 390px;
-    height: 390px;
-  }
-
   .feature-grid,
   .install-grid,
   .metric-rail {
@@ -1283,6 +1246,7 @@ kbd {
 @media (max-width: 620px) {
   .site-header,
   .section,
+  .install-commands,
   .site-footer,
   .subpage {
     width: min(100% - 22px, 1180px);
@@ -1293,8 +1257,8 @@ kbd {
   }
 
   .github-link {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
 
   .hero-copy h1 {
@@ -1314,20 +1278,6 @@ kbd {
   .metric-rail,
   .package-row {
     grid-template-columns: 1fr;
-  }
-
-  .screen-frame.main {
-    inset: 0 0 92px 0;
-  }
-
-  .screen-frame.side {
-    left: 0;
-    right: auto;
-    width: 54%;
-  }
-
-  .screen-frame.float {
-    width: 54%;
   }
 
   /* Graphite Continuity A1 mobile: essential hero content immediately useful (no opacity:0 or cinematic delay on small viewports) */
@@ -1353,6 +1303,8 @@ kbd {
 
   .main-nav a {
     flex: 1 1 calc(50% - 4px);
+    min-width: 44px;
+    min-height: 44px;
     padding: 7px 8px;
     font-size: 13px;
     text-align: center;

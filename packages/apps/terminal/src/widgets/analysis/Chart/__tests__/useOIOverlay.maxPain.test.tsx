@@ -53,6 +53,10 @@ vi.mock("@/services/ftApi", () => ({
   getFtOIProfile: vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getExpiry: vi.fn(async () => ({ expiry: ["2099-07-28"] })),
+}));
+
 vi.mock("@/lib/lightweightChartRuntime", () => ({
   lightweightHistogramRuntime: {
     addHistogramSeries: vi.fn(() => {

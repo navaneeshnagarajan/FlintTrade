@@ -22,6 +22,10 @@ const nextConfig = {
         pathname: '/flinttrade/**',
         search: '?v=20260613',
       },
+      {
+        // Product screenshots shown on the homepage.
+        pathname: '/product/**',
+      },
     ],
     remotePatterns: [],
   },

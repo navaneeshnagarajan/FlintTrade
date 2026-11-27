@@ -48,7 +48,7 @@ const EXPIRY_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "
  * Parse an expiry label ("2026-07-30", "30JUL26", "30-JUL-26") to a UTC epoch,
  * or null when it is not a real calendar date.
  */
-function expiryEpoch(expiry: string): number | null {
+export function parseExpiryEpoch(expiry: string): number | null {
   const value = expiry.trim().toUpperCase();
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   const market = /^(\d{2})-?([A-Z]{3})-?(\d{2}|\d{4})$/.exec(value);
@@ -91,7 +91,7 @@ export function selectFutureExpiry(expiries: readonly string[], now = new Date()
   const beforeTradingClose = part("hour") * 60 + part("minute") < 15 * 60 + 30;
   return expiries
     .flatMap((expiry) => {
-      const timestamp = expiryEpoch(expiry);
+      const timestamp = parseExpiryEpoch(expiry);
       const tradable =
         timestamp !== null && (timestamp > today || (timestamp === today && beforeTradingClose));
       return tradable ? [{ expiry, timestamp }] : [];
