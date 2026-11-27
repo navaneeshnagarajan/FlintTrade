@@ -391,7 +391,7 @@ export default function DockSidebar() {
     >
       <TooltipProvider delayDuration={200}>
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 py-3 [scrollbar-width:none]">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 py-3 ft-scroll-quiet">
             <Reorder.Group
               axis="y"
               values={mainItems}

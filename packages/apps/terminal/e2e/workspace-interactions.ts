@@ -69,10 +69,10 @@ export async function interactions(page: Page, info: TestInfo) {
   // FlexLayout 0.11.1 exposes a context callback, not a built-in popup.
   // Exercise the application's real channel menu rather than inventing one.
   const links=page.getByTestId("instrument-links");
-  await links.locator("summary").click();
+  await links.getByRole("button",{name:/^Instrument links/}).click();
   await links.getByRole("combobox",{name:"Instrument link channel"}).selectOption("fdc3.channel.green");
   record("channelMenu",await links.getByRole("combobox").locator("option").allTextContents());
-  await links.locator("summary").click();
+  await links.getByRole("button",{name:/^Instrument links/}).click();
 
   const positions=page.getByRole("tab",{name:"Positions",exact:true});
   const orders=page.getByRole("tab",{name:"Orders",exact:true});

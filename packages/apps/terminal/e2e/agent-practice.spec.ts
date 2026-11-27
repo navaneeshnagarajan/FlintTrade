@@ -139,7 +139,7 @@ async function openPracticeAgent(page: Page, registry: SyntheticFixtureRegistry)
   await page.goto("/ai");
   await expect(page).toHaveURL("http://localhost:5173/ai");
   await expect(page).toHaveTitle(/FlintTrade/);
-  await expect(page.getByRole("heading", { level: 1, name: "AI Centre" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "AI Centre" })).toBeVisible();
   expect(registry.callCount("GET", `${AGENT}/status`)).toBe(0);
   await page.getByRole("button", { name: "Agent", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Autonomous Agent" });

@@ -28,6 +28,7 @@ import {
 } from "./exploreScheduleGate";
 import { StatusDot, StatusBadge } from "./shared";
 
+import { Checkbox } from "@/components/ui/checkbox";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -147,11 +148,9 @@ export default function CronSection() {
         </div>
 
         <label className="mb-4 flex items-center gap-2 text-xs text-text-secondary">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={showSystemJobs}
             onChange={(event) => setShowSystemJobs(event.target.checked)}
-            className="accent-accent"
           />
           Show system jobs
         </label>

@@ -2,6 +2,8 @@ import { Input } from "@/components/ui/input";
 import { proposalSelector, type ExactControlSelector, type RunConfiguration, type RunProposal } from "@/services/runPolicy";
 import { canonicalPolicy } from "@/services/runPolicyTransport";
 
+import { NativeSelect } from "@/components/ui/native-select";
+import { Checkbox } from "@/components/ui/checkbox";
 export const usageDimensions = ["requests", "input_tokens", "output_tokens", "currency_micros", "credits_micros", "compute_milliseconds", "bytes", "concurrency", "storage_bytes"];
 export const learningFields = ["symbol", "exchange", "action", "entry_price", "exit_price", "quantity", "pnl", "pnl_pct", "exit_reason", "exit_price_estimated", "timestamp"];
 const operations = ["adoption.adopt", "adoption.get", "adoption.reconcile", "training.start", "training.get", "training.cancel", "training.reconcile", "evaluation.read", "evaluation.score"];
@@ -66,10 +68,10 @@ export function RunPolicyFields({ workflow, configuration, draft, selected, onCh
     <p className="text-sm text-text-secondary">{workflow.hint}</p>
     {revision === null ? <p className="text-xs text-warning">Read the selected exact control before preview. Unavailable custody is not revision zero; no revision is inferred.</p> : <p className="text-xs">Current control revision: {revision}</p>}
     {workflow.action === "learning-rights" ? <p className="text-xs break-words">Source: autonomous-trader.closed-trades:v1 · observations · reflection-prompt:v1. Fields: {learningFields.join(", ")}. Producer evidence is not broker-reconciled accounting; estimated exits retain their flags.</p> : null}
-    {workflow.action === "access" ? <div className="grid gap-2 sm:grid-cols-2">{operations.map(operation => <label className="text-sm flex gap-2" key={operation}><input type="checkbox" checked={selected.includes(operation)} onChange={event => onOperations(event.target.checked ? [...selected, operation] : selected.filter(value => value !== operation))} />{operation}</label>)}</div> : null}
+    {workflow.action === "access" ? <div className="grid gap-2 sm:grid-cols-2">{operations.map(operation => <label className="text-sm flex gap-2" key={operation}><Checkbox checked={selected.includes(operation)} onChange={event => onOperations(event.target.checked ? [...selected, operation] : selected.filter(value => value !== operation))} />{operation}</label>)}</div> : null}
     <div className="grid gap-3 sm:grid-cols-2">{fields.map(item => <label key={item.name} className={`block text-sm min-w-0 ${item.kind === "json" ? "sm:col-span-2" : ""}`}>{item.label}
       {item.kind === "json" ? <textarea name={item.name} aria-label={item.label} spellCheck={false} autoComplete="off" className="mt-1 min-h-36 w-full rounded border border-border-default bg-surface-card p-3 font-mono text-xs" value={draft[item.name] ?? ""} onChange={event => onChange(item.name, event.target.value)} />
-        : item.kind === "control" ? <select name={item.name} aria-label={item.label} className="mt-1 w-full rounded border border-border-default bg-surface-card p-2" value={draft[item.name] ?? ""} onChange={event => onChange(item.name, event.target.value)}><option value="">Choose explicit control</option>{["hard-local", "hard-provider", "not-applicable"].map(value => <option key={value}>{value}</option>)}</select>
+        : item.kind === "control" ? <NativeSelect name={item.name} aria-label={item.label} wrapperClassName="mt-1 flex w-full" value={draft[item.name] ?? ""} onChange={event => onChange(item.name, event.target.value)}><option value="">Choose explicit control</option>{["hard-local", "hard-provider", "not-applicable"].map(value => <option key={value}>{value}</option>)}</NativeSelect>
         : <Input name={item.name} aria-label={item.label} autoComplete="off" type={item.kind === "number" ? "number" : "text"} value={draft[item.name] ?? ""} onChange={event => onChange(item.name, event.target.value)} />}
     </label>)}</div>
   </>;

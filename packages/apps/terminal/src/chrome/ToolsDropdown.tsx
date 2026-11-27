@@ -110,8 +110,19 @@ export default function ToolsDropdown({
         onCloseRef.current();
       }
     };
+    // Radix triggers act on pointerdown and cancel the mouse event that
+    // follows, so opening another top-bar menu never reached mousedown.
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
     document.addEventListener("mousedown", handleMouseDown);
-    return () => document.removeEventListener("mousedown", handleMouseDown);
+    document.addEventListener("pointerdown", handleMouseDown, true);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("pointerdown", handleMouseDown, true);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, [isOpen]);
 
   // Arrow key navigation between menu items

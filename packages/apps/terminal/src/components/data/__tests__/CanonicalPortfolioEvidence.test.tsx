@@ -49,6 +49,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear(); vi.unstubAllGlobals(); expect(failures).toEqual([]); });
 async function mount() {
   await act(async () => { render(<QueryClientProvider client={client}><MemoryRouter><InvestRoute /></MemoryRouter></QueryClientProvider>); await import("@/routes/invest/tabs/DashboardTab"); });
+  // Invest opens on its own views; the evidence form is mounted but folded.
+  const toggle = screen.getByRole("button", { name: "Show evidence form" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(toggle);
+  expect(screen.getByRole("button", { name: "Hide evidence form" })).toHaveAttribute("aria-expanded", "true");
 }
 
 it("retains accepted opaque identities and complete provenance in the keyboard scroll region", async () => {

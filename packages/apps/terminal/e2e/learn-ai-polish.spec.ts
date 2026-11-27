@@ -53,7 +53,7 @@ test("Learn teaches built-in Practice and its Trade link preserves the selected 
 
 test("Schedules uses human names and keeps Explore controls disabled", async ({ page }, info) => {
   await page.goto("/automate#schedules");
-  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 1, name: "Automate", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 2, name: "Automate", exact: true })).toBeVisible();
   await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
   await expect(page.getByText("End-of-day position snapshot", { exact: true })).toBeVisible();
   await page.getByRole("checkbox", { name: "Show system jobs" }).check();
@@ -71,7 +71,7 @@ test("a retired automation deep link preserves schedules and monitors without fl
     handler: () => { throw new Error("Retired flow APIs must never be requested"); },
   });
   await page.goto("/automate#flows");
-  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 1, name: "Automate", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Automation app", exact: true }).getByRole("heading", { level: 2, name: "Automate", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Schedules", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Pre-market screener", { exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Flows", exact: true })).toHaveCount(0);

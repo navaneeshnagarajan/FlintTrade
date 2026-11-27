@@ -8,7 +8,8 @@
  *     <PageBody width="default">…</PageBody>
  *   </Page>
  *
- * PageHeader owns the route's single visible H1 and uses the same padding,
+ * PageHeader owns the route's single visible H1 (an H2 inside a docked app
+ * panel, where the app toolbar holds the H1) and uses the same padding,
  * type scale and divider on every page. PageBody is the default scroll container:
  * one gutter, one set of widths, and bottom room so the last row is never
  * hidden behind floating chrome. In compact docked tools, Page can instead
@@ -30,6 +31,16 @@ export interface PageProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const PageScrollContext = React.createContext<"body" | "page">("body");
+
+/**
+ * True inside a docked app panel. The app toolbar already carries the page's
+ * H1, so a page rendered in a panel takes an H2 and a tighter header.
+ */
+const PageEmbeddedContext = React.createContext(false);
+
+export function EmbeddedPage({ children }: { children: React.ReactNode }) {
+  return <PageEmbeddedContext.Provider value>{children}</PageEmbeddedContext.Provider>;
+}
 
 export function Page({ scroll = "body", className, children, ...rest }: PageProps) {
   return (
@@ -79,20 +90,22 @@ export function PageHeader({
   tourTarget,
   "data-testid": testId = "page-header",
 }: PageHeaderProps) {
+  const embedded = React.useContext(PageEmbeddedContext);
+  const Title = embedded ? "h2" : "h1";
   return (
     <header
       data-testid={testId}
       data-tour-target={tourTarget}
       className={cn(
         "shrink-0 border-b border-border-default bg-surface-base px-[var(--ft-page-gutter)]",
-        children ? "pt-5" : "py-5",
+        embedded ? (children ? "pt-3" : "py-3") : children ? "pt-5" : "py-5",
         className,
       )}
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="ft-text-page-title break-words text-text-primary">{title}</h1>
+            <Title className={cn("break-words text-text-primary", embedded ? "ft-text-section-title" : "ft-text-page-title")}>{title}</Title>
             {meta ? <div className="flex flex-wrap items-center gap-2">{meta}</div> : null}
           </div>
           {description ? (
@@ -103,7 +116,7 @@ export function PageHeader({
           <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
         ) : null}
       </div>
-      {children ? <div className="-mb-px mt-4 min-w-0">{children}</div> : null}
+      {children ? <div className={cn("-mb-px min-w-0", embedded ? "mt-2" : "mt-4")}>{children}</div> : null}
     </header>
   );
 }
@@ -191,7 +204,7 @@ export function PageTabs<T extends string>({
       aria-orientation="horizontal"
       onKeyDown={handleKeyDown}
       className={cn(
-        "flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "flex min-w-0 gap-1 overflow-x-auto ft-scroll-quiet",
         secondary ? "items-center" : "items-end",
         className,
       )}

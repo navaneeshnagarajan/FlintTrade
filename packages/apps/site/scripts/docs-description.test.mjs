@@ -15,6 +15,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..',
 
 const docsReadme = readFileSync(join(repoRoot, 'docs/README.md'), 'utf8');
 const userGuide = readFileSync(join(repoRoot, 'docs/USER_GUIDE.md'), 'utf8');
+const indicatorsReadme = readFileSync(join(repoRoot, 'packages/core/indicators/README.md'), 'utf8');
 
 function bodyAfterTitle(markdown) {
   return markdown.replace(/^#\s+.+\n+/, '').trimStart();
@@ -64,6 +65,16 @@ describe('descriptionDuplicatesOpeningBody', () => {
 
     expect(descriptionDuplicatesOpeningBody(description, body)).toBe(false);
     expect(shouldHidePageDescription(description, body)).toBe(false);
+  });
+
+  it('keeps the indicators homepage blurb a finished sentence', () => {
+    const description = descriptionFromMarkdown(indicatorsReadme, 'indicators package');
+
+    expect(description).toContain('Pine Script');
+    expect(description).not.toMatch(/Pine Scri(?!pt)/);
+    expect(description).not.toContain('—');
+    expect(description.endsWith('.')).toBe(true);
+    expect(description.length).toBeLessThanOrEqual(180);
   });
 
   it('detects the user-guide opening paragraph after the title is stripped', () => {

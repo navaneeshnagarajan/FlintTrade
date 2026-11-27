@@ -2,7 +2,7 @@ import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { Page, PageBody, PageHeader, PageTabs } from "../Page";
+import { EmbeddedPage, Page, PageBody, PageHeader, PageTabs } from "../Page";
 
 type TabId = "overview" | "holdings" | "tax";
 
@@ -35,6 +35,20 @@ describe("PageHeader", () => {
     expect(heading).toBeInTheDocument();
     expect(screen.getByText("Your holdings and wealth tools.")).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("takes an H2 inside a docked app panel, where the app toolbar holds the H1", () => {
+    render(
+      <>
+        <h1>Portfolio</h1>
+        <EmbeddedPage>
+          <PageHeader title="Invest" description="Your holdings and wealth tools." />
+        </EmbeddedPage>
+      </>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Invest" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Portfolio");
   });
 
   it("renders actions, meta chips and a secondary navigation slot", () => {

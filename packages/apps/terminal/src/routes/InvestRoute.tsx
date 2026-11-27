@@ -325,7 +325,7 @@ function InvestShell() {
       </PageHeader>
 
       <div className="shrink-0 px-[var(--ft-page-gutter)] py-2">
-        <CanonicalPortfolioEvidence />
+        <CanonicalPortfolioEvidence collapsible />
       </div>
 
       {/* Content */}

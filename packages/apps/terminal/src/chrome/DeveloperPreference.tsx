@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { isPublicDemoBuild } from "@/lib/demoSession";
+import { Checkbox } from "@/components/ui/checkbox";
 const KEY = "flinttrade:developer:v1";
 const EVENT = "flinttrade:developer-preference";
 export function developerEnabled(): boolean { return !isPublicDemoBuild() && localStorage.getItem(KEY) === "enabled"; }
@@ -12,7 +13,7 @@ export function DeveloperPreference() {
   const enabled = useDeveloperEnabled();
   if (isPublicDemoBuild()) return null;
   return <section className="space-y-2 rounded border border-border-default p-3">
-    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={enabled} onChange={event => { localStorage.setItem(KEY, event.target.checked ? "enabled" : "disabled"); window.dispatchEvent(new Event(EVENT)); }} />Enable Developer features</label>
+    <label className="flex items-center gap-2 text-sm"><Checkbox checked={enabled} onChange={event => { localStorage.setItem(KEY, event.target.checked ? "enabled" : "disabled"); window.dispatchEvent(new Event(EVENT)); }} />Enable Developer features</label>
     <p className="text-xs text-text-muted">Installed-only experimental visibility. This does not arm Live, change accounts, bypass qualification or grant permission.</p>
   </section>;
 }
