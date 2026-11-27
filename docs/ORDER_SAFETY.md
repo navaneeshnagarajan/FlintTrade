@@ -175,7 +175,7 @@ has no tooltip and no Next line, and it is not Still loading. The
 refused with "Not placed. Decision model is down. Start it from Status."
 The `unverified` tooltip is "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model." That code applies when this start did not download. A failed download,
 including one over an older unverified snapshot, is `download_failed`
-("Can't download the model"). The `wrong_revision` tooltip is "Wrong model loaded. Expected {pinned id}." That code is only a real mismatch: a complete
+("Can't download the model"). The `wrong_revision` tooltip is `Wrong model loaded. Expected {pinned id}.` That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
 that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or

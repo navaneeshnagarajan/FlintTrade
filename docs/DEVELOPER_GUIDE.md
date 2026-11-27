@@ -709,7 +709,7 @@ managed decision-model port. Tooltips for
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable` are the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
-has no tooltip. The `download_failed` tooltip is "Check your connection, then start the decision model again." The `wrong_revision` tooltip is "Wrong model loaded. Expected {pinned id}." That code is only a real mismatch: a complete
+has no tooltip. The `download_failed` tooltip is "Check your connection, then start the decision model again." The `wrong_revision` tooltip is `Wrong model loaded. Expected {pinned id}.` That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
 that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or

@@ -747,7 +747,7 @@ reject. The server reason for that Practice clamp is **Decision model uncertain.
 Live denial is **Decision model uncertain. Live stays closed.** When the
 requested quantity is greater than the allowed one, the Order Pad
 clamp notice shows the clamp sentence below, not the Practice reason line.
-**Deny.** Order Pad and Quick Trade show **Denied by decision model**, then **Not placed. Decision model denied this order: {reason}.** When no reason comes back, the line ends at **Not placed. Decision model denied this order.** The denial is one alert (`role="alert"`), the only live region.
+**Deny.** Order Pad and Quick Trade show **Denied by decision model**, then `Not placed. Decision model denied this order: {reason}.` When no reason comes back, the line ends at **Not placed. Decision model denied this order.** The denial is one alert (`role="alert"`), the only live region.
 The reason line is named **Decision model check** and is not its own status. When the server
 sent a quantity ceiling, the next line is
 **Max quantity N.** A Down refusal does not show that line. The reason
