@@ -407,15 +407,15 @@ def run_fail_closed_drills() -> tuple[DrillResult, ...]:
     )
 
     saved_allowlist = ollama_mod.LAYA_OLLAMA_ALLOWLIST
-    saved_backend = os.environ.get("FLINTTRADE_LAYA_BACKEND")
-    saved_model = os.environ.get("FLINTTRADE_LAYA_OLLAMA_MODEL")
+    saved_backend = os.environ.get("FLINTTRADE_DECISION_MODEL_BACKEND")
+    saved_model = os.environ.get("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL")
     calls: list[str] = []
 
     def restore() -> None:
         ollama_mod.LAYA_OLLAMA_ALLOWLIST = saved_allowlist
         reset_laya_ollama_transport_for_tests()
-        _restore_env("FLINTTRADE_LAYA_BACKEND", saved_backend)
-        _restore_env("FLINTTRADE_LAYA_OLLAMA_MODEL", saved_model)
+        _restore_env("FLINTTRADE_DECISION_MODEL_BACKEND", saved_backend)
+        _restore_env("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", saved_model)
 
     arm = set_laya_ollama_transport_for_tests
     try:
@@ -437,7 +437,7 @@ def run_fail_closed_drills() -> tuple[DrillResult, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     """Print a report. Exit 2 when the file is bad or tuning is aimed at test."""
-    parser = argparse.ArgumentParser(description="Score a Laya candidate on labelled JSONL.")
+    parser = argparse.ArgumentParser(description="Score a decision model candidate on labelled JSONL.")
     parser.add_argument("--cases", required=True, help="JSONL file of labelled cases")
     parser.add_argument("--repeats", type=int, default=1, help="Repeats of each case for stability")
     parser.add_argument("--model", default="", help="Candidate tag. Reported only.")
@@ -817,8 +817,8 @@ def _drill_transport(
     from flinttrade_engine.laya_ollama import LayaOllamaModel  # noqa: PLC0415
 
     ollama_mod.LAYA_OLLAMA_ALLOWLIST = (LayaOllamaModel(tag=_DRILL_TAG, digest=_EXAMPLE_DIGEST, route=route),)
-    os.environ["FLINTTRADE_LAYA_BACKEND"] = "ollama"
-    os.environ["FLINTTRADE_LAYA_OLLAMA_MODEL"] = _DRILL_TAG
+    os.environ["FLINTTRADE_DECISION_MODEL_BACKEND"] = "ollama"
+    os.environ["FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL"] = _DRILL_TAG
 
     @contextmanager
     def session(model: str):

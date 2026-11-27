@@ -116,7 +116,7 @@ class _Sentinel:
 
 @pytest.mark.unit
 def test_flag_off_keeps_the_sidecar_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FLINTTRADE_LAYA_BACKEND", raising=False)
+    monkeypatch.delenv("FLINTTRADE_DECISION_MODEL_BACKEND", raising=False)
 
     def explode(model: str):
         del model
@@ -133,7 +133,7 @@ def test_flag_off_keeps_the_sidecar_client(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.unit
 def test_explicit_sidecar_matches_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "SIDECAR")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "SIDECAR")
     client = _Sentinel()
     engine = Laya(status=DecisionStatus.READY)
     engine.set_decision_client(client)
@@ -144,7 +144,7 @@ def test_explicit_sidecar_matches_the_default(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.unit
 def test_unknown_backend_pauses_new_orders(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     reset_laya_backend_warning_for_tests()
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "typo")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "typo")
     client = _Sentinel()
     engine = Laya(status=DecisionStatus.READY)
     engine.set_decision_client(client)
@@ -189,8 +189,8 @@ def test_fail_closed_drills_refuse_and_still_close() -> None:
 
 @pytest.mark.unit
 def test_chat_and_systemone_send_only_the_side_and_the_note(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
-    monkeypatch.setenv("FLINTTRADE_LAYA_OLLAMA_MODEL", _TAG)
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", _TAG)
     seen: dict[str, Any] = {}
 
     def chat_poster(base_url: str, path: str, payload: Mapping[str, Any], timeout: float) -> Any:
@@ -230,8 +230,8 @@ def test_chat_and_systemone_send_only_the_side_and_the_note(monkeypatch: pytest.
 
 @pytest.mark.unit
 def test_exactly_4000_reaches_the_model_and_4001_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
-    monkeypatch.setenv("FLINTTRADE_LAYA_OLLAMA_MODEL", _TAG)
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", _TAG)
     calls: list[str] = []
     prefix = "Buying because the EXAMPLE level 100 held. "
     exact = prefix + ("x" * (4000 - len(prefix)))
@@ -265,8 +265,8 @@ def test_exactly_4000_reaches_the_model_and_4001_does_not(monkeypatch: pytest.Mo
 
 @pytest.mark.unit
 def test_confidence_does_not_decide(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
-    monkeypatch.setenv("FLINTTRADE_LAYA_OLLAMA_MODEL", _TAG)
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", _TAG)
 
     def body(deny_b: float, confidence: float) -> dict[str, Any]:
         return {
@@ -330,7 +330,7 @@ def test_ollama_chip_stays_wrong_model_version() -> None:
 
 @pytest.mark.unit
 def test_not_started_next_line_depends_on_who_installed_ollama() -> None:
-    assert OLLAMA_NOT_STARTED_MANAGED == "Ollama isn't running. Start it to bring Laya back."
+    assert OLLAMA_NOT_STARTED_MANAGED == "Ollama not running. Start Ollama, then start the decision model."
     assert OLLAMA_NOT_STARTED_UNMANAGED == ("Ollama isn't running. Start Ollama on this computer, then try again.")
     for line in (OLLAMA_NOT_STARTED_MANAGED, OLLAMA_NOT_STARTED_UNMANAGED):
         assert LAYA_START_COMMAND not in line
@@ -343,9 +343,9 @@ def test_ollama_route_visible_lines_do_not_say_sidecar() -> None:
     managed = ollama_route_visible_lines(managed=True)
     unmanaged = ollama_route_visible_lines(managed=False)
     assert OLLAMA_NOT_STARTED_MANAGED in managed
-    assert "Start Laya" in managed
+    assert "Start decision model" in managed
     assert OLLAMA_NOT_STARTED_UNMANAGED in unmanaged
-    assert "Start Laya" not in unmanaged
+    assert "Start decision model" not in unmanaged
     for line in (*managed, *unmanaged):
         assert "sidecar" not in line.lower()
         assert LAYA_START_COMMAND not in line
@@ -358,7 +358,7 @@ def test_ollama_ping_names_the_route_and_the_install(monkeypatch: pytest.MonkeyP
 
     from flinttrade_core.health_routes import health_bp
 
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
     reset_process_laya_for_tests()
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -372,15 +372,15 @@ def test_ollama_ping_names_the_route_and_the_install(monkeypatch: pytest.MonkeyP
     unmanaged_response = client.get("/api/v1/ping")
     unmanaged = unmanaged_response.get_json()
     assert unmanaged is not None
-    assert unmanaged["laya_route"] == "ollama"
-    assert unmanaged["laya_managed"] is False
-    assert unmanaged["laya_checking"] is False
+    assert unmanaged["decision_model_route"] == "ollama"
+    assert unmanaged["decision_model_managed"] is False
+    assert unmanaged["decision_model_checking"] is False
     assert "sidecar" not in unmanaged_response.get_data(as_text=True).lower()
 
     app.config["OLLAMA_RUNTIME"] = Managed()
     managed = client.get("/api/v1/ping").get_json()
     assert managed is not None
-    assert managed["laya_managed"] is True
+    assert managed["decision_model_managed"] is True
     reset_process_laya_for_tests()
 
 
@@ -391,7 +391,7 @@ def test_ollama_start_action_is_only_for_a_managed_install(monkeypatch: pytest.M
     from flinttrade_core.auth_routes import _create_token
     from flinttrade_core.health_routes import health_bp
 
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
     sidecar_calls: list[str] = []
 
     def sidecar() -> str:
@@ -414,9 +414,9 @@ def test_ollama_start_action_is_only_for_a_managed_install(monkeypatch: pytest.M
             raise AssertionError("an unmanaged install must not be started")
 
     app.config["OLLAMA_RUNTIME"] = Unmanaged()
-    refused = client.post("/api/v1/laya/start", headers=headers)
+    refused = client.post("/api/v1/decision-model/start", headers=headers)
     assert refused.status_code == 503
-    assert refused.get_json()["message"] == "Laya could not be started."
+    assert refused.get_json()["message"] == "Decision model failed to start."
     assert "sidecar" not in refused.get_data(as_text=True).lower()
     assert sidecar_calls == []
 
@@ -431,7 +431,7 @@ def test_ollama_start_action_is_only_for_a_managed_install(monkeypatch: pytest.M
             return {"state": "starting"}
 
     app.config["OLLAMA_RUNTIME"] = Managed()
-    ok = client.post("/api/v1/laya/start", headers=headers)
+    ok = client.post("/api/v1/decision-model/start", headers=headers)
     assert ok.status_code == 200
     assert ok.get_json()["status"] == "ok"
     assert started == ["start"]
@@ -581,7 +581,7 @@ def test_ping_identity_requests_have_a_short_total_budget(monkeypatch: pytest.Mo
     try:
         response = app.test_client().get("/api/v1/ping")
         assert response.status_code == 200
-        assert response.get_json()["laya_practice"] == "down"
+        assert response.get_json()["decision_model_practice"] == "down"
         assert clock[0] - 100.0 <= 0.500001
         assert len(waits) == 1
         assert 0 < waits[0] <= 0.5
@@ -671,7 +671,7 @@ def test_closed_backend_start_never_launches_a_runtime(monkeypatch: pytest.Monke
 
     from flinttrade_core import auth_routes, health_routes, laya_runtime
 
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "typo")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "typo")
     starts: list[str] = []
     checks: list[str] = []
 
@@ -684,7 +684,7 @@ def test_closed_backend_start_never_launches_a_runtime(monkeypatch: pytest.Monke
     monkeypatch.setattr(health_routes, "_start_managed_ollama_for_gate", lambda: starts.append("ollama"))
     app = Flask(__name__)
     app.register_blueprint(health_routes.health_bp)
-    response = app.test_client().post("/api/v1/laya/start")
+    response = app.test_client().post("/api/v1/decision-model/start")
     assert response.status_code == (503 if authorised else 401)
     assert starts == []
     assert checks == ["session"]
@@ -918,8 +918,8 @@ def test_real_ready_runtime_with_integrity_error_never_admits(monkeypatch: pytes
     entry = LayaOllamaModel(_TAG, _DIGEST, "chat")
     monkeypatch.setattr(ollama_runtime, "_MANAGED_RUNTIME_OWNER", lambda: runtime)
     monkeypatch.setattr(ollama_mod, "LAYA_OLLAMA_ALLOWLIST", (entry,))
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "ollama")
-    monkeypatch.setenv("FLINTTRADE_LAYA_OLLAMA_MODEL", _TAG)
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "ollama")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", _TAG)
     set_laya_ollama_transport_for_tests(
         session=None,
         poster=lambda *_args: pytest.fail("known integrity failure must not call model"),

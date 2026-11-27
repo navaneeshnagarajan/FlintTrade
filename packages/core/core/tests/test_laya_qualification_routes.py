@@ -13,7 +13,7 @@ def test_public_qualification_requires_explicit_suite_and_lifetime(
 ) -> None:
     """Configure, measure and retire without caller-supplied readiness evidence."""
     desk = mounted_desk
-    url = "/api/v1/laya/qualification"
+    url = "/api/v1/decision-model/qualification"
     assert desk.client.post(url, json={}, headers=desk.headers).status_code == 409
     assert sidecar[1] == []
     configured = desk.client.put(url + "/configuration", headers=desk.headers, json={
@@ -42,7 +42,7 @@ def test_public_qualification_requires_explicit_suite_and_lifetime(
 ])
 def test_public_qualification_configuration_fails_closed(mounted_desk: MountedDesk, body: dict[str, Any]) -> None:
     """Incomplete suites, missing lifetimes and booleans never become defaults."""
-    result = mounted_desk.client.put("/api/v1/laya/qualification/configuration", json=body,
+    result = mounted_desk.client.put("/api/v1/decision-model/qualification/configuration", json=body,
                                      headers=mounted_desk.headers)
     assert result.status_code == 400
     assert not mounted_desk.app.config["LAYA_QUALIFICATION_OWNER"].qualifies()

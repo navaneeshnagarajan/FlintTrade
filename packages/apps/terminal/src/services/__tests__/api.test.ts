@@ -3094,7 +3094,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
   it("placeOrder drops Ready on the Laya pause and says Checking when a Down chip then admits", async () => {
     mockBrokerState.activeAccountId = "native:upstox:U1";
     const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
-    const pause = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    const pause = "Not placed. Decision model is down. Start it from Status.";
     resetOperatorSignals();
     useOperatorSignalStore.setState({
       decisionStatus: "ready",
@@ -3111,7 +3111,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
     };
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "error",
-      code: "laya_denied",
+      code: "decision_model_denied",
       message: pause,
       reason: pause,
     }, 403));
@@ -3461,7 +3461,7 @@ describe("Native FlintTrade API client (api.ts)", () => {
 
     try {
       await expect(placeOrder(order)).rejects.toThrow(
-        "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+        "Not placed. Decision model is down. Start it from Status.",
       );
       expect(fetchSpy).not.toHaveBeenCalled();
 

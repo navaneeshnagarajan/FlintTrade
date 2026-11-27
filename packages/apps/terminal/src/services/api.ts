@@ -40,7 +40,7 @@ import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
-import { liveWritesMuted, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { LAYA_DOWN_REFUSAL, liveWritesMuted, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
@@ -2367,10 +2367,10 @@ async function postOrder<T>(
   const mode = authority?.mode ?? currentMode;
   if (mode === "live" && LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) {
     const incident = readOperatorIncident();
-    const layaExit = options?.exit === true && incident?.failureClass === "laya";
+    const layaExit = options?.exit === true && incident?.failureClass === "decision_model";
     if (liveWritesMuted(incident) && !layaExit) {
-      const message = incident?.failureClass === "laya"
-        ? incident.headline
+      const message = incident?.failureClass === "decision_model"
+        ? LAYA_DOWN_REFUSAL
         : (incident?.rectify ?? "Live orders are closed.");
       throw new OrderPreflightRefusal(message);
     }
@@ -2613,10 +2613,10 @@ const PRACTICE_SQUARE_OFF_PRODUCTS = new Set(["MIS", "CNC", "NRML"]);
 function practiceSquareOffFailure(symbol: string, err: unknown): string {
   if (err instanceof OrderApiError && err.body && typeof err.body === "object") {
     const body = err.body as Record<string, unknown>;
-    if (body.code === "laya_denied") {
+    if (body.code === "decision_model_denied") {
       const reason = typeof body.reason === "string" && body.reason
         ? body.reason
-        : err.message;
+        : err.message || "Not placed. Decision model denied this order.";
       const limits = body.limits;
       const max = limits && typeof limits === "object"
         ? (limits as { max_quantity?: unknown }).max_quantity
@@ -2624,9 +2624,9 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
       const limitsLine = typeof max === "number" && Number.isInteger(max) && max >= 1
         ? ` Max quantity ${max}.`
         : "";
-      return `${symbol}: Laya denied. ${reason}${limitsLine}`;
+      return `${symbol}: Denied by decision model. ${reason}${limitsLine}`;
     }
-    if (body.code === "laya_clamp" && typeof body.message === "string" && body.message) {
+    if (body.code === "decision_model_clamp" && typeof body.message === "string" && body.message) {
       return `${symbol}: ${body.message}`;
     }
   }

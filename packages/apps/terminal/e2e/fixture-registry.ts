@@ -913,8 +913,8 @@ export function registerOperatorStatusProbes(
       return {
         json: {
           status: "ok",
-          ...(options.laya === undefined ? {} : { laya: options.laya }),
-          ...(options.layaPractice === undefined ? {} : { laya_practice: options.layaPractice }),
+          ...(options.laya === undefined ? {} : { decision_model: options.laya }),
+          ...(options.layaPractice === undefined ? {} : { decision_model_practice: options.layaPractice }),
         },
       };
     },

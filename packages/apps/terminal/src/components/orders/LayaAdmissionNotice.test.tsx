@@ -10,18 +10,18 @@ describe("LayaAdmissionNotice", () => {
       <LayaAdmissionNotice
         notice={{
           kind: "deny",
-          headline: "Laya denied",
-          reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+          headline: "Denied by decision model",
+          reason: "Not placed. Decision model is down. Start it from Status.",
           limitsLine: null,
           appliedQuantity: null,
         }}
       />,
     );
-    const reason = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    const reason = "Not placed. Decision model is down. Start it from Status.";
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(reason);
-    expect(screen.queryByRole("status", { name: "Laya decision" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Laya decision")).toHaveTextContent(reason);
-    expect(alert).toContainElement(screen.getByLabelText("Laya decision"));
+    expect(screen.queryByRole("status", { name: "Decision model check" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Decision model check")).toHaveTextContent(reason);
+    expect(alert).toContainElement(screen.getByLabelText("Decision model check"));
   });
 });

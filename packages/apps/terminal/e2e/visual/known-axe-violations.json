@@ -431,7 +431,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -534,7 +534,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -637,7 +637,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -740,7 +740,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -843,7 +843,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -946,7 +946,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -958,7 +958,7 @@
       "a:FlintTrade home",
       "button:Search symbols, pages, commands\u2026 Ctrl+K",
       "button:Practice mode. Open the mode menu.",
-      "button:Status: Laya down",
+      "button:Status: Decision model down",
       "button:Ask AI",
       "button:Tools",
       "button:Enter fullscreen (F11)",
@@ -1012,7 +1012,7 @@
       "a:FlintTrade home",
       "button:Search symbols, pages, commands\u2026 Ctrl+K",
       "button:Practice mode. Open the mode menu.",
-      "button:Status: Laya down",
+      "button:Status: Decision model down",
       "button:Ask AI",
       "button:Tools",
       "button:Enter fullscreen (F11)",
@@ -1066,7 +1066,7 @@
       "a:FlintTrade home",
       "button:Search symbols, pages, commands\u2026 Ctrl+K",
       "button:Practice mode. Open the mode menu.",
-      "button:Status: Laya down",
+      "button:Status: Decision model down",
       "button:Ask AI",
       "button:Tools",
       "button:Enter fullscreen (F11)",
@@ -1120,7 +1120,7 @@
       "a:FlintTrade home",
       "button:Search symbols, pages, commands\u2026 Ctrl+K",
       "button:Practice mode. Open the mode menu.",
-      "button:Status: Laya down",
+      "button:Status: Decision model down",
       "button:Ask AI",
       "button:Tools",
       "button:Enter fullscreen (F11)",
@@ -1317,7 +1317,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]
@@ -1420,7 +1420,7 @@
       "button:Heat",
       "a:System",
       "button:Open local help",
-      "a:How to start Laya",
+      "a:How to start the decision model",
       "button:Manage brokers",
       "button:AI model settings"
     ]

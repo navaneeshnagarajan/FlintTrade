@@ -565,8 +565,8 @@ def test_down_webhook_place_never_reaches_safety(*, backend_lease_factory) -> No
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "error"
-    assert result["code"] == "laya_denied"
-    assert "Down" in result["reason"]
+    assert result["code"] == "decision_model_denied"
+    assert "is down" in result["reason"]
     assert "Chat" not in result["reason"]
     app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -592,8 +592,8 @@ def test_degraded_webhook_clamp_does_not_place(*, backend_lease_factory) -> None
 
     result = asyncio.run(dispatcher.place_order(payload))
 
-    assert result["code"] == "laya_clamp"
-    assert result["message"] == "Not placed. Laya allows up to 1."
+    assert result["code"] == "decision_model_clamp"
+    assert result["message"] == "Not placed. Decision model allows up to 1."
     assert result["applied_quantity"] == 1
     app.config["SAFETY"].check_order.assert_not_called()
 
@@ -628,7 +628,7 @@ def test_webhook_model_deny_never_reaches_safety(*, backend_lease_factory) -> No
 
     result = asyncio.run(dispatcher.place_order(payload))
 
-    assert result["code"] == "laya_denied"
+    assert result["code"] == "decision_model_denied"
     app.config["SAFETY"].check_order.assert_not_called()
     router.place_order.assert_not_called()
     router.place_order.assert_not_called()

@@ -498,7 +498,7 @@ describe("PositionsWidget", () => {
     );
     await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+        title: "Exit requested. Check Positions and Orders for the result.",
       }),
     ));
   });
@@ -1233,7 +1233,7 @@ describe("PositionsWidget", () => {
       const tag = screen.getByText("Restored");
       expect(tag).toHaveAttribute(
         "title",
-        "Restored from backup. Not sent to a broker or checked by Laya.",
+        "Restored from backup. Not sent to a broker or checked by the decision model.",
       );
     });
 
@@ -1321,7 +1321,7 @@ describe("PositionsWidget", () => {
     it("keeps the square-off control and shows Laya's refusal when a close is denied", async () => {
       mockModeState.mode = "practice";
       mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya denied this order.", 403, {
-        code: "laya_denied",
+        code: "decision_model_denied",
         reason: "Quantity is above the practice limit.",
         message: "Laya denied this order.",
         limits: { max_quantity: 4 },
@@ -1337,7 +1337,7 @@ describe("PositionsWidget", () => {
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
 
       const denied = await screen.findByTestId("laya-denied");
-      expect(denied).toHaveTextContent("Laya denied");
+      expect(denied).toHaveTextContent("Denied by decision model");
       expect(denied).toHaveTextContent("Quantity is above the practice limit.");
       expect(screen.getByText("Max quantity 4.")).toBeInTheDocument();
       expect(screen.getByText("Square off position?")).toBeInTheDocument();
@@ -1350,7 +1350,7 @@ describe("PositionsWidget", () => {
       mockPlaceOrder
         .mockResolvedValueOnce({ orderId: "PQ-OK" })
         .mockRejectedValueOnce(new OrderApiError("Laya denied this order.", 403, {
-          code: "laya_denied",
+          code: "decision_model_denied",
           reason: "Practice book is closed.",
           message: "Laya denied this order.",
         }));
@@ -1387,7 +1387,7 @@ describe("PositionsWidget", () => {
       }), expect.objectContaining({ mode: "practice" }), { exit: true });
       expect(await screen.findByText("Exit requested: INFY.")).toBeInTheDocument();
       expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
-      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Laya denied");
+      expect(screen.getByTestId("laya-denied")).toHaveTextContent("Denied by decision model");
       expect(screen.getByTestId("laya-denied")).toHaveTextContent("Practice book is closed.");
       expect(screen.getByText("Exit all positions?")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Confirm exit all positions" })).toBeEnabled();

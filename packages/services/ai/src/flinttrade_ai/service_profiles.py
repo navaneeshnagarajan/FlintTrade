@@ -132,7 +132,7 @@ def _decision_descriptors() -> tuple[ProviderDescriptor, ...]:
     return (
         ProviderDescriptor(
             provider_id="decision:laya-managed",
-            display_name="Laya decision model",
+            display_name="Decision model",
             service_kinds=frozenset({ServiceKind.DECISION}),
             capabilities=("decision.admit",),
             auth_models=("bearer",),

@@ -91,7 +91,7 @@ import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_REQUESTED, LAYA_DOWN_REFUSAL, ORDER_STATUS_UNKNOWN, liveWritesMuted } from "@/lib/operatorIncident";
+import { EXIT_REQUESTED, LAYA_DOWN_BANNER, ORDER_STATUS_UNKNOWN, liveWritesMuted } from "@/lib/operatorIncident";
 import { captureOperatorIncidentScope, isOperatorIncidentScopeCurrent } from "@/lib/operatorIncidentScope";
 import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
@@ -1188,7 +1188,7 @@ function OrderPadWidget(props: WidgetProps) {
     // Order Pad's Practice Buy is the paper path: Explore records a sample
     // fill and Practice uses the sandbox. Do not demand a live broker here.
     if (liveMuted) {
-      const message = operatorIncident?.failureClass === "laya"
+      const message = operatorIncident?.failureClass === "decision_model"
         ? operatorIncident.headline
         : (operatorIncident?.rectify ?? "Live orders are closed.");
       showToast("error", message, 6000);
@@ -1350,7 +1350,7 @@ function OrderPadWidget(props: WidgetProps) {
     if (exitAlreadyPending) return;
     const incident = readOperatorIncident();
     const muted = appMode === "live" && liveWritesMuted(incident);
-    if (muted && incident?.failureClass !== "laya") return;
+    if (muted && incident?.failureClass !== "decision_model") return;
     const values = getValues();
     const requested = Number(values.qty);
     const closeQty = Math.min(
@@ -1980,7 +1980,7 @@ function OrderPadWidget(props: WidgetProps) {
           <Button
             type="button"
             data-testid="orderpad-close"
-            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "laya")}
+            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "decision_model")}
             onClick={() => void handleClosePosition()}
             className={`${btnBase} bg-surface-hover text-text-primary border border-border-default hover:bg-surface-card`}
           >
@@ -2002,12 +2002,12 @@ function OrderPadWidget(props: WidgetProps) {
         </Button>
         {showPracticeLayaDown ? (
           <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
-            {LAYA_DOWN_REFUSAL}
+            {LAYA_DOWN_BANNER}
           </p>
         ) : null}
         {liveMuted && operatorIncident ? (
           <p className="text-xs text-loss" data-testid="live-write-rectify">
-            {operatorIncident.failureClass === "laya" ? operatorIncident.headline : operatorIncident.rectify}
+            {operatorIncident.failureClass === "decision_model" ? operatorIncident.headline : operatorIncident.rectify}
           </p>
         ) : (
           <LayaDegradedLimitsNote status={decisionStatus} />

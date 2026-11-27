@@ -28,8 +28,8 @@ Practice or Live on the session. The Mode chip is taken from the JWT `mode` clai
 _Avoid_: paper, App
 
 **Decision model**:
-The order-admission check. The Status row is labelled **Laya**, the model name, and the value is Ready, Degraded, Down, Still loading, Checking, or Downloading. It starts Down. Settings shows **Laya decision model**. `GET /api/v1/operator/status` reports this section as the decision model.
-_Avoid_: treating Laya or the decision model as a Mode or as broker connectivity
+The order-admission check. The Status row is labelled **Decision model**, and the value is Ready, Degraded, Down, Still loading, Checking, or Downloading. It starts Down. `GET /api/v1/operator/status` reports this section as the decision model.
+_Avoid_: treating the decision model as a Mode or as broker connectivity
 
 **Trading permission**:
 The user's time-limited authorisation for specified automated actions on specified accounts, within stated risk limits. Responsibility for existing exposure does not by itself authorise further automated writes.
