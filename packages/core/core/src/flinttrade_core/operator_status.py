@@ -63,7 +63,7 @@ def operator_status() -> tuple[Any, int]:
         "mode": _unknown(),
         "live_unlocked": _unknown(),
         "connected_read": _unknown(REASON_UNSCOPED),
-        "laya": _unknown_laya(),
+        "decision_model": _unknown_laya(),
         "kill_switch": _unknown(),
         "session": _unknown(),
         "broker": _unknown(REASON_UNSCOPED),
@@ -79,7 +79,7 @@ def operator_status() -> tuple[Any, int]:
         data["connected_read"] = project_connected_read(registry, scope)
         data["broker"] = project_broker(registry, scope)
         data["dispatch"] = project_dispatch(current_app.config.get("ORDER_LIFECYCLE_LEDGER"), scope)
-        data["laya"] = project_laya()
+        data["decision_model"] = project_laya()
         data["kill_switch"] = project_kill_switch(current_app.config.get("SAFETY"))
         data["strategy"] = project_strategy(
             current_app.config.get("STRATEGY_RUNNER"),

@@ -1336,7 +1336,7 @@ class TestRequestBodyEdgeCases:
         )
         body = resp.get_json()
         assert resp.status_code == 403
-        assert body["code"] == "laya_denied"
+        assert body["code"] == "decision_model_denied"
         assert body["reason"] == "Symbol and exchange are required."
         mock_sandbox.place_order.assert_not_called()
 
@@ -1355,7 +1355,7 @@ class TestRequestBodyEdgeCases:
         )
         data = resp.get_json()
         assert resp.status_code == 403
-        assert data["code"] == "laya_denied"
+        assert data["code"] == "decision_model_denied"
         assert data["reason"] == "Quantity must be a positive whole number."
         mock_sandbox.place_order.assert_not_called()
 

@@ -80,8 +80,8 @@ def test_quantity_above_the_ceiling_is_a_clamp_and_does_not_place() -> None:
     assert admission_kind(verdict, 3) == "clamp"
     blocked = place_block(verdict, 3)
     assert blocked is not None
-    assert blocked["code"] == "laya_clamp"
-    assert blocked["message"] == "Not placed. Laya allows up to 2."
+    assert blocked["code"] == "decision_model_clamp"
+    assert blocked["message"] == "Not placed. Decision model allows up to 2."
     assert blocked["http_status"] == 409
 
 
@@ -107,7 +107,7 @@ def test_tightened_quantity_places_when_the_request_is_already_allowed() -> None
 
     verdict = Verdict(
         allow=True,
-        reason="Laya is uncertain. Quantity stays inside the tighter limit.",
+        reason="Decision model uncertain. Quantity held to the tighter limit.",
         limits=VerdictLimits(max_quantity=1),
         applied_quantity=1,
         tightened=True,
@@ -125,7 +125,7 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     assert live.allow is False
     assert practice.allow is False
     assert live.applied_quantity == 0
-    assert live.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert live.reason == "Not placed. Decision model is down. Start it from Status."
     assert practice.reason == live.reason
     assert "Live" not in practice.reason
 
@@ -138,7 +138,7 @@ def test_unqualified_live_names_practice_and_practice_refusal_omits_live(status:
     live = engine.admit(_proposal(mode="live"))
     practice = engine.admit(_proposal(mode="practice"))
     assert live.allow is False
-    assert live.reason == "Laya isn't qualified for Live yet. Practice orders are available."
+    assert live.reason == "Decision model not qualified for Live. Use Practice."
     assert "Orders are paused" not in live.reason
     assert practice.allow is True
     assert "Live" not in practice.reason

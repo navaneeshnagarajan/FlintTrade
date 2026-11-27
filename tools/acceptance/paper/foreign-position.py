@@ -16,7 +16,7 @@ before=run.fingerprint();run.save('sources-before.json',before)
 desk=owned.Desk.__new__(owned.Desk);code=1
 try:
     desk.__init__('owned-cycle')
-    assert desk.refresh()['laya_practice']=='ready'
+    assert desk.refresh()['decision_model_practice']=='ready'
     desk.start_run();desk.clock.release.set()
     owned.wait_for(lambda:desk.owner.store.get_run(desk.run_id)['snapshot'].get('cycle_count',0)==1)
     entry=desk.snapshot()

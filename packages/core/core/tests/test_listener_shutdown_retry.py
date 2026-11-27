@@ -258,7 +258,7 @@ async def test_normal_listener_resume_still_refuses_a_fresh_incomplete_stop(
         assert listener is not None and flask_app is not None
         assert type(listener._server).__module__.startswith("waitress.")
         ping = await asyncio.to_thread(normal._request, offline_startup["port"], "GET", "/api/v1/ping")
-        assert ping["status"] == 200 and ping["body"]["laya_live_qualified"] is False
+        assert ping["status"] == 200 and ping["body"]["decision_model_live_qualified"] is False
         threads = normal._owned_threads(baseline)
         with pytest.raises(RuntimeError, match="shutdown encountered errors"):
             await runtime.stop(timeout=0.05)

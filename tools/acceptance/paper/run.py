@@ -459,19 +459,19 @@ def scenario(desk):
         save('baseline.json', {'entry': entry, 'canonical_status': canonical.status_code, 'canonical': canonical.json(),
                               'owned': desk.books(desk.owner.sandbox), 'default': desk.books(desk.app.config['DATA_SANDBOX_ENGINE'])})
         assert entry['code'] == 'broker_context_unavailable'
-        assert canonical.status_code == 403 and canonical.json()['code'] == 'laya_denied'
+        assert canonical.status_code == 403 and canonical.json()['code'] == 'decision_model_denied'
         if desk.scenario == 'canonical-red':
             assert canonical.status_code == 200 and canonical.json()['status'] == 'COMPLETE', canonical.text
         if desk.scenario == 'owned-red':
             assert entry.get('status') == 'COMPLETE', entry
         return
     ping = desk.refresh()
-    assert ping['laya'] == 'down' and ping['laya_live_qualified'] is False, ping
+    assert ping['decision_model'] == 'down' and ping['decision_model_live_qualified'] is False, ping
     response = desk.order(2 if desk.scenario == 'quantity2' else 1)
     save('manual.json', {'ping': ping, 'status': response.status_code, 'body': response.json(),
                          'books': desk.books(desk.app.config['DATA_SANDBOX_ENGINE'])})
     if desk.scenario == 'health-only':
-        assert ping['laya_practice'] == 'ready' and ping['laya'] == 'down' and not ping['laya_live_qualified'], ping
+        assert ping['decision_model_practice'] == 'ready' and ping['decision_model'] == 'down' and not ping['decision_model_live_qualified'], ping
         assert response.status_code == 200 and response.json()['status'] == 'COMPLETE', response.text
         trades = desk.app.config['DATA_SANDBOX_ENGINE'].get_trades()
         assert len(trades) == 1 and trades[0]['order_id'] == response.json()['order_id']
@@ -479,10 +479,10 @@ def scenario(desk):
         assert positions.status_code == 200 and len(positions.json()['data']['positions']) == 1
         save('manual-position-readback.json', positions.json())
     elif desk.scenario == 'quantity2':
-        assert response.status_code == 409 and response.json()['code'] == 'laya_clamp', response.text
+        assert response.status_code == 409 and response.json()['code'] == 'decision_model_clamp', response.text
         assert not desk.app.config['DATA_SANDBOX_ENGINE'].get_trades()
     else:
-        assert response.status_code in {403, 409} and response.json()['code'] in {'laya_denied', 'laya_unverified'}, response.text
+        assert response.status_code in {403, 409} and response.json()['code'] in {'decision_model_denied', 'decision_model_unverified'}, response.text
         assert not desk.app.config['DATA_SANDBOX_ENGINE'].get_trades()
     save('scenario-oracle.json', {'scenario': desk.scenario, 'assertions_reached': True,
                                  'overall_accepted': False, 'pending': 'strict network/lifetime reconciliation'})

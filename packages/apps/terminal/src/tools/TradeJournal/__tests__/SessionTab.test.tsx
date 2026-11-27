@@ -291,7 +291,7 @@ describe("SessionTab live mode", () => {
     const tag = screen.getByText("Restored");
     expect(tag).toHaveAttribute(
       "title",
-      "Restored from backup. Not sent to a broker or checked by Laya.",
+      "Restored from backup. Not sent to a broker or checked by the decision model.",
     );
   });
 

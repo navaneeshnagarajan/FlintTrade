@@ -347,7 +347,7 @@ subsystem.
 - **Broker** lives once, as the **Broker** row in the TopBar **Status** menu:
   **Connected**, **Connected (read)**, or **Unavailable**, plus a plain failure
   when a money-path incident darkens the session. Account switching does not
-  add a second broker row. The decision model, labelled Laya, and LLM are the other rows in that menu.
+  add a second broker row. The decision model and LLM are the other rows in that menu.
 - **Market** lives once, in the TopBar market-session chip. A confirmed
   closed cash session reads `Market closed · opens 09:15`. Unavailable
   timings read `Market unavailable`. Neither sentence is Live mode.
@@ -362,7 +362,7 @@ are never labelled last close. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
 continuous ends, a secondary F&O chip appears: `F&O open · till 15:30` before
-3 August 2026 and `F&O open · till 15:40` from 3 August 2026. The Market Clock
+3 August 2026 and `F&O open · till 15:40` from 3 August to 6 December 2026. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
@@ -392,8 +392,7 @@ Info, Degraded, or Blocked. Example-data copy and the Practice Mode line are not
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome normally says **Unavailable** or **Degraded** plus the failure
-in plain words, never **Connected** or **Connected (read)**. Failure class
-Laya is the exception: Broker may stay **Connected** or **Connected (read)**
+in plain words, never **Connected** or **Connected (read)**. The decision-model failure class is the exception: Broker may stay **Connected** or **Connected (read)**
 while Live orders stay muted. Other money-path
 classes mute Live orders the same way, with one
 rectify line. Kill All and the safety layers stay reachable. Chat being down
@@ -401,43 +400,40 @@ does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
 The TopBar **Status** menu is the one home for **Broker**, the decision model, and
-**LLM**. The decision-model row is labelled **Laya**. That label is the model
-name, and the value is the readiness word. Settings shows the same model as
-**Laya decision model**. Each row has its own label, value, and one-line description.
+**LLM**. The decision-model row is labelled **Decision model**. The value is the readiness word. Each row has its own label, value, and one-line description.
 Broker's line is `Your broker account for live orders and holdings.`
-Laya's line is the current reason, or `Checks every order before it is placed.`
+The decision model's line is the current reason, or `Checks every order before it is placed.`
 LLM's line is `Optional AI model for chat and suggestions.` The same three
 rows sit in the More sheet on a narrow window. Feed provenance stays on the
 ticker.
 
 The button's dot is the worst state. Example data is neutral and reads
-`Example data only`, including when Laya is **Down**. After that, Laya
+`Example data only`, including when the decision model is **Down**. After that, decision model
 **Down** is red, a broker failure that marks the path unavailable is red,
-and Live with no broker connected is red (`No broker connected`). Laya
+and Live with no broker connected is red (`No broker connected`). Decision model
 **Degraded**, a degraded broker path, and an LLM of **Error** or
-**Disconnected** are amber. **Checking** (the summary reads `Checking Laya`),
-**Still loading** (`Laya still loading`) and **Downloading** (`Laya starting`)
-stay neutral. In Practice, broker **Unavailable** with Laya **Ready** is
+**Disconnected** are amber. **Checking** (the summary reads `Checking decision model…`),
+**Still loading** (`Decision model loading`) and **Downloading** (`Starting decision model`)
+stay neutral. In Practice, broker **Unavailable** with the decision model **Ready** is
 neutral and reads `Broker unavailable`. `All systems ready` appears only when
 no row is worse than Ready.
 
 Broker's value is **Connected**, **Connected (read)**, or **Unavailable**.
-Laya's value is **Ready**, **Degraded**, **Down**, **Still loading**,
-**Downloading**, or **Checking**. Laya starts **Down**, including before a heartbeat and when
-the ping omits `laya`. Missing status is never painted **Ready**. While the
-value is **Checking**, the row reads `Checking Laya…`. Download and model
-lines, and how to start the managed Laya process, are in [Start Laya](#start-laya):
+The decision model's value is **Ready**, **Degraded**, **Down**, **Still loading**,
+**Downloading**, or **Checking**. The decision model starts **Down**, including before a heartbeat and when
+the ping omits `decision_model`. Missing status is never painted **Ready**. While the
+value is **Checking**, the row reads `Checking decision model…`. Download and model
+lines, and how to start the managed decision-model process, are in [Start the decision model](#start-the-decision-model):
 `Downloading the model · X of Y GB`, `Can't download the model`,
-`Wrong model version`, and `Can't verify the model`. The refusal while
-orders are paused is `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
-Only Live-facing **Down** opens the Laya Blocked strip and mutes new Live orders. A Practice order follows the Practice chip.
-Live-facing **Degraded** leaves Live open, shows **Laya Degraded — tighter
-limits**, and does not look Blocked. LLM is **Not configured**, or
+`Wrong model version`, and `Can't verify the model`. The Status line while
+new orders are paused is `Decision model is down. New orders are paused until it's ready. Closing positions still works.`
+Only Live-facing **Down** opens the blocked strip and mutes new Live orders. A Practice order follows the Practice chip.
+Live-facing **Degraded** leaves Live open, shows **Decision model degraded. Tighter limits apply.** and does not look Blocked. LLM is **Not configured**, or
 **Connected (suggest only)** when Chat is ready.
 
 Install-host disk, RAM, CPU, GPU, and network stay on Settings → Monitoring
 (`/settings#monitoring`). That page is its own Settings section. See
-[Monitoring](#monitoring). It is not folded into this Broker / Laya / LLM
+[Monitoring](#monitoring). It is not folded into this Broker / Decision model / LLM
 menu.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
@@ -452,8 +448,8 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked for a slower request rate. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked: Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live orders stay blocked. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with that Down line. A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The order button does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place Live orders. The strip also says **Kill All stays available.** Cancel-all only cancels. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed Laya process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start Laya, until the ping confirms the new state, the chip says Checking and the popover says Checking Laya…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed Laya process is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified. | While the strip is open, new Live orders stay muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice order is refused when Practice itself is Down, with "Laya is Down. New orders are paused until it's Ready. You can still close positions." Live-facing Ready or Degraded allows a Live order. Do not treat Chat as a substitute. |
-| Chat provider (`llm_provider`) | Info: Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
+| Decision model (`decision_model`) | Blocked: the decision model is Down ("Decision model is down. New orders are paused until it's ready. Closing positions still works."). New Live orders stay blocked. Close and Square off stay available, with no extra confirmation. The server admits a close that is the same contract, the opposite side, and no larger than the open quantity minus pending exits. On Live, the position book and the broker order book must both be readable. Pending exits include the broker's open orders and this desk's own pending exits. If the broker order book cannot be read, a reduce-only close is refused. There is no unreadable-book fallback. That order takes the full check and, while this strip is open, is refused with `Not placed. Decision model is down. Start it from Status.` A second exit on the same broker account, while one of yours on that contract is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` when the broker order book can be read, and the row shows **Exit pending**. The Live hold is for that broker account. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` The label is the symbol, or `this contract` when the symbol is empty. The order button does not also show **Denied by decision model** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place Live orders. The strip also says **Kill All stays available.** Cancel-all only cancels. The decision model starts Down. The desk ping publishes Live-facing `decision_model`, sidecar `decision_model_practice`, and `decision_model_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Decision model degraded. Tighter limits apply.** The decision-model chip label follows the current mode. Practice shows Ready, Degraded, or Down from the managed decision-model process, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. After Start decision model, until the ping confirms the new state, the chip says Checking and the popover says Checking decision model…. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the managed decision-model process is up and Live is not qualified. See [Start the decision model](#start-the-decision-model). A base checkpoint leaves Live unqualified. | While the strip is open, new Live orders stay muted on that strip. A reducing close can still be sent when the books prove it. Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A Practice order is refused when Practice itself is Down, with "Not placed. Decision model is down. Start it from Status." Live-facing Ready or Degraded allows a Live order. Do not treat Chat as a substitute. |
+| Chat provider (`llm_provider`) | Info: Chat is unavailable. Trading chrome stays as it was. A decision-model denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
 | Local network (`network_local`) | The desk process is up and cannot reach the public internet (gateway, DNS, or ping). A site/CDN miss with the desk ping still ok is edge/CDN. A single broker timeout is not this class. | Check the link or switch network, then retry. |
@@ -465,44 +461,43 @@ regulator's. They are not a FlintTrade claims desk:
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
 - SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
 
-<a id="start-laya"></a>
+<a id="start-the-decision-model"></a>
 
-### Start Laya
+### Start the decision model
 
-Laya is opt-in and starts **Down**. The desk does not paint it **Ready**
-until a health probe says so. While Laya is
+The decision model is opt-in and starts **Down**. The desk does not paint it **Ready**
+until a health probe says so. While the decision model is
 **Down**, including the first load, orders are refused. **Degraded** is
 not Ready, and it is not a refusal of every order: an order inside the
-tighter ceiling can continue. See [Laya on an order](#laya-on-place).
+tighter ceiling can continue. See [Decision model on an order](#decision-model-on-an-order).
 
-**Chip.** The label follows the active mode. Practice shows the managed Laya process:
+**Chip.** The label follows the active mode. Practice shows the managed decision-model process:
 **Ready**, **Degraded**, **Down**, **Still loading**, or **Checking**.
 Live shows the Live-facing status.
 During the first load the label is **Still loading** and does not read
-**Down**. Orders are still refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** **Checking** uses the neutral colour. The popover
-says **Checking Laya…**. It is not a stale **Ready**.
+**Down**. Orders are still refused with **Not placed. Decision model is down. Start it from Status.** **Checking** uses the neutral colour. The popover
+says **Checking decision model…**. It is not a stale **Ready**.
 
 The chip tooltip is the hover text. For `not_started`, `stopped`,
 `port_in_use`, `still_loading`, and `unreachable` it is the chip label
 followed by `. Next: python -m flinttrade_core.laya_runtime start`.
 `downloading` has no tooltip and no Next line. `download_failed`,
 `unverified`, `wrong_revision`, and `key_rejected` keep the sentences in
-the table. When the managed Laya process is **Ready** or **Degraded** and Live is not
+the table. When the managed decision-model process is **Ready** or **Degraded** and Live is not
 qualified, the tooltip is **Not qualified for Live**. That line is not
 painted as **Down** on the Practice chip.
 
 Clicking the chip opens a popover. It shows the chip label, the
-link **How to start Laya** (this section), and an operator-only **Start
-Laya** button. The button is there for a signed-in operator while the
-managed Laya process is not **Ready** or **Degraded**. A signed-out desk does not
+link **How to start the decision model** (this section), and an operator-only **Start decision model** button. The button is there for a signed-in operator while the
+managed decision-model process is not **Ready** or **Degraded**. A signed-out desk does not
 get it, and neither does a demo session. While the start request is in flight the button reads **Starting…**.
-If the start fails, the popover says **Laya could not be started.**
-**Start Laya** calls `POST /api/v1/laya/start`. After that click the chip
-says **Checking** in the neutral colour and the popover says **Checking Laya…** until the ping
+If the start fails, the popover says **Decision model failed to start.**
+**Start decision model** calls `POST /api/v1/decision-model/start`. After that click the chip
+says **Checking** in the neutral colour and the popover says **Checking decision model…** until the ping
 confirms **Ready**, **Degraded**, or a reason other than `not_started`.
 It does not show a stale **Ready** during that wait.
 A confirmed first load still says **Still loading**. An order refused with
-exactly **Laya is Down. New orders are paused until it's Ready. You can still close positions.** sets the
+exactly **Not placed. Decision model is down. Start it from Status.** sets the
 chip to **Down** on that response. The refusal line is unchanged.
 
 The popover prints the chip label, not the raw code. For `download_failed`,
@@ -510,7 +505,7 @@ The popover prints the chip label, not the raw code. For `download_failed`,
 that sentence does not start with the label. The status word on the chip
 is **Down**, except during the first load, when the chip says **Still
 loading**. A download in progress reads **Downloading** in the neutral colour and is not **Still loading**.
-`<n>` in the port label is the managed Laya port.
+`<n>` in the port label is the managed decision-model port.
 
 | Code | Chip label | Tooltip |
 |---|---|---|
@@ -519,16 +514,16 @@ loading**. A download in progress reads **Downloading** in the neutral colour an
 | `port_in_use` | `Port <n> in use` | `Port <n> in use. Next: python -m flinttrade_core.laya_runtime start` |
 | `still_loading` | Still loading | `Still loading. Next: python -m flinttrade_core.laya_runtime start` |
 | `downloading` | `Downloading the model · X of Y GB` | (none) |
-| `download_failed` | Can't download the model | `Check your connection, then Start Laya again.` |
+| `download_failed` | Can't download the model | `Check your connection, then start the decision model again.` |
 | `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
-| `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
-| `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
-| `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
-| `key_missing` | The Laya API key file is missing. | `The Laya API key file is missing.` A health check does not replace this with Not started. |
+| `unverified` | Can't verify the model | `Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
+| `wrong_revision` | Wrong model version | `Wrong model loaded. Expected {pinned id}.` |
+| `key_rejected` | Can't reach the decision model | `Decision model restarted with a new key. Reconnecting…` |
+| `key_missing` | API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`. | API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`. A health check does not replace this with Not started. |
 
 `downloading` uses the status word **Downloading** (neutral colour) and
 `download_failed` uses **Down**. Neither is **Still loading**. Orders are refused with
-`Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+`Not placed. Decision model is down. Start it from Status.`
 The `downloading` chip text is live progress, one decimal digit, decimal
 gigabytes: `Downloading the model · X of Y GB`, for example `Downloading the model · 1.2 of 3.4 GB`. It has no
 tooltip and no Next line. A new model version uses that same chip and
@@ -536,36 +531,36 @@ the same **Down** word. There is no separate Updating label.
 
 When FlintTrade pins a new model version, the next start downloads it the
 same way. Your current copy stays until the new one is verified.
-If the download fails, you'll see **Can't download the model** and Laya
+If the download fails, you'll see **Can't download the model** and the decision model
 stays **Down** until you retry. `download_failed` is that result: a
 dropped connection, a partial download, or a swap that put the previous
 copy back. An older copy on disk does not change that chip, including
 one whose bytes are not the pin and one that is unverified (an extra
 loadable file, or a missing companion whose weight digest matches).
-The chip stays **Can't download the model**, and Laya does not start.
+The chip stays **Can't download the model**, and the decision model does not start.
 
 `wrong_revision` is only a real mismatch: a complete download whose files
 do not match the pin, a copy already on disk that this start is not
-replacing, or a running Laya that reports another revision or digest. A
+replacing, or a running decision-model process that reports another revision or digest. A
 dropped connection, a partial download, or a failed download or swap is
 not this
 code. A missing digest is not this code. `key_rejected` keeps the chip
 **Down**. Orders are refused.
 
-When an order is refused because Laya cannot be reached, or because it
+When an order is refused because the decision model cannot be reached, or because it
 rejects the key, the chip updates on that same order. A connection
 failure or a timeout shows **Unreachable**. A rejected key shows
-**Can't reach Laya**. The refusal text stays `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+**Can't reach the decision model**. The refusal text stays `Not placed. Decision model is down. Start it from Status.`
 
-Every chip-Down refusal reads `Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+Every chip-Down refusal reads `Not placed. Decision model is down. Start it from Status.`
 That sentence is the same in Practice and in Live. It carries no quantity
 ceiling.
 
 `identity_absent` is not a chip code. When the chip is **Ready** and a
-single decision carries no proof, the refusal code is `laya_unverified`
-and the refusal reads `Not placed. Laya's decision couldn't be verified. Try again.`
+single decision carries no proof, the refusal code is `decision_model_unverified`
+and the refusal reads `Not placed. Decision model not verified. Try again.`
 
-On each managed Laya start FlintTrade hashes `model.safetensors` and every
+On each managed decision-model start FlintTrade hashes `model.safetensors` and every
 file in `[checkpoint.manifest]` before launch, and writes a runtime
 record for that run. The record holds the sha256, pid, and start token,
 and the inode, size, and modification time of the weights file and of
@@ -581,9 +576,9 @@ An admitted Practice order still writes one line, `effect=clamp` with
 `failure=note_absent` and no proof, including when the quantity already
 fits. When this run's record stood in, each model allow keeps its own
 `effect=allow` `proof=runtime` line. There is no dedupe. A model decision with no proof is refused
-with `Not placed. Laya's decision couldn't be verified. Try again.`
+with `Not placed. Decision model not verified. Try again.`
 A health document that omits the digest is **Ready** when that record
-matches the pin. Laya is not **Ready** by default.
+matches the pin. The decision model is not **Ready** by default.
 
 The pins live in
 `packages/services/engine/src/flinttrade_engine/laya_policy.toml`.
@@ -594,22 +589,22 @@ The pins live in
 When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index (`model.safetensors.index.json`),
 or any extra weights file or other file the launcher could read shows
-**Can't verify the model** and the managed Laya process does not start. A changed byte
+**Can't verify the model** and the managed decision-model process does not start. A changed byte
 in a copy that this start is not replacing shows **Wrong model version**
-and the managed Laya process does not start. A changed byte in the runtime checkpoint
-starts the download below; the managed Laya process does not start on that tree.
-Laya does not reach **Ready** in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+and the managed decision-model process does not start. A changed byte in the runtime checkpoint
+starts the download below; the managed decision-model process does not start on that tree.
+The decision model does not reach **Ready** in these cases. A verified boot sets
+`FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH` to that hashed weights file. A model already in the
 standard Hugging Face cache is accepted. When that file is the cache
 symlink (`snapshots/<revision>/model.safetensors` pointing at `blobs/`),
-the launch path is the snapshot file, not the blob. The managed Laya process loads
+the launch path is the snapshot file, not the blob. The managed decision-model process loads
 that snapshot directory. A blob path is still refused. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. When the managed Laya process health document leaves the revision
+id or a revision. When the managed decision-model process health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest,
 so the chip leaves **Still loading**. The launch log line is
 `laya weights path=<path> sha256=<digest>`. The recorded inode, size,
-and modification time are rechecked, without hashing again, when Laya
+and modification time are rechecked, without hashing again, when the decision model
 reports Ready and on each watch tick, about every 1.5 seconds. If one
 changes, the chip shows **Can't verify the model** and the log line is
 `laya weights path=<path> changed=<field>`, where `<field>` is `inode`,
@@ -619,12 +614,12 @@ reads the pid file (the process id file under `runtime/laya`), the key file
 `GET /api/v1/ping` every 1.5 seconds. That ping reconciles those same
 files the same way an order does, so the chip and the order gate read
 the same state. A command-line stop or start, or a key rotation, shows
-on the chip by the next 1.5-second check. After **Start Laya**, until the ping
+on the chip by the next 1.5-second check. After **Start decision model**, until the ping
 confirms the new state, the chip says **Checking** in the neutral
-colour and the popover says **Checking Laya…**. It does not show a
+colour and the popover says **Checking decision model…**. It does not show a
 stale **Ready** during that wait. An admitted order while the chip is
 not **Ready** or **Degraded** also shows **Checking** until the next
-ping. An order refused with exactly **Laya is Down. New orders are paused until it's Ready. You can still close positions.** sets the chip to
+ping. An order refused with exactly **Not placed. Decision model is down. Start it from Status.** sets the chip to
 **Down** on that response. The refusal line stays that sentence.
 
 **Command line.** From the FlintTrade environment (the project `.venv`
@@ -637,41 +632,41 @@ python -m flinttrade_core.laya_runtime status
 python -m flinttrade_core.laya_runtime stop
 ```
 
-`install` creates the managed Laya environment at
+`install` creates the managed decision-model environment at
 `<workspace>/runtime/laya/venv` (on Linux, `~/.flinttrade/runtime/laya/venv`,
 unless `FLINTTRADE_WORKSPACE_DIR` is set). That environment can share the
 base interpreter with FlintTrade: its `python` is often a symlink to the
-same executable, and the packages stay in the managed Laya environment. The
+same executable, and the packages stay in the managed decision-model environment. The
 install refuses to put them in the FlintTrade environment. The default
 install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
 then `laya[serve]==0.3.21`. The constraints file pins `torch==2.14.0+cpu`,
 `laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
-(the Laya install constraints file in the backend package).
+(the decision model install constraints file in the backend package).
 The download progress class subclasses that pinned `tqdm.auto.tqdm`.
 The `serve` extra stays on the
 install requirement, because a constraints file cannot name extras. Torch is installed
 first. The install size is roughly 1.2 GB. `install --accelerator cuda` and `install --accelerator rocm` are
-opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
+opt-in. `start` still runs the model on CPU.
 
-`start` listens on `127.0.0.1` only. The port comes from `LAYA_PORT` and
+`start` listens on `127.0.0.1` only. The port comes from `FLINTTRADE_DECISION_MODEL_PORT` and
 defaults to 8000. A port clash is **Down** with `port_in_use`. `start`
 writes a fresh API key to `<workspace>/runtime/laya/api.key`. When
-`LAYA_API_KEY_FILE` points at that same path, `start` replaces the file
+`FLINTTRADE_DECISION_MODEL_API_KEY_FILE` points at that same path, `start` replaces the file
 and does not treat it as missing. A different path that is not there
-still refuses with **The Laya API key file is missing.** `stop`
-stops the managed Laya process, deletes that key, and records **Down** with
+still refuses with "API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`." `stop`
+stops the managed decision-model process, deletes that key, and records **Down** with
 `not_started`. `status` prints the report, including `reason` and the
 plain-words `detail`, and does not print the API key. If
 the weights file or any pinned manifest file is not already installed,
 `start` downloads the pinned commit from `[checkpoint] revision` first.
-That step does not start the managed Laya process, and it does not use the default
+That step does not start the managed decision-model process, and it does not use the default
 branch. The files land in `<workspace>/runtime/laya/staging`, not in the
 launch directory and not in the shared Hugging Face cache. The download
 sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1`, so transfer logs stay in that folder and not in
 the shared cache. The model is about 2.37 GB, and that size is reported
 once. While that runs, the popover reads **Downloading the model · X of Y GB** (live
-progress, one decimal, decimal GB). Orders are refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** FlintTrade then hashes the
+progress, one decimal, decimal GB). Orders are refused with **Not placed. Decision model is down. Start it from Status.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. When no
 checkpoint is already there, a full match renames that directory onto
 `<workspace>/runtime/laya/checkpoint` and launches the offline verified
@@ -686,7 +681,7 @@ FlintTrade renames `<workspace>/runtime/laya/checkpoint` aside to
 onto `checkpoint`, then deletes the old copy, and launches the offline
 verified boot. If that second rename fails, the old checkpoint is renamed
 back and the chip shows **Can't download the model**, with the tooltip
-**Check your connection, then Start Laya again.** The managed Laya process does not
+**Check your connection, then start the decision model again.** The managed decision-model process does not
 start.
 
 A complete download whose files do not match the pin shows **Wrong model
@@ -697,7 +692,7 @@ download or swap is that same chip, not **Wrong model version** and not
 verify the model** stays when this start did not download. An extra
 loadable file in a complete download shows **Can't verify the model**. On any of those results the staging
 directory is deleted and the shared model cache is left alone. The
-managed Laya process does not start on files that do not match the pin. A copy already
+managed decision-model process does not start on files that do not match the pin. A copy already
 on disk is **Wrong model version** only when this start did not download.
 
 Leftover staging directories and `checkpoint.old-*` copies are removed at
@@ -707,36 +702,36 @@ and no message. If `checkpoint` is missing and one or more
 restored onto `checkpoint` and any other aside copies are removed. If that restore
 fails, the aside copy stays where it is and that cleanup is skipped. A
 copy that was restored is then checked against the pin. If it does not
-match, Laya does not start on it; the pinned download runs instead. If
+match, the decision model does not start on it; the pinned download runs instead. If
 that download fails, the chip is **Can't download the model** and the
 restored copy stays. A missing or extra file in a model that this start
 is not replacing still shows **Can't verify the model**. The log line
 for the download step is
 `laya download repo=<repo> revision=<revision>`.
 
-Start the backend with `LAYA_HOST=127.0.0.1`, the same `LAYA_PORT`, and
-`LAYA_API_KEY_FILE` set to that `api.key` when the managed Laya process was started
+Start the backend with `FLINTTRADE_DECISION_MODEL_HOST=127.0.0.1`, the same `FLINTTRADE_DECISION_MODEL_PORT`, and
+`FLINTTRADE_DECISION_MODEL_API_KEY_FILE` set to that `api.key` when the managed decision-model process was started
 separately. The next health probe attaches. The host must stay
 `127.0.0.1`.
 
 A base checkpoint leaves Live-facing status **Down**. Live stays **Down**
 until that exact revision, weight digest, and policy version are qualified
-with LIVE_DECISION evidence. Laya is never **Ready** by default.
+with LIVE_DECISION evidence. The decision model is never **Ready** by default.
 
-<a id="laya-on-place"></a>
+<a id="decision-model-on-an-order"></a>
 
-### Laya on an order
+### Decision model on an order
 
-Order buttons go through Laya admission. Live-facing **Ready** and
+Order buttons go through decision-model admission. Live-facing **Ready** and
 **Degraded** allow a Live order. Practice **Ready** and
 **Degraded** allow a Practice order, including while Live itself
 is still unqualified. The chip then shows the Practice state, with
 tooltip **Not qualified for Live**. On Live, an operator order and an automation
-order run Mode guard → Laya.admit → SafetySystem → gate_order →
-BrokerRouter. Laya does not place the order and does not replace those
+order run Mode guard → `Laya.admit` → SafetySystem → gate_order →
+BrokerRouter. The decision model does not place the order and does not replace those
 layers. A refusal or a quantity clamp stops before SafetySystem. A Practice
 order is admitted before the sandbox and does not enter SafetySystem.
-A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call, on an order, a routed order, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` On the server, example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` The Order Pad on example data records a sample fill instead (`Example order placed`, id starting `SAMPLE-`). Chat is not an
+A body with `"variety": "gtt"`, in any case or separator spelling, is HTTP 422 `gtt_unsupported` before the decision model, SafetySystem, and any broker call, on an order, a routed order, exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.` On the server, example data is HTTP 403 `mode_blocked` before admission: `Orders are not available for Example. Switch to Practice or Live to trade.` The Order Pad on example data records a sample fill instead (`Example order placed`, id starting `SAMPLE-`). Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
@@ -747,61 +742,58 @@ is **Add a reason (optional)**. It is not a required step, and an empty field do
 not block the order button. Quick Trade, Positions square-off, Order Ladder, Scalper,
 and Option Chain use the same accessible name, **Add a reason (optional)**.
 An order with no note still gets
-Laya's policy decision. Practice clamps. Live denies. It is not a hard
-reject. The server reason for that Practice clamp is **Laya is uncertain.
-Quantity stays inside the tighter limit.** The server reason for that
-Live denial is **Laya is uncertain. Live stays closed.** When the
+the decision model's policy decision. Practice clamps. Live denies. It is not a hard
+reject. The server reason for that Practice clamp is **Decision model uncertain. Quantity held to the tighter limit.** The server reason for that
+Live denial is **Decision model uncertain. Live stays closed.** When the
 requested quantity is greater than the allowed one, the Order Pad
 clamp notice shows the clamp sentence below, not the Practice reason line.
-**Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
-reason. The denial is one alert (`role="alert"`), the only live region.
-The reason line is named **Laya decision** and is not its own status. When the server
+**Deny.** Order Pad and Quick Trade show **Denied by decision model**, then `Not placed. Decision model denied this order: {reason}.` When no reason comes back, the line ends at **Not placed. Decision model denied this order.** The denial is one alert (`role="alert"`), the only live region.
+The reason line is named **Decision model check** and is not its own status. When the server
 sent a quantity ceiling, the next line is
 **Max quantity N.** A Down refusal does not show that line. The reason
-is **Laya is Down. New orders are paused until it's Ready. You can still close positions.** Order buttons
-stay off until Laya or the mode changes; you can then retry. Kill All
+is **Not placed. Decision model is down. Start it from Status.** Order buttons
+stay off until the decision model or the mode changes; you can then retry. Kill All
 stays reachable. A single decision with no proof, while the chip is
-**Ready**, is not that Down refusal. The notice reads **Not placed. Laya's decision couldn't be verified. Try again.**
-The code is `laya_unverified`.
+**Ready**, is not that Down refusal. The notice reads **Not placed. Decision model not verified. Try again.**
+The code is `decision_model_unverified`.
 A denial is not a Chat outage: the LLM label stays **Not configured** or
 **Connected (suggest only)**, and the Chat strip stays Info.
 
 **Clamp.** A clamp is only when the requested quantity is greater than
-the allowed one. Nothing is placed until you click. Laya never
+the allowed one. Nothing is placed until you click. The decision model never
 auto-places the reduced quantity. Order Pad and Quick Trade show
-**Not placed. Laya allows up to N.** with **Place N** and **Cancel**.
+**Not placed. Decision model allows up to N.** with **Place N** and **Cancel**.
 **Place N** sends that quantity through the same order checks. On Order
 Pad, **Review Practice order** then shows that placed quantity. When the
 request is already at the allowed quantity, that order is admitted.
-Place 1 on **Not placed. Laya allows up to 1.** places. Practice still
+Place 1 on **Not placed. Decision model allows up to 1.** places. Practice still
 reaches the sandbox only after that admit. On Live, an admitted quantity
 continues to SafetySystem and gate_order. **Cancel** places nothing.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
-**Laya Degraded — tighter limits** on the Status menu and under those
+**Decision model degraded. Tighter limits apply.** on the Status menu and under those
 order buttons. That line is not the Blocked strip, and it does not mute
 Live orders. The chip shows Degraded when Live
 itself is Degraded. Practice Degraded applies the tighter ceiling to a
 Practice order.
 
-**Down.** Laya starts **Down**. The chip label follows the current mode.
-See [Start Laya](#start-laya). In Practice it shows the managed Laya state and
+**Down.** The decision model starts **Down**. The chip label follows the current mode.
+See [Start the decision model](#start-the-decision-model). In Practice it shows the managed decision-model state and
 does not read Down while a Practice order can be admitted. **Not qualified
-for Live** is the chip tooltip. Only Live-facing **Down** opens the Laya
-Blocked strip and mutes new Live orders. Practice is
+for Live** is the chip tooltip. Only Live-facing **Down** opens the blocked strip and mutes new Live orders. Practice is
 not muted by that strip. While that mute is up, the Live order button
-does not also show **Laya denied**. Kill All stays reachable. Broker may
+does not also show **Denied by decision model**. Kill All stays reachable. Broker may
 stay **Connected** or **Connected (read)**. A Practice order is refused
 when Practice itself is Down. The server reason, in every mode, is
-**Laya is Down. New orders are paused until it's Ready. You can still close positions.** There is no
+**Not placed. Decision model is down. Start it from Status.** There is no
 quantity-ceiling line. A Practice refusal never says Live. A Live order
-while Laya is Ready or Degraded, without a matching qualification record,
-says **Laya isn't qualified for Live yet. Practice orders are available.**
+while the decision model is Ready or Degraded, without a matching qualification record,
+says **Decision model not qualified for Live. Use Practice.**
 Start the opt-in model before a Down engine can admit.
 
-A close the server classifies as reduce-only is still admitted when the books prove it. On Live, an unreadable broker order book refuses a reduce-only close, and that order takes the full check. While Laya is not Ready, Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** Cancel-all only cancels and stays reachable. Layer 5 cancels resting orders and then flattens; they are separate from cancel-all. Connected (read) is a broker status, not a Mode.
+A close the server classifies as reduce-only is still admitted when the books prove it. On Live, an unreadable broker order book refuses a reduce-only close, and that order takes the full check. While the decision model is not Ready, Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** Cancel-all only cancels and stays reachable. Layer 5 cancels resting orders and then flattens; they are separate from cancel-all. Connected (read) is a broker status, not a Mode.
 
-**Chat.** Chat never shows **Admit** or **Approved by Laya**. Chat being
+**Chat.** Chat never shows **Admit** or an approval from the decision model. Chat being
 offline does not close Live.
 
 Order Pad and Quick Trade are the surfaces that show the deny and clamp
@@ -884,7 +876,7 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
    Practice changes virtual capital and square-off times. It does not
    place an order.
 
-A Practice order is admitted before the sandbox. When Practice itself is Down, a new order is refused with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and nothing is filled. A close that only reduces an open position is still admitted, and the Practice sandbox can fill it. While Laya is not Ready, Positions and the Practice Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A second exit on that contract, while one of yours is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` and the row shows **Exit pending**. The label is the symbol, or **this contract** when the symbol is empty. The desk chip follows the current mode. When Practice can admit, the Practice chip shows **Ready** or **Degraded** from the managed Laya process and does not read **Down**. **Not qualified for Live** is the tooltip, not a Down label. Until a stop or a start is confirmed, the chip says **Checking** and the popover says **Checking Laya…**. When admission allows the quantity, the path is front-end → JWT guard → mode guard → Laya.admit → FlintTrade sandbox → simulated fill → REST refresh of Positions and Orders. No real money moved. A refusal or a quantity clamp stops before the sandbox. Example Buy never enters that path. Restoring a Practice backup marks those fills **Restored** (tooltip **Restored from backup. Not sent to a broker or checked by Laya.**). Performance shows **Excludes N restored fills** when N is at least 1, and hides that line when N is 0.
+A Practice order is admitted before the sandbox. When Practice itself is Down, a new order is refused with **Not placed. Decision model is down. Start it from Status.** and nothing is filled. A close that only reduces an open position is still admitted, and the Practice sandbox can fill it. While the decision model is not Ready, Positions and the Practice Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A second exit on that contract, while one of yours is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` and the row shows **Exit pending**. The label is the symbol, or **this contract** when the symbol is empty. The desk chip follows the current mode. When Practice can admit, the Practice chip shows **Ready** or **Degraded** from the managed decision-model process and does not read **Down**. **Not qualified for Live** is the tooltip, not a Down label. Until a stop or a start is confirmed, the chip says **Checking** and the popover says **Checking decision model…**. When admission allows the quantity, the path is front-end → JWT guard → mode guard → `Laya.admit` → FlintTrade sandbox → simulated fill → REST refresh of Positions and Orders. No real money moved. A refusal or a quantity clamp stops before the sandbox. Example Buy never enters that path. Restoring a Practice backup marks those fills **Restored** (tooltip **Restored from backup. Not sent to a broker or checked by the decision model.**). Performance shows **Excludes N restored fills** when N is at least 1, and hides that line when N is 0.
 
 **Estimated charges.** Every Practice fill runs through the same Indian statutory calculator the backtest uses: STT, the exchange transaction charge, the SEBI fee, stamp duty, and GST. The shared table records the exchange and the date each rate took effect. Brokerage is not in that table. Practice has no broker contract rate, so a fill never says Brokerage. The fill shows one line, `Charges ₹X (estimated)`, on its own line under the price. It expands to STT, the exchange transaction named from that fill (`NSE transaction` or `BSE transaction`), the SEBI fee, stamp duty, and GST. The `Simulated at last close` tag stays on its own line.
 
@@ -999,7 +991,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 
-- [ ] In Live, the Laya chip is **Ready** or **Degraded** if you intend to send a Live order. The chip follows the current mode and does not invent Ready. In Practice it shows the managed Laya state. **Not qualified for Live** is the tooltip when Live has no matching qualification record. **Down** shows **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and mutes a new Live order. Close and Square off stay available. A base checkpoint leaves Live unqualified. **Degraded** keeps Live open and shows **Laya Degraded — tighter limits**. A Practice order is refused when Practice itself is Down. After Start Laya, until the ping confirms the new state, the chip says **Checking** and the popover says **Checking Laya…**. See [Start Laya](#start-laya).
+- [ ] In Live, the decision model chip is **Ready** or **Degraded** if you intend to send a Live order. The chip follows the current mode and does not invent Ready. In Practice it shows the managed decision-model state. **Not qualified for Live** is the tooltip when Live has no matching qualification record. **Down** shows **Decision model is down. New orders are paused until it's ready. Closing positions still works.** and mutes a new Live order. Close and Square off stay available. A base checkpoint leaves Live unqualified. **Degraded** keeps Live open and shows **Decision model degraded. Tighter limits apply.** A Practice order is refused when Practice itself is Down. After Start decision model, until the ping confirms the new state, the chip says **Checking** and the popover says **Checking decision model…**. See [Start the decision model](#start-the-decision-model).
 
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 
@@ -1009,10 +1001,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] You get a static IP and register it with your broker. See
       [Broker static IP](#broker-static-ip).
 
-An operator Live order and an automation Live order run Mode guard → Laya.admit →
-SafetySystem → gate_order → BrokerRouter. Laya does not place the
+An operator Live order and an automation Live order run Mode guard → `Laya.admit` →
+SafetySystem → gate_order → BrokerRouter. The decision model does not place the
 order. A refusal or a quantity clamp stops before SafetySystem.
-See [Start Laya](#start-laya) and [Laya on an order](#laya-on-place).
+See [Start the decision model](#start-the-decision-model) and [Decision model on an order](#decision-model-on-an-order).
 
 ### Walkthrough
 
@@ -1069,7 +1061,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
   collapses behind the menu button at the top left.
 - **Top bar.** Search (symbols, pages and commands; also Ctrl+K or ⌘K), the
   Mode menu, one market chip (NSE session and IST clock), the **Status**
-  menu (broker, the decision model labelled Laya, and LLM), **Ask AI**, **Tools** (Quick Settings and
+  menu (broker, the decision model, and LLM), **Ask AI**, **Tools** (Quick Settings and
   Settings), full screen, notifications and your profile. The account
   switcher appears once a broker account is connected. Feed provenance is
   the chip at the start of the ticker.
@@ -1757,14 +1749,14 @@ acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
 Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
-It does not place Live orders, and it is not Laya. Chat is not an admission
-source: it never shows **Admit** or **Approved by Laya**. The desk Laya chip
+It does not place Live orders, and it is not the decision model. Chat is not an admission
+source: it never shows **Admit** or an approval from the decision model. The desk decision model chip
 is a separate status: **Ready**, **Degraded**, **Down**, **Still
 loading**, or **Checking**. The chip follows the current mode. In Practice it shows the
-managed Laya process and does not read Down while Practice orders are being admitted.
+managed decision-model process and does not read Down while Practice orders are being admitted.
 During the first load the label is **Still loading**. **Not qualified for
-Live** is the tooltip. Laya starts **Down** and does not invent Ready.
-How to start it is [Start Laya](#start-laya). A
+Live** is the tooltip. The decision model starts **Down** and does not invent Ready.
+How to start it is [Start the decision model](#start-the-decision-model). A
 base checkpoint leaves Live unqualified. Only Live-facing **Down** closes
 Live orders and mirror start.
 Practice is not muted by that strip. A Practice order is refused when
@@ -1820,7 +1812,7 @@ use Practice simulated fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
 cannot place Live orders. Chat never
-shows **Admit** or **Approved by Laya**. This does
+shows **Admit** or an approval from the decision model. This does
 not start broker account calls, and it does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
 When Chat is connected, the badge reads **Connected (suggest only)**.
@@ -2017,7 +2009,7 @@ tab never leaves a highlighted tab over a blank content pane.
 
 Settings → **Monitoring** (`/settings#monitoring`) reads this install. It
 does not write `workspace.json`. It stays its own Settings section. The
-TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
+TopBar **Broker**, **Decision model**, and **LLM** labels are a different cluster
 .
 
 **System Health** keeps service rows and machine rows apart. Signed-out
@@ -2030,7 +2022,7 @@ example **Broker — Example**. DuckDB reads **DuckDB — Healthy** when the
 check passes, and otherwise its note (example data can read **DuckDB — Example**)
 or **Error**. **Example** on a service row is that service's fallback. Monitoring fallback rows are Example. It does not stand
 in for disk, Memory, CPU, GPU, or network, and it is not merged into the
-TopBar Broker / Laya / LLM cluster.
+TopBar Broker / Decision model / LLM cluster.
 
 **This host** is the machine where FlintTrade is installed. The rows are
 **Disk**, **Memory** (RAM on that machine), **CPU**, **GPU**, and
@@ -2267,41 +2259,39 @@ FlintTrade JWTs expire daily at 8 AM IST. Refresh the token by signing in
 again. FlintTrade redirects you to `/welcome` automatically
 when it detects the 401.
 
-<a id="place-refused-as-laya-denied-or-quantity-reduced"></a>
+<a id="an-order-refused-by-the-decision-model-or-a-reduced-quantity"></a>
 
-### An order refused by Laya, or a reduced quantity
+### An order refused by the decision model, or a reduced quantity
 
 Order Pad and Quick Trade show this under the order buttons. Scalper,
 Positions, Order Ladder, and Option Chain may still show an order error
 as a toast.
 
-1. **Laya denied**. Read the server reason under the headline. The
+1. **Denied by decision model**: read the server reason under the headline. The
    denial is one alert (`role="alert"`), the only live region. The reason
-   line is named **Laya decision** and is not its own status. Order
-   buttons stay off until Laya or the mode changes. **Max quantity N.**
+   line is named **Decision model check** and is not its own status. Order
+   buttons stay off until the decision model or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
-   The strip reads **Laya is Down. New orders are paused until it's Ready. You can still close positions.** when Live-facing status is Down. It mutes new Live orders. Practice is not muted by that strip. A
-   Practice order is refused when Practice itself is Down, with **Laya is Down. New orders are paused until it's Ready. You can still close positions.** A non-exit order is HTTP 403. Start the opt-in model
-   before a Down engine can admit. A close that only reduces an open position can still be sent when the books prove it. On Live, an unreadable broker order book refuses a reduce-only close, and that order takes the full check. While Laya is not Ready, Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A close larger than the position is refused with that Down line. A second exit while one is already unfilled, and the broker order book can be read, is `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` and the row shows **Exit pending**. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` If the position flips after the broker book loads, that row is tagged **Unexpected** and stays on screen with `Position changed after your broker's orders loaded. You're now SIDE QUANTITY SYMBOL. Close it if that wasn't intended.` SIDE is long or short.
-   The Laya chip follows the current mode. Practice shows the managed Laya process.
+   The strip reads **Decision model is down. New orders are paused until it's ready. Closing positions still works.** when Live-facing status is Down. It mutes new Live orders. Practice is not muted by that strip. A
+   Practice order is refused when Practice itself is Down, with **Not placed. Decision model is down. Start it from Status.** A non-exit order is HTTP 403. Start the opt-in model
+   before a Down engine can admit. A close that only reduces an open position can still be sent when the books prove it. On Live, an unreadable broker order book refuses a reduce-only close, and that order takes the full check. While the decision model is not Ready, Positions, the Practice Order Pad and the Live Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A close larger than the position is refused with **Not placed. Decision model is down. Start it from Status.** A second exit while one is already unfilled, and the broker order book can be read, is `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` and the row shows **Exit pending**. When a retained exit exists and the broker's orders cannot be read, that refusal is `Not placed. Broker orders for SYMBOL are unavailable. Reconcile them before another exit.` If the position flips after the broker book loads, that row is tagged **Unexpected** and stays on screen with `Position changed after your broker's orders loaded. You're now SIDE QUANTITY SYMBOL. Close it if that wasn't intended.` SIDE is long or short.
+   The decision model chip follows the current mode. Practice shows the managed decision-model process.
    When Practice can admit, the chip shows **Ready** or **Degraded**, not
    **Down**. During the first load it says **Still loading**. In Live the
    chip shows Live-facing status. **Not qualified for Live** is the chip
-   tooltip and the popover line when the managed Laya process is up and Live is not
+   tooltip and the popover line when the managed decision-model process is up and Live is not
    qualified. A Live order while Ready or Degraded, without a matching
-   qualification record, says **Laya isn't qualified for Live yet.
-   Practice orders are available.** A base checkpoint leaves Live
-   unqualified. Laya starts **Down** and does not invent Ready. Start it
-   from [Start Laya](#start-laya). Chat cannot place Live orders.
-2. **Not placed. Laya allows up to N.** Nothing was placed. A clamp is
+   qualification record, says **Decision model not qualified for Live. Use Practice.** A base checkpoint leaves Live
+   unqualified. The decision model starts **Down** and does not invent Ready. Start it
+   from [Start the decision model](#start-the-decision-model). Chat cannot place Live orders.
+2. **Not placed. Decision model allows up to N.** Nothing was placed. A clamp is
    only when the requested quantity is greater than the allowed one.
-   Laya does not auto-place. **Place N** sends that quantity through
+   The decision model does not auto-place. **Place N** sends that quantity through
    admit again. On Order Pad, **Review Practice order** then shows that
-   placed quantity. Place 1 on **Not placed. Laya allows up to 1.** places.
+   placed quantity. Place 1 on **Not placed. Decision model allows up to 1.** places.
    SafetySystem and gate_order run when that quantity is allowed.
    **Cancel** places nothing. The model does not raise quantity. A Down refusal does not
-   show **Max quantity** and does not say to start the model. **Laya
-   Degraded — tighter limits** means Live-facing Degraded: Live is open
+   show **Max quantity** and does not say to start the model. **Decision model degraded. Tighter limits apply.** means Live-facing Degraded: Live is open
    with a tighter ceiling. It is not a Blocked strip.
 3. On the Order Pad, example data records a sample fill. The success line is
    `Example order placed` and the id starts with `SAMPLE-`. The server
@@ -2319,12 +2309,12 @@ as a toast.
    Open the Mode menu and choose **Practice** for simulated fills, or
    unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.
-   A Laya denial or clamp stops before the safety layers. Order Pad and
+   A decision-model denial or clamp stops before the safety layers. Order Pad and
    Quick Trade show it under the order button; see
-   [An order refused by Laya, or a reduced quantity](#place-refused-as-laya-denied-or-quantity-reduced).
+   [An order refused by the decision model, or a reduced quantity](#an-order-refused-by-the-decision-model-or-a-reduced-quantity).
 3. Check the FlintTrade backend logs, the console where you ran
    `python scripts/ft.py start` (or `make start`). A safety-layer refusal
-   is logged with the layer that blocked it. A Laya refusal is not that
+   is logged with the layer that blocked it. A decision-model refusal is not that
    layer.
 
 ### Front-end shows stale prices

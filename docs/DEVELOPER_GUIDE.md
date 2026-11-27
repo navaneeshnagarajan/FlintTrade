@@ -130,7 +130,7 @@ npx vitest                                 # watch mode (great for TDD)
 Playwright screenshot comparison and axe checks live in
 `packages/apps/terminal/e2e/visual-a11y.spec.ts`. They cover Home, the
 Trading Desk dashboard, the Practice Order Pad before and after a refused
-order, the Laya row in the labels the desk actually paints (Ready,
+order, the decision model row in the labels the desk actually paints (Ready,
 Degraded, Down), the TopBar Status menu, the two-operator
 screen, sign-in, and setup. Each one runs at 1440×900 and 2560×1440.
 
@@ -513,7 +513,7 @@ Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Example-data
 placement is refused by the backend (HTTP 403 `mode_blocked`,
 `Orders are not available for Example. Switch to Practice or Live to trade.`);
-Order Pad Example Buy is a local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no Laya admit, no
+Order Pad Example Buy is a local example fill (`Example order placed`, id starting `SAMPLE-`; no HTTP order route, no `Laya.admit`, no
 SafetySystem). Other Live write verbs still reach SafetySystem without
 this place admission. The global auth check covers both a session JWT
 and `FLINTTRADE_API_KEY`. The session JWT is read from
@@ -535,20 +535,22 @@ order):
    single position exceeding 60 % of available margin.
 5. **L3 Portfolio risk** — net delta and net vega caps.
 
-Do not bypass Laya or SafetySystem on those place paths. If you need a
+Do not bypass the decision model or SafetySystem on those place paths. If you need a
 fast-path for high-frequency orders, add the path inside the layers, not
 around them.
 
-### Laya decision process
+<a id="decision-model-process"></a>
+
+### Decision model process
 
 Operator steps, the chip, and the reason codes are in
-[Start Laya](USER_GUIDE.md#start-laya). Desk place surfaces go through
-this admission. Place admission asks the Laya model only after Down and
+[Start the decision model](USER_GUIDE.md#start-the-decision-model). Desk place surfaces go through
+this admission. Place admission asks the decision model only after Down and
 the hard rules.
 The host is opt-in. Install and supervise it with the FlintTrade
 environment (the project `.venv` after `uv sync`, or `uv run python`),
 so `flinttrade_core` and `flinttrade_engine` import. Do not run these
-commands with the managed Laya interpreter.
+commands with the managed decision-model interpreter.
 
 ```text
 python -m flinttrade_core.laya_runtime install
@@ -559,29 +561,29 @@ python -m flinttrade_core.laya_runtime stop
 
 `install` creates `<workspace>/runtime/laya/venv`. On Linux the default
 workspace is `~/.flinttrade`. `FLINTTRADE_WORKSPACE_DIR` overrides it.
-The managed Laya environment can share the base interpreter with FlintTrade:
+The managed decision-model environment can share the base interpreter with FlintTrade:
 its `python` is often a symlink to the same executable, and the prefix
 compared at install time is the environment directory, not that symlink.
 The install refuses a command whose prefix is the FlintTrade environment.
-The default install puts CPU torch in the managed Laya environment from
+The default install puts CPU torch in the managed decision-model environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
 the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`,
 `laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
-(the Laya install constraints file in the backend package).
+(the decision model install constraints file in the backend package).
 The `serve` extra stays on the install requirement. The CPU install applies
 that file to both pip commands, and installs torch first. The install size
 is roughly 1.2 GB. CUDA and ROCm
 installs do not use the CPU pin. `install --accelerator cuda` opts into the
-PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
-set to an https PyTorch ROCm wheel index. `start` still uses CPU
-(`LAYA_DEVICE=cpu`). The host stays `127.0.0.1`. `LAYA_PORT` chooses the
+PyPI torch build. `install --accelerator rocm` needs `FLINTTRADE_DECISION_MODEL_TORCH_INDEX`
+set to an https PyTorch ROCm wheel index. `start` still runs the model on
+CPU. The host stays `127.0.0.1`. `FLINTTRADE_DECISION_MODEL_PORT` chooses the
 port and defaults to 8000. A clash on that port is Down with
 `port_in_use`. A fresh API key is
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
-on a start that fails after the key was written. When `LAYA_API_KEY_FILE`
+on a start that fails after the key was written. When `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`
 points at that same path, `start` replaces the file and does not treat
 it as missing. A different path that is not there still refuses with
-"The Laya API key file is missing."
+"API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`."
 
 `start` downloads the pinned commit (`[checkpoint] revision`, never the
 default branch) into `<workspace>/runtime/laya/staging` when the weights
@@ -591,7 +593,7 @@ not the launch path and not the shared Hugging Face cache. The download
 sets `HF_HOME` to `<workspace>/runtime/laya/hf-home` and
 `HF_HUB_DISABLE_XET=1` (read by `huggingface_hub` 1.33.0), so transfer
 logs stay in that folder. The step does
-not start the managed Laya process. While it runs, including a pin change, the reason
+not start the managed decision-model process. While it runs, including a pin change, the reason
 is `downloading` and the popover is `Downloading the model · X of Y GB` (for example `Downloading the model · 1.2 of 3.4 GB`)
 (live, one decimal, decimal GB), with no Next line and no Updating label.
 Orders stay on the Down refusal. It then hashes `model.safetensors` and
@@ -608,11 +610,11 @@ do not match the pin is `wrong_revision`; staging is deleted and a
 checkpoint already on disk is left in place. An extra loadable file in a
 complete download is `unverified`. A dropped connection, a partial or
 missing file, or a read error is `download_failed` ("Can't download the
-model"; tooltip "Check your connection, then Start Laya again."). The
+model"; tooltip "Check your connection, then start the decision model again."). The
 status word for `downloading` is Downloading (neutral colour) and for
 `download_failed` it is Down, never Still
-loading, and orders use "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
-model cache alone. The managed Laya process does not start on files that do not match
+loading, and orders use "Not placed. Decision model is down. Start it from Status." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
+model cache alone. The managed decision-model process does not start on files that do not match
 the pin. If the download does not finish, the reason is `download_failed`, not
 `wrong_revision` and not `unverified`, whatever older snapshot is on
 disk. An empty cache is `download_failed`. `unverified` stays when this
@@ -624,7 +626,7 @@ message. If `checkpoint` is missing and one or more `checkpoint.old-*`
 copies remain, the last `checkpoint.old-*` name is restored onto
 `checkpoint` and any other aside copies are removed. If that restore fails, the aside copy stays
 where it is and that cleanup is skipped. A copy that was restored is then
-checked against the pin. If it does not match, the managed Laya process does not start
+checked against the pin. If it does not match, the managed decision-model process does not start
 on it; the pinned download runs instead, and a failed download leaves
 `download_failed` with that copy still on disk. The download log line is
 `laya download repo=<repo> revision=<revision>`.
@@ -634,10 +636,10 @@ The pins live in `laya_policy.toml`:
 `encoder/config.json`, `tokenizer/tokenizer_config.json`, and
 `tokenizer/tokenizer.json` by sha256.
 
-A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
-the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
+A backend that was started with `FLINTTRADE_DECISION_MODEL_HOST=127.0.0.1`, `FLINTTRADE_DECISION_MODEL_PORT` (or
+the default 8000), and `FLINTTRADE_DECISION_MODEL_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
-client uses the same revision and digest checks. On each managed Laya start
+client uses the same revision and digest checks. On each managed decision-model start
 FlintTrade hashes `model.safetensors` and each file in
 `[checkpoint.manifest]` before launch. The runtime record holds the
 sha256, pid, and start token, and each file's inode, size, and
@@ -646,23 +648,23 @@ modification time in nanoseconds
 also in `run.json`). When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index, or any extra weights file or other
 file the launcher could read is `unverified` ("Can't verify the model")
-and the managed Laya process does not start. A changed byte in a snapshot that this
+and the managed decision-model process does not start. A changed byte in a snapshot that this
 start is not replacing is `wrong_revision` ("Wrong model version") and the
-managed Laya process does not start. A changed byte in the runtime checkpoint is the
-download above; the managed Laya process does not start on that tree. Laya does not
+managed decision-model process does not start. A changed byte in the runtime checkpoint is the
+download above; the managed decision-model process does not start on that tree. The decision model does not
 reach Ready in these cases. A verified boot sets
-`LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in the
+`FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH` to that hashed weights file. A model already in the
 standard Hugging Face cache is accepted. When that file is the cache
 symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), it is
 passed as the snapshot file, not the blob. A blob path is still refused.
 The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. When that managed Laya process's health document leaves the revision
+id or a revision. When that managed decision-model process's health document leaves the revision
 null, FlintTrade fills the pinned revision from the verified manifest, so
 the chip leaves Still loading and can reach Ready without a download in
 this process. The launch log line is
 `laya weights path=<path> sha256=<digest>`. Those identity values are
-rechecked, without hashing again, when Laya reports Ready and on each
+rechecked, without hashing again, when the decision model reports Ready and on each
 watch tick, about every 1.5 seconds. A mismatch is `unverified`
 ("Can't verify the model"). The log line is
 `laya weights path=<path> changed=<field>` where `<field>` is `inode`,
@@ -674,19 +676,18 @@ is reconciled by that watch. The desk polls `GET /api/v1/ping` every
 1.5 seconds. That ping reconciles the pid, the key, and the runtime
 record the same way an order does, so the chip and the order gate read
 the same state. A stop or a start shows on the chip by the next 1.5-second check.
-After Start Laya, until the ping confirms the new state, the chip says
-Checking in the neutral colour and the popover says Checking Laya…. It
+After Start decision model, until the ping confirms the new state, the chip says
+Checking in the neutral colour and the popover says Checking decision model…. It
 does not show a stale Ready during that wait. An admitted place while
 the chip is not Ready or Degraded also shows Checking until the next
 ping. A confirmed first load
-still says Still loading. A place refused with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets the chip to Down on that
+still says Still loading. A place refused with exactly "Not placed. Decision model is down. Start it from Status." sets the chip to Down on that
 response. The refusal line is unchanged. Every `stop` deletes the runtime
 record, as does a start that fails after it was written. A record from
 an earlier run is rejected. A health document without the weight digest
 is Ready when that record matches the pin. If the record cannot be
 checked, the reason is `unverified` ("Can't verify the model"). The
-tooltip is "The installed model couldn't be checked against the pinned
-version. Restart Laya. If it keeps happening, reinstall it."
+tooltip is "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
 `still_loading`, `downloading`, `download_failed`, `unreachable`,
@@ -694,43 +695,40 @@ version. Restart Laya. If it keeps happening, reinstall it."
 not a status code. The desk shows Not started, Stopped,
 `Port <n> in use`, Still loading, `Downloading the model · X of Y GB`,
 Can't download the model, Unreachable, Wrong model version, Can't verify
-the model, Can't reach Laya, and The Laya API key file is missing.
+the model, Can't reach the decision model, and API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`.
 `key_missing` stays until a later start finds the file, or an explicit
-stop. When `LAYA_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`,
+stop. When `FLINTTRADE_DECISION_MODEL_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`,
 that next `start` replaces the file and does not treat it as missing. A
-different path that is not there still refuses with "The Laya API key
-file is missing." A health
+different path that is not there still refuses with "API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`." A health
 check does not replace it with Not started. The download progress class
 subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`). The model is
 about 2.37 GB, and the progress line reports that size once. `unverified` applies when this start did
 not download. A failed download, including one over an older unverified
 snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
-managed Laya port. Tooltips for
+managed decision-model port. Tooltips for
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable` are the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
-has no tooltip. The `download_failed` tooltip is "Check your connection,
-then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
-FlintTrade expects." That code is only a real mismatch: a complete
+has no tooltip. The `download_failed` tooltip is "Check your connection, then start the decision model again." The `wrong_revision` tooltip is `Wrong model loaded. Expected {pinned id}.` That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
-that this start is not replacing, or a running managed Laya process that reports
+that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or
 a failed download or swap, including one that puts the previous
 checkpoint back, is `download_failed`, not this code. The `key_rejected`
-tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
-Down and orders are refused. When a place is refused because Laya cannot
+tooltip is "Decision model restarted with a new key. Reconnecting…" The chip stays
+Down and orders are refused. When a place is refused because the decision model cannot
 be reached, or because it rejects the key, the chip updates on that same
-order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
-"Laya is Down. New orders are paused until it's Ready. You can still close positions." A
+order: Unreachable, or Can't reach the decision model. Every chip-Down refusal reads
+"Not placed. Decision model is down. Start it from Status." A
 dead child is reaped on the health probe and on interpreter exit, and
-the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
-restarts the managed Laya process for a signed-in operator session. A
-port that another process holds, including one that is not Laya, is Down
+the probe records Down with Stopped. `POST /api/v1/decision-model/start` starts or
+restarts the managed decision-model process for a signed-in operator session. A
+port that another process holds, including one that is not the decision model, is Down
 with `Port <n> in use`. The first load, before health is usable, is Still
 loading. Orders stay refused with the Down sentence while that load
 runs. After a successful load, a later miss is Unreachable.
 
-`GET /health` then records Practice Ready or Degraded from the managed Laya process.
+`GET /health` then records Practice Ready or Degraded from the managed decision-model process.
 Live stays Down until a `LayaQualification` record uses
 `EvidenceUseScope.LIVE_DECISION` for that exact revision, digest, and
 policy version. A base checkpoint is not that record. An unreachable
@@ -744,32 +742,30 @@ the model and writes one line, `effect=clamp` with `failure=note_absent`
 and no proof, including when the quantity already fits. When this run's
 record stood in, each model allow keeps its own `effect=allow`
 `proof=runtime` line. There is no dedupe. When the chip is Ready and a model decision
-carries no proof, the refusal code is `laya_unverified` and the decision log records
-`identity_absent` with no proof. The refusal reads "Not placed. Laya's
-decision couldn't be verified. Try again." Stopping the managed Laya process records
+carries no proof, the refusal code is `decision_model_unverified` and the decision log records
+`identity_absent` with no proof. The refusal reads "Not placed. Decision model not verified. Try again." Stopping the managed decision-model process records
 Down before an in-flight probe can publish Ready. An empty note is
 uncertain and is not a hard reject:
-Practice clamps and Live denies. The Practice server reason is "Laya is
-uncertain. Quantity stays inside the tighter limit." The Live server
-reason is "Laya is uncertain. Live stays closed." On a denial, Order Pad
+Practice clamps and Live denies. The Practice server reason is "Decision model uncertain. Quantity held to the tighter limit." The Live server
+reason is "Decision model uncertain. Live stays closed." On a denial, Order Pad
 and Quick Trade show that server reason inside one alert (`role="alert"`),
-the only live region. The reason line is named "Laya decision" and is not
+the only live region. The reason line is named "Decision model check" and is not
 its own status.
 A clamp is only when the requested quantity is greater than the allowed one. The desk clamp
-sentence is "Not placed. Laya allows up to N." Place N sends that
+sentence is "Not placed. Decision model allows up to N." Place N sends that
 quantity. On Order Pad, "Review Practice order" then shows the placed
-quantity. Place 1 on "Not placed. Laya allows up to 1." places. Nothing
+quantity. Place 1 on "Not placed. Decision model allows up to 1." places. Nothing
 is placed until Place N.
 Order Pad sends that note as `rationale`, including when the field is
 empty. The collapsed control is "Add a reason (optional)". Once open, the
 field's accessible name is the same. Quick Trade, Positions square-off,
 Order Ladder, Scalper, and Option Chain use that accessible name too.
 
-The same client speaks `POST /v1/systemone`. `decision:laya-managed`
-displays as **Laya decision model** and is the managed Ollama install.
+The same client speaks `POST /v1/systemone`. `decision:laya-managed` is the model backend id for the managed Laya model,
+and is the managed Ollama install. Settings shows the section **Decision model**.
 `decision:systemone-endpoint` displays as **System-one decision endpoint**:
 any loopback server you run that answers `POST /v1/systemone`. Neither
-starts when it is listed, and neither is Ready by default. Laya starts
+starts when it is listed, and neither is Ready by default. The decision model starts
 **Down**. Their default evidence scope is offline qualification until a
 Live qualification record exists. Do not vendor Unsloth Studio. It is
 the operator's own software and is never bundled. Pinned Unsloth training
@@ -943,7 +939,7 @@ that do not refuse an order show only `lot_unknown_message`:
 `The lot size for <name> isn't verified.` The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
 A quantity that is not a positive multiple of the lot is refused before
-Laya, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
+the decision model, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
 FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each
 refuse an order above the cap with that HTTP 400 and code
 `quantity_admission`. A broker `freeze_qty` on the body refuses the same

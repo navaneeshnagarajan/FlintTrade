@@ -6,7 +6,7 @@
     "Can't verify the model",
     "Wrong model version"
   ],
-  "statusMenu": "TopBar Status menu (broker, Laya, and LLM)",
+  "statusMenu": "TopBar Status menu (broker, decision model, and LLM)",
   "dashboard": "Trading Desk workspace, the retired Dashboard as a composition",
   "sampleData": "Example"
 }

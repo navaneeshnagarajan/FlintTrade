@@ -30,7 +30,7 @@ async function mockApi(page: Page): Promise<void> {
     const symbol = url.searchParams.get("symbol") ?? url.searchParams.get("query") ?? "";
 
     if (path.endsWith("/api/v1/ping") || path.endsWith("/health")) {
-      return route.fulfill({ json: { status: "ok", laya: "ready", laya_practice: "ready" } });
+      return route.fulfill({ json: { status: "ok", decision_model: "ready", decision_model_practice: "ready" } });
     }
     if (path.endsWith("/instrument-lots")) {
       return route.fulfill({ json: { rows: [] } });

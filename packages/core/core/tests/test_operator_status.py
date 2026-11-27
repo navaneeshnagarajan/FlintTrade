@@ -532,7 +532,7 @@ class TestOperatorStatusRoute:
         assert data["mode"] == {"status": "ok", "value": "practice"}
         assert data["live_unlocked"] == {"status": "ok", "value": False}
         assert data["connected_read"] == {"status": "ok", "value": True}
-        assert data["laya"] == {"status": "ready", "reason_code": None, "live_qualified": True}
+        assert data["decision_model"] == {"status": "ready", "reason_code": None, "live_qualified": True}
         assert data["kill_switch"] == {"status": "ok", "active": False, "reason": ""}
         assert data["session"]["reason"] == "within_hours"
         assert data["session"]["order_entry"] == "open"
@@ -602,7 +602,7 @@ class TestOperatorStatusRoute:
         assert "Traceback" not in text
         data = response.get_json()["data"]
         assert data["mode"]["value"] == "practice"
-        assert data["laya"] == {"status": "unknown", "reason_code": "unavailable", "live_qualified": None}
+        assert data["decision_model"] == {"status": "unknown", "reason_code": "unavailable", "live_qualified": None}
         assert data["broker"] == {"status": "unknown", "reason": "unavailable"}
         assert data["dispatch"] == {"status": "unknown", "reason": "unavailable"}
         assert data["strategy"] == {"status": "unknown", "reason": "unavailable"}

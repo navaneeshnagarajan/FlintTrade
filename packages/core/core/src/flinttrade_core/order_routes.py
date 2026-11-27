@@ -674,7 +674,7 @@ def _laya_place_response(body: dict[str, Any], *, mode: str, source: str) -> tup
         return None
     status = int(blocked.pop("http_status"))
     logger.info(
-        "Laya %s | mode=%s symbol=%s",
+        "Decision model %s | mode=%s symbol=%s",
         blocked.get("code"),
         mode,
         body.get("symbol", "?"),

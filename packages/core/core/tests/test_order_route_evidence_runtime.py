@@ -141,7 +141,7 @@ def test_raw_missing_exit_quantity_cannot_mint_reduce_only_admission(route_stack
 
     assert process_laya().decision_log() == ()
     assert response.status_code == 403, response.get_json()
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == []
     assert source.reads == [("positions", "route-account"), ("order_book", "route-account")]
 
@@ -164,7 +164,7 @@ def test_raw_exit_alias_or_quantity_ambiguity_cannot_record_reduction(route_stac
 
     assert process_laya().decision_log() == ()
     assert response.status_code == 403, response.get_json()
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == []
 
 
@@ -184,7 +184,7 @@ def test_raw_position_ambiguity_cannot_record_reduction(route_stack, changes) ->
 
     assert process_laya().decision_log() == ()
     assert response.status_code == 403, response.get_json()
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == []
 
 
@@ -200,7 +200,7 @@ def test_valid_raw_books_reach_real_gate_router_and_sdk_as_ack_only(route_stack,
     source.order_rows = orders
     over = _place(app, quantity + 1)
     assert over.status_code == 403, over.get_json()
-    assert over.get_json()["code"] == "laya_denied"
+    assert over.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == []
     assert process_laya().decision_log() == ()
 
@@ -588,7 +588,7 @@ def test_production_native_book_reader_keeps_invalid_reduction_evidence_refused(
     response = _place(app)
 
     assert response.status_code == 403, response.get_json()
-    assert response.get_json()["code"] == "laya_denied"
+    assert response.get_json()["code"] == "decision_model_denied"
     assert process_laya().decision_log() == ()
     assert writer_sdk.writes == []
     assert reads == ["positions", "orders"]
@@ -612,7 +612,7 @@ def test_partial_exit_remaining_is_capped_against_current_exposure_once(route_st
     source.position_rows = [{**_POSITION, "net_qty": 6, "quantity": "6"}]
     source.order_rows = [{**_EXIT, "filled_qty": "2"}]
     over = _place(app, 5)
-    assert over.status_code == 403 and over.get_json()["code"] == "laya_denied"
+    assert over.status_code == 403 and over.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == [] and process_laya().decision_log() == ()
 
     response = _place(app, 4)
@@ -629,7 +629,7 @@ def test_unavailable_or_partial_live_order_book_never_qualifies_as_empty(route_s
 
     response = _place(app, 10)
 
-    assert response.status_code == 403 and response.get_json()["code"] == "laya_denied"
+    assert response.status_code == 403 and response.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == [] and process_laya().decision_log() == ()
 
 
@@ -653,7 +653,7 @@ def test_missing_filled_evidence_counts_the_full_exit_and_cannot_bypass_full_saf
     app, source, sdk, _router = route_stack
     source.order_rows = [{name: value for name, value in _EXIT.items() if name != "filled_qty"}]
     over = _place(app, 7)
-    assert over.status_code == 403 and over.get_json()["code"] == "laya_denied"
+    assert over.status_code == 403 and over.get_json()["code"] == "decision_model_denied"
     assert sdk.writes == [] and process_laya().decision_log() == ()
 
     response = _place(app, 6)

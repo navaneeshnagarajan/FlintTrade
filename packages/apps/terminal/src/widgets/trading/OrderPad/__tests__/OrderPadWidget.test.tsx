@@ -348,12 +348,12 @@ describe("OrderPadWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("shows the Laya Down notice on the Practice pad without blocking the review", async () => {
+  it("shows the Decision model Down notice on the Practice pad without blocking the review", async () => {
     useOperatorSignalStore.setState({ layaPracticeStatus: "down" });
     render(<OrderPadWidget {...defaultProps} />);
 
     expect(screen.getByTestId("laya-down-notice")).toHaveTextContent(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Decision model is down. New orders are paused until it's ready. Closing positions still works.",
     );
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
@@ -496,7 +496,7 @@ describe("OrderPadWidget", () => {
 
   it("closes the review and shows a Laya denial on the pad", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
-      code: "laya_denied",
+      code: "decision_model_denied",
       reason: "Example cannot place orders.",
       message: "Example cannot place orders.",
       limits: { max_quantity: 100 },
@@ -508,7 +508,7 @@ describe("OrderPadWidget", () => {
       name: /confirm (simulated practice|example) order/i,
     }));
     const denied = await screen.findByTestId("laya-denied");
-    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Denied by decision model");
     expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
     expect(denied.closest("[role='dialog']")).toBeNull();
@@ -519,10 +519,10 @@ describe("OrderPadWidget", () => {
   });
 
   it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. New orders are paused until it's Ready. You can still close positions.", 403, {
-      code: "laya_denied",
-      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Not placed. Decision model is down. Start it from Status.", 403, {
+      code: "decision_model_denied",
+      reason: "Not placed. Decision model is down. Start it from Status.",
+      message: "Not placed. Decision model is down. Start it from Status.",      limits: { max_quantity: 100 },
     }));
     useOperatorSignalStore.setState({ decisionStatus: "down" });
     render(<OrderPadWidget {...defaultProps} />);
@@ -533,7 +533,7 @@ describe("OrderPadWidget", () => {
     });
     fireEvent.click(confirm);
     expect(await screen.findByTestId("laya-denied")).toHaveTextContent(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Not placed. Decision model is down. Start it from Status.",
     );
     expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
     expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
@@ -552,9 +552,9 @@ describe("OrderPadWidget", () => {
   });
 
   it("shows a clamp and does not place until Place N is clicked", async () => {
-    const clamp = "Not placed. Laya allows up to 1.";
+    const clamp = "Not placed. Decision model allows up to 1.";
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
-      code: "laya_clamp",
+      code: "decision_model_clamp",
       message: clamp,
       applied_quantity: 1,
       limits: { max_quantity: 1 },
@@ -594,9 +594,9 @@ describe("OrderPadWidget", () => {
   });
 
   it("cancels a clamp without placing", async () => {
-    const clamp = "Not placed. Laya allows up to 1.";
+    const clamp = "Not placed. Decision model allows up to 1.";
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
-      code: "laya_clamp",
+      code: "decision_model_clamp",
       message: clamp,
       applied_quantity: 1,
       limits: { max_quantity: 1 },
@@ -658,7 +658,7 @@ describe("OrderPadWidget", () => {
 
     expect(screen.getByRole("button", { name: /place buy order/i })).toBeDisabled();
     expect(screen.getByTestId("live-write-rectify")).toHaveTextContent(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Decision model is down. New orders are paused until it's ready. Closing positions still works.",
     );
     const close = screen.getByTestId("orderpad-close");
     expect(close).toBeEnabled();
@@ -687,7 +687,7 @@ describe("OrderPadWidget", () => {
     );
     const acknowledgement = await screen.findByRole("alert");
     expect(acknowledgement).toHaveTextContent(
-      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+      "Exit requested. Check Positions and Orders for the result.",
     );
     expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
   });
@@ -796,7 +796,7 @@ describe("OrderPadWidget", () => {
     );
     const acknowledgement = await screen.findByRole("alert");
     expect(acknowledgement).toHaveTextContent(
-      "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.",
+      "Exit requested. Check Positions and Orders for the result.",
     );
     expect(acknowledgement).not.toHaveTextContent(/closed|filled/i);
   });
@@ -985,7 +985,7 @@ describe("OrderPadWidget", () => {
     useOperatorSignalStore.setState({ decisionStatus: "degraded" });
     render(<OrderPadWidget {...defaultProps} />);
     const note = await screen.findByTestId("laya-degraded-limits");
-    expect(note).toHaveTextContent("Laya Degraded — tighter limits");
+    expect(note).toHaveTextContent("Decision model degraded. Tighter limits apply.");
     expect(note).not.toHaveTextContent("Blocked");
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
   });

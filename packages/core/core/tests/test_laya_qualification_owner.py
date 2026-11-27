@@ -49,7 +49,7 @@ def sidecar(
         manifest=(("config.json", hashlib.sha256(companion).hexdigest()),),
     )
     monkeypatch.setattr(laya_decision, "load_policy", lambda: policy)
-    monkeypatch.setenv("FLINTTRADE_LAYA_BACKEND", "sidecar")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_BACKEND", "sidecar")
     calls: list[str] = []
 
     class Response:
