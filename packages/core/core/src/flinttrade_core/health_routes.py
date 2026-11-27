@@ -391,8 +391,8 @@ def start_laya() -> tuple[Any, int]:
     return jsonify({"status": "ok"}), 200
 
 
-@health_bp.route("/api/v1/laya/qualification/configuration", methods=["PUT"])
-@health_bp.route("/api/v1/laya/qualification", methods=["POST", "DELETE"])
+@health_bp.route("/api/v1/decision-model/qualification/configuration", methods=["PUT"])
+@health_bp.route("/api/v1/decision-model/qualification", methods=["POST", "DELETE"])
 def laya_qualification_control() -> tuple[Any, int]:
     """Configure, explicitly measure or retire the existing qualification owner.
 
