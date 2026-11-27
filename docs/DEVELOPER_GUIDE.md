@@ -560,7 +560,7 @@ The default install puts CPU torch in the managed decision-model environment fro
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
 the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`,
 `laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
-(the Laya install constraints file in the backend package).
+(the decision model install constraints file in the backend package).
 The `serve` extra stays on the install requirement. The CPU install applies
 that file to both pip commands, and installs torch first. The install size
 is roughly 1.2 GB. CUDA and ROCm

@@ -641,7 +641,7 @@ install refuses to put them in the FlintTrade environment. The default
 install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
 then `laya[serve]==0.3.21`. The constraints file pins `torch==2.14.0+cpu`,
 `laya==0.3.21`, `huggingface_hub==1.33.0`, and `tqdm==4.70.1` with no extras
-(the Laya install constraints file in the backend package).
+(the decision model install constraints file in the backend package).
 The download progress class subclasses that pinned `tqdm.auto.tqdm`.
 The `serve` extra stays on the
 install requirement, because a constraints file cannot name extras. Torch is installed
