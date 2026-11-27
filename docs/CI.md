@@ -66,7 +66,7 @@ Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive 
 |---|---|
 | `test.yml` | Required quality checks; affected non-draft PRs, exhaustive main/dev pushes, weekly Sunday 04:00 UTC and manual runs |
 | `site.yml` | Reusable site typecheck, tests and build; called by Test using the shared selection plan and exhaustive triggers |
-| `supply-chain.yml` | Scoped dependency PR assurance; exhaustive main/dev pushes, weekly Monday and manual runs; native install/ACL smoke remains weekly/manual |
+| `supply-chain.yml` | Python, Rust and Node audits on every non-draft PR; scoped dependency PR assurance; exhaustive main/dev pushes, weekly Monday and manual runs; native install/ACL smoke remains weekly/manual |
 | `visual-a11y.yml` | Advisory terminal screenshots and axe checks for relevant non-draft changes; manual baseline regeneration |
 | `nightly-cross-platform.yml` | Weekly/manual macOS, Windows and Linux tests, toolchain-target canaries and native desktop package smoke |
 | `desktop-release.yml` | manual dispatch only; Release Please supplies the immutable release tag and expected commit SHA. Builds the four Electron installers, verifies their packaged contract and publishes them with `SHA256SUMS.txt` only to an empty release target. |
@@ -77,13 +77,13 @@ Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive 
 | `toolchain-freshness.yml` | Scheduled/manual and relevant toolchain-version checks. The managed Ollama pin is advisory: it warns, and does not fail, once it trails the latest stable release by more than two minor versions. |
 | `broker-sdk-freshness.yml` | Scheduled/manual broker SDK drift checks |
 
-Supply Chain retains Python/Rust/Node audits, licence/provenance checks, NOTICE and lock drift, frozen/hashed-install enforcement and external-contributor CLA binding. Changes to installation/build support files select assurance even if the lockfiles are unchanged. Mutable upstream advisory state is still checked on protected-branch pushes and scheduled runs.
+Supply Chain retains Python/Rust/Node audits, licence/provenance checks, NOTICE and lock drift, frozen/hashed-install enforcement and external-contributor CLA binding. Changes to installation/build support files select assurance even if the lockfiles are unchanged. The Python, Rust and Node audits run on every non-draft PR as well as on protected-branch pushes and scheduled runs, so a new upstream advisory shows up on the next PR.
 
 Electron Linux directory verification has one authoritative Test lane: bootstrap-manifest verification, full desktop tests/typecheck, bundling, required native promotion harness, packaging and packaged-security verification. Removing the duplicate Supply Chain packaging lane preserves this union and its weekly/manual coverage.
 
 Visual checks remain advisory while `VISUAL_AXE_GATE` is `0`; they do not prove application state or network behaviour. Manual baseline updates commit only after successful regeneration. Reticle verifies running user flows when application behaviour changes; CI/tooling-only changes do not require an unrelated UI session.
 
-Dependency version PRs remain grouped across the week, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Concurrency cancellation supersedes older runs for the same ref. Draft PRs skip runnable quality jobs until marked ready for review.
+Dependency version PRs remain grouped across the week, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Test and Supply Chain cancel only superseded pull request runs. Pushes to dev queue in one group per ref. Each main run gets its own group, so a later push never replaces a queued main run. Draft PRs skip runnable quality jobs until marked ready for review.
 
 ## Verification and review
 
