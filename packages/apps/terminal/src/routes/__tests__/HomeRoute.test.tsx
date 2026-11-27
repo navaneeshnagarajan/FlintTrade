@@ -208,6 +208,17 @@ function renderHomeRoute() {
   );
 }
 
+async function clickWidgetToolbar(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp,
+) {
+  const button = screen.getByRole("button", { name });
+  // The toolbar is pointer-events: none until the frame is hovered or
+  // focused. jsdom 31 honours that rule, so focus first to reveal it.
+  button.focus();
+  await user.click(button);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -300,7 +311,7 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    await user.click(screen.getByRole("button", { name: /remove ai pulse widget/i }));
+    await clickWidgetToolbar(user, /remove ai pulse widget/i);
     expect(screen.queryByTestId("ai-pulse-card")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /add widget/i }));
@@ -338,7 +349,7 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    await user.click(screen.getByRole("button", { name: /remove watchlist widget/i }));
+    await clickWidgetToolbar(user, /remove watchlist widget/i);
     expect(screen.queryByTestId("watchlist-card")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /add widget/i }));
@@ -432,7 +443,7 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    await user.click(screen.getByRole("button", { name: /make welcome widget hero/i }));
+    await clickWidgetToolbar(user, /make welcome widget hero/i);
 
     const welcomeCard = useBentoStore.getState().cards.find((card) => card.id === "card-welcome");
     expect(welcomeCard?.size).toBe("hero");
@@ -446,7 +457,7 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    await user.click(screen.getByRole("button", { name: /remove ai pulse widget/i }));
+    await clickWidgetToolbar(user, /remove ai pulse widget/i);
 
     expect(screen.queryByTestId("home-widget-frame-card-ai")).not.toBeInTheDocument();
     expect(useBentoStore.getState().cards.some((card) => card.id === "card-ai")).toBe(false);
@@ -457,7 +468,7 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    await user.click(screen.getByRole("button", { name: /make welcome widget hero/i }));
+    await clickWidgetToolbar(user, /make welcome widget hero/i);
     await user.click(screen.getByRole("button", { name: /save current layout/i }));
     await user.click(screen.getByRole("button", { name: /reset layout/i }));
 
