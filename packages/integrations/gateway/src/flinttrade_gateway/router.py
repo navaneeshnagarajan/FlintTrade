@@ -956,6 +956,7 @@ class BrokerRouter:
         kind: str,
         order: Any = None,
         account_id: str | None = None,
+        action: str = "place",
     ) -> None:
         if self._rate_limiter is None:
             return
@@ -967,7 +968,7 @@ class BrokerRouter:
         # and the BSE budget of the broker (see BrokerRateLimiter.admit_order).
         admit = getattr(self._rate_limiter, "admit_order", None)
         if callable(admit):
-            admit(adapter_id, exchange=exchange or None)
+            admit(adapter_id, exchange=exchange or None, action=action)
             return
         await self._rate_limiter.acquire(adapter_id, kind, exchange=exchange or None)
 
@@ -1479,7 +1480,7 @@ class BrokerRouter:
                 self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
                 self._admit_order_rules(adapter_id, signed_order, modify_order_id=signed_order_id)
                 self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order", signed_order, account_id)
+                await self._throttle(adapter_id, "order", signed_order, account_id, action="modify")
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1586,7 +1587,7 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_order)
-                await self._throttle(adapter_id, "order", signed_order, account_id)
+                await self._throttle(adapter_id, "order", signed_order, account_id, action="cancel")
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,
@@ -1708,7 +1709,10 @@ class BrokerRouter:
                     session.algo_id = ""
                 else:
                     self._algo_tag(adapter_id, session, signed_payload)
-                await self._throttle(adapter_id, "order", signed_payload, account_id)
+                await self._throttle(
+                    adapter_id, "order", signed_payload, account_id,
+                    action="cancel" if "cancel" in verb else "modify" if "modify" in verb else "place",
+                )
                 attempt_id = self._prepare_lifecycle(
                     request_ctx=request_ctx,
                     adapter_id=adapter_id,

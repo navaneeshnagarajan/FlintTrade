@@ -230,7 +230,14 @@ def test_order_rate_threshold_starts_on_its_effective_date() -> None:
     assert row.in_force(row.effective_from)
     assert row.parameters["max_per_second"] == 10
     assert row.level == "block"
-    assert row.message == "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    place = "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    modify = "Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."
+    cancel = "Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."
+    assert row.message == place
+    assert str(rules.order_rate_exceeded()) == f"Regulation · {place}"
+    assert str(rules.order_rate_exceeded(action="place")) == f"Regulation · {place}"
+    assert str(rules.order_rate_exceeded(action="modify")) == f"Regulation · {modify}"
+    assert str(rules.order_rate_exceeded(action="cancel")) == f"Regulation · {cancel}"
 
 
 def test_live_acknowledgement_starts_on_its_effective_date() -> None:

@@ -11,6 +11,7 @@ modes.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -522,7 +523,22 @@ class TestOrderRateLimiting:
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
         return mock_sandbox
 
-    def test_practice_eleventh_nse_order_is_refused_and_bse_is_not(self, flask_app, client):
+    def _freeze_order_rate_clock(self, flask_app, monkeypatch, now: float = 1000.0):
+        from flinttrade_gateway.rate_limiter import BrokerRateLimiter
+
+        router = flask_app.config.get("BROKER_ROUTER")
+        limiter = getattr(router, "rate_limiter", None) if router is not None else None
+        if limiter is None:
+            limiter = flask_app.config.get("ORDER_RATE_LIMITER")
+        if limiter is None:
+            limiter = BrokerRateLimiter({}, clock=lambda: now)
+            flask_app.config["ORDER_RATE_LIMITER"] = limiter
+            return limiter
+        monkeypatch.setattr(limiter, "_clock", lambda: now)
+        return limiter
+
+    def test_practice_eleventh_nse_order_is_refused_and_bse_is_not(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
         sandbox = self._practice_fill(flask_app)
         headers = _auth_headers(mode="practice")
         for index in range(10):
@@ -552,8 +568,9 @@ class TestOrderRateLimiting:
         assert other.status_code == 200, other.get_json()
         assert sandbox.place_order.call_count == 11
 
-    def test_reset_gives_a_fresh_burst(self, flask_app, client):
+    def test_reset_gives_a_fresh_burst(self, flask_app, client, monkeypatch):
         """After reset, the first order is never 429."""
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
         self._practice_fill(flask_app)
         resp = client.post(
             "/api/v1/orders/place",
@@ -561,6 +578,155 @@ class TestOrderRateLimiting:
             headers=_auth_headers(mode="practice"),
         )
         assert resp.status_code == 200
+
+    _MODIFY_TEXT = "Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."
+    _CANCEL_TEXT = "Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."
+
+    @contextmanager
+    def _pending_engine(self, flask_app, monkeypatch):
+        from flinttrade_data.sandbox_engine import SandboxEngine
+
+        engine = SandboxEngine(db_path=":memory:")
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", engine)
+        monkeypatch.setitem(flask_app.config, "TICK_RECORDER", MagicMock())
+        try:
+            yield engine
+        finally:
+            engine.close()
+
+    def _place_pending(self, client, *, exchange="NSE", symbol="NIFTY"):
+        response = client.post(
+            "/api/v1/orders/place",
+            json={
+                "symbol": symbol,
+                "exchange": exchange,
+                "action": "BUY",
+                "quantity": 1,
+                "price": 100,
+                "product": "MIS",
+                "order_type": "LIMIT",
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+        assert response.status_code == 200, response.get_json()
+        payload = response.get_json()
+        assert payload["status"] == "PENDING", payload
+        return payload["order_id"]
+
+    def _assert_change_refusal(self, response, *, action, engine, order_id, price=100):
+        text = self._MODIFY_TEXT if action == "modify" else self._CANCEL_TEXT
+        assert response.status_code == 429, response.get_json()
+        payload = response.get_json()
+        assert payload["code"] == "order_rule_blocked"
+        assert payload["message"] == f"Regulation · {text}"
+        assert payload["rule_results"][0]["rule_id"] == "order-rate-threshold"
+        assert payload["rule_results"][0]["message"] == text
+        rows = [row for row in engine.get_orders() if row["order_id"] == order_id]
+        assert len(rows) == 1
+        assert rows[0]["status"] == "PENDING"
+        assert rows[0]["price"] == price
+
+    def test_practice_modify_over_cap_is_refused(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(10)]
+            refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(
+                refused, action="modify", engine=engine, order_id=order_ids[0]
+            )
+
+    def test_practice_cancel_over_cap_is_refused(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(10)]
+            refused = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[0]},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(
+                refused, action="cancel", engine=engine, order_id=order_ids[0]
+            )
+
+    def test_practice_place_modify_cancel_share_one_budget(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(8)]
+            modified = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert modified.status_code == 200, modified.get_json()
+            cancelled = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[1]},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert cancelled.status_code == 200, cancelled.get_json()
+            place_refused = client.post(
+                "/api/v1/orders/place",
+                json={
+                    "symbol": "NIFTY",
+                    "exchange": "NSE",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "price": 100,
+                    "product": "MIS",
+                    "order_type": "LIMIT",
+                },
+                headers=_auth_headers(mode="practice"),
+            )
+            assert place_refused.status_code == 429
+            assert place_refused.get_json()["message"] == self._RATE_HEADLINE
+            modify_refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[2], "price": 120},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(modify_refused, action="modify", engine=engine, order_id=order_ids[2])
+            cancel_refused = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[3]},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(cancel_refused, action="cancel", engine=engine, order_id=order_ids[3])
+            remaining = {row["order_id"]: row for row in engine.get_orders()}
+            assert remaining[order_ids[0]]["price"] == 110
+            assert remaining[order_ids[1]]["status"] == "CANCELLED"
+
+    def test_practice_modify_cancel_on_another_exchange_are_unaffected(
+        self, flask_app, client, monkeypatch
+    ):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            nse_ids = [self._place_pending(client) for _ in range(10)]
+            bse_id = self._place_pending(client, exchange="BSE", symbol="RELIANCE")
+            modified = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": bse_id, "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert modified.status_code == 200, modified.get_json()
+            cancelled = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": bse_id},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert cancelled.status_code == 200, cancelled.get_json()
+            nse_refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": nse_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(nse_refused, action="modify", engine=engine, order_id=nse_ids[0])
+            rows = {row["order_id"]: row for row in engine.get_orders()}
+            assert rows[bse_id]["status"] == "CANCELLED"
+            assert rows[bse_id]["price"] == 110
 
 
 class TestPracticeMode:

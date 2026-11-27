@@ -225,7 +225,13 @@ class BrokerRateLimiter:
         with self._lock:
             self._buckets.clear()
 
-    def admit_order(self, broker_id: str, *, exchange: str | None = None) -> None:
+    def admit_order(
+        self,
+        broker_id: str,
+        *,
+        exchange: str | None = None,
+        action: str = "place",
+    ) -> None:
         """Consume one order token, or refuse with the published rate rule.
 
         An order spends from the budget of its exchange (see :func:`order_venue`).
@@ -252,7 +258,7 @@ class BrokerRateLimiter:
                     self._buckets[key] = bucket
                 bucket.refill(now)
                 if bucket.tokens + _TOKEN_EPSILON < 1.0:
-                    raise order_rate_exceeded()
+                    raise order_rate_exceeded(action=action)
                 buckets.append(bucket)
             for bucket in buckets:
                 bucket.tokens -= 1.0

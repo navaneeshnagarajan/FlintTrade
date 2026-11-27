@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import pytest
 
 from flinttrade_core.exceptions import BrokerError, SafetyBypassError
+from flinttrade_core.order_rules import OrderBudgetExceeded, order_rate_exceeded
 from flinttrade_engine.local_state_provider import (
     DISPATCH_OUTCOME_UNKNOWN,
     OrderLifecycleLedger,
@@ -975,3 +976,42 @@ async def test_cancel_of_an_unknown_order_spends_both_nse_and_bse(*, backend_lea
 
     order_buckets = {key[2]: bucket.tokens for key, bucket in limiter._buckets.items() if key[1] == "order"}
     assert order_buckets == {"NSE": pytest.approx(9.0), "BSE": pytest.approx(9.0)}
+
+
+async def test_live_modify_and_cancel_throttle_refusals_use_action_messages(
+    *, backend_lease_factory
+) -> None:
+    class _RefuseLimiter:
+        def admit_order(self, broker_id: str, *, exchange=None, action: str = "place") -> None:
+            raise order_rate_exceeded(action=action)
+
+    adapter = _FakeAdapter()
+    router = _router(adapter, rate_limiter=_RefuseLimiter(), backend_lease_factory=backend_lease_factory)
+
+    place_order = _order()
+    with pytest.raises(OrderBudgetExceeded) as place:
+        await router.place_order(
+            _request_ctx(),
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=place_order,
+            safety_ctx=_mint(place_order, backend_lease_factory=backend_lease_factory),
+        )
+    assert str(place.value) == (
+        "Regulation · Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+
+    with pytest.raises(OrderBudgetExceeded) as modify:
+        await _modify(router, "OID-1", backend_lease_factory=backend_lease_factory)
+    assert str(modify.value) == (
+        "Regulation · Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+
+    with pytest.raises(OrderBudgetExceeded) as cancel:
+        await _cancel(router, "OID-1", backend_lease_factory=backend_lease_factory)
+    assert str(cancel.value) == (
+        "Regulation · Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."
+    )
+    assert adapter.placed == []
+    assert adapter.modified == []
+    assert adapter.cancelled == []

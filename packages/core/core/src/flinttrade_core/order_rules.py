@@ -746,10 +746,22 @@ class OrderBudgetExceeded(OrderRuleRefused):
     http_status = 429
 
 
-def order_rate_exceeded() -> OrderBudgetExceeded:
+ORDER_RATE_ACTION_LEAD = {
+    "place": "Not placed.",
+    "modify": "Not modified.",
+    "cancel": "Not cancelled.",
+}
+
+
+def order_rate_exceeded(*, action: str = "place") -> OrderBudgetExceeded:
     """Refusal for the eleventh order in one second on one exchange."""
     row = rule_by_id("order-rate-threshold")
     message = _fill(row.message, row.parameters)
+    lead = ORDER_RATE_ACTION_LEAD.get(action)
+    if lead is not None:
+        _old, _sep, rest = message.partition(". ")
+        if rest:
+            message = f"{lead} {rest}"
     return OrderBudgetExceeded([RuleResult(row.level, row.source, row.id, message)])
 
 
@@ -905,6 +917,7 @@ def rules_markdown() -> str:
 __all__ = [
     "OrderBudget",
     "OrderBudgetExceeded",
+    "ORDER_RATE_ACTION_LEAD",
     "order_rate_exceeded",
     "OrderFacts",
     "OrderRule",

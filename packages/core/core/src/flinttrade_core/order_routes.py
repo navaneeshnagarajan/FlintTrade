@@ -2720,6 +2720,15 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                 }
             ), 503
 
+        if ft_action in {"modify", "cancel"}:
+            rate_body = dict(body)
+            looked = _practice_order_exchange(sandbox, rate_body)
+            if looked and not str(rate_body.get("exchange") or "").strip():
+                rate_body["exchange"] = looked
+            rate_refusal = _order_rate_refusal(rate_body, broker="practice", action=ft_action)
+            if rate_refusal is not None:
+                return rate_refusal
+
         # Placement is handled only by ``_dispatch_practice_place``. Cancel and
         # modify still reach the sandbox book; other actions do not create orders.
         try:
@@ -3412,7 +3421,30 @@ def _order_rate_limiter() -> Any:
     return limiter
 
 
-def _order_rate_refusal(body: Mapping[str, Any], *, broker: str) -> tuple[Any, int] | None:
+def _practice_order_exchange(sandbox: Any, body: Mapping[str, Any]) -> str | None:
+    """Exchange on the request, or on the Practice order it changes."""
+    exchange = str(body.get("exchange") or "").strip() or None
+    if exchange:
+        return exchange
+    order_id = str(body.get("order_id") or body.get("orderid") or "").strip()
+    if not order_id or sandbox is None:
+        return None
+    try:
+        rows = sandbox.get_orders()
+    except Exception:
+        return None
+    for row in rows or []:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("order_id") or "").strip() == order_id:
+            found = str(row.get("exchange") or "").strip()
+            return found or None
+    return None
+
+
+def _order_rate_refusal(
+    body: Mapping[str, Any], *, broker: str, action: str = "place"
+) -> tuple[Any, int] | None:
     """Refuse the eleventh order in one second on one exchange, else None."""
     from flinttrade_core.order_rules import OrderBudgetExceeded, results_payload  # noqa: PLC0415
 
@@ -3422,7 +3454,7 @@ def _order_rate_refusal(body: Mapping[str, Any], *, broker: str) -> tuple[Any, i
         return None
     exchange = str(body.get("exchange") or "").strip() or None
     try:
-        admit(broker, exchange=exchange)
+        admit(broker, exchange=exchange, action=action)
     except OrderBudgetExceeded as exc:
         return jsonify(
             {

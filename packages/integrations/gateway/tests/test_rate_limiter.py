@@ -471,3 +471,25 @@ async def test_an_order_with_no_exchange_is_refused_when_either_budget_is_spent(
     _assert_order_rate_refused(excinfo)
     assert {key[2] for key in rl._buckets} == {"NSE", "BSE"}
     assert clock.slept == []
+
+
+@pytest.mark.parametrize(
+    ("action", "text"),
+    [
+        ("place", "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."),
+        ("modify", "Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."),
+        ("cancel", "Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."),
+    ],
+)
+def test_admit_order_refusal_uses_the_action_message(action: str, text: str) -> None:
+    clock = _FakeClock()
+    rl = BrokerRateLimiter({}, clock=clock.time, sleep=clock.sleep)
+    for _ in range(10):
+        rl.admit_order("dhan", exchange="NSE")
+    with pytest.raises(OrderBudgetExceeded) as excinfo:
+        rl.admit_order("dhan", exchange="NSE", action=action)
+    error = excinfo.value
+    assert str(error) == f"Regulation · {text}"
+    assert error.results[0].rule_id == "order-rate-threshold"
+    assert error.results[0].message == text
+    assert error.results[0].level == "block"
