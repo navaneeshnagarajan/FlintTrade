@@ -677,7 +677,7 @@ neo_module.PositionsAPI = FakePositions
 neo.quotes = synthetic_quotes
 assert neo.holdings()["data"][0]["averagePrice"] == 100.0
 position = neo.positions()["data"][0]
-if md.version("kotakneoapi") == "3.0.9":
+if md.version("kotakneoapi") in {"3.0.9", "3.0.13"}:
     # positions() returns the broker row. Enrichment (netQty/positionPnl) stays
     # unwired because a missing or zero LTP used to be treated as a price.
     raw = {"exSeg": "nse_cm", "tok": "SYNTHETIC-TOKEN", "cfBuyQty": "2", "ltp": "120.00"}
@@ -745,8 +745,8 @@ for service, method, failure in (
     finally:
         service.failure = None
 
-if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
-    # 3.0.8 positions() reads this on-disk holdings cache. 3.0.9 positions()
+if md.version("kotakneoapi") in {"3.0.8", "3.0.9", "3.0.13"}:
+    # 3.0.8 positions() reads this on-disk holdings cache. Later positions()
     # does not; holdings() still writes it, so a failed write must stay a
     # redacted read failure rather than an empty holdings result.
     from neo_api_client.utils import holdings_cache
@@ -832,7 +832,7 @@ async def require_callback_cancellation_and_cleanup():
     feed_module.decode_packet = failed_decode
     try:
         market_feed.on_error = failed_callback
-        if md.version("kotakneoapi") in {"3.0.8", "3.0.9"}:
+        if md.version("kotakneoapi") in {"3.0.8", "3.0.9", "3.0.13"}:
             assert market_feed._decode_packet(b"synthetic") is None
         else:
             try:

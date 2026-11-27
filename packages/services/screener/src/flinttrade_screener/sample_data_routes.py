@@ -519,7 +519,7 @@ def get_lot_size() -> Any:
             base_resolution = resolver.resolve(base, exchange)
             if _SOURCE_RANK.get(base_resolution.source, 0) > _SOURCE_RANK.get(resolution.source, 0):
                 resolution = base_resolution
-        lot_size = resolution.lot_size if resolution.source != "default" else 0
+        lot_size = resolution.lot_size or 0
         is_sample = resolution.source != "live"
     else:
         # No broker client configured — built-in fallback table only.

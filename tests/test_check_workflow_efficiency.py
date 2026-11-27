@@ -14,7 +14,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
-DEPENDENCY_JOBS = ("python-audit", "rust-audit", "node-audit", "transitive-licences")
+AUDIT_JOBS = ("python-audit", "rust-audit", "node-audit")
+DEPENDENCY_JOBS = ("transitive-licences",)
 
 
 def _workflow(name: str) -> dict:
@@ -59,6 +60,22 @@ def test_supply_chain_has_full_main_scheduled_and_manual_assurance() -> None:
         assert job["needs"] == "changed-surfaces"
         assert "github.event.pull_request.draft != true" in job["if"]
         assert "needs.changed-surfaces.outputs.dependencies == 'true'" in job["if"]
+
+
+def test_advisory_audits_run_on_every_pull_request() -> None:
+    """Advisories change without a repository change, so a PR must run what main runs."""
+    jobs = _workflow("supply-chain.yml")["jobs"]
+    for name in AUDIT_JOBS:
+        job = jobs[name]
+        assert job["if"] == "github.event.pull_request.draft != true"
+        assert "changed-surfaces" not in str(job.get("needs", ""))
+
+
+@pytest.mark.parametrize("name", ["test.yml", "supply-chain.yml", "visual-a11y.yml"])
+def test_main_runs_are_never_cancelled_or_superseded(name: str) -> None:
+    concurrency = _workflow(name)["concurrency"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+    assert "github.ref == 'refs/heads/main' && github.run_id || github.ref" in concurrency["group"]
 
 
 def test_site_uses_the_same_selection_and_full_triggers_as_test() -> None:

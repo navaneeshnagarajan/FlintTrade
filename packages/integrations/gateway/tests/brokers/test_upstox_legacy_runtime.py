@@ -261,7 +261,7 @@ def test_u1_real_pinned_sdk_serialises_legacy_facade_protection_without_transpor
 
     import upstox_client
 
-    assert version("upstox-python-sdk") == "2.30.0"
+    assert version("upstox-python-sdk") == "2.31.0"
     serialiser = upstox_client.ApiClient()
     seen = []
 

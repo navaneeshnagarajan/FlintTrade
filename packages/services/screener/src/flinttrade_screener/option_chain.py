@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from flinttrade_core.broker_client import BrokerClient
 from flinttrade_core.models import OptionChainStrike
 
+from .lot_sizes import get_lot_size_sync
+
 logger = logging.getLogger("flinttrade.screener.option_chain")
 
 
@@ -105,49 +107,6 @@ class OptionChainSnapshot:
         end = min(len(sorted_strikes), atm_idx + count + 1)
         return sorted_strikes[start:end]
 
-
-# Lot sizes for common underlyings
-LOT_SIZES: dict[str, int] = {
-    # NFO — Index options
-    "NIFTY": 65,
-    "BANKNIFTY": 30,
-    "FINNIFTY": 40,
-    "MIDCPNIFTY": 50,
-    # BFO — BSE F&O
-    "SENSEX": 20,
-    "BANKEX": 30,
-    "SENSEX50": 25,
-    # CDS — Currency derivatives
-    "USDINR": 1000,
-    "EURINR": 1000,
-    "GBPINR": 1000,
-    "JPYINR": 1000,
-    # MCX — Bullion
-    "GOLD": 100,         # 100 grams
-    "GOLDM": 10,         # 10 grams (Gold Mini)
-    "GOLDPETAL": 1,      # 1 gram (Gold Petal)
-    "SILVER": 30,        # 30 kg
-    "SILVERM": 5,        # 5 kg (Silver Mini)
-    "SILVERMIC": 1,      # 1 kg (Silver Micro)
-    # MCX — Energy
-    "CRUDEOIL": 100,     # 100 barrels
-    "CRUDEOILM": 10,     # 10 barrels (Crude Mini)
-    "NATURALGAS": 1250,  # 1250 MMBtu
-    # MCX — Base metals
-    "COPPER": 2500,      # 2.5 tonnes (in kg)
-    "COPPERM": 250,      # 250 kg (Copper Mini)
-    "ZINC": 5000,        # 5 tonnes (in kg)
-    "ZINCMINI": 1000,    # 1 tonne (in kg)
-    "LEAD": 5000,        # 5 tonnes (in kg)
-    "LEADMINI": 1000,    # 1 tonne (in kg)
-    "NICKEL": 1500,      # 1.5 tonnes (in kg)
-    "NICKELMINI": 100,   # 100 kg (Nickel Mini)
-    "ALUMINIUM": 5000,   # 5 tonnes (in kg)
-    "ALUMINI": 1000,     # 1 tonne (in kg)
-    # MCX — Agri
-    "MENTHAOIL": 360,    # 360 kg
-    "COTTON": 25,        # 25 bales
-}
 
 # Exchange-to-spot-index mapping for fetching spot price
 _SPOT_EXCHANGE: dict[str, str] = {
@@ -242,6 +201,6 @@ class OptionChainAnalyzer:
         )
 
     @staticmethod
-    def get_lot_size(symbol: str) -> int:
-        """Get lot size for an underlying. Returns 1 if unknown."""
-        return LOT_SIZES.get(symbol.upper(), 1)
+    def get_lot_size(symbol: str) -> int | None:
+        """Lot size for an underlying from the shared lot lookup, or ``None`` if unknown."""
+        return get_lot_size_sync(symbol)
