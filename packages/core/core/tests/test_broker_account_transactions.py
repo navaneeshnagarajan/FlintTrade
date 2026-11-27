@@ -1254,12 +1254,24 @@ asyncio.run(harness.coordinator.mutate(request, timeout=5.0))
 
 
 @pytest.mark.asyncio
-async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness):
+async def test_blocked_synthetic_gated_write_drains_before_reconnect(harness, monkeypatch):
+    from datetime import datetime, timedelta
     from flinttrade_core.models import Order
     from flinttrade_core.exceptions import SafetyBypassError
+    from flinttrade_engine import safety as safety_module
     from flinttrade_engine.safety import gate_order, set_safety_gate_secret
     from flinttrade_gateway.brokers._base import ROUTER_TOKEN
     from flinttrade_gateway.router import BrokerRouter
+
+    class SessionClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            current = datetime.now(tz)
+            while current.weekday() >= 5:
+                current -= timedelta(days=1)
+            return current.replace(hour=11, minute=0, second=0, microsecond=0)
+
+    monkeypatch.setattr(safety_module, "datetime", SessionClock)
 
     request = harness.request()
     await harness.coordinator.mutate(request, timeout=2.0)

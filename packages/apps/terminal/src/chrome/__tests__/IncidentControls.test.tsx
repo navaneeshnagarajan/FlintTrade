@@ -1,6 +1,7 @@
-import { Activity } from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { Activity, type ReactElement } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, render as renderView, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IncidentTimelinePanel } from '../IncidentTimelinePanel';
 import { IncidentChannelSettings } from '../IncidentChannelSettings';
 import { useAuthStore } from '@/stores/authStore';
@@ -10,7 +11,29 @@ const id = '66666666-6666-4666-8666-666666666666';
 const receipt = { id: '44444444-4444-4444-8444-444444444444', channel: 'telegram', state: 'failed', attempts: 1, updated_at: '2026-10-12T00:00:00Z' };
 const row = { id, correlation_id: id, observed_at: receipt.updated_at, source: 'core_http', scope: 'core_process', severity: 'critical', code: 'http_failure', freshness: 'observed', measurement: { state: 'measured', duration_ms: 12, status_code: 503 }, root_cause: { state: 'unknown', code: null }, deliveries: [receipt] };
 const envelope = (incidents: object[]) => ({ status: 'available', durable: true, retention: 'until_manual_deletion', incidents, has_more: false, next_cursor: null });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+let client: QueryClient;
+let authBefore: ReturnType<typeof useAuthStore.getState>;
+let modeBefore: ReturnType<typeof useModeStore.getState>;
+
+beforeEach(() => {
+  client = new QueryClient();
+  authBefore = useAuthStore.getState();
+  modeBefore = useModeStore.getState();
+});
+
+afterEach(() => {
+  cleanup();
+  client.clear();
+  useAuthStore.setState(authBefore);
+  useModeStore.setState(modeBefore);
+  vi.unstubAllGlobals();
+});
+
+function render(ui: ReactElement) {
+  return renderView(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+}
 
 function login() {
   useAuthStore.setState({ status: 'logged-in', token: 'synthetic-incident-controls' });

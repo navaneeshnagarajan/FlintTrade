@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Collection, Mapping, MutableMapping
+from collections.abc import Callable, Collection, Iterator, Mapping, MutableMapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -192,6 +194,87 @@ class ModifySafetyIntent:
 class _AccountSource:
     target: Any
     session: Any = None
+    managed_read: Callable[..., Any] | None = None
+
+
+_MANAGED_SOURCE: ContextVar[tuple[object, str, str, _AccountSource] | None] = ContextVar(
+    "managed_portfolio_source", default=None,
+)
+
+
+@contextmanager
+def managed_safety_reads(app: Any, adapter_id: str, account_id: str,
+                         verify_authority: Callable[[], Any]) -> Iterator[None]:
+    """Borrow the normal exact read owner without exposing an unversioned session.
+
+    The caller supplies its existing authenticated command verifier. Every read
+    retains ACL, workspace, credential, registry and invocation-time fencing;
+    this bridge supplies neither market observations nor write authority.
+
+    Args:
+        app: Normal factory retaining account setup and broker dependency ownership.
+        adapter_id: Exact native adapter identity to borrow.
+        account_id: Case-sensitive account identity authorised by the caller.
+        verify_authority: Existing authenticated-command verifier, rechecked at read admission and invocation.
+
+    Yields:
+        None while the exact managed read source is installed in the caller context.
+
+    Raises:
+        PortfolioSafetyStateError: Current managed custody, write-capable read admission or a required observation
+            is unavailable.
+    """
+    from flinttrade_gateway.broker_read_service import BrokerReadOwner
+
+    from .account_setup import setup_for
+    from .broker_identity import BrokerSelector
+    from .broker_read_port import BrokerReadFailure, BrokerReadSuccess, ExactReadTarget
+
+    setup = setup_for(app)
+    if setup is None or not setup.production:
+        raise PortfolioSafetyStateError("Managed account owner is unavailable")
+    setup.require_current()
+    owner = setup.runtime.read_owner
+    dependencies = app.extensions.get("flinttrade_broker_dependencies")
+    if type(owner) is not BrokerReadOwner or dependencies is not setup._read_dependencies:
+        raise PortfolioSafetyStateError("Managed read generation is unavailable")
+
+    def authority() -> Any:
+        """Revalidate exact owner custody; the provider checks durable coherence."""
+        # BrokerReadOwner's provider already checks enrolled workspace/vault
+        # coherence on every admission and actual SDK frontier.
+        setup._require_owners()
+        if (setup.runtime.read_owner is not owner
+                or app.extensions.get("flinttrade_broker_dependencies") is not dependencies):
+            raise PortfolioSafetyStateError("Managed read generation retired")
+        return verify_authority()
+
+    port = owner.bind(target=ExactReadTarget(BrokerSelector(adapter_id, account_id)),
+                      verify_current_authority=authority)
+    if type(port) is BrokerReadFailure:
+        raise PortfolioSafetyStateError("Managed account read admission refused")
+
+    async def read(name: str, *args: Any) -> Any:
+        """Return only the genuine owner-admitted native observation."""
+        result = await owner.read_safety_source(port, name, *args)
+        if type(result) is not BrokerReadSuccess:
+            raise PortfolioSafetyStateError("Managed portfolio observation is unavailable")
+        return result.value
+
+    try:
+        handle = dependencies.session_provider(authority(), adapter_id, account_id)
+        if handle.is_read_only:
+            raise PortfolioSafetyStateError("Managed account is read-only")
+        source = _AccountSource(dependencies.native_adapters[adapter_id], session=handle, managed_read=read)
+        token = _MANAGED_SOURCE.set((app.config, adapter_id, account_id, source))
+    except BaseException:
+        owner.revoke(port)
+        raise
+    try:
+        yield
+    finally:
+        _MANAGED_SOURCE.reset(token)
+        owner.revoke(port)
 
 
 @dataclass(frozen=True)
@@ -1007,6 +1090,11 @@ def _resolve_account_source(
     account_id: str,
 ) -> _AccountSource:
 
+    managed = _MANAGED_SOURCE.get()
+    if managed is not None:
+        if managed[0] is not config or managed[1:3] != (adapter_id, account_id):
+            raise PortfolioSafetyStateError("Managed portfolio target differs")
+        return managed[3]
     adapter = (config.get("NATIVE_ADAPTERS") or {}).get(adapter_id)
     registry = config.get("REGISTRY")
     if adapter is None or registry is None:
@@ -1019,6 +1107,8 @@ def _resolve_account_source(
 
 
 async def _read(source: _AccountSource, native_name: str, *args: Any) -> Any:
+    if source.managed_read is not None:
+        return await source.managed_read(native_name, *args)
     method_name = native_name
     reader = getattr(source.target, method_name, None)
     if not callable(reader):

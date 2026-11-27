@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import re
 import subprocess
+import time
 
 from flinttrade_core.model_rights_policies import TIMESFM_3_RESTRICTION_POLICY
 from flinttrade_core.service_providers import (
@@ -40,7 +41,7 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_GUARD_STRUCTURE_DIGEST = "5ea967b3267ae823bfaab56cd2990475d16dfe785042ca0bfcdd5dc13e030e36"
+_GUARD_STRUCTURE_DIGEST = "e0d74fc8dafe2b44cd050472f237038860a20ea214902427e9205619f3aa9b44"
 _RESTRICTED_IDENTIFIER_PATTERN = re.compile(
     r"t[._-]*i[._-]*m[._-]*e[._-]*s[._-]*f[._-]*m",
     flags=re.IGNORECASE,
@@ -123,17 +124,25 @@ def _python_source_contains_restricted_identifier(source: str) -> bool:
 
 
 def _static_literal_chain_contains_restricted_identifier(source: str) -> bool:
-    chains = re.finditer(
-        rf"(?:{_STATIC_LITERAL_PATTERN})(?:(?:\s*\+\s*|\s+)(?:{_STATIC_LITERAL_PATTERN}))+",
-        source,
-        flags=re.DOTALL,
-    )
-    return any(
-        _is_restricted_identifier_chain(
-            "".join(_decode_static_literal(literal) for literal in re.findall(_STATIC_LITERAL_PATTERN, chain.group(0)))
-        )
-        for chain in chains
-    )
+    matches = list(re.finditer(_STATIC_LITERAL_PATTERN, source))
+    if len(matches) < 2:
+        return False
+    index = 0
+    while index < len(matches) - 1:
+        end = index + 1
+        while end < len(matches):
+            gap = source[matches[end - 1].end():matches[end].start()]
+            if re.fullmatch(r"(?:\s*\+\s*|\s+)", gap, flags=re.DOTALL) is None:
+                break
+            end += 1
+        if end > index + 1:
+            decoded = "".join(_decode_static_literal(match.group(0)) for match in matches[index:end])
+            if _is_restricted_identifier_chain(decoded):
+                return True
+            index = end
+        else:
+            index += 1
+    return False
 
 
 def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
@@ -165,6 +174,15 @@ def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert not _contains_restricted_identifier("for times, fm in measurements:")
     assert not _contains_restricted_identifier('("times", "fm")')
     assert not _contains_restricted_identifier("time_series_timestamp = object()")
+
+
+def test_concatenated_identifier_scan_stays_linear() -> None:
+    """A quote-heavy file must not make the chain scan backtrack past a second."""
+    padding = ('"alpha"\n' * 4000)
+    started = time.perf_counter()
+    assert _static_literal_chain_contains_restricted_identifier(padding + '"times" + "fm"')
+    assert not _static_literal_chain_contains_restricted_identifier(padding + '"times", "fm"')
+    assert time.perf_counter() - started < 1.0
 
 
 def test_timesfm_policy_preserves_licence_and_conservative_policy_attribution() -> None:
@@ -493,7 +511,7 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
     ]
     guard_top_level_functions = [node.name for node in guard_tree.body if isinstance(node, ast.FunctionDef)]
 
-    assert guard_direct_imports == ["ast", "hashlib", "re", "subprocess"]
+    assert guard_direct_imports == ["ast", "hashlib", "re", "subprocess", "time"]
     assert set(guard_from_imports) == {
         "pathlib",
         "flinttrade_core.model_rights_policies",
@@ -517,6 +535,7 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
         "_python_source_contains_restricted_identifier",
         "_static_literal_chain_contains_restricted_identifier",
         "test_timesfm_guard_detects_static_concatenated_identifier",
+        "test_concatenated_identifier_scan_stays_linear",
         "test_timesfm_policy_preserves_licence_and_conservative_policy_attribution",
         "test_timesfm_policy_cannot_be_widened_by_a_caller_claim",
         "test_timesfm_identity_mismatch_remains_isolated_research",

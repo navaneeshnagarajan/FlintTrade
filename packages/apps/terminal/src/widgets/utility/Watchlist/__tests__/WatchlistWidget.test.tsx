@@ -142,6 +142,7 @@ describe("WatchlistWidget", () => {
   it("shows the Watchlist heading", () => {
     renderWidget();
     expect(screen.getByText("Watchlist")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Watchlist", level: 2 })).toBeInTheDocument();
   });
 
   it("shows default symbols (NIFTY, BANKNIFTY, SBIN, RELIANCE, HDFCBANK)", () => {
@@ -207,7 +208,7 @@ describe("WatchlistWidget", () => {
     useModeStore.setState({ mode: "explore" });
     const { store } = renderWidget();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    await userEvent.click(screen.getByRole("button", { name: /^BANKNIFTY\s*NSE_INDEX/ }));
     expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
@@ -233,7 +234,7 @@ describe("WatchlistWidget", () => {
     expect(screen.getByTestId("bus-follower-option-chain")).toHaveTextContent("");
     expect(screen.getByTestId("bus-follower-scalper")).toHaveTextContent("");
 
-    await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    await userEvent.click(screen.getByRole("button", { name: /^BANKNIFTY\s*NSE_INDEX/ }));
 
     expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
     expect(screen.getByTestId("bus-follower-chart")).toHaveTextContent("BANKNIFTY");
@@ -399,7 +400,7 @@ describe("WatchlistWidget", () => {
     renderWidget();
 
     // Right-click the NIFTY symbol row button
-    const niftyRow = screen.getByRole("button", { name: "NIFTY" });
+    const niftyRow = screen.getByRole("button", { name: /^NIFTY\s*NSE_INDEX/ });
     fireEvent.contextMenu(niftyRow);
 
     // Symbol context menu should appear with Remove option
@@ -482,7 +483,7 @@ describe("WatchlistWidget", () => {
     const seen: Array<unknown> = [];
     const unsubscribe = subscribeChannelInstrument(store, DEFAULT_CHANNEL_ID, (i) => seen.push(i));
 
-    await userEvent.click(screen.getByRole("button", { name: "NIFTY" }));
+    await userEvent.click(screen.getByRole("button", { name: /^NIFTY\s*NSE_INDEX/ }));
 
     expect(seen).toEqual([{ symbol: "NIFTY", exchange: "NSE_INDEX" }]);
     expect(store.get(channelInstrumentAtoms[DEFAULT_CHANNEL_ID]))
@@ -499,7 +500,7 @@ describe("WatchlistWidget", () => {
     ]);
     const { store } = renderWidget({ channel: "fdc3.channel.green" });
 
-    await userEvent.click(screen.getByRole("button", { name: "SBIN" }));
+    await userEvent.click(screen.getByRole("button", { name: /^SBIN\s*NSE/ }));
 
     expect(store.get(channelInstrumentAtoms["fdc3.channel.green"]))
       .toEqual({ symbol: "SBIN", exchange: "NSE" });
@@ -510,7 +511,7 @@ describe("WatchlistWidget", () => {
   it("joined to no channel (channel: 'none') broadcasts nowhere", async () => {
     const { store } = renderWidget({ channel: "none" });
 
-    await userEvent.click(screen.getByRole("button", { name: "NIFTY" }));
+    await userEvent.click(screen.getByRole("button", { name: /^NIFTY\s*NSE_INDEX/ }));
 
     for (const meta of USER_CHANNELS) {
       expect(store.get(channelInstrumentAtoms[meta.id])).toBeNull();
@@ -610,12 +611,12 @@ describe("WatchlistWidget", () => {
     expect(trend.className).toContain("whitespace-nowrap");
     expect(trend.className).not.toMatch(/overflow-wrap|uppercase|tracking-wider/);
     expect(within(columns).getByText("% change", { exact: true })).toBeInTheDocument();
-    expect(await screen.findByLabelText("NIFTY LTP")).toHaveTextContent("24,150.00");
-    expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("+0.63%");
-    expect(screen.getByLabelText("BANKNIFTY LTP")).toHaveTextContent("51,200.00");
-    expect(screen.getByLabelText("SBIN LTP")).toHaveTextContent("780.00");
-    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
-    expect(screen.getByLabelText("HDFCBANK LTP")).toHaveTextContent("1,680.00");
+    expect(await screen.findByTestId("NIFTY LTP")).toHaveTextContent("24,150.00");
+    expect(screen.getByTestId("NIFTY % change")).toHaveTextContent("+0.63%");
+    expect(screen.getByTestId("BANKNIFTY LTP")).toHaveTextContent("51,200.00");
+    expect(screen.getByTestId("SBIN LTP")).toHaveTextContent("780.00");
+    expect(screen.getByTestId("RELIANCE LTP")).toHaveTextContent("2,850.00");
+    expect(screen.getByTestId("HDFCBANK LTP")).toHaveTextContent("1,680.00");
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
@@ -625,8 +626,8 @@ describe("WatchlistWidget", () => {
     expect(await within(screen.getByRole("group", { name: "Watchlist columns" })).findByText("LTP", { exact: true })).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("% change", { exact: true })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
-      expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");
+      expect(screen.getByTestId("NIFTY LTP")).toHaveTextContent("—");
+      expect(screen.getByTestId("NIFTY % change")).toHaveTextContent("—");
     });
   });
 
@@ -642,8 +643,8 @@ describe("WatchlistWidget", () => {
 
     expect(within(screen.getByRole("group", { name: "Watchlist columns" })).queryByText("LTP", { exact: true })).not.toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Watchlist columns" })).queryByText("% change", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("NIFTY LTP")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("NIFTY % change")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("NIFTY LTP")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("NIFTY % change")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("checkbox", { name: "LTP column" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "% change column" }));
@@ -651,8 +652,8 @@ describe("WatchlistWidget", () => {
     expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("LTP", { exact: true })).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Watchlist columns" })).getByText("% change", { exact: true })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
-      expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");
+      expect(screen.getByTestId("NIFTY LTP")).toHaveTextContent("—");
+      expect(screen.getByTestId("NIFTY % change")).toHaveTextContent("—");
     });
   });
 });

@@ -99,11 +99,38 @@ def _distribution_name(dist: metadata.Distribution) -> str:
     return re.sub(r"[-_.]+", "-", str(dist.metadata.get("Name", "")).lower())
 
 
+# One process re-reads the same installed files on every inspect. distributions()
+# returns a new wrapper each call, so the key is the install path plus name and
+# version. A replaced distribution, or a new version, misses this cache.
+_FILE_CACHE: dict[tuple[str, str, str], tuple[tuple[str, ...], tuple[str, ...]]] = {}
+
+
+def _distribution_cache_key(dist: metadata.Distribution) -> tuple[str, str, str]:
+    """Identify an installed distribution without retaining its wrapper."""
+    try:
+        root = str(Path(str(dist.locate_file(""))).resolve())
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        root = f"object:{id(dist)}"
+    return (_distribution_name(dist), str(getattr(dist, "version", "")), root)
+
+
+def _cached_distribution_files(dist: metadata.Distribution) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return top-level names and file paths, read once per installed identity."""
+    key = _distribution_cache_key(dist)
+    found = _FILE_CACHE.get(key)
+    if found is not None:
+        return found
+    top_level = tuple((dist.read_text("top_level.txt") or "").splitlines())
+    names = tuple(str(file) for file in (dist.files or ()))
+    _FILE_CACHE[key] = (top_level, names)
+    return top_level, names
+
+
 def _owns_neo_namespace(dist: metadata.Distribution) -> bool:
-    top_level = dist.read_text("top_level.txt") or ""
-    if "neo_api_client" in top_level.splitlines():
+    top_level, names = _cached_distribution_files(dist)
+    if "neo_api_client" in top_level:
         return True
-    return any(str(file).replace("\\", "/").split("/")[0] == "neo_api_client" for file in (dist.files or ()))
+    return any(name.replace("\\", "/").split("/")[0] == "neo_api_client" for name in names)
 
 
 def _kotak_provenance_matches(dist: metadata.Distribution, source_commit: str) -> bool:
@@ -251,8 +278,8 @@ def _attest_source(pin: dict[str, Any]) -> tuple[str | None, str]:
     for other in distributions:
         if other is dist:
             continue
-        top_level = (other.read_text("top_level.txt") or "").splitlines()
-        if module in top_level or any(str(file).split("/")[0] == module for file in (other.files or ())):
+        top_level, names = _cached_distribution_files(other)
+        if module in top_level or any(name.split("/")[0] == module for name in names):
             return installed, STATUS_CONFLICT
     release = name == "growwapi"
     if release:
