@@ -64,10 +64,8 @@ class TestFallbackTable:
     def test_banknifty_lot_size_is_30(self):
         assert FALLBACK_LOT_SIZES["BANKNIFTY"] == 30
 
-    def test_finnifty_lot_size_is_65(self):
-        # Freshest value from the (formerly diverging) route table — the old
-        # 40 here was stale.
-        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 65
+    def test_finnifty_lot_size_is_60(self):
+        assert FALLBACK_LOT_SIZES["FINNIFTY"] == 60
 
     def test_midcpnifty_lot_size_is_120(self):
         # Freshest value from the (formerly diverging) route table — the old
@@ -89,7 +87,7 @@ class TestFallbackTable:
         old_route_table = {
             "NIFTY": lot_size_from_master("NIFTY"),
             "BANKNIFTY": lot_size_from_master("BANKNIFTY"),
-            "FINNIFTY": 65,
+            "FINNIFTY": 60,
             "MIDCPNIFTY": 120,
             "SENSEX": lot_size_from_master("SENSEX"),
             "BANKEX": 30,
@@ -135,11 +133,11 @@ class TestGetLotSizeSync:
         assert get_lot_size_sync("NIFTY") == FALLBACK_LOT_SIZES["NIFTY"]
         assert get_lot_size_sync("Nifty") == FALLBACK_LOT_SIZES["NIFTY"]
 
-    def test_unknown_symbol_returns_1(self):
-        assert get_lot_size_sync("UNKNOWN_XYZ") == 1
+    def test_unknown_symbol_returns_none(self):
+        assert get_lot_size_sync("UNKNOWN_XYZ") is None
 
-    def test_empty_symbol_returns_1(self):
-        assert get_lot_size_sync("") == 1
+    def test_empty_symbol_returns_none(self):
+        assert get_lot_size_sync("") is None
 
     def test_whitespace_stripped(self):
         assert get_lot_size_sync("  NIFTY  ") == FALLBACK_LOT_SIZES["NIFTY"]
@@ -202,10 +200,9 @@ class TestLotSizeResolverCache:
         lot = resolver.get_lot_size("NIFTY", "NFO")
         assert lot == FALLBACK_LOT_SIZES["NIFTY"]
 
-    def test_truly_unknown_symbol_returns_1(self):
+    def test_truly_unknown_symbol_returns_none(self):
         resolver = self._make_resolver([])
-        lot = resolver.get_lot_size("NOTAREALSTOCK", "NSE")
-        assert lot == 1
+        assert resolver.get_lot_size("NOTAREALSTOCK", "NSE") is None
 
     def test_network_error_falls_back_gracefully(self):
         client = MagicMock()
@@ -331,7 +328,7 @@ class TestLotSizeResolverResolve:
     def test_unknown_symbol_reports_default_source(self):
         resolver = self._make_resolver([])
         resolution = resolver.resolve("NOTAREALSTOCK", "NSE")
-        assert resolution == LotResolution(1, "default")
+        assert resolution == LotResolution(None, "default")
 
     def test_get_lot_size_delegates_to_resolve(self):
         resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
@@ -411,3 +408,22 @@ class TestModuleExports:
     def test_lot_resolution_importable_from_module(self):
         from flinttrade_screener.lot_sizes import LotResolution as ImportedResolution
         assert ImportedResolution is LotResolution
+
+
+def test_unknown_lot_message_names_the_underlying(monkeypatch):
+    from flinttrade_screener.lot_sizes import (
+        FALLBACK_LOT_SIZES,
+        lot_size_unknown_message,
+        missing_lot_refusal,
+    )
+
+    monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
+    assert lot_size_unknown_message("SENSEX26DEC85000CE") == "The lot size for SENSEX isn't verified."
+    assert lot_size_unknown_message("notlisted 26 dec fut") == "The lot size for NOTLISTED isn't verified."
+    assert lot_size_unknown_message("M&M26DECFUT") == "The lot size for M&M isn't verified."
+    assert missing_lot_refusal("SENSEX26DEC85000CE") == (
+        "Not placed. The lot size for SENSEX isn't verified."
+    )
+    assert missing_lot_refusal("M&M26DECFUT") == (
+        "Not placed. The lot size for M&M isn't verified."
+    )

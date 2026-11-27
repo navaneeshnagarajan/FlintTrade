@@ -61,7 +61,6 @@ from .oi_analytics import (
     UnusualOIEntry,
 )
 from .option_chain import (
-    LOT_SIZES,
     OptionChainAnalyzer,
     OptionChainSnapshot,
     StrikeData,
@@ -125,7 +124,6 @@ __all__ = [
     "OptionChainAnalyzer",
     "OptionChainSnapshot",
     "StrikeData",
-    "LOT_SIZES",
     # OI analysis
     "OIAnalysis",
     "PCRResult",

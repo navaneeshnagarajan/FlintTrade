@@ -36,10 +36,10 @@ from flask import Blueprint, current_app, jsonify, request
 from . import broker_registry_reads as broker_reads
 from .gex import calculate_gex
 from .iv_smile import calculate_iv_smile
-from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver
+from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver, get_lot_size_sync, missing_lot_refusal
 from .oi_analysis import OIAnalysis
 from .oi_profile import calculate_oi_profile
-from .option_chain import LOT_SIZES, OptionChainSnapshot, StrikeData
+from .option_chain import OptionChainSnapshot, StrikeData
 from .rrg import (
     BENCHMARK_EXCHANGE,
     BENCHMARK_SYMBOL,
@@ -874,7 +874,7 @@ def _resolve_gex_lot_size(
     resolution = LotSizeResolver(client).resolve(normalised_symbol, exchange)
     return (
         resolution.lot_size
-        if resolution.source == "live" and 0 < resolution.lot_size <= _MAX_LOT_SIZE
+        if resolution.source == "live" and resolution.lot_size is not None and 0 < resolution.lot_size <= _MAX_LOT_SIZE
         else None
     )
 
@@ -1507,7 +1507,15 @@ def straddle_pnl_endpoint() -> Any:
         adjustment_legs = _parse_adjustment_legs(body)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
-    lot_size = LOT_SIZES.get(symbol.upper(), 50)
+    lot_size = get_lot_size_sync(symbol)
+    if lot_size is None:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "lot_size_unknown",
+                "message": missing_lot_refusal(symbol),
+            }
+        ), 422
     spot = 24000.0
     candles: list[dict[str, Any]] = []
 

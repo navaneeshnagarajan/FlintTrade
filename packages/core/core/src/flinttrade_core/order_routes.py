@@ -47,6 +47,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
+from .instrument_lots import lot_size_from_master, missing_lot_refusal
 from .order_input import json_object_body, normalise_order_type_fields
 from .order_outcome import (
     ORDER_CANCELLED,
@@ -4786,7 +4787,8 @@ def place_options_strategy() -> tuple[Any, int]:
 
     try:
         lots: int = int(body.get("lots", 1))
-        lot_size: int = int(body.get("lot_size", 50))
+        requested_lot_size = body.get("lot_size")
+        requested_lot = None if requested_lot_size is None else int(requested_lot_size)
         exchange: str = str(body.get("exchange", "NFO"))
         product: str = str(body.get("product", "NRML"))
         basket_strategy: str = str(body.get("strategy", strategy_name))
@@ -4796,6 +4798,24 @@ def place_options_strategy() -> tuple[Any, int]:
     from flinttrade_engine.basket_orders import _leg_to_order  # noqa: PLC0415
     from flinttrade_engine.bracket_routes import _request_principal  # noqa: PLC0415
     from flinttrade_engine.options_multi_order import OptionsStrategyBuilder  # noqa: PLC0415
+
+    lot_size = lot_size_from_master(underlying)
+    if lot_size is None:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "lot_size_unknown",
+                "message": missing_lot_refusal(underlying),
+            }
+        ), 422
+    if requested_lot is not None and requested_lot != lot_size:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "lot_size_mismatch",
+                "message": f"Lot size {requested_lot} doesn't match {underlying.strip().upper()}. Use {lot_size}.",
+            }
+        ), 422
 
     try:
         legs = _build_strategy_legs(

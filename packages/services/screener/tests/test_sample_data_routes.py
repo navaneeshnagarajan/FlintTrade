@@ -320,7 +320,7 @@ def test_lot_size_table_delegates_to_resolver_fallback(client):
     assert sample_data_routes._LOT_SIZE_TABLE is FALLBACK_LOT_SIZES
 
     resp = client.get("/api/v1/screener/lot-size?symbol=FINNIFTY")
-    assert resp.get_json()["lot_size"] == 65
+    assert resp.get_json()["lot_size"] == 60
     resp = client.get("/api/v1/screener/lot-size?symbol=MIDCPNIFTY")
     assert resp.get_json()["lot_size"] == 120
 
