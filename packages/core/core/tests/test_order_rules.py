@@ -100,7 +100,7 @@ def test_markdown_generator_lists_id_scope_date_and_message() -> None:
     table = rules_markdown()
     lines = table.strip().splitlines()
     assert lines[0] == "| Rule id | Level | Scope | Effective from | Description | Message |"
-    assert set(line.split("|")[2].strip() for line in lines[2:]) <= {"Blocks", "Warns", "Info"}
+    assert {line.split("|")[2].strip() for line in lines[2:]} <= {"Blocks", "Warns", "Info"}
     assert len(lines) == len(load_rules()) + 2
     assert (
         "| `bse-stop-limit-gap` | Blocks | BSE · all brokers · options · SL | 2026-02-09 | On BSE the stop-loss limit price"

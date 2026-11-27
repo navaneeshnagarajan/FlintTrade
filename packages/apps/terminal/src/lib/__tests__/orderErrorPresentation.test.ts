@@ -35,7 +35,7 @@ describe("Dhan rejection sentences", () => {
 
   it("places the sentence after a pre-dispatch refusal without repeating Dhan's message", () => {
     const shown = present("dhan", { dispatch_outcome: "refused_before_dispatch", broker_code: "DH-906", broker_message: "IP not whitelisted", broker_reason: STATIC_IP });
-    expect(shown?.body).toMatch(new RegExp(`Broker code: DH-906\\.\\n${STATIC_IP.replace(/[.]/g, "\\.")}\\nIP not whitelisted$`));
+    expect(shown?.body).toMatch(new RegExp(`Broker code: DH-906\\.\\n${STATIC_IP.replaceAll(".", "\\.")}\\nIP not whitelisted$`));
     expect(shown?.body).not.toContain("Broker reason (observation)");
   });
 
