@@ -97,7 +97,6 @@ Forever, basket, split, and trigger *place* are not submit routes.
 New integrations must preserve this split. Do not invent a third path, and
 do not send an extended verb through `gate_order` alone.
 
-<a id="laya-admission"></a>
 <a id="decision-model-admission"></a>
 
 ## Decision model admission
@@ -137,16 +136,15 @@ in the versioned `laya_policy.toml`. There is no confidence field in the
 gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
-Down copy is the same in every mode: the Status line is "Decision model down. New orders paused until it's ready. Closing positions still works." and a refused new order is "Not placed. Decision model is down. Start it from Status." A non-exit order is HTTP 403. That refusal carries no quantity ceiling. A Practice
+Down copy is the same in every mode: the Status line is "Decision model is down. New orders are paused until it's ready. Closing positions still works." and a refused new order is "Not placed. Decision model is down. Start it from Status." A non-exit order is HTTP 403. That refusal carries no quantity ceiling. A Practice
 refusal never says Live. When the decision model is Ready
 or Degraded and a Live place is refused only because Live is not qualified,
-the reason is "Laya isn't qualified for Live yet. Practice orders are available." An uncertain answer, including an empty note, clamps in
+the reason is "Decision model not qualified for Live. Use Practice." An uncertain answer, including an empty note, clamps in
 Practice and denies in Live. It is not a hard reject. The Practice server
-reason is "Laya is uncertain. Quantity stays inside the tighter limit."
-The Live server reason is "Laya is uncertain. Live stays closed." On a
+reason is "Decision model uncertain. Quantity held to the tighter limit."
+The Live server reason is "Decision model uncertain. Live stays closed." On a
 denial, Order Pad and Quick Trade show that server reason inside one
-alert (`role="alert"`), the only live region. The reason line is named
-"Laya decision" and is not its own status. The desk
+alert (`role="alert"`), the only live region. The reason line is named "Decision model check" and is not its own status. The desk
 does not auto-place. A clamp is only when the requested quantity is
 greater than the allowed one. Order Pad and Quick Trade show "Not placed. Decision model allows up to N." with Place N and Cancel. Place N sends that
 quantity. On Order Pad, "Review Practice order" then shows the placed
@@ -158,33 +156,32 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `downloading` (`Downloading the model · X of Y GB`), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
 (Can't verify the model), `wrong_revision` (Wrong model version),
-`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the managed decision-model port. For
+`key_rejected` (Can't reach the decision model), and `key_missing` (API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`.). A health check does not replace `key_missing` with Not started. `<n>` is the managed decision-model port. For
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
 has no tooltip and no Next line, and it is not Still loading. The
-`download_failed` tooltip is "Check your connection, then Start Laya again."
+`download_failed` tooltip is "Check your connection, then start the decision model again."
 `downloading` and `download_failed` use the status word Down. Orders are
 refused with "Not placed. Decision model is down. Start it from Status."
-The `unverified` tooltip is "The installed model couldn't be checked
-against the pinned version. Restart Laya. If it keeps happening, reinstall it." That code applies when this start did not download. A failed download,
+The `unverified` tooltip is "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model." That code applies when this start did not download. A failed download,
 including one over an older unverified snapshot, is `download_failed`
-("Can't download the model"). The `wrong_revision` tooltip is "Laya is running a different model than FlintTrade expects." That code is only a real mismatch: a complete
+("Can't download the model"). The `wrong_revision` tooltip is "Wrong model loaded. Expected {pinned id}." That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
 that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or
 a failed download or swap, including one that puts the previous
 checkpoint back, is not this code. The
-`key_rejected` tooltip is "Laya restarted with a new key. Reconnecting…"
+`key_rejected` tooltip is "Decision model restarted with a new key. Reconnecting…"
 The chip stays Down and orders are refused. When a place is refused
 because the decision model cannot be reached, or because it rejects the key, the chip
-updates on that same order: Unreachable, or Can't reach Laya. The
+updates on that same order: Unreachable, or Can't reach the decision model. The
 refusal text stays "Not placed. Decision model is down. Start it from Status."
 Every chip-Down refusal reads that sentence.
 
 `identity_absent` is not a chip code. When the chip is Ready and a single
 decision carries no proof, the refusal code is `decision_model_unverified` and the
-refusal reads "Not placed. Decision model not verified. Check Status."
+refusal reads "Not placed. Decision model not verified. Try again."
 
 On each managed decision-model start FlintTrade hashes `model.safetensors` and every
 file in `[checkpoint.manifest]` before launch. The runtime record holds
@@ -200,7 +197,7 @@ or `proof=runtime`. An admitted Practice place with an empty note skips
 the model and writes one line, `effect=clamp` with `failure=note_absent`
 and no proof, including when the quantity already fits. When this run's
 record stood in, each model allow keeps its own `effect=allow`
-`proof=runtime` line. There is no dedupe. A model decision with no proof is refused with "Not placed. Decision model not verified. Check Status." A health document that
+`proof=runtime` line. There is no dedupe. A model decision with no proof is refused with "Not placed. Decision model not verified. Try again." A health document that
 omits the digest is Ready when that record matches the pin. If the
 record cannot be checked, the chip reason is `unverified`. Stopping the
 managed decision-model process records Down before an in-flight probe can publish Ready. Desk
@@ -281,14 +278,14 @@ pid, the key, and the runtime record the same way an order does, so the
 chip and the order gate read the same state. A stop or a start shows on
 the chip by the next 1.5-second check. After Start decision model, until the ping confirms
 the new state, the chip says Checking in the neutral colour and the
-popover says Checking Laya…. It does not show a stale Ready during that
+popover says Checking decision model…. It does not show a stale Ready during that
 wait. An admitted place while the chip is not Ready or Degraded also
 shows Checking until the next ping. A confirmed first load still says Still loading. A place refused
 with exactly "Not placed. Decision model is down. Start it from Status." sets
 the chip to Down on that response. The refusal line stays that sentence.
 New orders stay paused. A reduce-only close is unchanged.
 
-When decision status is Down, the desk opens incident class `laya` ("Decision model down. New orders paused until it's ready. Closing positions still works.").
+When decision status is Down, the desk opens incident class `decision_model` ("Decision model is down. New orders are paused until it's ready. Closing positions still works.").
 That class closes a new Live place on the shared
 client place path. The server decides reduce-only. A client flag is ignored.
 A close qualifies inside either place route when it reduces the same contract without changing its sign. Its opposite-side quantity cannot exceed the open quantity minus pending exits. On Live, available position and broker-order books must establish that bound; this desk’s pending exits also count. Missing, malformed or contradictory books cannot establish a reduce-only close or known flatness. There is no unreadable-book fallback.

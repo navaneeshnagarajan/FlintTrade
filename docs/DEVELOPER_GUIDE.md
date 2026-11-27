@@ -530,7 +530,6 @@ Do not bypass the decision model or SafetySystem on those place paths. If you ne
 fast-path for high-frequency orders, add the path inside the layers, not
 around them.
 
-<a id="laya-decision-process"></a>
 <a id="decision-model-process"></a>
 
 ### Decision model process
@@ -575,7 +574,7 @@ written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written. When `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`
 points at that same path, `start` replaces the file and does not treat
 it as missing. A different path that is not there still refuses with
-"The Laya API key file is missing."
+"API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`."
 
 `start` downloads the pinned commit (`[checkpoint] revision`, never the
 default branch) into `<workspace>/runtime/laya/staging` when the weights
@@ -602,7 +601,7 @@ do not match the pin is `wrong_revision`; staging is deleted and a
 checkpoint already on disk is left in place. An extra loadable file in a
 complete download is `unverified`. A dropped connection, a partial or
 missing file, or a read error is `download_failed` ("Can't download the
-model"; tooltip "Check your connection, then Start Laya again."). The
+model"; tooltip "Check your connection, then start the decision model again."). The
 status word for `downloading` is Downloading (neutral colour) and for
 `download_failed` it is Down, never Still
 loading, and orders use "Not placed. Decision model is down. Start it from Status." A non-exit order is HTTP 403. Those failures delete the staging directory and leave the shared
@@ -669,7 +668,7 @@ is reconciled by that watch. The desk polls `GET /api/v1/ping` every
 record the same way an order does, so the chip and the order gate read
 the same state. A stop or a start shows on the chip by the next 1.5-second check.
 After Start decision model, until the ping confirms the new state, the chip says
-Checking in the neutral colour and the popover says Checking Laya…. It
+Checking in the neutral colour and the popover says Checking decision model…. It
 does not show a stale Ready during that wait. An admitted place while
 the chip is not Ready or Degraded also shows Checking until the next
 ping. A confirmed first load
@@ -679,7 +678,7 @@ record, as does a start that fails after it was written. A record from
 an earlier run is rejected. A health document without the weight digest
 is Ready when that record matches the pin. If the record cannot be
 checked, the reason is `unverified` ("Can't verify the model"). The
-tooltip is "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it."
+tooltip is "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
 `still_loading`, `downloading`, `download_failed`, `unreachable`,
@@ -687,11 +686,11 @@ tooltip is "The installed model couldn't be checked against the pinned version. 
 not a status code. The desk shows Not started, Stopped,
 `Port <n> in use`, Still loading, `Downloading the model · X of Y GB`,
 Can't download the model, Unreachable, Wrong model version, Can't verify
-the model, Can't reach Laya, and The Laya API key file is missing.
+the model, Can't reach the decision model, and API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`.
 `key_missing` stays until a later start finds the file, or an explicit
 stop. When `FLINTTRADE_DECISION_MODEL_API_KEY_FILE` names `<workspace>/runtime/laya/api.key`,
 that next `start` replaces the file and does not treat it as missing. A
-different path that is not there still refuses with "The Laya API key file is missing." A health
+different path that is not there still refuses with "API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`." A health
 check does not replace it with Not started. The download progress class
 subclasses the pinned `tqdm==4.70.1` (`tqdm.auto.tqdm`). The model is
 about 2.37 GB, and the progress line reports that size once. `unverified` applies when this start did
@@ -701,16 +700,16 @@ managed decision-model port. Tooltips for
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable` are the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
-has no tooltip. The `download_failed` tooltip is "Check your connection, then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than FlintTrade expects." That code is only a real mismatch: a complete
+has no tooltip. The `download_failed` tooltip is "Check your connection, then start the decision model again." The `wrong_revision` tooltip is "Wrong model loaded. Expected {pinned id}." That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
 that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or
 a failed download or swap, including one that puts the previous
 checkpoint back, is `download_failed`, not this code. The `key_rejected`
-tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
+tooltip is "Decision model restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because the decision model cannot
 be reached, or because it rejects the key, the chip updates on that same
-order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
+order: Unreachable, or Can't reach the decision model. Every chip-Down refusal reads
 "Not placed. Decision model is down. Start it from Status." A
 dead child is reaped on the health probe and on interpreter exit, and
 the probe records Down with Stopped. `POST /api/v1/decision-model/start` starts or
@@ -735,13 +734,13 @@ and no proof, including when the quantity already fits. When this run's
 record stood in, each model allow keeps its own `effect=allow`
 `proof=runtime` line. There is no dedupe. When the chip is Ready and a model decision
 carries no proof, the refusal code is `decision_model_unverified` and the decision log records
-`identity_absent` with no proof. The refusal reads "Not placed. Decision model not verified. Check Status." Stopping the managed decision-model process records
+`identity_absent` with no proof. The refusal reads "Not placed. Decision model not verified. Try again." Stopping the managed decision-model process records
 Down before an in-flight probe can publish Ready. An empty note is
 uncertain and is not a hard reject:
-Practice clamps and Live denies. The Practice server reason is "Laya is uncertain. Quantity stays inside the tighter limit." The Live server
-reason is "Laya is uncertain. Live stays closed." On a denial, Order Pad
+Practice clamps and Live denies. The Practice server reason is "Decision model uncertain. Quantity held to the tighter limit." The Live server
+reason is "Decision model uncertain. Live stays closed." On a denial, Order Pad
 and Quick Trade show that server reason inside one alert (`role="alert"`),
-the only live region. The reason line is named "Laya decision" and is not
+the only live region. The reason line is named "Decision model check" and is not
 its own status.
 A clamp is only when the requested quantity is greater than the allowed one. The desk clamp
 sentence is "Not placed. Decision model allows up to N." Place N sends that
@@ -753,8 +752,8 @@ empty. The collapsed control is "Add a reason (optional)". Once open, the
 field's accessible name is the same. Quick Trade, Positions square-off,
 Order Ladder, Scalper, and Option Chain use that accessible name too.
 
-The same client speaks `POST /v1/systemone`. `decision:laya-managed`
-displays as **Decision model** and is the managed Ollama install.
+The same client speaks `POST /v1/systemone`. `decision:laya-managed` is the model backend id for the managed Laya model,
+and is the managed Ollama install. Settings shows the section **Decision model**.
 `decision:systemone-endpoint` displays as **System-one decision endpoint**:
 any loopback server you run that answers `POST /v1/systemone`. Neither
 starts when it is listed, and neither is Ready by default. The decision model starts
