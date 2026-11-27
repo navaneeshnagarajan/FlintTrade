@@ -58,7 +58,7 @@ class _Books:
 
 @pytest.fixture
 def native_stack(backend_lease_factory, monkeypatch):
-    assert version("upstox-python-sdk") == "2.30.0"
+    assert version("upstox-python-sdk") == "2.31.0"
     reset_reduce_only_for_tests()
     safety = SafetySystem(SafetyConfig(check_market_hours=False))
     proof = backend_lease_factory()
