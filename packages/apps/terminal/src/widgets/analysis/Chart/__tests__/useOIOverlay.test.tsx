@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getFtOIProfile } from "@/services/ftApi";
 import { lightweightHistogramRuntime } from "@/lib/lightweightChartRuntime";
-import { getNearestExpiry, useOIOverlay } from "../useOIOverlay";
+import { getExpiry } from "@/services/api";
+import { resolveOverlayExpiry, useOIOverlay } from "../useOIOverlay";
 
 const oiSeries = {
   applyOptions: vi.fn(),
@@ -37,6 +38,13 @@ vi.mock("@/services/ftApi", () => ({
   getFtOIProfile: vi.fn(),
 }));
 
+vi.mock("@/services/api", () => ({
+  getExpiry: vi.fn(),
+}));
+
+/** NIFTY contracts expire on Tuesdays; Tue 28 Jul 2026 is the July monthly. */
+const NIFTY_LIST = ["21-JUL-26", "28-JUL-26", "04-AUG-26", "25-AUG-26", "2099-12-29"];
+
 vi.mock("@/lib/lightweightChartRuntime", () => ({
   lightweightHistogramRuntime: {
     addHistogramSeries: vi.fn(() => oiSeries),
@@ -65,6 +73,7 @@ describe("useOIOverlay", () => {
       total_ce_oi: 300,
       total_pe_oi: 100,
     } as never);
+    vi.mocked(getExpiry).mockResolvedValue({ expiry: NIFTY_LIST });
   });
 
   it("creates the OI histogram through the shared Flint chart runtime", async () => {
@@ -94,25 +103,35 @@ describe("useOIOverlay", () => {
     ]);
   });
 
-  it("fetches the IST expiry contract, not the operator's local-midnight one", async () => {
-    // 09:30 IST on Thursday 30 July 2026 — the last Thursday of the month, so
-    // the contract expiring at today's close is the one to profile.
-    //
-    // The old calculator mixed browser-local `new Date(y, m, d)` maths with a
-    // UTC `toISOString()` tail and compared `now` against LOCAL midnight of the
-    // expiry day, so at this instant it asked for a contract that depended on
-    // where the operator sat: "2026-08-27" from UTC (rolled a month early,
-    // because local midnight had passed) and "2026-08-26" from IST (that roll,
-    // plus the local-midnight-to-UTC off-by-one — a date that is not even a
-    // Thursday). The answer must not depend on the host zone at all.
+  it("profiles the nearest contract on the NSE option list, read in IST", async () => {
+    // 09:30 IST on Tuesday 28 July 2026, an expiry day, so the contract
+    // expiring at today's close is the one to profile. The list is read from
+    // the derivatives segment (NFO), not the chart's NSE_INDEX exchange.
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date("2026-07-30T04:00:00Z"));
+    vi.setSystemTime(new Date("2026-07-28T04:00:00Z"));
 
     render(<OIOverlayHarness />);
 
     await waitFor(() => {
-      expect(getFtOIProfile).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", "2026-07-30", 20);
+      expect(getFtOIProfile).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", "2026-07-28", 20);
     });
+    expect(getExpiry).toHaveBeenCalledWith("NIFTY", "NFO", "options");
+  });
+
+  it("does not guess a contract when the list is empty", async () => {
+    vi.mocked(getExpiry).mockResolvedValue({ expiry: [] });
+    render(<OIOverlayHarness />);
+    await waitFor(() => expect(getExpiry).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(getFtOIProfile).not.toHaveBeenCalled();
+  });
+
+  it("does not guess a contract when the list cannot be loaded", async () => {
+    vi.mocked(getExpiry).mockRejectedValue(new Error("network"));
+    render(<OIOverlayHarness />);
+    await waitFor(() => expect(getExpiry).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(getFtOIProfile).not.toHaveBeenCalled();
   });
 });
 
@@ -124,46 +143,40 @@ describe("useOIOverlay", () => {
 // actually requests from the backend.
 // ---------------------------------------------------------------------------
 
-describe("getNearestExpiry", () => {
-  afterEach(() => {
-    vi.useRealTimers();
+describe("resolveOverlayExpiry", () => {
+  beforeEach(() => {
+    vi.mocked(getExpiry).mockReset();
+    vi.mocked(getExpiry).mockResolvedValue({ expiry: NIFTY_LIST });
   });
 
-  it("REGRESSION: keeps the expiring contract through its own expiry day", () => {
-    // 09:30 IST and 23:00 IST on Thursday 30 July 2026. The old version rolled
-    // to the next month the moment local midnight passed, so the chart could
-    // never overlay OI for the contract expiring that very session.
-    expect(getNearestExpiry(new Date("2026-07-30T04:00:00Z"))).toBe("2026-07-30");
-    expect(getNearestExpiry(new Date("2026-07-30T17:30:00Z"))).toBe("2026-07-30");
+  it("keeps the expiring contract through its own expiry day", async () => {
+    // 09:30 IST and 23:00 IST on Tuesday 28 July 2026.
+    expect(await resolveOverlayExpiry("NIFTY", "NSE_INDEX", new Date("2026-07-28T04:00:00Z"))).toBe("2026-07-28");
+    expect(await resolveOverlayExpiry("NIFTY", "NSE_INDEX", new Date("2026-07-28T17:30:00Z"))).toBe("2026-07-28");
   });
 
-  it("reads the calendar month in IST, not in UTC", () => {
-    // 01:00 IST on Saturday 1 August 2026 — the UTC clock still says 31 July.
-    // The IST month is August, so August's contract is the near one. (The old
-    // version happened to land on the same answer here from a UTC host, and on
-    // 2026-08-26 from an IST one — this pins the month read either way.)
-    expect(new Date("2026-07-31T19:30:00Z").toISOString().slice(0, 10)).toBe("2026-07-31");
-    expect(getNearestExpiry(new Date("2026-07-31T19:30:00Z"))).toBe("2026-08-27");
+  it("rolls to the next listed contract once the expiry day is past, in IST", async () => {
+    // 00:30 IST on Wednesday 29 July 2026; UTC still reads 28 July.
+    expect(await resolveOverlayExpiry("NIFTY", "NSE_INDEX", new Date("2026-07-28T19:00:00Z"))).toBe("2026-08-04");
   });
 
-  it("rolls to the next month once the expiry day is past", () => {
-    expect(getNearestExpiry(new Date("2026-07-31T04:00:00Z"))).toBe("2026-08-27");
+  it("reads SENSEX Thursday expiries from the BSE option list", async () => {
+    vi.mocked(getExpiry).mockResolvedValue({ expiry: ["2026-07-30", "2026-08-06"] });
+    expect(await resolveOverlayExpiry("SENSEX", "BSE_INDEX", new Date("2026-07-27T04:00:00Z"))).toBe("2026-07-30");
+    expect(getExpiry).toHaveBeenCalledWith("SENSEX", "BFO", "options");
   });
 
-  it("crosses the year boundary", () => {
-    // 01:30 IST on 1 January 2027, when UTC is still on 31 December 2026.
-    expect(getNearestExpiry(new Date("2026-12-31T20:00:00Z"))).toBe("2027-01-28");
-    // 31 December 2026 is itself the December expiry, so it holds all day.
-    expect(getNearestExpiry(new Date("2026-12-31T04:00:00Z"))).toBe("2026-12-31");
+  it("uses a holiday-shifted date exactly as listed", async () => {
+    vi.mocked(getExpiry).mockResolvedValue({ expiry: ["27-JUL-26", "04-AUG-26"] });
+    expect(await resolveOverlayExpiry("NIFTY", "NSE", new Date("2026-07-24T04:00:00Z"))).toBe("2026-07-27");
   });
 
-  it("emits an ISO date the backend's expiry parser accepts", () => {
-    expect(getNearestExpiry(new Date("2026-07-30T04:00:00Z"))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it("returns null for an exchange with no option list", async () => {
+    expect(await resolveOverlayExpiry("BTCUSDT", "CRYPTO")).toBeNull();
+    expect(getExpiry).not.toHaveBeenCalled();
   });
 
-  it("defaults to the current instant", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-24T19:30:00Z")); // 01:00 IST on 25 July
-    expect(getNearestExpiry()).toBe("2026-07-30");
+  it("emits an ISO date the backend's expiry parser accepts", async () => {
+    expect(await resolveOverlayExpiry("NIFTY", "NSE_INDEX", new Date("2026-07-20T04:00:00Z"))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
