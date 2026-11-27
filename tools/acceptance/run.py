@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import re
 import socket
-import subprocess
 
 from guard import guard, python_environment, HERE, ROOT, RETICLE
 
@@ -58,11 +57,25 @@ def main():
         R24_STAGE='browser', R24_CORE_PORT='5173')
     commands=[];code=1
     def execute(argv,name,timeout=1200,child_env=None):
-        with (OUT/(name+'.log')).open('w') as log:
-            result=subprocess.run(list(map(str,argv)),cwd=ROOT,env=child_env or env,stdout=log,stderr=subprocess.STDOUT,timeout=timeout)
-        commands.append({'name':name,'argv':list(map(str,argv)),'exit':result.returncode})
-        print(name,result.returncode,flush=True)
-        return result.returncode
+        # The import stays at this seam so source-bound fault probes exercise
+        # exactly the same executor as every maintained mode.
+        from owned_command import CommandRecord, run_owned
+        command: CommandRecord = {
+            'name': name, 'argv': list(map(str, argv)), 'exit': None,
+            'outcome': 'exception', 'timeout_seconds': timeout,
+        }
+        try:
+            with (OUT / (name + '.log')).open('w') as log:
+                return run_owned(
+                    command['argv'], cwd=ROOT, env=child_env or env,
+                    stdout=log, timeout=timeout, receipt_path=OUT / (name + '.ownership.json'), record=command,
+                )
+        except BaseException as exc:
+            command['exception'] = {'type': type(exc).__name__, 'message': str(exc)}
+            raise
+        finally:
+            commands.append(command)
+            print(name, command['outcome'], command['exit'], flush=True)
     cleanup={}
     try:
         if args.mode=='infra':

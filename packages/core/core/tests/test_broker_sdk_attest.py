@@ -5,6 +5,7 @@ from __future__ import annotations
 import textwrap
 import json
 from importlib import metadata
+from typing import cast
 
 import pytest
 
@@ -258,3 +259,36 @@ def test_current_kotak_runtime_pin_does_not_accept_the_release_distribution(
     assert result.pinned_version == "3.0.13"
     assert result.status == expected
     assert (result in required_failures([result])) is (expected != "ok")
+
+
+def test_installed_distribution_files_are_read_once_per_identity() -> None:
+    """A repeated inspect must not walk every installed file again."""
+    from flinttrade_core import broker_sdk_attest as attestation
+
+    reads = {"files": 0}
+
+    class _Metadata(dict):
+        def get(self, key, default=None):
+            return super().get(key, default)
+
+    class _Dist:
+        version = "1.0.0"
+        metadata = _Metadata(Name="example")
+
+        @property
+        def files(self):
+            reads["files"] += 1
+            return ("example/__init__.py",)
+
+        def read_text(self, name):
+            return "example\n" if name == "top_level.txt" else None
+
+    dist = _Dist()
+    fake = cast(metadata.Distribution, dist)
+    attestation._FILE_CACHE.pop(attestation._distribution_cache_key(fake), None)
+    attestation._cached_distribution_files(fake)
+    attestation._cached_distribution_files(fake)
+    assert reads["files"] == 1
+    dist.version = "1.0.1"
+    attestation._cached_distribution_files(fake)
+    assert reads["files"] == 2

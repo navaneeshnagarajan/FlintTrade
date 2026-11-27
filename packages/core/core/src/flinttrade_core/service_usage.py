@@ -459,6 +459,52 @@ class ServiceUsageLedger:
                 raise KeyError(request_id)
             return json.loads(row[0])
 
+    @property
+    def identity(self) -> str:
+        """Return this validated durable ledger's identity, never spend authority.
+
+        Returns:
+            The identity stored in validated durable ledger metadata.
+        """
+        with self._transaction() as db:
+            return db.execute("SELECT identity FROM metadata").fetchone()[0]
+
+    def task_observation(
+        self, request_id: str, actor: str, *, expected_digest: str, expected_owner: str,
+    ) -> dict[str, Any]:
+        """Read one claimed task and its actual attempts without replay or release.
+
+        Args:
+            request_id: The original dispatcher's exact task identity.
+            actor: The authenticated principal that originally claimed the task.
+            expected_digest: Immutable digest recorded before native dispatch.
+            expected_owner: Original durable service-ledger identity.
+
+        Returns:
+            The retained task receipt with current, exact-owner attempt receipts.
+            A pending task remains pending even when no attempt is yet visible.
+
+        Raises:
+            KeyError: The task was never observed by this ledger.
+            UsageConflict: The principal, task digest or ledger identity differs.
+        """
+        with self._transaction() as db:
+            if db.execute("SELECT identity FROM metadata").fetchone()[0] != expected_owner:
+                raise UsageConflict("task ledger owner changed")
+            row = db.execute(
+                "SELECT actor,digest,payload FROM task_receipts WHERE request_id=?", (request_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(request_id)
+            if row[:2] != (actor, expected_digest):
+                raise UsageConflict("task identity conflict")
+            receipt = json.loads(row[2])
+            receipt["attempts"] = [self._record(db, item[0]).to_dict() for item in db.execute(
+                "SELECT attempt_id FROM attempts WHERE json_extract(identity,'$.request_id')=? ORDER BY attempt_id",
+                (request_id,),
+            )]
+            return receipt
+
     def budget(self, connection: ServiceConnectionRef) -> tuple[int, dict[str, Any]]:
         """Read the current explicit budget; absence and expiry are not unlimited."""
         with self._transaction() as db:

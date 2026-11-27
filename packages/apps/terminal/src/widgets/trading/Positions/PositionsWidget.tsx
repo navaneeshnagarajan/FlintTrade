@@ -1385,7 +1385,7 @@ function PositionsWidget(props: WidgetProps) {
             </span>
           )}
           <span
-            className={`font-mono tabular-nums font-medium ${
+            className={`font-mono tabular-nums font-medium whitespace-nowrap ${
               showPnl ? (totalPnl >= 0 ? "text-profit" : "text-loss") : "text-text-muted"
             }`}
             title={
@@ -1425,7 +1425,7 @@ function PositionsWidget(props: WidgetProps) {
                 aria-pressed={mode === view}
                 className={`px-2 py-0.5 text-xxs font-medium transition-colors ${
                   mode === view
-                    ? "bg-accent/15 text-accent"
+                    ? "bg-accent/15 text-accent [[data-mode=light]_&]:text-text-primary"
                     : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
                 }`}
               >

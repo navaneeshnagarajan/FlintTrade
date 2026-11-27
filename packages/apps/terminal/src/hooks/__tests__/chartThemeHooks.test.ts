@@ -70,7 +70,7 @@ vi.mock("@/stores/themeStore", () => ({
 // Import hooks AFTER mocks are set up
 // ---------------------------------------------------------------------------
 
-import { useLightweightChartTheme } from "../useChartTheme";
+import { readLightweightChartTheme, useLightweightChartTheme } from "../useChartTheme";
 import { usePlotlyTheme } from "../usePlotlyTheme";
 import { useGlideTheme } from "../useGlideTheme";
 
@@ -79,6 +79,21 @@ import { useGlideTheme } from "../useGlideTheme";
 // ---------------------------------------------------------------------------
 
 describe("useLightweightChartTheme", () => {
+  it("reads workspace canvas tokens from its own element without changing document or welcome tokens", () => {
+    const canvas = document.createElement("div");
+    const scoped: Record<string, string> = { ...CSS_VARS, "--chart-bg": "#1b2e34", "--chart-up": "#acd879", "--chart-font-family": "Inter, sans-serif" };
+    const read = vi.fn((element: Element) => ({
+      getPropertyValue: (name: string) => (element === canvas ? scoped : CSS_VARS)[name] ?? "",
+    }));
+    vi.stubGlobal("getComputedStyle", read);
+    const before = document.documentElement.getAttribute("style");
+    const theme = readLightweightChartTheme(canvas);
+    expect(theme.layout.background.color).toBe("#1b2e34");
+    expect(theme.layout.fontFamily).toBe("Inter, sans-serif");
+    expect(theme.candle.upColor).toBe("#acd879");
+    expect(readLightweightChartTheme().layout.background.color).toBe("#0a0a0f");
+    expect(document.documentElement.getAttribute("style")).toBe(before);
+  });
   it("returns a non-empty object", () => {
     const { result } = renderHook(() => useLightweightChartTheme());
     expect(result.current).toBeTruthy();
