@@ -60,19 +60,24 @@ read, the code is `exit_orders_unreadable`, and
 The Positions row shows **Exit pending** for the unfilled exit. The
 label is the symbol, or `this contract` when the symbol is empty.
 
-Before the decision model, place refuses a quantity that is not a positive multiple of
-the lot, or that is above the freeze limit, with HTTP 400 and
-`code: "quantity_admission"`. The Order Pad shows the lot sentence once,
+Before Laya, a quantity that is not a positive multiple of the lot is
+refused with HTTP 400 and `code: "quantity_admission"`. The Order Pad
+shows the lot sentence once,
 inline: `Quantity must be a multiple of the lot size (N).` `N` is that
 contract's lot. An unverified lot is
 `Not placed. The lot size for <name> isn't verified.`
 `<name>` is the contract's display name, shown once, inline. The Practice
 sandbox returns that sentence as HTTP 400 with `status: error` and no
-`code` field. An order over the per-order freeze limit is refused with
-HTTP 400 and code `quantity_admission`. The message gives the limit,
-names the instrument, and asks for smaller orders. The order is not split.
-The limit is the broker `freeze_qty` when the body carries one, otherwise
-the exchange figure.
+`code` field. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800, MIDCPNIFTY 2,800,
+NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order above the cap,
+with HTTP 400 and code `quantity_admission`. A broker `freeze_qty` on the
+body refuses the same way and is used ahead of that table. `message` is
+`Max {cap} per order for {symbol}. Place smaller orders.` `{cap}` is the
+limit rounded down to a whole number of lots when `lot_size` is set, and
+the limit itself when it is not. `{symbol}` is the underlying, or
+`this contract` when the symbol is empty. The order is not split.
+SENSEX options 1,000, SENSEX futures 500, and BANKEX options 900 are
+unverified and do not refuse when the body has no `freeze_qty`.
 
 When the request sends `X-FlintTrade-Mode` and that value differs from the
 JWT `mode` claim, place, the broker place route, and the extended gated
@@ -821,7 +826,7 @@ Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `quantity_admission` | Place refused a lot multiple or a freeze breach before the decision model, HTTP 400. For a lot multiple, `message` is `Quantity must be a multiple of the lot size (N).` The Order Pad shows that sentence once, inline. An order over the per-order freeze limit uses the same HTTP 400 and code `quantity_admission`. The message gives the limit, names the instrument, and asks for smaller orders. The order is not split. An unverified Practice lot is a separate HTTP 400 with the message `Not placed. The lot size for <name> isn't verified.` and no `code` field. |
+| `quantity_admission` | A quantity that is not a positive multiple of the lot is refused before Laya, HTTP 400. For a lot multiple, `message` is `Quantity must be a multiple of the lot size (N).` The Order Pad shows that sentence once, inline. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order above the cap with the same HTTP 400 and code `quantity_admission`. A broker `freeze_qty` refuses the same way and is used ahead of that table. `message` is `Max {cap} per order for {symbol}. Place smaller orders.` `{cap}` is the limit rounded down to a whole number of lots when `lot_size` is set, and the limit itself when it is not. `{symbol}` is the underlying, or `this contract` when the symbol is empty. The order is not split. SENSEX options 1,000, SENSEX futures 500, and BANKEX options 900 are unverified and do not refuse when the body has no `freeze_qty`. An unverified Practice lot is a separate HTTP 400 with the message `Not placed. The lot size for <name> isn't verified.` and no `code` field. |
 | Mode header mismatch | `X-FlintTrade-Mode` is present and differs from the JWT `mode` claim — HTTP 403. Body is `{"status":"error","message":"X-FlintTrade-Mode does not match the authenticated mode"}` and has no `code` field. |
 | `mode_blocked` | A sample-data session (or another blocked session) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` sample-data refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` sample-data refusals (same header/claim gate). Example-data place stays on this code, with message `Orders are not available for Example. Switch to Practice or Live to trade.` |
 | `decision_model_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox, HTTP 403. Body: `status: "error"`, `code: "decision_model_denied"`, `message` and `reason` (the same server text). The desk shows that `reason` under the denial on a line named Decision model check, inside one alert (`role="alert"`), the only live region. That line is not its own status. Down is "Not placed. Decision model is down. Start it from Status." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Decision model not qualified for Live. Use Practice." An empty Live note is "Decision model uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -118,11 +119,20 @@ _NSE_INDEX_FREEZE: dict[str, int] = {
     "NIFTYFPI": 8_500,
 }
 
-# Well-known defaults seeded when no CSV is loaded.
+# BSE limits are unverified: none of them is checked against a current BSE
+# notice. They never refuse an order. When the broker sends no freeze_qty and
+# the quantity is above one of them, the order continues with a warning.
+# Quantities are in units, not lots. BANKEX has a value for options only.
+# SENSEX50 starts with the same letters as
+# SENSEX and has no entry.
+_BSE_UNVERIFIED_OPTION_FREEZE: dict[str, int] = {"SENSEX": 1_000, "BANKEX": 900}
+_BSE_UNVERIFIED_FUTURE_FREEZE: dict[str, int] = {"SENSEX": 500}
+_BSE_UNLISTED_LONGER_NAMES: tuple[str, ...] = ("SENSEX50",)
+
+# Well-known defaults seeded when no CSV is loaded. The NSE table changes from
+# time to time; recheck it against the exchange's current limits.
 _NSE_DEFAULTS: dict[tuple[str, str], int] = {
-    **{(symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()},
-    ("SENSEX", "BFO"): 500,
-    ("BANKEX", "BFO"): 900,
+    (symbol, "NFO"): limit for symbol, limit in _NSE_INDEX_FREEZE.items()
 }
 
 _INDEX_FREEZE_NAMES: tuple[str, ...] = tuple(
@@ -144,6 +154,28 @@ def index_underlying(symbol: str) -> str | None:
     return None
 
 
+def unverified_freeze_quantity(symbol: str) -> int | None:
+    """Unverified BSE freeze quantity in units for a SENSEX or BANKEX contract."""
+    entry = _unverified_freeze_entry(symbol)
+    return entry[1] if entry else None
+
+
+def _unverified_freeze_entry(symbol: str) -> tuple[str, int] | None:
+    compact = "".join(str(symbol).upper().split())
+    if compact.startswith(_BSE_UNLISTED_LONGER_NAMES):
+        return None
+    if compact.endswith(("CE", "PE")):
+        table = _BSE_UNVERIFIED_OPTION_FREEZE
+    elif compact.endswith("FUT"):
+        table = _BSE_UNVERIFIED_FUTURE_FREEZE
+    else:
+        return None
+    for name, limit in table.items():
+        if compact.startswith(name):
+            return name, limit
+    return None
+
+
 def _positive_int(value: object) -> int | None:
     """Return a positive integer, ignoring booleans and other types."""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -151,15 +183,26 @@ def _positive_int(value: object) -> int | None:
     return value if value > 0 else None
 
 
+_EXPIRY_IN_SYMBOL = re.compile(r"^([A-Z0-9&]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)")
+
+
 def order_symbol_label(symbol: str) -> str:
-    """Symbol named in the freeze refusal. Blank input uses a neutral label."""
-    text = " ".join(str(symbol).split())
-    return text or "this contract"
+    """Underlying named in the freeze refusal. Blank input uses a neutral label."""
+    text = " ".join(str(symbol).upper().split())
+    if not text:
+        return "this contract"
+    index = index_underlying(text)
+    if index is not None:
+        return index
+    head = re.split(r"[ -]", text, maxsplit=1)[0]
+    match = _EXPIRY_IN_SYMBOL.match(head)
+    return match.group(1) if match else head
 
 
 # Visible quantity sentences. Admission and the order pad use these templates
 # so a wording change is one edit. The number is the lot-aligned cap.
 OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders."
+UNVERIFIED_FREEZE_WARNING = "Max per order for {symbol} may be {freeze} qty. Split if the broker rejects."
 LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot})."
 QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order"
 
@@ -199,7 +242,9 @@ def quantity_cap_label(lot_size: int, placeable: int) -> str:
 
 
 def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -> int | None:
-    """Broker ``freeze_qty`` wins. Otherwise use the NSE/FAOP/77189 index table.
+    """Broker ``freeze_qty`` wins. Otherwise use the NSE index table.
+
+    Unverified BSE values are not returned here; see :func:`quantity_freeze_warning`.
 
     Returns:
         The maximum quantity for one order, or ``None`` when no freeze applies.
@@ -211,6 +256,31 @@ def resolve_freeze_quantity(symbol: str, broker_freeze_qty: int | None = None) -
     if underlying is None:
         return None
     return _NSE_INDEX_FREEZE[underlying]
+
+
+def quantity_freeze_warning(
+    symbol: str,
+    quantity: int,
+    *,
+    broker_freeze_qty: int | None = None,
+) -> str | None:
+    """Warning for a quantity above an unverified BSE freeze value.
+
+    Applies only when the broker sends no freeze quantity and no verified limit
+    covers the symbol. ``quantity`` is in units (lots times lot size).
+    """
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        return None
+    if resolve_freeze_quantity(symbol, broker_freeze_qty) is not None:
+        return None
+    entry = _unverified_freeze_entry(symbol)
+    if entry is None or quantity <= entry[1]:
+        return None
+    name, limit = entry
+    return UNVERIFIED_FREEZE_WARNING.format(
+        symbol=name,
+        freeze=format_indian_quantity(limit),
+    )
 
 
 def max_placeable_quantity(
