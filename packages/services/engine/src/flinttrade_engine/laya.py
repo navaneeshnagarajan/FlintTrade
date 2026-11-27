@@ -355,17 +355,17 @@ class Laya:
         A health check must not replace that reason with ``not_started``.
         """
         if reason is not None and reason not in LAYA_REASON_CODES:
-            raise ValueError("Laya reason is not recognised")
+            raise ValueError("Decision model reason not recognised.")
         if not 1 <= port <= 65535:
-            raise ValueError("Laya sidecar port is invalid")
+            raise ValueError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.")
         if progress is not None and (
             len(progress) != 2 or isinstance(progress[0], bool) or isinstance(progress[1], bool)
         ):
-            raise ValueError("Laya download progress is invalid")
+            raise ValueError("Decision model download progress is invalid.")
         if progress is not None and (
             not isinstance(progress[0], int) or not isinstance(progress[1], int) or progress[0] < 0 or progress[1] < 0
         ):
-            raise ValueError("Laya download progress is invalid")
+            raise ValueError("Decision model download progress is invalid.")
         with self._lock:
             self._reason = reason
             self._reason_port = port

@@ -19,6 +19,19 @@ describe("layaNoticeFromOrderError", () => {
     });
   });
 
+  it("states the refusal when the server gives no deny reason", () => {
+    const notice = layaNoticeFromOrderError(new OrderApiError("", 403, {
+      code: "decision_model_denied",
+    }));
+    expect(notice).toEqual({
+      kind: "deny",
+      headline: "Denied by decision model",
+      reason: "Not placed. Decision model denied this order.",
+      limitsLine: null,
+      appliedQuantity: null,
+    });
+  });
+
   it("uses the server clamp sentence and does not invent a denial", () => {
     const notice = layaNoticeFromOrderError(new OrderApiError(
       "Not placed. Decision model allows up to 4.",

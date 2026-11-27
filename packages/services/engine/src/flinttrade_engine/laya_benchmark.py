@@ -437,7 +437,7 @@ def run_fail_closed_drills() -> tuple[DrillResult, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     """Print a report. Exit 2 when the file is bad or tuning is aimed at test."""
-    parser = argparse.ArgumentParser(description="Score a Laya candidate on labelled JSONL.")
+    parser = argparse.ArgumentParser(description="Score a decision model candidate on labelled JSONL.")
     parser.add_argument("--cases", required=True, help="JSONL file of labelled cases")
     parser.add_argument("--repeats", type=int, default=1, help="Repeats of each case for stability")
     parser.add_argument("--model", default="", help="Candidate tag. Reported only.")

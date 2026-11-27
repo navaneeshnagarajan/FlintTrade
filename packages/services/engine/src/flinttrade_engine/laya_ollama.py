@@ -108,11 +108,11 @@ class LayaOllamaModel:
 
     def __post_init__(self) -> None:
         if self.route not in {"chat", "systemone"}:
-            raise ValueError("Laya Ollama route must be chat or systemone")
+            raise ValueError("Decision model Ollama route must be chat or systemone.")
         if _normalise_digest(self.digest) != self.digest:
-            raise ValueError("Laya Ollama digest must be 64 lower-case hex characters")
+            raise ValueError("Decision model Ollama digest must be 64 lower-case hex characters.")
         if not self.tag or any(char.isspace() for char in self.tag):
-            raise ValueError("Laya Ollama model tag is invalid")
+            raise ValueError("Decision model Ollama model tag is invalid.")
 
 
 # Empty until a digest is reviewed. A tag alone never admits.
@@ -355,7 +355,7 @@ def publish_ollama_gate_status(engine: Any | None = None) -> LayaOllamaSurface:
     try:
         return _publish_ollama_gate_status(target)
     except Exception:
-        _LOG.exception("Ollama Laya status could not be read")
+        _LOG.exception("Ollama decision model status could not be read")
         surface = LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_UNVERIFIED, None, False, _UNBOUND_PORT)
         apply_ollama_surface(target, surface)
         return surface

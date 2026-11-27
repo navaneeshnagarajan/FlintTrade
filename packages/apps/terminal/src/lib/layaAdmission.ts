@@ -29,6 +29,8 @@ const LAYA_DOWN_PAUSE = "Not placed. Decision model is down. Start it from Statu
 
 const LAYA_DECISION_UNVERIFIED = "Not placed. Decision model not verified. Try again.";
 
+const LAYA_DENIED_NO_REASON = "Not placed. Decision model denied this order.";
+
 function readAppliedQuantity(body: Record<string, unknown>): number | null {
   const applied = body.applied_quantity;
   return typeof applied === "number" && Number.isInteger(applied) && applied >= 1 ? applied : null;
@@ -59,7 +61,7 @@ export function layaNoticeFromOrderError(
     return {
       kind: "deny",
       headline: "Denied by decision model",
-      reason,
+      reason: reason || LAYA_DENIED_NO_REASON,
       limitsLine: max === null ? null : `Max quantity ${max}.`,
       appliedQuantity: null,
     };

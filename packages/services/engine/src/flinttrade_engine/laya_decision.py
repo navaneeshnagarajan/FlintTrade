@@ -170,25 +170,25 @@ def parse_policy(text: str) -> LayaPolicy:
     """
     raw = tomllib.loads(text)
     if not isinstance(raw, dict):
-        raise ValueError("Laya policy must be a table")
+        raise ValueError("Decision model policy invalid: policy table.")
     version = str(raw.get("version") or "").strip()
     checkpoint = raw.get("checkpoint")
     questions = raw.get("question")
     if not version or not isinstance(checkpoint, dict) or not isinstance(questions, dict):
-        raise ValueError("Laya policy is missing its version, checkpoint, or questions")
+        raise ValueError("Decision model policy invalid: version, checkpoint, or questions.")
     _reject_confidence_key(raw)
     rules: list[QuestionRule] = []
     for question_id in _QUESTION_ORDER:
         spec = questions.get(question_id)
         if not isinstance(spec, dict):
-            raise ValueError(f"Laya policy is missing question {question_id}")
+            raise ValueError(f"Decision model policy invalid: question {question_id}.")
         deny_option = str(spec.get("deny_option") or "")
         if deny_option not in _NEUTRAL_KEYS:
-            raise ValueError("Laya policy deny options must be neutral A or B keys")
+            raise ValueError("Decision model policy invalid: deny options.")
         deny_at = _unit_probability(spec.get("deny_at"), "deny_at")
         abstain_at = _unit_probability(spec.get("abstain_at"), "abstain_at")
         if abstain_at >= deny_at:
-            raise ValueError("Laya abstain threshold must sit below the deny threshold")
+            raise ValueError("Decision model policy invalid: abstain threshold.")
         rules.append(
             QuestionRule(
                 question_id=question_id,
@@ -203,9 +203,9 @@ def parse_policy(text: str) -> LayaPolicy:
     name = str(checkpoint.get("checkpoint") or "").strip()
     weight_file = str(checkpoint.get("file") or "").strip()
     if not all((revision, sha256, repo, name, weight_file)):
-        raise ValueError("Laya policy checkpoint pin is incomplete")
+        raise ValueError("Decision model policy invalid: checkpoint pin.")
     if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
-        raise ValueError("Laya policy digest must be 64 lower-case hex characters")
+        raise ValueError("Decision model policy invalid: digest.")
     manifest = _parse_manifest(checkpoint.get("manifest"))
     return LayaPolicy(
         version=version,
@@ -222,16 +222,16 @@ def parse_policy(text: str) -> LayaPolicy:
 def _parse_manifest(raw: object) -> tuple[tuple[str, str], ...]:
     """Return the pinned companion files as ``(relative name, sha256)`` pairs."""
     if not isinstance(raw, dict) or not raw:
-        raise ValueError("Laya policy checkpoint manifest is incomplete")
+        raise ValueError("Decision model policy invalid: checkpoint manifest.")
     pairs: list[tuple[str, str]] = []
     for name, digest in sorted(raw.items()):
         relative = str(name).replace("\\", "/").strip()
         parts = tuple(part for part in relative.split("/") if part)
         if not parts or ".." in parts or relative.startswith("/"):
-            raise ValueError("Laya policy manifest path is unsafe")
+            raise ValueError("Decision model policy invalid: manifest path.")
         text = str(digest or "").strip().lower()
         if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
-            raise ValueError("Laya policy digest must be 64 lower-case hex characters")
+            raise ValueError("Decision model policy invalid: digest.")
         pairs.append(("/".join(parts), text))
     return tuple(pairs)
 
@@ -697,7 +697,7 @@ def _validate_base_url(base_url: str) -> str:
 def _reject_confidence_key(node: object) -> None:
     if isinstance(node, dict):
         if "confidence" in node:
-            raise ValueError("Laya policy must not threshold the confidence field")
+            raise ValueError("Decision model policy invalid: confidence threshold.")
         for value in node.values():
             _reject_confidence_key(value)
     elif isinstance(node, list):
@@ -707,10 +707,10 @@ def _reject_confidence_key(node: object) -> None:
 
 def _unit_probability(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"Laya policy {label} must be a probability")
+        raise ValueError(f"Decision model policy invalid: {label}.")
     number = float(value)
     if not math.isfinite(number) or number <= 0 or number > 1:
-        raise ValueError(f"Laya policy {label} must be a probability")
+        raise ValueError(f"Decision model policy invalid: {label}.")
     return number
 
 

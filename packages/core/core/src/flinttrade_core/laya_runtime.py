@@ -62,7 +62,7 @@ LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
 
     path = os.environ.get("FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH", "")
     if not path or not os.path.isfile(path):
-        sys.stderr.write("laya weights path is not a file\\n")
+        sys.stderr.write("Decision model weights path is not a file.\\n")
         raise SystemExit(1)
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -72,7 +72,7 @@ LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
     logical = os.path.abspath(path)
     directory = os.path.dirname(logical)
     if os.path.basename(logical) != "model.safetensors":
-        sys.stderr.write("laya weights path is not the checkpoint file\\n")
+        sys.stderr.write("Decision model weights path is not the checkpoint file.\\n")
         raise SystemExit(1)
     from laya.router import Router
     from laya.serve import create_app
@@ -108,7 +108,7 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
     revision = os.environ.get("LAYA_REVISION", "").strip()
     dest = os.environ.get("FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR", "").strip()
     if not repo or len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision) or not dest:
-        sys.stderr.write("laya download pin is incomplete\\n")
+        sys.stderr.write("Decision model download pin is incomplete.\\n")
         raise SystemExit(1)
     os.environ["HF_HUB_OFFLINE"] = "0"
     os.environ["HF_HUB_DISABLE_XET"] = "1"
@@ -352,7 +352,7 @@ def install_commands(venv_dir: Path, *, accelerator: str = "cpu") -> list[list[s
     index in ``FLINTTRADE_DECISION_MODEL_TORCH_INDEX``.
     """
     if accelerator not in _ACCELERATORS:
-        raise LayaRuntimeError("Laya accelerator must be cpu, cuda, or rocm")
+        raise LayaRuntimeError("Decision model accelerator must be cpu, cuda, or rocm.")
     if accelerator == "cpu":
         constraints = sidecar_constraints_path()
         assert_constraints_have_no_extras(constraints)
@@ -375,9 +375,9 @@ def resolve_laya_port(port: int | None = None) -> int:
         try:
             port = int(text)
         except ValueError as exc:
-            raise LayaRuntimeError("Laya sidecar port is invalid") from exc
+            raise LayaRuntimeError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.") from exc
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
-        raise LayaRuntimeError("Laya sidecar port is invalid")
+        raise LayaRuntimeError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.")
     return port
 
 
@@ -481,7 +481,7 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
     try:
         port = int(port_text)
     except ValueError as exc:
-        raise LayaRuntimeError("Laya sidecar port is invalid") from exc
+        raise LayaRuntimeError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.") from exc
     root = workspace if workspace is not None else workspace_dir()
     runtime = LayaRuntime(root, host=host, port=port)
     key_path = Path(key_file).expanduser()
@@ -1079,9 +1079,9 @@ class LayaRuntime:
         watch_interval: float | None = None,
     ) -> None:
         if host != LAYA_BIND_HOST:
-            raise LayaRuntimeError("Laya sidecar must bind 127.0.0.1")
+            raise LayaRuntimeError("Decision model must bind 127.0.0.1.")
         if device != "cpu":
-            raise LayaRuntimeError("Laya runs on CPU until an accelerator runtime is qualified")
+            raise LayaRuntimeError("Decision model runs on CPU only. Use device cpu.")
         self.workspace_dir = workspace_dir.expanduser().resolve()
         self.runtime_root = self.workspace_dir / "runtime" / "laya"
         self.venv_dir = self.runtime_root / "venv"
@@ -1275,10 +1275,10 @@ class LayaRuntime:
         try:
             api_key = key_path.expanduser().read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise LayaRuntimeError("Laya API key file cannot be read") from exc
+            raise LayaRuntimeError("API key file can't be read. Check FLINTTRADE_DECISION_MODEL_API_KEY_FILE.") from exc
         if not api_key:
             _record_attach_down(self._port)
-            raise LayaRuntimeError("Laya API key file is empty")
+            raise LayaRuntimeError("API key file is empty. Check FLINTTRADE_DECISION_MODEL_API_KEY_FILE.")
         policy = load_policy()
         self._watched_key = key_path.expanduser()
         self._key_rejected = False
@@ -2415,7 +2415,7 @@ class LayaRuntime:
 
 def _default_install(venv_dir: Path, commands: list[list[str]]) -> None:
     if not commands:
-        raise LayaRuntimeError("Laya install command is empty")
+        raise LayaRuntimeError("Decision model install failed: the install command is empty.")
     for command in commands:
         _reject_flinttrade_interpreter(Path(command[0]), venv_dir)
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)  # noqa: S603
@@ -2435,9 +2435,9 @@ def _reject_flinttrade_interpreter(python: Path, venv_dir: Path) -> None:
     target = venv_dir.expanduser().resolve()
     command_prefix = venv_prefix(python).expanduser().resolve()
     if command_prefix == flint or target == flint:
-        raise LayaRuntimeError("Laya install must not use the FlintTrade interpreter")
+        raise LayaRuntimeError("Decision model install failed: it must not use the FlintTrade interpreter.")
     if command_prefix != target:
-        raise LayaRuntimeError("Laya install must target the sidecar virtual environment")
+        raise LayaRuntimeError("Decision model install failed: it must target the decision model virtual environment.")
 
 
 def _accelerator_torch_command(venv_dir: Path, index_url: str | None) -> list[str]:
@@ -2566,7 +2566,7 @@ def main(argv: list[str] | None = None) -> int:
     ``uv sync``). The sidecar virtual environment is
     ``<workspace>/runtime/laya/venv``.
     """
-    parser = argparse.ArgumentParser(description="Install and supervise the Laya decision sidecar.")
+    parser = argparse.ArgumentParser(description="Install and supervise the decision model runtime (laya[serve]).")
     parser.add_argument("command", choices=("install", "start", "stop", "status"))
     parser.add_argument("--accelerator", choices=tuple(sorted(_ACCELERATORS)), default="cpu")
     args = parser.parse_args(argv)
@@ -2666,7 +2666,7 @@ def _read_loopback_health(base_url: str) -> Mapping[str, Any] | None:
 
     parsed = urlsplit(base_url)
     if parsed.scheme != "http" or parsed.hostname != LAYA_BIND_HOST or parsed.port is None:
-        raise LayaRuntimeError("Laya health probe must use the loopback sidecar")
+        raise LayaRuntimeError("Decision model health check failed: the probe must use the loopback address.")
     request = urllib.request.Request(f"{base_url}/health", method="GET")
     request.add_header("Accept", "application/json")
     try:

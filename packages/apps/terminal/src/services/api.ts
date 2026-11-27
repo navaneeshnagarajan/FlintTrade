@@ -2620,7 +2620,7 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
     if (body.code === "decision_model_denied") {
       const reason = typeof body.reason === "string" && body.reason
         ? body.reason
-        : err.message;
+        : err.message || "Not placed. Decision model denied this order.";
       const limits = body.limits;
       const max = limits && typeof limits === "object"
         ? (limits as { max_quantity?: unknown }).max_quantity

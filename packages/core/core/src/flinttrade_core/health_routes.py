@@ -151,7 +151,7 @@ def _reconcile_laya_for_desk() -> None:
         if callable(reconcile):
             reconcile()
     except Exception:
-        logger.warning("Laya desk reconcile failed", exc_info=True)
+        logger.warning("Decision model desk reconcile failed", exc_info=True)
 
 
 def _refresh_laya_status() -> None:
@@ -161,13 +161,13 @@ def _refresh_laya_status() -> None:
 
         refresh_process_laya_status()
     except Exception:
-        logger.warning("Laya status probe failed", exc_info=True)
+        logger.warning("Decision model status probe failed", exc_info=True)
         try:
             from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
 
             process_laya().apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
         except Exception:
-            logger.warning("Laya status could not be recorded", exc_info=True)
+            logger.warning("Decision model status could not be recorded", exc_info=True)
 
 
 def reset_health_singletons_for_tests() -> None:
@@ -386,7 +386,7 @@ def start_laya() -> tuple[Any, int]:
         if ollama:
             logger.warning("Managed Ollama could not be started", exc_info=True)
         else:
-            logger.warning("Laya sidecar could not be started", exc_info=True)
+            logger.warning("Decision model could not be started", exc_info=True)
         return jsonify({"status": "error", "message": "Decision model failed to start."}), 503
     return jsonify({"status": "ok"}), 200
 
