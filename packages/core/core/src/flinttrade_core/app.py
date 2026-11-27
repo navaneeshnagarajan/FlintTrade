@@ -351,6 +351,9 @@ class _BackendLeaseRuntimeWatch:
         self._app = app
         self._on_revoked = on_revoked
         self._stopped = threading.Event()
+        # Either a revocation claims the callback or stop() disarms it first.
+        self._claim_lock = threading.Lock()
+        self._claimed = False
         self._thread = threading.Thread(target=self._run, name="backend-runtime-watch", daemon=True)
 
     def start(self) -> None:
@@ -358,34 +361,37 @@ class _BackendLeaseRuntimeWatch:
         self._thread.start()
 
     def _run(self) -> None:
-        while not self._stopped.wait(0.05):
-            if not self._proof.wait_revoked(0):
-                continue
+        while not self._proof.wait_revoked(0.05):
             if self._stopped.is_set():
                 return
-            self._app.config["BACKEND_LEASE_READY"] = False
-            self._app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
-            try:
-                router = self._app.config.get("BROKER_ROUTER")
-                if router is not None:
-                    router.revoke_and_drain(timeout=0.0)
-                _close_runtime_request_admission(self._app)
-            except Exception as exc:  # noqa: BLE001 - refusal must still reach lifecycle cleanup
-                logger.error("Backend lease admission retirement failed (%s)", type(exc).__name__)
-            try:
-                self._on_revoked()
-            except BaseException as exc:  # noqa: BLE001 - retain app-owned recovery state
-                logger.critical("Backend lease shutdown remains incomplete (%s)", type(exc).__name__)
-            return
+        with self._claim_lock:
+            if self._stopped.is_set():
+                return
+            self._claimed = True
+        self._app.config["BACKEND_LEASE_READY"] = False
+        self._app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+        try:
+            router = self._app.config.get("BROKER_ROUTER")
+            if router is not None:
+                router.revoke_and_drain(timeout=0.0)
+            _close_runtime_request_admission(self._app)
+        except Exception as exc:  # noqa: BLE001 - refusal must still reach lifecycle cleanup
+            logger.error("Backend lease admission retirement failed (%s)", type(exc).__name__)
+        try:
+            self._on_revoked()
+        except BaseException as exc:  # noqa: BLE001 - retain app-owned recovery state
+            logger.critical("Backend lease shutdown remains incomplete (%s)", type(exc).__name__)
 
     def stop(self, *, timeout: float) -> bool:
-        """Disarm normal teardown; never join the callback's own watcher thread."""
-        self._stopped.set()
+        """Disarm normal teardown; only an already running callback can fail it."""
+        with self._claim_lock:
+            self._stopped.set()
+            claimed = self._claimed
         if self._thread is threading.current_thread():
             return True
         if self._thread.ident is not None:
             self._thread.join(timeout=max(0.0, timeout))
-        return not self._thread.is_alive()
+        return not claimed or not self._thread.is_alive()
 
 
 def _stop_backend_lease_watch(app: Flask, *, timeout: float) -> bool:
