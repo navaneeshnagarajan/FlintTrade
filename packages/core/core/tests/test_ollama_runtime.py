@@ -1741,36 +1741,18 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
 
     monkeypatch.setattr(ollama_runtime, "_RuntimeFileLock", _ObservedRuntimeFileLock)
 
-    # filelock's Windows backend unlinks the lock file as the last step of
-    # releasing it. OwnerSafeFileLock, acquiring concurrently from this process,
-    # correctly refuses a path that vanishes underneath it and reports "lease
-    # path is unsafe" — so a handover landing inside that unlink window fails the
-    # test on an error unrelated to its subject. That race is scaffolding, not
-    # product behaviour: a real lease holder is a FlintTrade process using
-    # OwnerSafeFileLock, which does not unlink. Suppressing the unlink in the
+    # A real FlintTrade holder uses OwnerSafeFileLock, which keeps the lock
+    # file in place when it releases. Plain FileLock on Windows unlinks that
+    # path as its last release step, and a concurrent OwnerSafeFileLock then
+    # refuses the vanished path as unsafe. Using the production lock in the
     # holder keeps the handover the test is actually about.
     holder_code = "\n".join(
         (
             "import sys, time",
             "from pathlib import Path",
-            "from filelock import FileLock",
-            "import filelock._windows, filelock._unix",
-            "for _module in (filelock._windows, filelock._unix):",
-            "    for _name in ('WindowsFileLock', 'UnixFileLock'):",
-            "        _cls = getattr(_module, _name, None)",
-            "        if _cls is None:",
-            "            continue",
-            "        _inner = _cls._release",
-            "        def _keep_lock_file(self, _inner=_inner):",
-            "            _unlink = Path.unlink",
-            "            Path.unlink = lambda *a, **k: None",
-            "            try:",
-            "                _inner(self)",
-            "            finally:",
-            "                Path.unlink = _unlink",
-            "        _cls._release = _keep_lock_file",
+            "from flinttrade_core.owner_file_lock import OwnerSafeFileLock",
             "lock_path, ready_path, release_path = map(Path, sys.argv[1:4])",
-            f"with FileLock(lock_path, timeout={_READINESS_CEILING_SECONDS}, mode=0o600):",
+            f"with OwnerSafeFileLock(lock_path, timeout={_READINESS_CEILING_SECONDS}, mode=0o600):",
             "    ready_path.write_text('ready', encoding='ascii')",
             "    while not release_path.exists():",
             "        time.sleep(0.01)",
