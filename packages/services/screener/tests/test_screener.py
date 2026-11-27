@@ -619,12 +619,17 @@ class TestOptionChainHelpers:
         assert find_atm_strike(24000, []) == 0.0
 
     def test_lot_sizes(self):
-        from flinttrade_screener.option_chain import LOT_SIZES
-        assert LOT_SIZES["NIFTY"] == 65
-        assert LOT_SIZES["BANKNIFTY"] == 30
-        assert LOT_SIZES["SENSEX"] == 20
-        assert LOT_SIZES["CRUDEOIL"] == 100
-        assert LOT_SIZES["USDINR"] == 1000
+        from flinttrade_core.instrument_lots import lot_size_from_master
+        from flinttrade_screener import option_chain
+        from flinttrade_screener.option_chain import OptionChainAnalyzer
+
+        # The option chain keeps no lot table of its own.
+        assert not hasattr(option_chain, "LOT_SIZES")
+        assert OptionChainAnalyzer.get_lot_size("NIFTY") == lot_size_from_master("NIFTY")
+        assert OptionChainAnalyzer.get_lot_size("SENSEX") == lot_size_from_master("SENSEX")
+        assert OptionChainAnalyzer.get_lot_size("FINNIFTY") == 60
+        assert OptionChainAnalyzer.get_lot_size("CRUDEOIL") == 100
+        assert OptionChainAnalyzer.get_lot_size("USDINR") == 1000
 
     def test_strikes_near_atm(self):
         snap = _make_snapshot(count=10)
@@ -663,7 +668,7 @@ class TestPackageExports:
         expected = [
             "OptionChainAnalyzer", "OIAnalysis", "FuturesQuadrant",
             "PortfolioGreeks", "IVAnalysis", "Quadrant",
-            "PCRResult", "MaxPainResult", "LOT_SIZES",
+            "PCRResult", "MaxPainResult",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"

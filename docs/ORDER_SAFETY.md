@@ -56,7 +56,7 @@ once, inline:
 `N` is that contract's lot. It is not a published constant. A missing
 verified lot is a different sentence, also shown once, inline:
 `Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Practice sandbox returns
+`<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. The Practice sandbox returns
 that sentence as HTTP 400 with `status: error` and no `code` field, and
 it does not fill the order. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800,
 MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order

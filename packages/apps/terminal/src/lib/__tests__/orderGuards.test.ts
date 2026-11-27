@@ -61,7 +61,7 @@ describe("checkLotSizeVerified", () => {
   it("fails closed on a derivative with an unverified lot size", () => {
     expect(
       checkLotSizeVerified("NFO", { lotSize: 75, verified: false }, "NIFTY25JUL22000CE"),
-    ).toBe("Not placed. The lot size for NIFTY25JUL22000CE isn't verified.");
+    ).toBe("Not placed. The lot size for NIFTY isn't verified.");
   });
 
   it("fails closed when the lot size is missing entirely", () => {

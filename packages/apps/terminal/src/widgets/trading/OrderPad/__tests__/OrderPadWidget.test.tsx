@@ -1167,7 +1167,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "Not placed. The lot size for NIFTY isn't verified.";
     const messages = await screen.findAllByText(refusal);
     expect(messages.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/lot size unknown/i)).not.toBeInTheDocument();
@@ -1233,7 +1233,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockGetSymbol.mockRejectedValue(new Error("selected contract unavailable"));
     renderNfoPad();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "Not placed. The lot size for NIFTY isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
@@ -1250,7 +1250,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     renderNfoPad();
     await waitFor(() => expect(mockGetSymbol).toHaveBeenCalledWith("NIFTY28MAR2422000CE", "NFO"));
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
-    const refusal = "Not placed. The lot size for NIFTY 22000 CE isn't verified.";
+    const refusal = "Not placed. The lot size for NIFTY isn't verified.";
     expect((await screen.findAllByText(refusal)).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Lot 75 · Max 1,800 per order")).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1380,7 +1380,40 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("keeps the quantity hint to one fixed line when the freeze warning shows", async () => {
+  it("reserves a full-width two-line row for the quantity refusal so the pad below does not shift", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY28MAR2422000CE", name: "NIFTY", exchange: "NFO",
+      instrumenttype: "OPTIDX", lotsize: 75, tick_size: 0.05,
+    });
+    renderNfoPad();
+    await screen.findByText("Lot 75 · Max 1,800 per order");
+
+    const errorRow = document.getElementById("orderpad-qty-error");
+    expect(errorRow).toBeInstanceOf(HTMLElement);
+    expect(errorRow).toHaveClass("min-h-8", "text-xxs");
+    expect(errorRow?.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis/);
+    expect(errorRow).not.toHaveAttribute("role");
+    expect(errorRow?.previousElementSibling).toHaveClass("grid", "grid-cols-2");
+
+    const hint = document.getElementById("orderpad-qty-hint");
+    expect(hint).toHaveClass("min-h-8", "text-xs", "leading-4");
+    expect(hint?.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis|whitespace-nowrap/);
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3525" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const refusal = "Max 1,800 per order for NIFTY. Place smaller orders.";
+    const alert = await screen.findByRole("alert");
+    expect(alert).toBe(errorRow);
+    expect(alert).toHaveTextContent(refusal);
+    expect(alert).toHaveClass("min-h-8", "text-xxs", "text-loss");
+    expect(alert.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis/);
+    expect(alert.previousElementSibling).toHaveClass("grid", "grid-cols-2");
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the unverified freeze warning on the reserved row and keeps the cap label visible", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "SENSEX26NOV2680000CE", name: "SENSEX", exchange: "BFO",
       instrumenttype: "OPTIDX", lotsize: 20, tick_size: 0.05,
@@ -1390,14 +1423,22 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     })} />);
     await screen.findByText("Lot: 20");
     const hint = document.getElementById("orderpad-qty-hint") as HTMLElement;
-    const lineClasses = ["h-4", "leading-4", "overflow-hidden", "text-ellipsis", "whitespace-nowrap"];
-    expect(hint).toHaveClass(...lineClasses);
-    expect(hint.className).not.toMatch(/min-h-/);
+    const errorRow = document.getElementById("orderpad-qty-error") as HTMLElement;
+    expect(hint).toHaveClass("min-h-8", "text-xs", "leading-4", "text-text-muted");
+    expect(hint.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis|whitespace-nowrap/);
+    expect(hint).not.toHaveAttribute("title");
     fireEvent.change(document.getElementById("orderpad-qty") as HTMLInputElement, { target: { value: "1020" } });
     const warning = "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects.";
-    expect(await screen.findByText(warning)).toBe(hint);
-    expect(hint).toHaveClass(...lineClasses);
-    expect(hint).toHaveAttribute("title", warning);
+    const status = await screen.findByText(warning);
+    expect(status).toBe(errorRow);
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveClass("min-h-8", "text-xxs", "text-warning");
+    expect(status).not.toHaveClass("text-loss");
+    expect(status.className).not.toMatch(/truncate|line-clamp|overflow-hidden|text-ellipsis/);
+    expect(hint).toHaveTextContent("Lot: 20");
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("uses the selected contract freeze quantity ahead of the index table", async () => {
@@ -1473,7 +1514,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(place).toBeEnabled();
 
     fireEvent.click(screen.getByRole("radio", { name: "MARKET" }));
-    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    const line = document.getElementById("orderpad-rule-line") as HTMLElement;
     await waitFor(() => expect(line).toHaveTextContent(
       "Market orders aren't accepted on options. Use a limit price.",
     ));
@@ -1500,7 +1541,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
     fireEvent.change(priceInput, { target: { value: "39.95" } });
     fireEvent.change(document.getElementById("orderpad-trig-price") as HTMLInputElement, { target: { value: "50" } });
-    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    const line = document.getElementById("orderpad-rule-line") as HTMLElement;
     await waitFor(() => expect(line).toHaveTextContent("Stop-loss limit must be within ₹10 of trigger."));
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(priceInput.value).toBe("39.95");
@@ -1519,7 +1560,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot 75 · Max 1,800 per order");
     const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
     fireEvent.change(priceInput, { target: { value: "200" } });
-    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    const line = document.getElementById("orderpad-rule-line") as HTMLElement;
     await waitFor(() => expect(line).toHaveTextContent("Price may be outside the exchange band (₹60–₹140)."));
     expect(line).toHaveAttribute("data-level", "warn");
     expect(line).not.toHaveAttribute("role", "alert");
@@ -1548,7 +1589,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     await screen.findByText("Lot 75 · Max 1,800 per order");
     fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "300" } });
     await reviewAndConfirmPractice(/practice buy/i);
-    const line = document.getElementById("orderpad-qty-error") as HTMLElement;
+    const line = document.getElementById("orderpad-rule-line") as HTMLElement;
     await waitFor(() => expect(line).toHaveTextContent("Enter a price within ₹0.05–₹250."));
     fireEvent.click(screen.getByTestId("order-rule-more"));
     expect(screen.getByTestId("order-rule-list")).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140).");
