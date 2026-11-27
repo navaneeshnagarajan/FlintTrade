@@ -6,6 +6,15 @@
 # repository-wide release contract via scripts/apply-version.py and
 # pushes the propagation into the same PR.
 #
+# bootstrap-sha in release-please-config.json is the commit where the first
+# release starts, so that release does not collect every change since the
+# repository began. Release Please ignores that setting after the first
+# release pull request merges. An oversized later release stores its notes
+# in release-notes.md on a side branch. If that file is missing, Release
+# Please fails on every following run before it can write the file again.
+# The recovery step closes that pull request and deletes its branches so
+# this run can open a fresh one.
+#
 # Merging the release PR makes release-please create the GitHub release and
 # the v* tag. Tags created with GITHUB_TOKEN do not trigger tag-push
 # workflows, so this workflow explicitly dispatches desktop-release.yml with
@@ -37,6 +46,12 @@ jobs:
       prs_created: ${{ steps.release.outputs.prs_created }}
       pr: ${{ steps.release.outputs.pr }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Close a release pull request whose notes file is missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/recover_release_please_overflow.py
       - id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
