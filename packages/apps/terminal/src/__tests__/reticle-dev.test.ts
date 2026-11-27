@@ -1,7 +1,7 @@
 /**
  * Official Reticle scaffold must register a real store before capabilities.
  * An empty `stores: []` makes state asserts indistinguishable from a healthy
- * empty read (Codex P1 on #261).
+ * empty read.
  */
 import fs from "node:fs";
 import path from "node:path";

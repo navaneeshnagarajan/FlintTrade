@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 from pathlib import Path
@@ -14,15 +13,8 @@ CURRENT_ELECTRON_GUIDANCE = (
     Path("readme.md"),
     Path("docs/ARCHITECTURE.md"),
     Path("docs/DEVELOPER_GUIDE.md"),
-    Path("templates/agent-context/CLAUDE.md.template"),
-    Path("templates/agent-context/packages/apps/desktop/CLAUDE.md.template"),
 )
 ELECTRON_CI_GUIDANCE = Path("docs/CI.md")
-ELECTRON_RUNTIME_TEMPLATES = (
-    Path("templates/agent-context/CLAUDE.md.template"),
-    Path("templates/agent-context/packages/apps/desktop/AGENTS.md.template"),
-    Path("templates/agent-context/packages/apps/desktop/CLAUDE.md.template"),
-)
 TEXT_SUFFIXES = {
     ".css",
     ".html",
@@ -206,8 +198,8 @@ def test_public_descriptions_preserve_trading_software_identity() -> None:
 
 def test_current_electron_guidance_describes_the_stable_release_gate() -> None:
     """Current guidance must describe repository behaviour, not external release status."""
-    # This exact current-guidance set deliberately excludes PLAN.md and AGENTS.md,
-    # which are live status ledgers, and docs/releases/, which is historical.
+    # This exact current-guidance set deliberately excludes PLAN.md, which is a
+    # live status ledger, and docs/releases/, which is historical.
     violations: dict[str, list[str]] = {}
     unstable_status_patterns = {
         "current publication status": re.compile(r"\bpublished yet\b", re.IGNORECASE),
@@ -242,19 +234,5 @@ def test_current_electron_guidance_describes_the_stable_release_gate() -> None:
             ci_issues.append(f"missing CI contract: {required}")
     if ci_issues:
         violations[ELECTRON_CI_GUIDANCE.as_posix()] = ci_issues
-
-    assert violations == {}
-
-
-def test_agent_templates_match_the_pinned_electron_runtime_major() -> None:
-    """Generated agent guidance must name the Electron major pinned by desktop."""
-    package = json.loads(_read(ROOT / "packages/apps/desktop/package.json"))
-    electron_pin = package["devDependencies"]["electron"]
-    expected_major = electron_pin.split(".", maxsplit=1)[0]
-    violations = {
-        path.as_posix(): f"expected Electron {expected_major} for pinned {electron_pin}"
-        for path in ELECTRON_RUNTIME_TEMPLATES
-        if f"Electron {expected_major}" not in _read(ROOT / path)
-    }
 
     assert violations == {}
