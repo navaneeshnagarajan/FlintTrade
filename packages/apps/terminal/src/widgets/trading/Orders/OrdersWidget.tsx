@@ -28,7 +28,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/services/queryKeys";
 import type { Position } from "@/types/api";
 import { StopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
-import { contractKeyOf, exitNowTicket, isStopLossTriggeredNotFilled } from "@/lib/stopLossState";
+import { contractKeyOf, exitNowTicket, exitTicketQuote, isStopLossTriggeredNotFilled } from "@/lib/stopLossState";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
@@ -720,7 +720,7 @@ function OrdersWidget(_props: WidgetProps) {
               (item) => contractKeyOf(item) === contractKeyOf(r) && item.quantity !== 0,
             );
             return position
-              ? exitNowTicket(position, { ltp: position.ltp })
+              ? exitNowTicket(position, exitTicketQuote(position))
               : exitNowTicket(
                 {
                   symbol: r.symbol,

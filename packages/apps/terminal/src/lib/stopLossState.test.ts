@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   exitNowTicket,
+  exitTicketQuote,
   isStopLossTriggeredNotFilled,
   openExitTicket,
   stopLossNotFilledKeys,
@@ -44,6 +45,19 @@ describe("stop-loss triggered, not filled", () => {
     });
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: -75 }, null)).not.toHaveProperty("price");
     expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: 0 }, null)).toBeNull();
+    expect(exitTicketQuote({ bid: 10, ask: 11, ltp: 10.5 }, { bid: 12, ltp: 12.2 })).toEqual({
+      bid: 12, ask: 11, ltp: 12.2,
+    });
+    expect(exitTicketQuote({ ltp: 41.3 })).toEqual({ ltp: 41.3 });
+    expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: 150 }, exitTicketQuote({ bid: 41.2, ask: 41.5, ltp: 41.3 }))).toMatchObject({
+      action: "SELL",
+      price: 41.2,
+    });
+    expect(exitNowTicket({ symbol: "X", exchange: "NFO", quantity: -75 }, exitTicketQuote({ bid: 12.1, ask: 12.4, ltp: 12.33 }))).toMatchObject({
+      action: "BUY",
+      price: 12.4,
+    });
+
   });
 
   it("opens the order ticket and sends nothing", () => {

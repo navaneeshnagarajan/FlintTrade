@@ -479,6 +479,23 @@ def _evaluate_row(row: OrderRule, facts: OrderFacts, order_type: str) -> RuleRes
     return None
 
 
+
+_OPTION_TYPE_REFUSAL_IDS = frozenset({"options-market-order-not-sent", "options-stop-market-not-sent"})
+_REFUSED_FILL_INFO_IDS = frozenset({
+    "practice-market-price-cap",
+    "dhan-market-price-protection",
+    "kotak-market-price-protection",
+})
+
+
+def _without_refused_fill_info(results: list[RuleResult]) -> list[RuleResult]:
+    """Drop market-fill info that would contradict an options type refusal."""
+    ids = {result.rule_id for result in results if result.level == "block"}
+    if ids & _OPTION_TYPE_REFUSAL_IDS:
+        return [result for result in results if result.rule_id not in _REFUSED_FILL_INFO_IDS]
+    return results
+
+
 def _sort_key(index: int, row: OrderRule) -> tuple[int, int, int]:
     return (LEVELS.index(row.level), AUTHORITIES.index(row.authority), index)
 
@@ -513,7 +530,7 @@ def evaluate(facts: OrderFacts, *, on: date | None = None) -> list[RuleResult]:
         if result is not None:
             scored.append((_sort_key(index, row), result))
     scored.sort(key=lambda item: item[0])
-    return [result for _, result in scored]
+    return _without_refused_fill_info([result for _, result in scored])
 
 
 def stop_loss_limit_price(

@@ -25,8 +25,8 @@ export function StopLossNotFilledChip({ symbol, ticket, textClassName = "text-xx
       <Button
         type="button"
         size="sm"
-        variant="ghost"
-        className={`h-5 px-1.5 ${textClassName} text-text-primary hover:bg-surface-hover`}
+        variant="outline"
+        className="h-6 px-2 text-[13px] leading-4 border-loss/60 text-loss hover:bg-loss/10"
         aria-label={`${EXIT_NOW} ${symbol}`}
         onClick={() => {
           const next = ticket();

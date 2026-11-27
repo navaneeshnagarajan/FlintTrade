@@ -368,7 +368,7 @@
           "level": "info",
           "source": "Practice",
           "rule_id": "practice-market-price-cap",
-          "message": "Practice fills a market order only within 3% of the last price."
+          "message": "Market orders fill within 3% of the last price."
         }
       ]
     },
@@ -537,7 +537,7 @@
           "level": "block",
           "source": "Exchange",
           "rule_id": "algo-market-orders-fo-rejected",
-          "message": "Market orders in F&O are not accepted. Use a limit price."
+          "message": "Market orders in F&O aren't accepted. Use a limit price."
         }
       ]
     },
@@ -560,7 +560,7 @@
           "level": "warn",
           "source": "Kotak Neo",
           "rule_id": "kotak-market-price-protection",
-          "message": "Market orders are sent as limits within about 0.5% of the last price and may not fill."
+          "message": "Market orders are sent as limits within 0.5% of the last price and may not fill."
         }
       ]
     },

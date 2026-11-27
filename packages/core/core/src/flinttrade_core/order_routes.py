@@ -2812,6 +2812,60 @@ def _visible_practice_refusal(message: str, symbol: str) -> str:
     return practice_price_unavailable(symbol)
 
 
+
+def _resolve_practice_exit_fill(
+    body: Mapping[str, Any],
+    *,
+    limit: float,
+    order_type: str,
+) -> Any:
+    """Last-price fill for a Practice exit, or a refusal sentence, or None.
+
+    None means the last price does not honour the limit, so the order cannot
+    fill immediately. A MARKET fill is not used here: the request price is
+    the limit, not a live last.
+    """
+    if order_type not in {"LIMIT", "SL", "SL-M"}:
+        return None
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not symbol or not (isinstance(limit, (int, float)) and limit > 0):
+        return None
+    from flinttrade_data.practice_price import (  # noqa: PLC0415
+        lookup_stored_last_close,
+        resolve_practice_market_price,
+    )
+
+    exchange = str(body.get("exchange") or "").strip().upper()
+    stored = lookup_stored_last_close(symbol, exchange)
+    resolved = resolve_practice_market_price(
+        symbol=symbol,
+        exchange=exchange,
+        request_price=0.0,
+        price_basis="",
+        stored_close=stored,
+    )
+    if isinstance(resolved, str):
+        return resolved
+    last = resolved.price
+    action = str(body.get("action") or "").strip().upper()
+    if order_type in {"SL", "SL-M"}:
+        try:
+            trigger = float(body.get("trigger_price") or body.get("triggerPrice") or 0.0)
+        except (TypeError, ValueError):
+            trigger = 0.0
+        if trigger <= 0:
+            return None
+        if action == "SELL" and last > trigger:
+            return None
+        if action == "BUY" and last < trigger:
+            return None
+    if action == "SELL" and last < limit:
+        return None
+    if action == "BUY" and last > limit:
+        return None
+    return resolved
+
+
 def _resolve_practice_market_fill(
     body: Mapping[str, Any],
     *,
@@ -2898,7 +2952,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     positions, orders = _practice_books(sandbox)
     if _own_exit_pending(body, positions, orders):
         return _exit_pending_response(_contract_label(body))
-    laya_block, _qualified = _admit_place(
+    laya_block, qualified = _admit_place(
         body,
         mode=_MODE_PRACTICE,
         live=False,
@@ -2948,7 +3002,12 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         ), 500
 
     order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
-    if order_type != "MARKET" and current_app.config.get("TICK_RECORDER") is None:
+    exit_place = qualified or body.get("exit_only") is True
+    if (
+        order_type != "MARKET"
+        and current_app.config.get("TICK_RECORDER") is None
+        and not exit_place
+    ):
         return jsonify(
             {
                 "status": "error",
@@ -2970,14 +3029,30 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         trigger_price = 0.0
 
     fill = _resolve_practice_market_fill(body, price=price, order_type=order_type)
+    if fill is None and exit_place:
+        fill = _resolve_practice_exit_fill(body, limit=price, order_type=order_type)
     if isinstance(fill, str):
         return jsonify({"status": "error", "message": fill}), 400
-    place_price = price if fill is None else fill.price
+    if (
+        fill is None
+        and exit_place
+        and order_type != "MARKET"
+        and current_app.config.get("TICK_RECORDER") is None
+    ):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The last price is outside the limit.",
+            }
+        ), 400
+    place_price = price if fill is None or (exit_place and order_type != "MARKET") else fill.price
     provenance: dict[str, Any] = {}
     if fill is not None and fill.price_source:
         provenance["price_source"] = fill.price_source
         if fill.price_age_s is not None:
             provenance["price_age_s"] = fill.price_age_s
+    if fill is not None and exit_place and order_type != "MARKET":
+        provenance["fill_price"] = fill.price
 
     sandbox_write_started = False
     try:

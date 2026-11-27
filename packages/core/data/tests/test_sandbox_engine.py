@@ -230,6 +230,18 @@ class TestPlaceBuyOrder:
         assert result["message"] == "Practice LIMIT order is pending a matching live tick"
         assert "Paper" not in result["message"]
 
+    def test_fill_price_completes_a_limit_immediately(self, engine: SandboxEngine) -> None:
+        result = engine.place_order(
+            "INFY", "NSE", "BUY", 5, 100.0, order_type="LIMIT", fill_price=99.5
+        )
+        assert result["status"] == "COMPLETE"
+        assert result["message"] == "Practice order filled: BUY 5 INFY @ 99.50"
+        order = engine.get_orders()[0]
+        assert order["status"] == "COMPLETE"
+        assert order["price"] == 100.0
+        assert order["avg_fill_px"] == 99.5
+        assert engine.get_positions()[0]["net_qty"] == 5
+
     def test_buy_order_increases_used_margin(self, engine: SandboxEngine) -> None:
         # 10 lots at 450 = ₹4,500 — well within default ₹10,00,000 capital
         engine.place_order("COALINDIA", "NSE", "BUY", 10, 450.0)

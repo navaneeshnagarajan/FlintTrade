@@ -14,7 +14,7 @@ import { OrderRuleLine } from "../src/components/orders/OrderRuleLine";
 import { StopLossNotFilledChip } from "../src/components/orders/StopLossNotFilledChip";
 import { pendingLiveAcknowledgement } from "../src/lib/liveAcknowledgement";
 import { evaluateOrderRules, hasBlockingRule } from "../src/lib/orderRules";
-import { exitNowTicket, isStopLossTriggeredNotFilled } from "../src/lib/stopLossState";
+import { exitNowTicket, exitTicketQuote, isStopLossTriggeredNotFilled } from "../src/lib/stopLossState";
 import "../src/index.css";
 
 const ON = "2026-11-22";
@@ -71,7 +71,7 @@ function Book() {
       <div>
         {POSITION.symbol}{" "}
         {isStopLossTriggeredNotFilled(stop) ? (
-          <StopLossNotFilledChip symbol={POSITION.symbol} ticket={() => exitNowTicket(POSITION, { ltp: POSITION.ltp })} />
+          <StopLossNotFilledChip symbol={POSITION.symbol} ticket={() => exitNowTicket(POSITION, exitTicketQuote(POSITION))} />
         ) : null}
       </div>
       <button type="button" onClick={() => setStop({ ...stop, status: "COMPLETE" })}>Stop fills</button>

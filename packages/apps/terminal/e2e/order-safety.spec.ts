@@ -10,13 +10,13 @@ test("a market option order is refused on the reserved line, Place stays disable
   const place = page.getByRole("button", { name: "Place" });
   await expect(place).toBeEnabled();
   await page.getByLabel("Type").selectOption("MARKET");
-  await expect(line).toContainText("FlintTrade · Market orders aren't accepted on options. Use a limit price.");
+  await expect(line).toContainText("Market orders aren't accepted on options. Use a limit price.");
   await expect(line).toHaveAttribute("role", "alert");
   await expect(place).toBeDisabled();
   await page.getByTestId("order-rule-more").click();
   await expect(page.getByTestId("order-rule-list")).toBeVisible();
   await page.getByLabel("Type").selectOption("SL-M");
-  await expect(line).toContainText("FlintTrade · Stop-market orders aren't accepted on options. Use stop-limit.");
+  await expect(line).toContainText("Stop-market orders aren't accepted on options. Use stop-limit.");
   await expect(place).toBeDisabled();
 });
 
@@ -27,7 +27,7 @@ test("a BSE stop-loss limit too far from its trigger is refused; the price is ne
   await page.getByLabel("Trigger").fill("50");
   await page.getByLabel("Price").fill("39.95");
   const line = page.locator("#orderpad-qty-error");
-  await expect(line).toContainText("Exchange · Stop-loss limit must be within ₹10 of trigger.");
+  await expect(line).toContainText("Stop-loss limit must be within ₹10 of trigger.");
   await expect(page.getByRole("button", { name: "Place" })).toBeDisabled();
   await expect(page.getByLabel("Price")).toHaveValue("39.95");
   await page.getByLabel("Price").fill("40");
@@ -37,7 +37,7 @@ test("a BSE stop-loss limit too far from its trigger is refused; the price is ne
 test("a price outside the band warns without disabling Place or changing the price", async ({ page }) => {
   await page.getByLabel("Price").fill("200");
   const line = page.locator("#orderpad-qty-error");
-  await expect(line).toContainText("Exchange · Price may be outside the exchange band (₹60–₹140).");
+  await expect(line).toContainText("Price may be outside the exchange band (₹60–₹140).");
   await expect(line).toHaveAttribute("data-level", "warn");
   await expect(page.getByRole("button", { name: "Place" })).toBeEnabled();
   await expect(page.getByLabel("Price")).toHaveValue("200");

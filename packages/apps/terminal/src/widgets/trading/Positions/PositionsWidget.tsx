@@ -154,7 +154,7 @@ import {
 } from "./positionBook";
 import { SAMPLE_POSITION_BOOK } from "./sampleBook";
 import { StopLossNotFilledChip as SharedStopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
-import { contractKeyOf, exitNowTicket, openExitTicket, stopLossNotFilledKeys } from "@/lib/stopLossState";
+import { contractKeyOf, exitNowTicket, exitTicketQuote, openExitTicket, stopLossNotFilledKeys } from "@/lib/stopLossState";
 import {
   instrumentKind,
   marketPriceCapPct,
@@ -210,7 +210,7 @@ function StopLossNotFilledChip({ position }: { position: PositionRow }) {
   return (
     <SharedStopLossNotFilledChip
       symbol={position.symbol}
-      ticket={() => exitNowTicket(position, { ltp: position.ltp })}
+      ticket={() => exitNowTicket(position, exitTicketQuote(position))}
     />
   );
 }
@@ -451,7 +451,7 @@ function squareOffOrder(
 }
 
 function openPositionExitTicket(position: PositionRow): void {
-  const ticket = exitNowTicket(position, { ltp: positionLastPrice(position) });
+  const ticket = exitNowTicket(position, exitTicketQuote(position, { ltp: positionLastPrice(position) }));
   if (ticket) openExitTicket(ticket);
 }
 

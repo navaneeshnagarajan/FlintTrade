@@ -1,10 +1,10 @@
 /**
  * The ticket's reserved line for refusals and warnings.
  *
- * One line, always present so the ticket never shifts. It shows the most
- * serious item, prefixed by its source ("Exchange · …"). A quantity refusal
- * or a block-level rule is red and announced; a warning is amber and never
- * disables Place. "+N" opens the rest of the list.
+ * Two lines are always reserved so the ticket never shifts. It shows the most
+ * serious item without a source prefix. A quantity refusal or a block-level
+ * rule is red and announced; a warning is amber and never disables Place.
+ * "+N" opens the rest of the list, each row prefixed by its source.
  */
 
 import { useState } from "react";
@@ -35,10 +35,12 @@ function lineText(result: RuleResult): string {
 export function OrderRuleLine({ id, refusal, results, fallback, announce = true }: OrderRuleLineProps) {
   const [open, setOpen] = useState(false);
   const top = results[0];
-  const headline = refusal || fallback || (top ? lineText(top) : "");
+  const sourced = !refusal && !fallback && top ? lineText(top) : "";
+  const headline = refusal || fallback || (top ? top.message : "");
   const rest = refusal || fallback ? results : results.slice(1);
   const level = refusal || fallback ? "block" : top?.level;
   const colour = level ? LEVEL_CLASS[level] : "text-loss";
+  const title = sourced || (headline || undefined);
   return (
     <div className="flex flex-col gap-0.5">
       <p
@@ -47,7 +49,9 @@ export function OrderRuleLine({ id, refusal, results, fallback, announce = true 
         data-level={headline ? level : undefined}
         role={headline && (refusal || (announce && level === "block")) ? "alert" : undefined}
         aria-live={announce && level === "warn" ? "polite" : undefined}
-        className={`min-h-4 text-xs leading-4 ${colour}`}
+        title={title}
+        aria-label={sourced || undefined}
+        className={`min-h-8 line-clamp-2 text-xs leading-4 ${colour}`}
       >
         {headline || "\u00a0"}
         {rest.length > 0 ? (

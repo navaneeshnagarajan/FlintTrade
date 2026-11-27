@@ -37,7 +37,7 @@ import type {
 } from "@/types/api";
 import { layaOrderRefused } from "@/lib/layaStatus";
 import { instrumentKind, optionExitLimitPrice } from "@/lib/orderRules";
-import { exitNowTicket, openExitTicket } from "@/lib/stopLossState";
+import { exitNowTicket, exitTicketQuote, openExitTicket } from "@/lib/stopLossState";
 import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -1868,7 +1868,19 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     ...(priceSource ? { priceSource } : {}),
     ...(priceAgeS !== undefined ? { priceAgeS } : {}),
     ...(ltpBasis ? { ltpBasis } : {}),
+    ...practiceBidAsk(value),
   };
+}
+
+function practicePositivePrice(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function practiceBidAsk(value: Record<string, unknown>): { bid?: number; ask?: number } {
+  const bid = practicePositivePrice(value.bid ?? value.best_bid ?? value.bid_price);
+  const ask = practicePositivePrice(value.ask ?? value.best_ask ?? value.ask_price);
+  return { ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}) };
 }
 
 function normalisePracticeOrder(value: unknown): Order | undefined {
@@ -2668,7 +2680,7 @@ async function squareOffPracticePositions(): Promise<void> {
     const isOption = instrumentKind(position.symbol, position.exchange) === "option";
     const last = position.ltp > 0 ? position.ltp : null;
     if (isOption && last === null) {
-      const ticket = exitNowTicket(position, { ltp: last });
+      const ticket = exitNowTicket(position, exitTicketQuote(position));
       if (ticket) openExitTicket(ticket);
       else failures.push(`${position.symbol}: no last price`);
       continue;

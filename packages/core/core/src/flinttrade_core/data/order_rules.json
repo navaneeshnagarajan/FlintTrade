@@ -20,7 +20,8 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Stop-market orders aren't accepted on options. Use stop-limit."
+      "message": "Stop-market orders aren't accepted on options. Use stop-limit.",
+      "family": "option_stop_market"
     },
     {
       "id": "options-market-order-not-sent",
@@ -40,7 +41,8 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Market orders aren't accepted on options. Use a limit price."
+      "message": "Market orders aren't accepted on options. Use a limit price.",
+      "family": "option_market"
     },
     {
       "id": "algo-market-orders-fo-rejected",
@@ -66,7 +68,7 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Market orders in F&O are not accepted. Use a limit price."
+      "message": "Market orders in F&O aren't accepted. Use a limit price."
     },
     {
       "id": "market-order-needs-trade-today",
@@ -112,7 +114,7 @@
         "min_gap_inr": 10,
         "flat_gap_up_to_trigger_inr": 50
       },
-      "message": "Stop-loss limit must be within ₹{max_gap} of trigger."
+      "message": "Stop-loss limit must be within \u20b9{max_gap} of trigger."
     },
     {
       "id": "nse-options-operating-range",
@@ -133,14 +135,14 @@
       "effective_from": "2026-04-28",
       "effective_to": null,
       "parameters": {},
-      "message": "Enter a price within ₹{low}–₹{high}."
+      "message": "Enter a price within \u20b9{low}\u2013\u20b9{high}."
     },
     {
       "id": "bse-lpp-sensex-expiry-day",
       "authority": "exchange",
       "level": "warn",
       "source": "Exchange",
-      "description": "On SENSEX expiry day the price protection range for low-priced options narrows to ₹10.",
+      "description": "On SENSEX expiry day the price protection range for low-priced options narrows to \u20b910.",
       "check": "price_band",
       "scope": {
         "exchange": "BSE",
@@ -159,7 +161,7 @@
         "band_pct": 40,
         "min_band_inr": 10
       },
-      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
       "family": "option_price_band"
     },
     {
@@ -184,7 +186,7 @@
         "band_pct": 40,
         "min_band_inr": 20
       },
-      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
       "family": "option_price_band"
     },
     {
@@ -209,7 +211,7 @@
         "band_pct": 40,
         "min_band_inr": 20
       },
-      "message": "Price may be outside the exchange band (₹{low}–₹{high}).",
+      "message": "Price may be outside the exchange band (\u20b9{low}\u2013\u20b9{high}).",
       "family": "option_price_band"
     },
     {
@@ -320,7 +322,7 @@
       "parameters": {
         "max_modifications": 25
       },
-      "message": "This order has already been modified {limit} times. Place a new order."
+      "message": "This order has been modified {limit} times. Place a new order."
     },
     {
       "id": "dhan-market-price-protection",
@@ -334,8 +336,7 @@
         "broker": "dhan",
         "instrument": "derivative",
         "order_types": [
-          "MARKET",
-          "SL-M"
+          "MARKET"
         ]
       },
       "effective_from": "2026-04-01",
@@ -355,8 +356,7 @@
         "broker": "kotakneo",
         "instrument": "all",
         "order_types": [
-          "MARKET",
-          "SL-M"
+          "MARKET"
         ]
       },
       "effective_from": "2026-04-01",
@@ -412,7 +412,7 @@
           ]
         ]
       },
-      "message": "Market orders are sent as limits within about {band} of the last price and may not fill."
+      "message": "Market orders are sent as limits within {band} of the last price and may not fill."
     },
     {
       "id": "dhan-intraday-square-off",
@@ -459,7 +459,7 @@
       "parameters": {
         "cap_pct": 3
       },
-      "message": "Practice fills a market order only within {cap_pct}% of the last price."
+      "message": "Market orders fill within {cap_pct}% of the last price."
     },
     {
       "id": "practice-bracket-unsupported",

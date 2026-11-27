@@ -715,7 +715,7 @@ describe("OrderPadWidget", () => {
       const qty = screen.getByLabelText("Quantity") as HTMLInputElement;
       fireEvent.change(qty, { target: { value: "10" } });
       expect(Number(qty.value)).toBe(4);
-      expect(line()).toHaveTextContent("FlintTrade · Quantity reduced to 4, the open position.");
+      expect(line()).toHaveTextContent("Quantity reduced to 4, the open position.");
       expect(line()).toHaveAttribute("data-level", "warn");
     });
 
@@ -723,7 +723,7 @@ describe("OrderPadWidget", () => {
       mockOpenPositions.rows = [];
       render(<OrderPadWidget {...exitTicket(4)} />);
       await screen.findByText("Lot 1 · Max 1,800 per order");
-      expect(line()).toHaveTextContent("FlintTrade · Position is closed. Order not sent.");
+      expect(line()).toHaveTextContent("Position is closed. Order not sent.");
       expect(line()).toHaveAttribute("data-level", "block");
       expect(screen.getByRole("button", { name: /practice sell/i })).toBeDisabled();
     });
@@ -736,7 +736,7 @@ describe("OrderPadWidget", () => {
       fill(4);
 
       fireEvent.click(screen.getByRole("button", { name: /practice sell/i }));
-      await waitFor(() => expect(line()).toHaveTextContent("FlintTrade · Quantity reduced to 2, the open position."));
+      await waitFor(() => expect(line()).toHaveTextContent("Quantity reduced to 2, the open position."));
       expect(Number((screen.getByLabelText("Quantity") as HTMLInputElement).value)).toBe(2);
       expect(mockPlaceOrder).not.toHaveBeenCalled();
 
@@ -753,7 +753,7 @@ describe("OrderPadWidget", () => {
       fill(4);
 
       fireEvent.click(screen.getByRole("button", { name: /practice sell/i }));
-      await waitFor(() => expect(line()).toHaveTextContent("FlintTrade · Position is closed. Order not sent."));
+      await waitFor(() => expect(line()).toHaveTextContent("Position is closed. Order not sent."));
       expect(mockPlaceOrder).not.toHaveBeenCalled();
     });
 
@@ -1475,14 +1475,14 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.click(screen.getByRole("radio", { name: "MARKET" }));
     const line = document.getElementById("orderpad-qty-error") as HTMLElement;
     await waitFor(() => expect(line).toHaveTextContent(
-      "FlintTrade · Market orders aren't accepted on options. Use a limit price.",
+      "Market orders aren't accepted on options. Use a limit price.",
     ));
     expect(line).toHaveAttribute("role", "alert");
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("radio", { name: "SL-M" }));
     await waitFor(() => expect(line).toHaveTextContent(
-      "FlintTrade · Stop-market orders aren't accepted on options. Use stop-limit.",
+      "Stop-market orders aren't accepted on options. Use stop-limit.",
     ));
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
@@ -1501,7 +1501,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(priceInput, { target: { value: "39.95" } });
     fireEvent.change(document.getElementById("orderpad-trig-price") as HTMLInputElement, { target: { value: "50" } });
     const line = document.getElementById("orderpad-qty-error") as HTMLElement;
-    await waitFor(() => expect(line).toHaveTextContent("Exchange · Stop-loss limit must be within ₹10 of trigger."));
+    await waitFor(() => expect(line).toHaveTextContent("Stop-loss limit must be within ₹10 of trigger."));
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeDisabled();
     expect(priceInput.value).toBe("39.95");
 
@@ -1520,7 +1520,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
     fireEvent.change(priceInput, { target: { value: "200" } });
     const line = document.getElementById("orderpad-qty-error") as HTMLElement;
-    await waitFor(() => expect(line).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140)."));
+    await waitFor(() => expect(line).toHaveTextContent("Price may be outside the exchange band (₹60–₹140)."));
     expect(line).toHaveAttribute("data-level", "warn");
     expect(line).not.toHaveAttribute("role", "alert");
     expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
@@ -1549,7 +1549,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "300" } });
     await reviewAndConfirmPractice(/practice buy/i);
     const line = document.getElementById("orderpad-qty-error") as HTMLElement;
-    await waitFor(() => expect(line).toHaveTextContent("Exchange · Enter a price within ₹0.05–₹250."));
+    await waitFor(() => expect(line).toHaveTextContent("Enter a price within ₹0.05–₹250."));
     fireEvent.click(screen.getByTestId("order-rule-more"));
     expect(screen.getByTestId("order-rule-list")).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140).");
   });

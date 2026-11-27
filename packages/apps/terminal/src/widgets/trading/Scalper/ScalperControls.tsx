@@ -107,8 +107,6 @@ export function ScalperControls({
   onLotsInc,
   product,
   onProductChange,
-  orderType,
-  onOrderTypeChange,
   limitPrice,
   onLimitPriceChange,
   slPoints,
@@ -248,24 +246,14 @@ export function ScalperControls({
           onChange={(v) => onProductChange(v as ProductType)}
         />
 
-        {/* Order type toggle */}
-        <ToggleGroup
-          label="Type"
-          value={orderType}
-          options={["MARKET", "LIMIT"] as const}
-          onChange={(v) => onOrderTypeChange(v as OrderTypeValue)}
+        {/* Blank sends at the contract's live premium. Options only accept a limit. */}
+        <NumberInput
+          label="Limit ₹"
+          value={limitPrice}
+          onChange={onLimitPriceChange}
+          min={0}
+          placeholder="Live premium"
         />
-
-        {/* Blank sends at the contract's live premium */}
-        {orderType === "LIMIT" && (
-          <NumberInput
-            label="Limit ₹"
-            value={limitPrice}
-            onChange={onLimitPriceChange}
-            min={0}
-            placeholder="Live premium"
-          />
-        )}
 
         {/* Optional protective exit leg, in points from the entry price.
             Leave both blank for a plain order; enter EXACTLY ONE to place a

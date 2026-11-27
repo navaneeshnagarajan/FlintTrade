@@ -461,7 +461,7 @@ def test_raw_future_market_blocks_only_where_the_broker_does_not_convert() -> No
         (
             "warn",
             "kotak-market-price-protection",
-            "Market orders are sent as limits within about 0.5% of the last price and may not fill.",
+            "Market orders are sent as limits within 0.5% of the last price and may not fill.",
         ),
     ]
 
@@ -621,3 +621,18 @@ def test_docs_page_carries_the_current_rules_table() -> None:
 
     page = Path(__file__).resolve().parents[4] / "docs" / "BROKER_AND_EXCHANGE_RULES.md"
     assert rules_markdown() in page.read_text(encoding="utf-8")
+
+@pytest.mark.parametrize("broker", ["practice", "dhan"])
+def test_an_option_market_refusal_hides_fill_info_rows(broker: str) -> None:
+    results = evaluate_order(
+        {"symbol": "NIFTY25NOV2624000CE", "exchange": "NFO", "pricetype": "MARKET"},
+        on=date(2026, 11, 22),
+        broker=broker,
+        broker_name="Practice" if broker == "practice" else "Dhan",
+        last_price="150",
+    )
+    ids = [result.rule_id for result in results]
+    assert "options-market-order-not-sent" in ids
+    assert "practice-market-price-cap" not in ids
+    assert "dhan-market-price-protection" not in ids
+

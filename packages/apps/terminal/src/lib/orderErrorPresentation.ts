@@ -28,7 +28,7 @@ const dispatchError = z.object({
 const errorRecord = z.record(z.string(), z.unknown());
 /** Fixed rejection sentences the server may attach; any other text is ignored. */
 const brokerRejectionSentences = z.enum([
-  "Dhan rejected this because the request didn't come from your registered static IP.",
+  "Dhan rejected the order. Send it from your registered static IP.",
   "Dhan rejected the order. Check static IP and segment activation.",
 ]);
 const localGuardMessages = new Set([

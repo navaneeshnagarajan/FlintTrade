@@ -168,4 +168,22 @@ describe("order rules mirror", () => {
       expect(results.map((item) => item.rule_id)).not.toContain("options-market-order-not-sent");
     }
   });
+
+  it("hides fill-info rows when an options market refusal fires", () => {
+    for (const broker of ["practice", "dhan"] as const) {
+      const results = evaluateOrderRules({
+        symbol: "NIFTY25NOV2624000CE",
+        exchange: "NFO",
+        orderType: "MARKET",
+        action: "SELL",
+        lastPrice: 150,
+        broker,
+        quantity: 75,
+      }, "2026-11-22");
+      const ids = results.map((item) => item.rule_id);
+      expect(ids).toContain("options-market-order-not-sent");
+      expect(ids).not.toContain("practice-market-price-cap");
+      expect(ids).not.toContain("dhan-market-price-protection");
+    }
+  });
 });

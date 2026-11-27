@@ -615,6 +615,7 @@ class SandboxEngine:
         price_source: str | None = None,
         price_age_s: int | None = None,
         exit_only: bool = False,
+        fill_price: float | None = None,
     ) -> dict[str, Any]:
         """Validate a paper order and either fill it or leave it pending.
 
@@ -623,7 +624,9 @@ class SandboxEngine:
         the rule's message. Other MARKET orders fill immediately at ``price``,
         the live reference price. LIMIT, SL and SL-M orders
         remain pending until :meth:`check_pending_fills` receives a matching
-        live tick. Pending buys reserve margin and pending sells reserve covered
+        live tick, unless ``fill_price`` is a positive price — then the order
+        completes immediately at that fill, still honouring ``price`` as the
+        limit. Pending buys reserve margin and pending sells reserve covered
         quantity.
 
         Args:
@@ -638,6 +641,9 @@ class SandboxEngine:
             strategy: Optional strategy label retained on the order and trade.
             instrument_token: Security id of the listed contract. When set, the
                 quantity must be a positive multiple of that contract's lot size.
+            fill_price: When set to a positive finite price, a LIMIT or stop
+                order completes immediately at this fill instead of waiting for
+                a tick. ``price`` remains the limit.
             exit_only: The order may only reduce the open position. The position
                 is read under the engine lock; a flat or same-side position
                 refuses the order and a larger quantity is cut to the open size.
@@ -761,8 +767,17 @@ class SandboxEngine:
 
             order_id = str(uuid.uuid4())
             now = time.time()
-            status = "COMPLETE" if order_type == "MARKET" else "PENDING"
-            fill_price = price if status == "COMPLETE" else None
+            immediate_fill = None
+            if fill_price is not None:
+                try:
+                    candidate = float(fill_price)
+                except (TypeError, ValueError, OverflowError):
+                    candidate = None
+                if candidate is not None and math.isfinite(candidate) and candidate > 0:
+                    immediate_fill = candidate
+            status = "COMPLETE" if order_type == "MARKET" or immediate_fill is not None else "PENDING"
+            complete_price = immediate_fill if immediate_fill is not None else (price if status == "COMPLETE" else None)
+            fill_price = complete_price
             fill_time = now if status == "COMPLETE" else None
             stored_source, stored_age = _fill_provenance(
                 price_source if status == "COMPLETE" else None,
@@ -806,7 +821,7 @@ class SandboxEngine:
                         exchange=exchange,
                         action=action,
                         quantity=quantity,
-                        price=price,
+                        price=complete_price if complete_price is not None else price,
                         product=product,
                         strategy=strategy,
                         traded_at=now,
@@ -828,21 +843,22 @@ class SandboxEngine:
             fill_price if fill_price is not None else price,
             status,
         )
+        reported = complete_price if complete_price is not None else price
         message = (
-            f"Practice order filled: {action} {quantity} {symbol} @ {price:.2f}"
+            f"Practice order filled: {action} {quantity} {symbol} @ {reported:.2f}"
             if status == "COMPLETE"
             else f"Practice {order_type} order is pending a matching live tick"
         )
         if status == "COMPLETE" and stored_source == "last_close" and stored_age is not None:
             from flinttrade_data.practice_price import last_close_fill_label
 
-            message = last_close_fill_label(price, stored_age)
+            message = last_close_fill_label(reported, stored_age)
         result: dict[str, Any] = {"order_id": order_id, "status": status, "message": message}
         if exit_results:
             result["rule_results"] = exit_results
         if stored_source:
             result["price_source"] = stored_source
-            result["price"] = price
+            result["price"] = reported
         if stored_age is not None:
             result["price_age_s"] = stored_age
         return result

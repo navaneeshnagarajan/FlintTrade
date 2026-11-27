@@ -58,7 +58,6 @@ export function LiveAcknowledgementDialog({ text, onCancel, onAccept }: LiveAckn
               setTicked(false);
               onAccept();
             }}
-            className="bg-profit hover:bg-profit/90 text-white"
           >
             {LIVE_ACK_CONFIRM}
           </AlertDialogAction>

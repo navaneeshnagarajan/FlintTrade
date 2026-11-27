@@ -323,6 +323,22 @@ function evaluateRow(row: RuleRow, facts: Facts): RuleResult | null {
 }
 
 /** Every rule result for one order, most serious first. ``on`` is ``YYYY-MM-DD`` (IST). */
+
+const OPTION_TYPE_REFUSAL_IDS = new Set(["options-market-order-not-sent", "options-stop-market-not-sent"]);
+const REFUSED_FILL_INFO_IDS = new Set([
+  "practice-market-price-cap",
+  "dhan-market-price-protection",
+  "kotak-market-price-protection",
+]);
+
+function withoutRefusedFillInfo(results: RuleResult[]): RuleResult[] {
+  const blocked = new Set(results.filter((item) => item.level === "block").map((item) => item.rule_id));
+  if ([...OPTION_TYPE_REFUSAL_IDS].some((id) => blocked.has(id))) {
+    return results.filter((item) => !REFUSED_FILL_INFO_IDS.has(item.rule_id));
+  }
+  return results;
+}
+
 export function evaluateOrderRules(input: OrderRuleInput, on: string = istToday()): RuleResult[] {
   const kind = instrumentKind(input.symbol, input.exchange);
   let expiryDay = input.expiryDay ?? null;
@@ -349,7 +365,7 @@ export function evaluateOrderRules(input: OrderRuleInput, on: string = istToday(
     if (result) scored.push({ key: [LEVELS.indexOf(row.level), AUTHORITIES.indexOf(row.authority), index], result });
   });
   scored.sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2]);
-  return scored.map((entry) => entry.result);
+  return withoutRefusedFillInfo(scored.map((entry) => entry.result));
 }
 
 /** Quantity an exit on ``action`` may close: the open size when it opposes the position, else 0. */
@@ -483,7 +499,6 @@ const BROKER_NAMES: Record<string, string> = {
   kotakneo: "Kotak Neo",
   kotak: "Kotak Neo",
   upstox: "Upstox",
-  groww: "Groww",
   indmoney: "INDmoney",
   deltaexchange: "Delta Exchange",
 };

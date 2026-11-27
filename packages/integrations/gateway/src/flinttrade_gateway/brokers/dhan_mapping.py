@@ -128,7 +128,7 @@ class DhanMappingError(ValueError):
     """Raised when an order cannot be translated to / from the Dhan API."""
 
 
-STATIC_IP_REJECTED = "Dhan rejected this because the request didn't come from your registered static IP."
+STATIC_IP_REJECTED = "Dhan rejected the order. Send it from your registered static IP."
 STATIC_IP_OR_SEGMENT = "Dhan rejected the order. Check static IP and segment activation."
 _IP_TEXT = re.compile(r"\bIP(?:v[46])?s?\b", re.IGNORECASE)
 _DH_9XX = re.compile(r"DH-9\d\d")

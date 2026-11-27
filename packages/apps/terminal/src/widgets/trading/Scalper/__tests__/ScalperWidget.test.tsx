@@ -484,7 +484,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     expect(screen.getByText("Limit ₹")).toBeInTheDocument();
 
     await buyCeWithConfirm();
@@ -514,7 +513,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
 
     await buyCeWithConfirm();
@@ -554,7 +552,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -580,7 +577,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Target points"), { target: { value: "10" } });
 
@@ -593,22 +589,11 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("refuses a market order on an option with the rule message", async () => {
-    mockTicks.current = new Proxy(
-      {},
-      { get: () => ({ ltp: 200, close: 200 }) },
-    ) as Record<string, { ltp?: number; close?: number }>;
+  it("does not offer a market order type", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
-
-    fireEvent.click(screen.getByText("MARKET"));
-    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
-
-    await buyCeWithConfirm();
-
-    await screen.findAllByText("FlintTrade · Market orders aren't accepted on options. Use a limit price.");
-    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
-    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "MARKET" })).not.toBeInTheDocument();
+    expect(screen.queryByText("MARKET")).not.toBeInTheDocument();
   });
 
   it("shows the preset's refusal and warning on the rule line before any order", async () => {
@@ -621,14 +606,8 @@ describe("ScalperWidget", () => {
     const line = document.getElementById("scalper-rule-line") as HTMLElement;
 
     setLimit("200");
-    await waitFor(() => expect(line).toHaveTextContent("Exchange · Price may be outside the exchange band (₹60–₹140)."));
+    await waitFor(() => expect(line).toHaveTextContent("Price may be outside the exchange band (₹60–₹140)."));
     expect(line).toHaveAttribute("data-level", "warn");
-
-    fireEvent.click(screen.getByText("MARKET"));
-    await waitFor(() => expect(line).toHaveTextContent(
-      "FlintTrade · Market orders aren't accepted on options. Use a limit price.",
-    ));
-    expect(line).toHaveAttribute("data-level", "block");
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -651,7 +630,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -674,7 +652,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -690,7 +667,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 
@@ -711,7 +687,6 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
     fireEvent.change(screen.getByPlaceholderText("Live premium"), { target: { value: "185.5" } });
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
 

@@ -54,6 +54,7 @@ export interface Position extends ValuedQuantity {
   ltpBasis?: "ltp" | "last_close" | "fill_price";
   priceSource?: "ltp" | "last_close"; priceAgeS?: number; priceLabel?: string;
   markSource?: "avg" | "fallback"; settlementPrice?: number;
+  bid?: number; ask?: number;
 }
 export interface Order extends InstrumentIdentity {
   orderId: string; action: OrderSide; quantity: number; price: number;

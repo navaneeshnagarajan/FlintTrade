@@ -4,7 +4,7 @@ import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { OrderApiError } from "@/services/api";
 import type { PlaceOrderParams } from "@/types/api";
 
-const STATIC_IP = "Dhan rejected this because the request didn't come from your registered static IP.";
+const STATIC_IP = "Dhan rejected the order. Send it from your registered static IP.";
 const STATIC_IP_OR_SEGMENT = "Dhan rejected the order. Check static IP and segment activation.";
 const params = { action: "BUY", symbol: "INFY", exchange: "NSE", product: "MIS", quantity: 1, orderType: "MARKET" } as PlaceOrderParams;
 

@@ -1925,13 +1925,6 @@ function OrderPadWidget(props: WidgetProps) {
                     >
                       {qtyHintText || "\u00a0"}
                     </p>
-                    <OrderRuleLine
-                      id="orderpad-qty-error"
-                      refusal={errors.qty?.message}
-                      results={lineResults}
-                      fallback={submitRefusal && submitRefusal.results.length === 0 ? submitRefusal.text : undefined}
-                      announce={submitRefusal == null}
-                    />
                   </div>
                 );
               }}
@@ -1951,6 +1944,16 @@ function OrderPadWidget(props: WidgetProps) {
               )}
             />
           </div>
+        )}
+
+        {inputMode === "qty" && (
+          <OrderRuleLine
+            id="orderpad-qty-error"
+            refusal={errors.qty?.message}
+            results={lineResults}
+            fallback={submitRefusal && submitRefusal.results.length === 0 ? submitRefusal.text : undefined}
+            announce={submitRefusal == null}
+          />
         )}
 
         {/* Fund mode: enter rupee amount, auto-calculate lots */}

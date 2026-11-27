@@ -84,6 +84,26 @@ export interface ExitTicket {
  * the best price (bid to sell, ask to buy, else the last price). Without any
  * price the ticket opens empty for the user to fill.
  */
+
+function positiveQuotePrice(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/** Bid, ask and last from a position or quote, preferring the quote when both exist. */
+export function exitTicketQuote(
+  position: { bid?: number | null; ask?: number | null; ltp?: number | null },
+  quote?: { bid?: number | null; ask?: number | null; ltp?: number | null } | null,
+): { bid?: number; ask?: number; ltp?: number } {
+  const bid = positiveQuotePrice(quote?.bid) ?? positiveQuotePrice(position.bid);
+  const ask = positiveQuotePrice(quote?.ask) ?? positiveQuotePrice(position.ask);
+  const ltp = positiveQuotePrice(quote?.ltp) ?? positiveQuotePrice(position.ltp);
+  return {
+    ...(bid != null ? { bid } : {}),
+    ...(ask != null ? { ask } : {}),
+    ...(ltp != null ? { ltp } : {}),
+  };
+}
+
 export function exitNowTicket(
   position: { symbol: string; exchange: string; quantity: number; product?: string },
   quote: { bid?: number | null; ask?: number | null; ltp?: number | null } | null | undefined,
