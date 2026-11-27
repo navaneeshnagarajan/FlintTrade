@@ -537,9 +537,9 @@ duckdb==1.5.6 \
     #   flinttrade-historical
     #   flinttrade-journal
     #   flinttrade-screener
-filelock==4.2.6 \
-    --hash=sha256:ee7af8ede36dcaf12e1016d9f7c3a63ecd5497d46f85dab21b8c779b8f944e97 \
-    --hash=sha256:fd7d4fca497bf3e3d0945a13261f8e684f2aef12ce7cf76aef26e13bf7388b88
+filelock==4.3.0 \
+    --hash=sha256:143407310acf479e82d88068e3b9a6486f45fb410c0ed8729fe7359eaabeb6f1 \
+    --hash=sha256:f933f39f7e01249a4a49b9abab30edc6d4b874624c3de5dd0b0d137aa8adb979
     # via flinttrade-core
 flask==3.1.3 \
     --hash=sha256:0ef0e52b8a9cd932855379197dd8f94047b359ca0a78695144304cb45f87c9eb \
@@ -704,9 +704,9 @@ joblib==1.6.0 \
     --hash=sha256:2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03 \
     --hash=sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba
     # via flinttrade-ai
-jugaad-data==0.37.0 \
-    --hash=sha256:7a513f3dff76bef39aaaecee55de4f23f96397228f15acef1dad7f3033db2b67 \
-    --hash=sha256:d98d09f2cc7615df847b76ad3bf4e3fa5386d18fc0b3fbfd2f30def99788c5cd
+jugaad-data==0.37.4 \
+    --hash=sha256:01f2f071fd611b216c883330c06c9992b7dab3cf000095cba108390cb6ee803a \
+    --hash=sha256:b8c0ea058c3df4bbcb461e2215f26006ce8d0aec6eb4c2be0daed36c452a46ac
     # via flinttrade-historical
 kiwisolver==1.5.1 \
     --hash=sha256:007a5553dfc4f4e8d184f588a0200e2cd4b63a59cc8796df3c39909e679dc7a0 \
