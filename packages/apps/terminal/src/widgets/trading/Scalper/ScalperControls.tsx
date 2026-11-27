@@ -1,6 +1,7 @@
 // ─── Scalper — control bar (symbol, expiry, strikes, lots, order settings) ────
 
 import { AlertTriangle, RefreshCw, Zap, ZapOff } from "lucide-react";
+import { BrokerRequiredNotice } from "@/components/ui/BrokerRequiredNotice";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -19,6 +20,8 @@ export interface ScalperControlsProps {
   onSymbolChange: (v: string) => void;
   expiries: string[];
   expiriesError: boolean;
+  /** The expiry read was refused only because no broker is connected. */
+  expiriesBrokerRequired?: boolean;
   expiry: string;
   onExpiryChange: (v: string) => void;
   onRetryExpiries: () => void;
@@ -81,6 +84,7 @@ export function ScalperControls({
   onSymbolChange,
   expiries,
   expiriesError,
+  expiriesBrokerRequired = false,
   expiry,
   onExpiryChange,
   onRetryExpiries,
@@ -137,7 +141,22 @@ export function ScalperControls({
         {/* Expiry selector */}
         <div className="flex flex-col gap-0.5">
           <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">Expiry</span>
-          {expiriesError ? (
+          {expiriesError && expiriesBrokerRequired ? (
+            <div className="flex items-center gap-1">
+              <BrokerRequiredNotice what="expiries" className="h-8" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onRetryExpiries}
+                aria-label="Retry loading expiries"
+                title="Retry loading expiries"
+                className="size-8 shrink-0 text-text-muted hover:text-text-primary"
+              >
+                <RefreshCw size={12} aria-hidden="true" />
+              </Button>
+            </div>
+          ) : expiriesError ? (
             <Button
               type="button"
               variant="outline"
@@ -192,7 +211,7 @@ export function ScalperControls({
 
         {/* Keyboard hint */}
         {focused && (
-          <span className="text-xxs text-text-disabled border border-border-subtle rounded-md px-1.5 py-1 hidden lg:inline-flex items-center font-mono">
+          <span className="text-xxs text-text-muted border border-border-subtle rounded-md px-1.5 py-1 hidden lg:inline-flex items-center font-mono">
             Shift + Arrows to trade
           </span>
         )}
@@ -303,7 +322,7 @@ export function ScalperControls({
       </div>
 
       {!ordersArmed && (
-        <p className="px-3 pb-2 text-xs text-text-disabled">{orderBlockCopy}</p>
+        <p className="px-3 pb-2 text-xs text-text-muted">{orderBlockCopy}</p>
       )}
     </div>
   );

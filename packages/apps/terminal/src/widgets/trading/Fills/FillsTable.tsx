@@ -129,14 +129,14 @@ function PracticeChargesLine({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-auto px-0 py-0 text-[10px] font-normal text-text-muted hover:text-text-secondary"
+        className="h-auto px-0 py-0 text-xxs font-normal text-text-muted hover:text-text-secondary"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
         Charges {fmtCharge(charges.total)} (estimated)
       </Button>
       {open && (
-        <ul className="mt-0.5 space-y-0.5 text-[10px] text-text-secondary font-mono tabular-nums">
+        <ul className="mt-0.5 space-y-0.5 text-xxs text-text-secondary font-mono tabular-nums">
           <li>STT {fmtCharge(charges.stt)}</li>
           <li>
             {transactionLine} {fmtCharge(charges.exchangeCharges)}

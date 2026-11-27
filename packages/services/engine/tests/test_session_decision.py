@@ -461,3 +461,32 @@ def test_deprecated_open_alias_maps_to_the_runner_session() -> None:
             if ".is_market_open" in text or "is_market_open=" in text:
                 offenders.append(str(relative))
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("at", "close", "admitted"),
+    [
+        (datetime(2026, 7, 31, 15, 35, tzinfo=IST), time(15, 30), False),
+        (datetime(2026, 8, 3, 15, 35, tzinfo=IST), time(15, 40), True),
+        (datetime(2026, 12, 4, 15, 42, tzinfo=IST), time(15, 40), False),
+        (datetime(2026, 12, 7, 15, 42, tzinfo=IST), time(15, 45), True),
+    ],
+)
+def test_practice_clock_uses_the_fno_close_for_the_simulated_date(
+    at: datetime,
+    close: time,
+    admitted: bool,
+) -> None:
+    scheduler = TimeScheduler()
+    scheduler.now_ist = lambda: at  # type: ignore[method-assign]
+    for segment in ("NFO", "BFO"):
+        assert scheduler.get_market_session(segment) == (time(9, 15), close)
+        assert scheduler.accepts_new_entries(segment) is admitted
+
+
+def test_practice_clock_stops_an_index_contract_at_1530_on_its_expiry_day() -> None:
+    scheduler = TimeScheduler()
+    scheduler.now_ist = lambda: datetime(2026, 12, 15, 15, 35, tzinfo=IST)  # type: ignore[method-assign]
+    calendar = ["2026-12-15", "2026-12-22"]
+    assert scheduler.accepts_new_entries("NFO", symbol="NIFTY15DEC2624000CE", expiry_calendar=calendar) is False
+    assert scheduler.accepts_new_entries("NFO", symbol="NIFTY22DEC2624000CE", expiry_calendar=calendar) is True

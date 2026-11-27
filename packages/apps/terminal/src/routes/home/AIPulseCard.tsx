@@ -18,7 +18,7 @@ export function AIPulseCard() {
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Sparkles size={13} className="text-accent" aria-hidden="true" />
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="ft-text-overline text-text-muted">
             AI Pulse
           </p>
           <ExampleLabel testId="ai-pulse-example-label" />

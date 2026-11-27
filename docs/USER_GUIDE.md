@@ -362,7 +362,8 @@ Closed on its own. Unavailable timings read `Market unavailable`, and
 are never labelled last close. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
-continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
+continuous ends, a secondary F&O chip appears: `F&O open · till 15:30` before
+3 August 2026 and `F&O open · till 15:40` from 3 August 2026. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. From 7 December 2026 the same chips follow NSE/CMTR/77355
@@ -870,7 +871,7 @@ tape freezes and shows **Reduced motion**. The feed chip may read **Example**; i
 5. Set Quantity to 1 lot. After you select the future, Order Pad
    auto-fills Quantity from that instrument's current lot size. Do
    not type a remembered number. Learn Glossary follows the loaded instrument master
-   rather than fixed example figures. A quantity that is not a whole number of lots is refused once, inline: `Quantity must be a multiple of the lot size (N).` `N` is that contract's lot. If the lot is not verified, the pad shows one line: `Not placed. The lot size for <name> isn't verified.` `<name>` is the contract's display name. An order over the per-order freeze limit is refused with HTTP 400 and code `quantity_admission`. The message gives the limit, names the instrument, and asks for smaller orders. The order is not split. The limit is the broker freeze field when the order carries one, otherwise the exchange figure. Choose **MARKET**. Side = **BUY**.
+   rather than fixed example figures. A quantity that is not a whole number of lots is refused once, inline: `Quantity must be a multiple of the lot size (N).` `N` is that contract's lot. If the lot is not verified, the pad shows one line: `Not placed. The lot size for <name> isn't verified.` `<name>` is the contract's display name. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order above the cap, with HTTP 400 and code `quantity_admission`. A broker `freeze_qty` refuses the same way and is used ahead of that table. The line is `Max {cap} per order for {symbol}. Place smaller orders.` `{cap}` is the limit rounded down to a whole number of lots when the lot size is known, and the limit itself when it is not. `{symbol}` is the underlying, or `this contract` when the symbol is empty. The order is not split. SENSEX options 1,000, SENSEX futures 500, and BANKEX options 900 are unverified and do not refuse when the broker sends no `freeze_qty`. Above one of them, the pad shows one line under Quantity, `Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.`, and the order continues. `{symbol}` is that index. `{freeze}` is that value. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review (**Confirm simulation**).
    The sandbox order appears in the **Positions** widget immediately; the
    **Orders** widget shows it as filled (simulated). **Example Buy** on
@@ -1471,8 +1472,8 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
 09:15–15:30 "open" window. When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
-15:40` through 6 December 2026, and `F&O open · till 15:45` from 7 December
-2026. Non-CAS cash still continuous to 15:30.
+15:30` before 3 August 2026, `F&O open · till 15:40` from 3 August to
+6 December 2026, and `F&O open · till 15:45` from 7 December 2026. Non-CAS cash still continuous to 15:30.
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or
@@ -1736,7 +1737,7 @@ flashes the outage copy.
 
 ## 9. AI Centre walkthrough
 
-Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Signals, Sentiment, and RAG run in your own app, backed by
+Open Automation and the AI Centre panel (`/ai` opens that panel; the title stays **AI Centre**). Chat, Analysis, Sentiment, and RAG run in your own app, backed by
 `packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list. It is not a live AI fetch. Suggest stays
 labelled illustrative. See
@@ -1812,8 +1813,8 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. It never shows a green **Connected (suggest only)**. Example data does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
-**Sample replies**. Signals **Live** / **Polling** stay separate from Chat
-LLM readiness.
+**Sample replies**. The Analysis panel **Live** / **Polling** badges stay
+separate from Chat LLM readiness.
 
 AI Chat live-read context: when an LLM is configured, Chat may
 use Practice simulated fills and native live-read feeds for
@@ -1865,9 +1866,12 @@ When mood and risk match nothing, the empty state offers
 **Deploy to Strategy Lab** opens `/lab?strategy=<registryKey>` for that
 card.
 
-### Signals
+### Analysis
 
-The Signals panel shows analysis worked out inside your own app from market data. It is not a recommendation to trade, and you decide whether to place any order.
+The **Analysis** panel shows analysis worked out inside your own app from
+market data. Several checks run at the same time, and the panel combines
+their results. It is not a recommendation to trade, and it is not financial
+advice. You decide whether to place any order.
 
 ### Sentiment
 

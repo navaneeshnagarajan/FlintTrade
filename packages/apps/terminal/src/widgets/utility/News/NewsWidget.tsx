@@ -457,6 +457,7 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search headlines, sources..."
+            aria-label="Search news"
             className="h-6 pl-6 pr-2 text-xs bg-surface-hover border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-primary/50"
           />
         </div>

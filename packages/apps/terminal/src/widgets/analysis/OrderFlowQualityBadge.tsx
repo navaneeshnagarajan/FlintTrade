@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import {
   getOrderFlowQualitySummary,
   type OrderFlowResponse,
@@ -19,7 +20,7 @@ const PROVENANCE_LABELS = {
 /** Compact quality disclosure shared by both order-flow visualisations. */
 export function OrderFlowQualityBadge({ data }: OrderFlowQualityBadgeProps) {
   const { quality, provenance } = getOrderFlowQualitySummary(data);
-  if (quality === "sample") return null;
+  if (quality === "sample") return <ExampleDataBadge />;
   const provenanceLabel = PROVENANCE_LABELS[provenance];
   const presentation = quality === "exact"
     ? {

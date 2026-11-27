@@ -519,7 +519,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
             <div className="mt-2">{module.preview}</div>
 
             {/* Footer hover cue */}
-            <div className="mt-3 flex items-center gap-1 text-xxs text-text-disabled group-hover:text-text-muted transition-colors">
+            <div className="mt-3 flex items-center gap-1 text-xxs text-text-muted group-hover:text-text-secondary transition-colors">
               <span>Open {module.title}</span>
               <ArrowRight className="w-3 h-3" />
             </div>

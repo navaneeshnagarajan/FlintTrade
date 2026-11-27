@@ -45,20 +45,29 @@ Settings → Practice does not place.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
 does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before Laya,
-place refuses a quantity that is not a positive multiple of the lot, or
-that is above the freeze limit, with HTTP 400 `quantity_admission`. The
-Order Pad shows the lot sentence once, inline:
+a quantity that is not a positive multiple of the lot is refused with
+HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
+once, inline:
 `Quantity must be a multiple of the lot size (N).`
 `N` is that contract's lot. It is not a published constant. A missing
 verified lot is a different sentence, also shown once, inline:
 `Not placed. The lot size for <name> isn't verified.`
 `<name>` is the contract's display name. The Practice sandbox returns
 that sentence as HTTP 400 with `status: error` and no `code` field, and
-it does not fill the order. An order over the per-order freeze limit is
-refused with HTTP 400 and code `quantity_admission`. The message gives
-the limit, names the instrument, and asks for smaller orders. The order
-is not split. The limit is the broker freeze field when the order carries
-one, otherwise the exchange figure. The routed place route is Live only and uses the same
+it does not fill the order. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800,
+MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order
+above the cap, with HTTP 400 and code `quantity_admission`. A broker
+`freeze_qty` on the order refuses the same way and is used ahead of that
+table. `message` is `Max {cap} per order for {symbol}. Place smaller orders.`
+`{cap}` is the limit rounded down to a whole number of lots when the lot
+size is known, and the limit itself when it is not. `{symbol}` is the
+underlying, or `this contract` when the symbol is empty. The order is
+not split. SENSEX options 1,000, SENSEX futures 500, and BANKEX options
+900 are unverified and do not refuse when the broker sends no
+`freeze_qty`. Above one of them, the Order Pad shows one line under
+Quantity, `Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.`,
+and the order continues. `{symbol}` is that index. `{freeze}` is that
+value. The routed place route is Live only and uses the same
 Live admission. Modify and cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
 before Laya, SafetySystem, and any broker call, on place, routed place,

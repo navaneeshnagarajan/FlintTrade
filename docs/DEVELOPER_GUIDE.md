@@ -931,12 +931,22 @@ be ordered.
 `<name>` is the contract's display name. The Order Pad shows that
 sentence once, inline, when a derivative has no verified lot. The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
-Place refuses either that multiple or a freeze breach before Laya, with
-HTTP 400 `quantity_admission`. An order over the per-order freeze limit
-is refused with that HTTP 400 and code `quantity_admission`. The message
-gives the limit, names the instrument, and asks for smaller orders. The
-order is not split. The limit is the broker freeze field when the body
-carries one, otherwise the exchange figure. The Practice sandbox
+A quantity that is not a positive multiple of the lot is refused before
+Laya, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
+FINNIFTY 1,800, MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each
+refuse an order above the cap with that HTTP 400 and code
+`quantity_admission`. A broker `freeze_qty` on the body refuses the same
+way and is used ahead of that table. `message` is
+`Max {cap} per order for {symbol}. Place smaller orders.` `{cap}` is the
+limit rounded down to a whole number of lots when the lot size is known,
+and the limit itself when it is not. `{symbol}` is the underlying, or
+`this contract` when the symbol is empty. The order is not split.
+SENSEX options 1,000, SENSEX futures 500, and BANKEX options 900 are
+unverified and do not refuse when the body has no `freeze_qty`. Above
+one of them, the Order Pad shows one line under Quantity,
+`Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.`,
+and the order continues. `{symbol}` is that index. `{freeze}` is that
+value. The Practice sandbox
 returns an unverified lot as HTTP 400 with the visible message and no
 `code` field.
 The terminal does not bundle a second copy of the excerpt. The app shell
