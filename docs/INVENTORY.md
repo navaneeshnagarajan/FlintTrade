@@ -19,7 +19,7 @@ blockers. Groww's official `growwapi` SDK is pinned for attestation/reference
 parity while the adapter keeps using FlintTrade's tested REST transport; the
 latest key-secret probe proves login/account reads but still lacks broker-side
 market-data/API permission, static IP, and order-safety evidence. Broker sessions are not available in the terminal. Writes return 503 and reads return 409.
-Read smoke uses the in-process read path, not a Setup → Brokers HTTP session. Brokers require orders from a registered static IP.
+Read smoke uses the in-process read path, not a Setup → Brokers HTTP session. Dhan and Kotak Neo require API orders from a registered static IP.
 INDmoney is a REST-native adapter with no SDK pin; its dashboard token resets
 at the daily 06:00 IST cycle. Delta Exchange is also REST-native with no SDK pin.
 It stays disabled until Live order safety and unattended deadman flattening are
