@@ -566,8 +566,8 @@ that file to both pip commands, and installs torch first. The install size
 is roughly 1.2 GB. CUDA and ROCm
 installs do not use the CPU pin. `install --accelerator cuda` opts into the
 PyPI torch build. `install --accelerator rocm` needs `FLINTTRADE_DECISION_MODEL_TORCH_INDEX`
-set to an https PyTorch ROCm wheel index. `start` still uses CPU
-(`FLINTTRADE_DECISION_MODEL_DEVICE=cpu`). The host stays `127.0.0.1`. `FLINTTRADE_DECISION_MODEL_PORT` chooses the
+set to an https PyTorch ROCm wheel index. `start` still runs the model on
+CPU. The host stays `127.0.0.1`. `FLINTTRADE_DECISION_MODEL_PORT` chooses the
 port and defaults to 8000. A clash on that port is Down with
 `port_in_use`. A fresh API key is
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
