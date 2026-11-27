@@ -12,7 +12,7 @@
  *     moves to Trade Review in merge 2.12, not here).
  *
  * Every rupee figure derives through lib/pnl (positionMtm / realisedBySymbol /
- * realisedFromTrades) — never a raw broker `pnl` sum (CLAUDE.md quirk 4).
+ * realisedFromTrades), never a raw broker `pnl` sum, which some brokers get wrong.
  */
 
 import type { UTCTimestamp } from "lightweight-charts";

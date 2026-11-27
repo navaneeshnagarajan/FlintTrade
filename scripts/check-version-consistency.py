@@ -26,7 +26,6 @@ CARGO_MANIFESTS = [
 CURRENT_TAG_FILES = [
     "readme.md",
     "disclaimer.md",
-    "CLAUDE.md",
     "PLAN.md",
     "docs/ARCHITECTURE.md",
     "docs/DESKTOP.md",
@@ -36,9 +35,6 @@ CURRENT_TAG_FILES = [
     "docs/setup/QUICKSTART.md",
     "docs/setup/windows.md",
     "packages/apps/site/src/app/page.tsx",
-    "templates/agent-context/AGENTS.md.template",
-    "templates/agent-context/CLAUDE.md.template",
-    "templates/agent-context/PLAN.md.template",
 ]
 
 INSTALLER_POLICY_FILES = [

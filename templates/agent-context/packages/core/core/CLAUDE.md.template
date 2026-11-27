@@ -1,7 +1,0 @@
-# FlintTrade — core
-
-> Framework, CLI, native broker reads, config, models, logger, exceptions, app server, admin, security, monitoring
-
-## Dependencies
-
-See `packages/core/core/pyproject.toml` for declared dependencies and optional extras.

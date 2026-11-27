@@ -1591,11 +1591,9 @@ def auth_mode_switch() -> tuple[Any, int]:
 
     Issues a NEW JWT with ``mode: "practice"`` and
     ``live_mode_unlocked: false``, and REVOKES the caller's existing JWT
-    (so a stale live-unlocked token can't be replayed). This closes the
-    2026-05-19 Codex audit finding that ``ModeIndicator.tsx`` was
-    flipping local UI state to Practice without ever invalidating the
-    PIN-unlocked JWT — meaning a retained live-unlocked JWT could still
-    place live orders even after the UI displayed Practice.
+    (so a stale live-unlocked token can't be replayed). Flipping only the
+    local UI state to Practice would leave the PIN-unlocked JWT able to
+    place live orders while the UI displayed Practice.
 
     Practice is a privilege reduction (the broker-free sandbox), so any
     valid session token may request it. Example data is not a desk
@@ -1663,8 +1661,7 @@ def auth_mode_switch() -> tuple[Any, int]:
     # token is still replayable until its 8 AM IST expiry, so we MUST NOT
     # tell the frontend the downgrade succeeded; the UI would then flip to
     # Practice while a stale live token sits in memory ready to place
-    # real orders. Codex stop-gate 2026-05-19 flagged this as the inverse
-    # of the original CRITICAL finding.
+    # real orders.
     old_jti = str(payload.get("jti", ""))
     old_exp = float(payload.get("exp", 0))
     if not old_jti:
