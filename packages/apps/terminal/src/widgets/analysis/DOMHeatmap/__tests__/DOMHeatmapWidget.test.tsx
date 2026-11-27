@@ -646,3 +646,38 @@ describe("DOMHeatmap market authority retirement", () => {
     expect(screen.queryByTestId("domheatmap-canvas")).not.toBeInTheDocument();
   });
 });
+
+describe("DOMHeatmapWidget broker-required notice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMode = "live";
+  });
+
+  it("shows a neutral connect-a-broker notice instead of the red error", async () => {
+    mockGetDepth.mockRejectedValue(
+      new Error("A connected native broker account is required for depth."),
+    );
+    await act(async () => {
+      render(<DOMHeatmapWidget {...liveProps} />);
+    });
+
+    const notice = await screen.findByTestId("broker-required-notice");
+    expect(notice).toHaveTextContent("Connect a broker to load market depth.");
+    // The canvas container is role="img"; the notice's button must sit outside it.
+    expect(screen.getByTestId("domheatmap-container")).not.toContainElement(notice);
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    expect(screen.queryByText(/connected native broker account is required/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Accumulating depth data…")).not.toBeInTheDocument();
+  });
+
+  it("keeps the red error for every other failure", async () => {
+    mockGetDepth.mockRejectedValue(new Error("Connection refused"));
+    await act(async () => {
+      render(<DOMHeatmapWidget {...liveProps} />);
+    });
+
+    expect(await screen.findByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Connection refused")).toBeInTheDocument();
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
+  });
+});

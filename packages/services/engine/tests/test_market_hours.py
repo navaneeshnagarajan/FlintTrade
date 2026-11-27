@@ -113,10 +113,29 @@ class TestStandardHours:
         with pytest.raises(ValueError, match="Unknown exchange"):
             get_standard_hours("INVALID")
 
-    def test_nfo_runs_to_1540(self) -> None:
-        open_t, close_t = get_standard_hours("NFO")
-        assert open_t == time(9, 15)
-        assert close_t == time(15, 40)
+    @pytest.mark.parametrize("exchange", ["NFO", "BFO"])
+    @pytest.mark.parametrize(
+        ("on", "close"),
+        [
+            (date(2026, 8, 2), time(15, 30)),
+            (date(2026, 8, 3), time(15, 40)),
+            (date(2026, 12, 6), time(15, 40)),
+            (date(2026, 12, 7), time(15, 45)),
+        ],
+    )
+    def test_fno_standard_hours_follow_the_session_date(self, exchange: str, on: date, close: time) -> None:
+        assert get_standard_hours(exchange, on) == (time(9, 15), close)
+
+    def test_fno_standard_hours_default_to_today_in_ist(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from flinttrade_engine import market_hours
+
+        class _Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001, ANN206
+                return datetime(2026, 12, 6, 23, 0, tzinfo=timezone.utc).astimezone(tz)
+
+        monkeypatch.setattr(market_hours, "datetime", _Clock)
+        assert get_standard_hours("NFO") == (time(9, 15), time(15, 45))
 
 
 class TestNseCashPhase:
@@ -443,6 +462,26 @@ class TestCasRevisionBoundary:
         assert get_market_hours("NFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
         assert get_market_hours("BFO", date(2026, 12, 6)) == (time(9, 15), time(15, 40))
         assert get_market_hours("BFO", date(2026, 12, 7)) == (time(9, 15), time(15, 45))
+
+    @pytest.mark.parametrize("segment", ["NFO", "BFO"])
+    @pytest.mark.parametrize(
+        ("session", "close"),
+        [
+            (date(2026, 8, 2), time(15, 30)),
+            (date(2026, 8, 3), time(15, 40)),
+            (date(2026, 12, 6), time(15, 40)),
+            (date(2026, 12, 7), time(15, 45)),
+        ],
+    )
+    def test_fno_close_follows_the_session_date(self, segment: str, session: date, close: time) -> None:
+        assert get_market_hours(segment, session) == (time(9, 15), close)
+        assert derivative_contract_close(segment, session) == close
+        assert derivative_contract_close(segment, session, symbol="RELIANCE28JAN27FUT") == close
+
+    def test_expiry_day_before_the_revision_keeps_the_segment_close(self) -> None:
+        # Index contracts only stop early from 7 Dec 2026.
+        assert derivative_contract_close("NFO", date(2026, 7, 28), symbol="NIFTY28JUL2624000CE") == time(15, 30)
+        assert derivative_contract_close("NFO", date(2026, 8, 4), symbol="NIFTY04AUG2624000CE") == time(15, 40)
 
     def test_expiring_index_contract_closes_at_1530(self) -> None:
         calendar = [date(2026, 12, 10), date(2026, 12, 17)]

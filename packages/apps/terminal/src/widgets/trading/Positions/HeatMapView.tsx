@@ -474,7 +474,7 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart, on
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
           <SquareStack size={28} className="text-text-disabled" />
           <span className="text-sm">{showExchangeEmpty ? NO_EXCHANGE_GROUPS_MESSAGE : emptyMessage}</span>
-          {!showExchangeEmpty && <span className="text-xxs text-text-disabled">{emptyHint}</span>}
+          {!showExchangeEmpty && <span className="text-xxs text-text-muted">{emptyHint}</span>}
         </div>
       ) : (
         <div className="absolute inset-0 overflow-auto">

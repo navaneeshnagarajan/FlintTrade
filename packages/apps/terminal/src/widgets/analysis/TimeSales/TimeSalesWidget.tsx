@@ -34,6 +34,7 @@ import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hook
 import { useTape } from "./useTape";
 import { SAMPLE_TAPE, SAMPLE_TAPE_NOW } from "./sampleData";
 import { FeatureTeaser } from "@/components/teasers";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useDepthData } from "@/hooks/useDepthData";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -97,7 +98,7 @@ function PrintRow({ p }: { p: TapePrint }) {
       <td className="py-0.5 px-2 text-right font-mono tabular-nums text-text-primary">
         {p.qty > 0 ? QTY_FMT.format(p.qty) : "—"}
       </td>
-      <td className={`py-0.5 pl-2 uppercase text-[10px] font-semibold ${sideCls(p.side)}`}>
+      <td className={`py-0.5 pl-2 uppercase text-xxs font-semibold ${sideCls(p.side)}`}>
         {p.side === "neutral" ? "—" : p.side}
       </td>
     </tr>
@@ -139,12 +140,12 @@ function Selector({ value, options, onChange }: { value: string; options: string
 function StatRow({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-border-default last:border-0">
-      <span className="text-[10px] text-text-muted">{label}</span>
+      <span className="text-xxs text-text-muted">{label}</span>
       <div className="flex items-baseline gap-1.5">
         <span className={`text-xs font-mono tabular-nums font-semibold ${accent ?? "text-text-primary"}`}>
           {value}
         </span>
-        {sub && <span className="text-[10px] text-text-muted">{sub}</span>}
+        {sub && <span className="text-xxs text-text-muted">{sub}</span>}
       </div>
     </div>
   );
@@ -204,7 +205,7 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
       {/* Velocity sparkline */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-text-muted uppercase tracking-wide">Print velocity (60s)</span>
+          <span className="ft-text-overline text-text-muted">Print velocity (60s)</span>
           <span className={`text-xs font-mono font-semibold tabular-nums ${velocityColour}`}>
             {stats.velocity} prints/s
           </span>
@@ -223,7 +224,7 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
       <div className="bg-surface-card border border-border-default rounded px-2">
         <StatRow label="Print velocity" value={`${stats.velocity}`} sub="prints/s" accent={velocityColour} />
         <StatRow
-          label="Avg Trade Size"
+          label="Avg trade size"
           value={hasSizes ? QTY_FMT.format(Math.round(stats.avgTradeSize)) : "—"}
           sub={hasSizes ? "qty" : "no size on feed"}
         />
@@ -238,13 +239,13 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
       {/* Tick-rule aggressor split */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-text-muted uppercase tracking-wide">Aggressor, tick rule (60s)</span>
-          <span className="text-[10px] text-text-secondary font-mono tabular-nums">
+          <span className="ft-text-overline text-text-muted">Aggressor, tick rule (60s)</span>
+          <span className="text-xxs text-text-secondary font-mono tabular-nums">
             {stats.uptickPct.toFixed(0)}% up / {stats.downtickPct.toFixed(0)}% down
           </span>
         </div>
         <DirectionBadge uptickPct={stats.uptickPct} downtickPct={stats.downtickPct} />
-        <div className="flex justify-between text-[10px] text-text-muted">
+        <div className="flex justify-between text-xxs text-text-muted">
           <span className="text-green-500">Uptick</span>
           <span>Neutral</span>
           <span className="text-red-500">Downtick</span>
@@ -254,20 +255,20 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
       {/* Resting book imbalance — depth feed only, omitted when unavailable */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-text-muted uppercase tracking-wide">Bid / Ask Imbalance</span>
+          <span className="text-xxs text-text-muted">Bid/ask imbalance</span>
           <span className={`text-xs font-mono font-semibold tabular-nums ${imbalanceColour}`}>
             {imbalance === null ? "—" : `${bidPct.toFixed(1)}% bid`}
           </span>
         </div>
         {imbalance === null ? (
-          <p className="text-[10px] text-text-muted">
+          <p className="text-xxs text-text-muted">
             Needs the depth feed — the quote tape carries no resting bid/ask sizes, so this is left blank
             rather than estimated.
           </p>
         ) : (
           <>
             <ImbalanceBar bidPct={bidPct} />
-            <div className="flex justify-between text-[10px] text-text-muted">
+            <div className="flex justify-between text-xxs text-text-muted">
               <span>Bid</span>
               <span className="text-text-muted/70">top 5 levels, depth snapshot</span>
               <span>Ask</span>
@@ -351,9 +352,9 @@ function TimeSalesWidget(props: WidgetProps) {
               not exchange trade prints, they are prints inferred from quote
               ticks by the tick rule, and every statistic below is computed from
               them. Keep it visible in both views. */}
-          <p className="text-[10px] text-text-muted">
+          <p className="text-xxs text-text-muted">
             {instrument.symbol} · prints inferred from quote ticks (tick rule)
-            {isSample && <span className="ml-1 text-warning" role="status">Sample data</span>}
+            {isSample && <ExampleDataBadge className="ml-1" />}
 
           </p>
         </div>
@@ -396,7 +397,7 @@ function TimeSalesWidget(props: WidgetProps) {
         <button
           type="button"
           onClick={() => setStatsOpen((p) => !p)}
-          className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-text-muted hover:text-text-secondary transition-colors"
+          className="flex items-center gap-1 text-xxs uppercase tracking-wide text-text-muted hover:text-text-secondary transition-colors"
           aria-expanded={statsOpen}
           aria-label="Microstructure statistics"
         >
@@ -414,7 +415,7 @@ function TimeSalesWidget(props: WidgetProps) {
             <div className="relative h-1.5 rounded-full bg-red-500/25 overflow-hidden">
               <div className="h-full bg-green-500/70" style={{ width: `${buyPct}%` }} />
             </div>
-            <div className="flex justify-between mt-0.5 text-[10px] text-text-muted font-mono tabular-nums">
+            <div className="flex justify-between mt-0.5 text-xxs text-text-muted font-mono tabular-nums">
               <span className="text-green-500">B {QTY_FMT.format(buyQty)}</span>
               <span className="text-red-500">S {QTY_FMT.format(sellQty)}</span>
             </div>
@@ -428,7 +429,7 @@ function TimeSalesWidget(props: WidgetProps) {
             <div className="flex-1 overflow-auto">
               <table className="w-full">
                 <thead className="sticky top-0 bg-surface-card">
-                  <tr className="text-[10px] uppercase tracking-wide text-text-muted border-b border-border-default">
+                  <tr className="ft-text-overline text-text-muted border-b border-border-default">
                     <th className="py-1 pr-2 text-left font-medium">Time</th>
                     <th className="py-1 px-2 text-right font-medium">Price</th>
                     <th className="py-1 px-2 text-right font-medium">Qty</th>

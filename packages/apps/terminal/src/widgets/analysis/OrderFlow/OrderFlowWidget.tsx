@@ -39,7 +39,7 @@
  * Accessibility:
  *   - Canvas has role="img" and aria-label describing the current view.
  *   - Symbol and interval selectors have visible labels via sr-only span.
- *   - "Sample Data" badge includes screen-reader text.
+ *   - Backend sample buckets carry the Example data badge outside Explore.
  */
 
 import {
@@ -61,6 +61,7 @@ import {
   Sigma,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -83,7 +84,7 @@ import { cn } from "@/lib/utils";
 import type { WidgetProps } from "@/types/widgets";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
-import { getOrderFlowDataState } from "@/services/ftApi.data";
+import { getOrderFlowDataState, getOrderFlowQualitySummary } from "@/services/ftApi.data";
 import {
   DEVICE_PIXEL_RATIO_CHECK_INTERVAL_MS,
   getFootprintCanvasLayout,
@@ -862,6 +863,11 @@ function OrderFlowWidget(props: WidgetProps) {
   const cumDelta = useMemo(() => cumulativeDelta(columns), [columns]);
   const latestPoc = useMemo(() => getLatestPoc(columns), [columns]);
   const errorMessage = error instanceof Error ? error.message : "Failed to load data";
+  const showingExampleBuckets =
+    !isLoading &&
+    !isError &&
+    columns.length > 0 &&
+    getOrderFlowQualitySummary(data).quality === "sample";
   const compactStatus = isLoading
     ? "Loading"
     : isError
@@ -1194,12 +1200,20 @@ function OrderFlowWidget(props: WidgetProps) {
           )}
         </div>}
 
+        {isCompact && showingExampleBuckets && (
+          <ExampleDataBadge className="ml-auto min-w-0 shrink overflow-hidden whitespace-nowrap" />
+        )}
+
         {isCompact && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="ml-auto flex size-6 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+                className={cn(
+                  "flex size-6 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary",
+                  // The badge takes the auto margin when it is present.
+                  !showingExampleBuckets && "ml-auto",
+                )}
                 aria-label="More order flow controls"
                 title="More order flow controls"
               >

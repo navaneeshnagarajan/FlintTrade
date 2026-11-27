@@ -370,7 +370,7 @@ describe("StraddleWidget", () => {
     renderWidget({ view });
 
     expect(await screen.findByText("200")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Example option quotes" })).toHaveTextContent("Example data");
+    expect(screen.getByRole("status", { name: "Example option quotes" })).toHaveTextContent("Example");
     expect(screen.queryByText(/live ATM/i)).not.toBeInTheDocument();
     expect(apiMocks.getPositionbook).not.toHaveBeenCalled();
   });
@@ -807,5 +807,43 @@ describe("computeImpliedMove", () => {
     expect(computeImpliedMove({ ...live, cePremium: 0 })).toBeNull();
     expect(computeImpliedMove({ ...live, pePremium: null })).toBeNull();
     expect(computeImpliedMove({ ...live, spot: Number.NaN })).toBeNull();
+  });
+});
+
+describe("StraddleWidget broker-required notice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
+    marketScopeState.current = "live:native:dhan:A1";
+    chartMocks.reset();
+    apiMocks.getExpiry.mockReset().mockResolvedValue([]);
+    apiMocks.getOptionChain.mockReset().mockResolvedValue({ calls: [], puts: [] });
+    apiMocks.getQuotes.mockReset().mockResolvedValue({ ltp: 0 });
+    apiMocks.getPositionbook.mockReset().mockResolvedValue([]);
+  });
+
+  it("shows a neutral connect-a-broker notice instead of a red error", async () => {
+    liveChainMocks();
+    apiMocks.getOptionChain.mockRejectedValue(
+      new Error("A connected native broker account is required for optionchain."),
+    );
+
+    renderWidget();
+
+    expect(await screen.findByTestId("broker-required-notice")).toHaveTextContent(
+      "Connect a broker to load straddle prices.",
+    );
+    expect(screen.queryByText(/connected native broker account is required/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the red error banner for every other failure", async () => {
+    liveChainMocks();
+    apiMocks.getOptionChain.mockRejectedValue(new Error("Native option chain unavailable"));
+
+    renderWidget();
+
+    const message = await screen.findByText("Chain error: Native option chain unavailable");
+    expect(message.closest("div")).toHaveClass("text-loss");
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
   });
 });

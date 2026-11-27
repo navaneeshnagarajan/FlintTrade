@@ -9,7 +9,8 @@
  *
  * DATA HONESTY: gap fill statistics (fill rate, fill time) require per-day
  * INTRADAY history that isn't cheaply available, so the widget shows
- * deterministic SAMPLE gap events with an always-visible "Sample data" badge.
+ * deterministic SAMPLE gap events, labelled by the Explore Mode line or,
+ * outside Explore, an always-visible Example data badge.
  * It carries NO refresh control — a previous one only slept 700 ms and spun a
  * loader while the data never changed, which dishonestly implied a live fetch.
  */
@@ -18,6 +19,7 @@ import { useState, useMemo, useEffect, memo } from "react";
 import { ArrowUpFromLine } from "lucide-react";
 import { FlintScatterChart } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import {
   Select,
   SelectContent,
@@ -195,10 +197,9 @@ function GapAnalysisWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <ArrowUpFromLine size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Gap Analysis</span>
-        {/* Honest disclosure — the widget renders SAMPLE_GAP_EVENTS
-            unconditionally (no gap-analysis backend is wired). The badge must
-            stay visible even when a broker is connected. */}
-        
+        {/* SAMPLE_GAP_EVENTS is the only source (no gap-analysis backend is
+            wired), so the badge stays even when a broker is connected. */}
+        <ExampleDataBadge />
         <div className="flex-1" />
       </div>
 
