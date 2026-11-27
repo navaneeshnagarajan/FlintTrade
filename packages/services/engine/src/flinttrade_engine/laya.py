@@ -56,9 +56,7 @@ _PRICE_REQUIRED = frozenset({"LIMIT", "SL"})
 _TRIGGER_REQUIRED = frozenset({"SL", "SL-M"})
 _ADMITTED_SOURCES = frozenset({"operator", "automate"})
 
-LAYA_DOWN_REASON = (
-    "Laya is Down. New orders are paused until it's Ready. You can still close positions."
-)
+LAYA_DOWN_REASON = "Not placed. Decision model is down. Start it from Status."
 
 
 class DecisionStatus(StrEnum):
@@ -98,18 +96,22 @@ LAYA_REASON_CODES = frozenset(
 
 LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start"
 LAYA_DOWNLOAD_FAILED_DETAIL = "Can't download the model"
-LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then Start Laya again."
+LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then start the decision model again."
 # Decimal gigabytes, so 1_200_000_000 of 3_400_000_000 reads "1.2 of 3.4 GB".
 _DECIMAL_GB = 1_000_000_000
 
+# Model id the runtime is pinned to. Shown as a value, never as the feature name.
+PINNED_MODEL_ID = "convaiinnovations/laya"
+LAYA_KEY_MISSING = "API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE."
+
 _REASON_TOOLTIPS = {
     LAYA_REASON_UNVERIFIED: (
-        "The installed model couldn't be checked against the pinned version. "
-        "Restart Laya. If it keeps happening, reinstall it."
+        "Installed model doesn't match the pinned version. "
+        "Restart the decision model. If it repeats, reinstall the model."
     ),
-    LAYA_REASON_WRONG_REVISION: "Laya is running a different model than FlintTrade expects.",
-    LAYA_REASON_KEY_REJECTED: "Laya restarted with a new key. Reconnecting…",
-    LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
+    LAYA_REASON_WRONG_REVISION: f"Wrong model loaded. Expected {PINNED_MODEL_ID}.",
+    LAYA_REASON_KEY_REJECTED: "Decision model restarted with a new key. Reconnecting…",
+    LAYA_REASON_KEY_MISSING: LAYA_KEY_MISSING,
     LAYA_REASON_DOWNLOAD_FAILED: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 }
 
@@ -144,8 +146,8 @@ def laya_reason_detail(
         LAYA_REASON_UNREACHABLE: "Unreachable",
         LAYA_REASON_WRONG_REVISION: "Wrong model version",
         LAYA_REASON_UNVERIFIED: "Can't verify the model",
-        LAYA_REASON_KEY_REJECTED: "Can't reach Laya",
-        LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
+        LAYA_REASON_KEY_REJECTED: "Can't reach the decision model",
+        LAYA_REASON_KEY_MISSING: LAYA_KEY_MISSING,
     }
     if reason is None:
         return None
@@ -291,6 +293,8 @@ class Laya:
         self._download_progress: tuple[int, int] | None = None
         self._decision_client: Any = None
         self._qualification: Any = None
+        self._qualification_owner: Any = None
+        self._explicit_live = False
         self._gate_checking = False
         self._lock = threading.Lock()
         self._log: list[DecisionRecord] = []
@@ -318,6 +322,7 @@ class Laya:
         with self._lock:
             self._status = status
             self._live_qualified = status is not DecisionStatus.DOWN
+            self._explicit_live = status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
                 self._sticky_refusal = False
@@ -332,6 +337,7 @@ class Laya:
         with self._lock:
             self._status = status
             self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
+            self._explicit_live = False
             if status is not DecisionStatus.DOWN:
                 self._reason = None
                 self._sticky_refusal = False
@@ -353,17 +359,17 @@ class Laya:
         A health check must not replace that reason with ``not_started``.
         """
         if reason is not None and reason not in LAYA_REASON_CODES:
-            raise ValueError("Laya reason is not recognised")
-        if not 1 <= port <= 65535:
-            raise ValueError("Laya sidecar port is invalid")
+            raise ValueError("Decision model reason not recognised.")
+        if not 1024 <= port <= 65535:
+            raise ValueError("Decision model port is invalid. Set FLINTTRADE_DECISION_MODEL_PORT to 1024–65535.")
         if progress is not None and (
             len(progress) != 2 or isinstance(progress[0], bool) or isinstance(progress[1], bool)
         ):
-            raise ValueError("Laya download progress is invalid")
+            raise ValueError("Decision model download progress is invalid.")
         if progress is not None and (
             not isinstance(progress[0], int) or not isinstance(progress[1], int) or progress[0] < 0 or progress[1] < 0
         ):
-            raise ValueError("Laya download progress is invalid")
+            raise ValueError("Decision model download progress is invalid.")
         with self._lock:
             self._reason = reason
             self._reason_port = port
@@ -418,14 +424,63 @@ class Laya:
         with self._lock:
             self._qualification = record
 
+    def bind_qualification_owner(self, owner: Any) -> None:
+        """Bind the normal factory's exact qualification producer, initially closed.
+
+        Args:
+            owner: Exact normal-factory qualification owner already bound to this gate.
+
+        Raises:
+            TypeError: The object is not the expected qualification owner or belongs to another gate.
+        """
+        from flinttrade_core.laya_qualification import LayaQualificationOwner  # noqa: PLC0415
+
+        if type(owner) is not LayaQualificationOwner or owner.gate is not self:
+            raise TypeError("exact Laya qualification owner required")
+        with self._lock:
+            self._qualification_owner = owner
+            self._live_qualified = False
+            self._explicit_live = False
+
+    def qualification_owner_is(self, owner: object) -> bool:
+        """Check exact producer custody without interpreting a returned report.
+
+        Args:
+            owner: Candidate producer identity to compare without evaluating its report.
+
+        Returns:
+            Whether the candidate is the exact currently retained qualification owner.
+        """
+        return self._qualification_owner is owner
+
+    def runtime_qualifies(self, policy: Any) -> bool:
+        """Read current producer evidence; a transport DTO is not factory authority.
+
+        Args:
+            policy: Current policy checked by the bound producer or legacy qualification record.
+
+        Returns:
+            Whether retained producer evidence or the existing legacy record covers the policy.
+        """
+        from .laya_decision import qualification_covers_live  # noqa: PLC0415
+
+        with self._lock:
+            owner, record = self._qualification_owner, self._qualification
+        return owner.qualifies(policy) if owner is not None else qualification_covers_live(record, policy)
+
     def effective_status(self, mode: str) -> DecisionStatus:
         """Status that applies to ``mode``. Unqualified Live stays Down."""
         with self._lock:
-            if self._status is DecisionStatus.DOWN:
-                return DecisionStatus.DOWN
-            if mode.strip().lower() == "live" and not self._live_qualified:
-                return DecisionStatus.DOWN
-            return self._status
+            status, qualified, explicit, owner = (
+                self._status, self._live_qualified, self._explicit_live, self._qualification_owner,
+            )
+        if status is DecisionStatus.DOWN:
+            return DecisionStatus.DOWN
+        if mode.strip().lower() == "live" and not (explicit and qualified) and (
+            not qualified or owner is not None and not owner.qualifies()
+        ):
+            return DecisionStatus.DOWN
+        return status
 
     def note_heartbeat(self) -> DecisionStatus:
         """Return the Live-facing status a desk heartbeat should publish.
@@ -443,7 +498,8 @@ class Laya:
         with self._lock:
             runtime = self._status
             qualified = bool(self._live_qualified) and runtime is not DecisionStatus.DOWN
-        live = runtime if qualified else DecisionStatus.DOWN
+        live = self.effective_status("live")
+        qualified = qualified and live is not DecisionStatus.DOWN
         return runtime, live, qualified
 
     def decision_log(self) -> tuple[DecisionRecord, ...]:
@@ -504,6 +560,8 @@ class Laya:
             degraded_ceiling=self._degraded_max_quantity,
             client=client,
         )
+        if self.effective_status(proposal.mode) is DecisionStatus.DOWN:
+            return self._down_verdict(limits)
         if decision.effect == "unverified":
             return Verdict(
                 allow=False,
@@ -576,6 +634,8 @@ class Laya:
             degraded_ceiling=self._degraded_max_quantity,
             client=client,
         )
+        if self.effective_status(proposal.mode) is DecisionStatus.DOWN:
+            return self._down_verdict(limits)
         if decision.effect == "unverified":
             return Verdict(
                 allow=False,
@@ -723,12 +783,14 @@ class Laya:
         return ""
 
 
-_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+_DOWN_PAUSE = LAYA_DOWN_REASON
 
-LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again."
+LAYA_DECISION_UNVERIFIED = "Not placed. Decision model not verified. Try again."
+
+_DENIED_PREFIX = "Not placed. Decision model denied this order: "
 
 
-_UNQUALIFIED_LIVE = "Laya isn't qualified for Live yet. Practice orders are available."
+_UNQUALIFIED_LIVE = "Decision model not qualified for Live. Use Practice."
 
 
 def proposal_from_place_fields(
@@ -780,7 +842,7 @@ def _reason_for_decision_failure(code: str) -> str | None:
     """Map a host failure onto a chip reason in the same request.
 
     A connect error or a timeout is ``unreachable``. A 401 or 403 from the
-    sidecar is ``key_rejected`` (chip "Can't reach Laya"). Other failures
+    sidecar is ``key_rejected`` (chip "Can't reach the decision model"). Other failures
     stay with the probe.
     """
     if code in {"revision_mismatch", "digest_mismatch"}:
@@ -798,9 +860,14 @@ def _reason_for_decision_failure(code: str) -> str | None:
     return None
 
 
+def denied_message(detail: str) -> str:
+    """Desk sentence for a deny with a stated reason."""
+    return f"{_DENIED_PREFIX}{detail}"
+
+
 def clamp_place_message(applied_quantity: int) -> str:
     """Desk sentence for a clamp. Nothing has been placed."""
-    return f"Not placed. Laya allows up to {applied_quantity}."
+    return f"Not placed. Decision model allows up to {applied_quantity}."
 
 
 def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | None:
@@ -817,7 +884,7 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
     if kind == "clamp":
         return {
             "status": "error",
-            "code": "laya_clamp",
+            "code": "decision_model_clamp",
             "message": clamp_place_message(verdict.applied_quantity),
             "reason": verdict.reason,
             "limits": limits,
@@ -827,14 +894,14 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
     if verdict.reason == LAYA_DECISION_UNVERIFIED:
         return {
             "status": "error",
-            "code": "laya_unverified",
+            "code": "decision_model_unverified",
             "message": LAYA_DECISION_UNVERIFIED,
             "reason": LAYA_DECISION_UNVERIFIED,
             "http_status": 409,
         }
     body: dict[str, Any] = {
         "status": "error",
-        "code": "laya_denied",
+        "code": "decision_model_denied",
         "message": verdict.reason,
         "reason": verdict.reason,
         "http_status": 403,

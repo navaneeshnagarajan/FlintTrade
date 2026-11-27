@@ -12,6 +12,7 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { Triangle, ChevronDown, Loader2 } from "lucide-react";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
@@ -192,8 +193,8 @@ function VolatilityConeWidget() {
   // When connected, build a REAL cone: daily-return series from history →
   // /v1/analytics/volcone (rolling-HV percentiles). The overlay is current
   // realised HV (honest — no live IV feed), so the marker is labelled "HV".
-  // Disconnected / on error → the synthetic SAMPLE_CONE (badged), never a
-  // fabricated "live" cone.
+  // Disconnected, loading or on error → the synthetic SAMPLE_CONE behind the
+  // Example data badge, never a fabricated "live" cone.
   useEffect(() => {
     if (!isConnected) {
       setLiveCone(null);
@@ -275,19 +276,21 @@ function VolatilityConeWidget() {
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
 
       {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
+      <div className="flex-none flex flex-wrap items-center gap-2 gap-y-1 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Triangle size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">Volatility Cone</span>
+        <span className="whitespace-nowrap text-xs font-semibold text-text-primary">Volatility Cone</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: HV cone computed from real price history"
             title="Live — historical-volatility percentiles from real price history; the overlay is current realised HV."
           >
             Live
           </span>
-        ) : null}
+        ) : (
+          <ExampleDataBadge />
+        )}
         {isLoading && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />}
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />

@@ -7,6 +7,7 @@
 # Deliberately NOT ignored: contract.json, flows/, intent.json and
 # capsules/. Those are meant to be committed — a saved flow only earns its keep
 # when a teammate or CI can replay it.
+# Generated session output under intent/unsorted/ is ignored.
 #
 # Edit freely: Reticle writes this once and never rewrites it.
 
@@ -24,3 +25,4 @@ cloud-state.json
 issues.json
 *.log
 *.tmp
+intent/unsorted/

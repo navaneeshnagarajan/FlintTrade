@@ -1,5 +1,5 @@
 /**
- * Laya chip and the Mode-menu Live reason.
+ * Decision model chip and the Mode-menu Live reason.
  *
  * The chip label follows the current mode. Practice and Explore show the
  * sidecar. Live shows the Live-facing status. Qualification is a tooltip
@@ -39,7 +39,7 @@ export const LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start"
 const DECIMAL_GB = 1_000_000_000;
 
 export const LAYA_DOWNLOAD_FAILED_DETAIL = "Can't download the model";
-export const LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then Start Laya again.";
+export const LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then start the decision model again.";
 
 /** Live download line. One decimal place, decimal gigabytes. */
 export function formatDownloadProgress(doneBytes: number, totalBytes: number): string {
@@ -65,22 +65,22 @@ export const LAYA_DOWNLOADING_LABEL = "Downloading";
 export type LayaChipLabel = "Ready" | "Degraded" | "Down" | "Still loading" | "Checking" | "Downloading";
 
 /** Popover line for that unconfirmed window. Neutral colour, not Ready. */
-export const LAYA_CHECKING_DETAIL = "Checking Laya…";
+export const LAYA_CHECKING_DETAIL = "Checking decision model…";
 
-/** Exact order refusal when the gate says Laya is Down. */
-export const LAYA_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+/** Exact order refusal when the gate says the decision model is Down. */
+export const LAYA_DOWN_PAUSE = "Not placed. Decision model is down. Start it from Status.";
 
 /** True when a failed place is the Down pause. Other denials leave the chip alone. */
 export function layaOrderRefused(body: unknown): boolean {
   if (body === null || typeof body !== "object") return false;
   const record = body as { code?: unknown; message?: unknown; reason?: unknown };
-  if (record.code !== "laya_denied") return false;
+  if (record.code !== "decision_model_denied") return false;
   return record.message === LAYA_DOWN_PAUSE || record.reason === LAYA_DOWN_PAUSE;
 }
 
-/** User guide section "Start Laya". The heading is written in the docs. */
+/** User guide section "Start the decision model". The heading is written in the docs. */
 export const LAYA_START_DOCS_HREF =
-  "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/USER_GUIDE.md#start-laya";
+  "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/USER_GUIDE.md#start-the-decision-model";
 
 export function layaChipStatus(input: {
   mode: string;
@@ -90,6 +90,11 @@ export function layaChipStatus(input: {
   if (input.mode === "live") return input.live ?? null;
   return input.practice ?? null;
 }
+
+/** Model id the runtime is pinned to. Shown as a value, never as the feature name. */
+export const PINNED_MODEL_ID = "convaiinnovations/laya";
+
+const LAYA_KEY_MISSING = "API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE.";
 
 export function layaReasonPlain(
   reason: string | null | undefined,
@@ -106,17 +111,17 @@ export function layaReasonPlain(
   if (reason === "unreachable") return "Unreachable";
   if (reason === "wrong_revision") return "Wrong model version";
   if (reason === "unverified") return "Can't verify the model";
-  if (reason === "key_rejected") return "Can't reach Laya";
-  if (reason === "key_missing") return "The Laya API key file is missing.";
+  if (reason === "key_rejected") return "Can't reach the decision model";
+  if (reason === "key_missing") return LAYA_KEY_MISSING;
   return null;
 }
 
 const LAYA_REASON_TOOLTIPS: Record<string, string> = {
   unverified:
-    "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
-  wrong_revision: "Laya is running a different model than FlintTrade expects.",
-  key_rejected: "Laya restarted with a new key. Reconnecting…",
-  key_missing: "The Laya API key file is missing.",
+    "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model.",
+  wrong_revision: `Wrong model loaded. Expected ${PINNED_MODEL_ID}.`,
+  key_rejected: "Decision model restarted with a new key. Reconnecting…",
+  key_missing: LAYA_KEY_MISSING,
   download_failed: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 };
 
@@ -137,14 +142,14 @@ export const OLLAMA_DIGEST_DETAIL =
   "FlintTrade checks the digest Ollama reports for the exact model tag on every admission. The tag is not the proof. If that digest does not match the pinned digest, the gate shows Wrong model version and new orders stay paused. You can still close positions.";
 
 /** Next line when a FlintTrade-managed Ollama install is not running. */
-export const OLLAMA_NOT_STARTED_MANAGED = "Ollama isn't running. Start it to bring Laya back.";
+export const OLLAMA_NOT_STARTED_MANAGED = "Ollama not running. Start Ollama, then start the decision model.";
 
 /** Next line when Ollama is the operator's own install. There is no Start action. */
 export const OLLAMA_NOT_STARTED_UNMANAGED = "Ollama isn't running. Start Ollama on this computer, then try again.";
 
-export const OLLAMA_START_ACTION = "Start Laya";
+export const OLLAMA_START_ACTION = "Start decision model";
 export const OLLAMA_STARTING_ACTION = "Starting…";
-export const OLLAMA_START_FAILED = "Laya could not be started.";
+export const OLLAMA_START_FAILED = "Decision model failed to start.";
 
 /** Chip words on the Ollama route. Identical to the sidecar chip. */
 export function ollamaChipText(
@@ -198,7 +203,7 @@ export function ollamaRouteVisibleLines(managed: boolean): string[] {
   lines.push(LAYA_CHECKING_DETAIL, LAYA_DOWN_PAUSE, OLLAMA_START_FAILED);
   if (managed) lines.push(OLLAMA_START_ACTION, OLLAMA_STARTING_ACTION);
   for (const label of ["Ready", "Degraded", "Down", "Still loading", "Downloading", "Checking"]) {
-    lines.push(`Laya ${label}`);
+    lines.push(`Decision model ${label}`);
   }
   return lines;
 }

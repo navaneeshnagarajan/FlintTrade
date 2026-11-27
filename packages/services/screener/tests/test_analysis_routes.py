@@ -700,6 +700,32 @@ class TestStraddlePnLEndpoint:
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         assert body["status"] == "success"
 
+    def test_straddlepnl_reads_the_lot_table(self, client, monkeypatch):
+        from flinttrade_screener import analysis_routes
+        from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+        seen = []
+        original = analysis_routes.simulate_straddle_pnl
+
+        def _spy(*args, **kwargs):
+            seen.append(kwargs["lot_size"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setitem(FALLBACK_LOT_SIZES, "NIFTY", 77)
+        monkeypatch.setattr(analysis_routes, "simulate_straddle_pnl", _spy)
+        resp, _ = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
+        assert resp.status_code == 200
+        assert seen == [77]
+
+    def test_straddlepnl_unknown_lot_is_not_guessed(self, client):
+        resp, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NOTALISTEDINDEX"})
+        assert resp.status_code == 422
+        assert body == {
+            "status": "error",
+            "code": "lot_size_unknown",
+            "message": "Not placed. The lot size for NOTALISTEDINDEX isn't verified.",
+        }
+
     def test_straddlepnl_has_required_fields(self, client):
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY"})
         data = body["data"]

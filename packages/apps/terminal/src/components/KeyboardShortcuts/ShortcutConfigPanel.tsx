@@ -280,7 +280,7 @@ function ShortcutRow({ binding, allBindings, conflict, onUpdate }: ShortcutRowPr
         {!isDefault && binding.customizable && (
           <Badge
             variant="outline"
-            className="text-[10px] h-4 px-1.5 border-accent/40 text-accent"
+            className="text-xxs h-4 px-1.5 border-accent/40 text-accent"
           >
             Custom
           </Badge>

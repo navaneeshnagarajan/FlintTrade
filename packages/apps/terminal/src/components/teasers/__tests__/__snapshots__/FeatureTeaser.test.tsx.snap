@@ -64,7 +64,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
           Strategy Lab
         </span>
         <span
-          class="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-blue-400 bg-current/10"
+          class="shrink-0 rounded px-1.5 py-0.5 font-mono text-xxs font-medium uppercase tracking-wider text-blue-400 bg-current/10"
         >
           Preview
         </span>
@@ -146,7 +146,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
                 />
               </div>
               <span
-                class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
+                class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-blue-400"
               >
                 Designed
               </span>
@@ -176,7 +176,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
                 />
               </div>
               <span
-                class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
               >
                 In Dev
               </span>
@@ -206,7 +206,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
                 />
               </div>
               <span
-                class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
               >
                 Testing
               </span>
@@ -236,7 +236,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
                 />
               </div>
               <span
-                class="text-[10px] font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
+                class="text-xxs font-medium whitespace-nowrap transition-colors duration-200 text-text-muted"
               >
                 Live
               </span>
@@ -244,7 +244,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
           </div>
         </div>
         <a
-          class="text-[10px] font-medium text-blue-400 underline-offset-2 hover:underline"
+          class="text-xxs font-medium text-blue-400 underline-offset-2 hover:underline"
           href="https://github.com/navaneeshnagarajan/FlintTrade/blob/main/ROADMAP.md"
         >
           Product roadmap
@@ -269,7 +269,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
             >
               <span
                 class="absolute inset-[-100%] animate-[spin_3s_linear_infinite]"
-                style="background: conic-gradient(from 90deg at 50% 50%, transparent 0%, rgb(59, 130, 246) 50%, transparent 100%);"
+                style="background: conic-gradient(from 90deg, transparent 0%, rgb(59, 130, 246) 50%, transparent 100%);"
               />
             </span>
             <span
@@ -306,7 +306,7 @@ exports[`FeatureTeaser > matches snapshot for preview status 1`] = `
           </button>
         </div>
         <span
-          class="text-[10px] text-text-muted pl-0.5"
+          class="text-xxs text-text-muted pl-0.5"
         >
           via 
           Telegram

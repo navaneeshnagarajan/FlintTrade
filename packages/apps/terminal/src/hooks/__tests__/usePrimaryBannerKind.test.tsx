@@ -60,11 +60,11 @@ describe("usePrimaryBannerKind", () => {
     expect(result.current).toBe("feed_disconnected");
   });
 
-  it("Laya Down outranks a disconnected feed", () => {
+  it("Decision model Down outranks a disconnected feed", () => {
     mockBrokerConnected.value = false;
     useOperatorSignalStore.setState({ decisionStatus: "down" });
     const { result } = renderHook(() => usePrimaryBannerKind(), { wrapper });
-    expect(result.current).toBe("laya");
+    expect(result.current).toBe("decision_model");
   });
 
   it("client daily-loss alert is Live risk even if the feed is down", () => {

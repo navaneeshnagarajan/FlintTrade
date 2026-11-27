@@ -42,7 +42,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'pnpm exec vite --configLoader runner --host 127.0.0.1 --port 5173 --strictPort',
+    command: `"${process.execPath}" "${import.meta.dirname}/node_modules/vite/bin/vite.js" --configLoader runner --host 127.0.0.1 --port 5173 --strictPort`,
     port: 5173,
     reuseExistingServer: !process.env['CI'],
     timeout: 60_000,

@@ -10,7 +10,7 @@ describe("mode honesty copy", () => {
 
   it("gives Practice its sandbox line", () => {
     expect(modeHonestyCopy("practice")).toBe(
-      "Practice — simulated fills, no real money.",
+      "Practice. Simulated fills, no real money.",
     );
   });
 

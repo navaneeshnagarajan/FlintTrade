@@ -4,7 +4,8 @@
  * Wired to /ft-api/v1/portfolio/optimise (numpy/scipy Markowitz family). When a
  * broker is connected it fetches ~1y of daily history for a large-cap basket,
  * derives length-aligned daily returns, and optimises; otherwise it shows a
- * badged sample so the widget is usable in explore mode. Read-only analysis —
+ * built-in sample allocation, labelled by the Explore Mode line or, outside
+ * Explore, the Example data badge. Read-only analysis:
  * it suggests target weights, it does not place any order.
  */
 
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useDataScope } from "@/hooks/useDataScope";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import { useModeStore } from "@/stores/modeStore";
 import { getHistory } from "@/services/api";
 import {
@@ -181,7 +183,7 @@ function PortfolioOptimiserWidget() {
         <span className="text-xs font-semibold text-text-primary">Portfolio Optimiser</span>
         {isLive ? (
           <span
-            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xxs font-medium text-emerald-400"
             role="status"
             aria-label="Live: weights optimised from real basket history"
             title="Live — mean-variance weights from ~1y of the basket's real daily history."
@@ -190,14 +192,16 @@ function PortfolioOptimiserWidget() {
           </span>
         ) : isPractice ? (
           <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xxs font-medium text-amber-400"
             role="status"
             aria-label="Practice: weights optimised from the Practice basket history"
-            title="Practice — read-only weights from the current Practice data scope."
+            title="Practice. Read-only weights from the Practice basket history."
           >
             Practice
           </span>
-        ) : null}
+        ) : (
+          <ExampleDataBadge />
+        )}
         {(returnsQuery.isFetching || query.isFetching || frontierQuery.isFetching) && (
           <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Optimising" />
         )}

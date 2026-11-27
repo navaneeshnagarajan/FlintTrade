@@ -54,7 +54,7 @@ class Desk(run.Desk):
 
 
 def scenario(desk):
-    assert desk.refresh()['laya_practice']=='ready'
+    assert desk.refresh()['decision_model_practice']=='ready'
     deps=desk.app.extensions.get('flinttrade_broker_dependencies')
     run.save('factory-read-owners.json',{'dependencies':type(deps).__name__,
              'audit':type(desk.app.config.get('AUDIT')).__name__,
@@ -135,7 +135,7 @@ def scenario(desk):
     if VARIANT=='down-after-entry':
         desk.fixtures.mode='health-down'
         ping=desk.refresh()
-        assert ping['laya_practice']=='down' and ping['laya']=='down'
+        assert ping['decision_model_practice']=='down' and ping['decision_model']=='down'
     # Only an owned external quote changes; monitor/risk/positions remain product-owned.
     desk.read_bootstrap.price=details['take_profit']+.5
     wait_for(lambda:desk.owner.run.cleanup_complete,20)

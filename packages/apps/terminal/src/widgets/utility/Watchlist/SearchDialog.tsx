@@ -78,6 +78,7 @@ export function SearchDialog({ onAdd, onClose }: SearchDialogProps) {
           value={query}
           onChange={(e) => handleQuery(e.target.value)}
           placeholder="Search symbol… e.g. SBIN, TCS"
+          aria-label="Search symbol"
           className="flex-1 bg-transparent text-xs text-text-primary placeholder-text-muted focus:outline-none"
         />
         <button

@@ -56,6 +56,40 @@ describe("BrokerRateLimitsPanel", () => {
     expect(await screen.findByText(/No rate-limited brokers connected/i)).toBeInTheDocument();
   });
 
+  it("states the order limit per exchange", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    expect(screen.getByText("Max 10 orders per second per exchange. Higher rates need exchange registration.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/dhan order rate/i)).toHaveAccessibleDescription(
+      "Max 10 orders per second per exchange. Higher rates need exchange registration.",
+    );
+    expect(screen.queryByText(/Orders\/s can be/)).not.toBeInTheDocument();
+  });
+
+  it("explains that a data rate of 0 turns off only this limit", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    expect(screen.getByLabelText(/dhan data rate/i)).toHaveAccessibleDescription(
+      "Data requests: 0 turns off this limit. Broker limits still apply.",
+    );
+  });
+
+  it.each(["20", "10.5", "0"])("blocks saving an order rate of %s", async (value) => {
+    renderPanel();
+    await screen.findByText("dhan");
+    fireEvent.change(screen.getByLabelText(/dhan order rate/i), { target: { value } });
+    expect(screen.getByLabelText(/dhan order rate/i)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: /save dhan rate limits/i })).toBeDisabled();
+  });
+
+  it("still allows unlimited data", async () => {
+    renderPanel();
+    await screen.findByText("dhan");
+    fireEvent.change(screen.getByLabelText(/dhan data rate/i), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /save dhan rate limits/i }));
+    await waitFor(() => expect(mockSet).toHaveBeenCalledWith("dhan", 10, 0));
+  });
+
   it("blocks saving a negative rate", async () => {
     renderPanel();
     await screen.findByText("dhan");

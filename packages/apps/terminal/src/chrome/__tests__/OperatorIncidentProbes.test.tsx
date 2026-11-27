@@ -43,10 +43,10 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
     vi.unstubAllGlobals();
   });
 
-  it("records Laya Down from the desk ping", async () => {
+  it("records Decision model Down from the desk ping", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/v1/ping")) {
-        return jsonResponse({ status: "ok", laya: "down" });
+        return jsonResponse({ status: "ok", decision_model: "down" });
       }
       return jsonResponse({ status: "healthy" });
     }));
@@ -58,7 +58,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
 
   it("records Ready only when the heartbeat says Ready", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes("/api/v1/ping")) return jsonResponse({ status: "ok", laya: "ready" });
+      if (String(input).includes("/api/v1/ping")) return jsonResponse({ status: "ok", decision_model: "ready" });
       return jsonResponse({ status: "healthy" });
     }));
     renderProbes();
@@ -91,10 +91,10 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
       if (String(input).includes("/api/v1/ping")) {
         return jsonResponse({
           status: "ok",
-          laya: practice,
-          laya_practice: practice,
-          laya_live_qualified: practice === "ready",
-          laya_reason: reason,
+          decision_model: practice,
+          decision_model_practice: practice,
+          decision_model_live_qualified: practice === "ready",
+          decision_model_reason: reason,
         });
       }
       return jsonResponse({ status: "healthy" });
@@ -112,7 +112,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Ready");
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Decision model Ready");
 
     practice = "down";
     reason = "stopped";
@@ -120,7 +120,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
       await vi.advanceTimersByTimeAsync(LAYA_STATUS_POLL_MS);
     });
     const stopped = screen.getByTestId("laya-surface");
-    expect(stopped).toHaveTextContent("Laya Down");
+    expect(stopped).toHaveTextContent("Decision model Down");
     expect(stopped.textContent).not.toMatch(/Ready/);
 
     practice = "ready";
@@ -129,7 +129,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
       await vi.advanceTimersByTimeAsync(LAYA_STATUS_POLL_MS);
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Ready");
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Decision model Ready");
     vi.useRealTimers();
     notifyManager.setScheduler((callback) => {
       setTimeout(callback, 0);

@@ -80,7 +80,7 @@ export function Stepper({
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-text-disabled ml-1" title={sublabelTitle}>
+                  <span className="text-text-muted ml-1" title={sublabelTitle}>
                     {sublabel}
                   </span>
                 </TooltipTrigger>
@@ -88,7 +88,7 @@ export function Stepper({
               </Tooltip>
             </TooltipProvider>
           ) : (
-            <span className="text-text-disabled ml-1">{sublabel}</span>
+            <span className="text-text-muted ml-1">{sublabel}</span>
           )
         )}
       </span>
@@ -270,7 +270,7 @@ export function ActionButton({
         {icon}
         {label}
       </span>
-      <span className="text-xxs text-text-disabled font-sans font-normal">{shortcut}</span>
+      <span className="text-xxs text-text-muted font-sans font-normal">{shortcut}</span>
     </button>
   );
 }

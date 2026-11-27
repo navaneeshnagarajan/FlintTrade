@@ -54,6 +54,13 @@ describe("NewsWidget", () => {
     ).toBeInTheDocument();
   });
 
+  it("gives the search input an accessible name", () => {
+    render(<NewsWidget />);
+    expect(screen.getByRole("textbox", { name: "Search news" })).toBe(
+      screen.getByPlaceholderText("Search headlines, sources..."),
+    );
+  });
+
   it("reports backend unavailability without browser fetching a feed", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 

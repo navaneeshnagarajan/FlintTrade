@@ -92,7 +92,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         >
           <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
           <span>
-            {CONNECTED_READ_LABEL} only — never placeable Live orders.
+            {CONNECTED_READ_LABEL} only. Live orders are off.
             Neo has no sandbox. {NEO_OPERATOR_COPY}
           </span>
         </div>
@@ -155,7 +155,7 @@ export function ConnectionStep({
     <div className="space-y-5">
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
-          Practice — simulated fills, no real money. You do not
+          Practice. Simulated fills, no real money. You do not
           need a broker for Practice.
         </p>
         <Button
@@ -167,8 +167,7 @@ export function ConnectionStep({
           <ArrowRight className="size-4 ml-2" />
         </Button>
         <p className="text-xs text-text-muted text-center">
-          Native brokers stay in Settings as a fallback — not the
-          primary Practice path.
+          Native brokers stay in Settings as a fallback.
         </p>
       </div>
 

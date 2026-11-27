@@ -251,7 +251,7 @@ function WidgetButton({ widget, onAdd, onLocked, searchQuery = "" }: WidgetButto
           className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded px-1 py-0.5 bg-accent/15 border border-accent/30"
         >
           <Eye className="w-2.5 h-2.5 text-accent" />
-          <span className="text-[9px] text-accent font-medium leading-none">Preview</span>
+          <span className="text-xxs text-accent font-medium leading-none">Preview</span>
         </span>
       )}
 

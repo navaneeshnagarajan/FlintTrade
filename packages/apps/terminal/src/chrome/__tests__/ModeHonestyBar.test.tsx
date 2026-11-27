@@ -21,7 +21,7 @@ describe("ModeHonestyBar", () => {
     render(<ModeHonestyBar mode="practice" />);
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveTextContent(
-      "Practice — simulated fills, no real money.",
+      "Practice. Simulated fills, no real money.",
     );
     expect(bar).not.toHaveTextContent(/SandboxEngine/i);
   });

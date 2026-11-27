@@ -405,7 +405,7 @@ exempt from the supported-runner floor in `flint.toml`. They compile the
 native addon that ships inside the installer, so the runner's glibc becomes
 the minimum glibc of the published binary — raising the runner would raise
 the floor for every user. The jobs that compile nothing (`validate`,
-`publish`, `electron-desktop-tests`) track the supported floor instead.
+`publish`, `electron-desktop-suite`) track the supported floor instead.
 
 Each job installs the frozen JavaScript workspace, verifies the bootstrap tool
 manifest, bundles Electron, builds the installer and verifies the packaged

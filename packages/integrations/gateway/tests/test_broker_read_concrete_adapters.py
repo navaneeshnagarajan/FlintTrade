@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import csv
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -3319,7 +3320,8 @@ def _kotakneo_rows(client: _KotakNeoClient) -> None:
         "trdSym": "TCS-EQ",
         "exSeg": "nse_cm",
         "trnsTp": "B",
-        "fldQty": 0,
+        "fldQty": 1,
+        "qty": 0,
         "avgPrc": 0,
         "prod": "CNC",
         "flDtTm": "07-Sep-2026 09:20:00",
@@ -3460,7 +3462,8 @@ async def test_kotakneo_supported_surfaces_preserve_zero_optional_absence_and_ex
     start = len(client.calls)
     trades = await bound.port.trades()
     assert isinstance(trades, BrokerReadSuccess)
-    assert trades.value[0].quantity == trades.value[0].price == "0"
+    assert trades.value[0].quantity == "1"
+    assert trades.value[0].price == "0"
     assert client.calls[start:] == ["trade_book"]
 
     start = len(client.calls)
@@ -3468,6 +3471,26 @@ async def test_kotakneo_supported_surfaces_preserve_zero_optional_absence_and_ex
     super_orders = await bound.port.order_states(OrderStateRequest(BrokerOrderFamily.SUPER))
     assert forever == super_orders == BrokerReadFailure(BrokerReadErrorCode.UNSUPPORTED)
     assert client.calls[start:] == []
+
+
+@pytest.mark.asyncio
+async def test_kotakneo_zero_actual_fill_is_refused_without_extra_calls(
+    bind_adapter: Callable[..., _BoundAdapter],
+) -> None:
+    """Refuse zero actual execution without extra reads or quantity substitution.
+
+    Args:
+        bind_adapter: Real owner/registry fixture with a synthetic native SDK client.
+    """
+    client = _KotakNeoClient()
+    _kotakneo_rows(client)
+    client.responses["trade_book"]["data"][0]["fldQty"] = 0
+    bound = bind_adapter("kotakneo", KotakNeoAdapter(client_factory=lambda _session: client), client)
+
+    outcome = await bound.port.trades()
+
+    assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
+    assert client.calls == ["trade_book"]
 
 
 @pytest.mark.asyncio

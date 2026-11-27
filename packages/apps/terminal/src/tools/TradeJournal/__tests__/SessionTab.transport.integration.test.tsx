@@ -406,7 +406,7 @@ describe("Session truth through Trade Review", () => {
     expect(log.getByText("SYNTHETIC-A")).toBeInTheDocument();
     expect(log.getByText("+₹750")).toBeInTheDocument();
     expect(log.getByText("30m")).toBeInTheDocument();
-    expect(log.getByText("Restored")).toHaveAttribute("title", "Restored from backup. Not sent to a broker or checked by Laya.");
+    expect(log.getByText("Restored")).toHaveAttribute("title", "Restored from backup. Not sent to a broker or checked by the decision model.");
     expect(session.getByLabelText(EMPTY_ORDERS)).toBeInTheDocument();
     expectNoSamples();
     expect(countReads(tradesUrl)).toBe(1);

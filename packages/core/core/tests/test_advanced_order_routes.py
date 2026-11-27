@@ -223,3 +223,49 @@ def test_options_strategy_missing_underlying():
             json={"strategy_name": "short_straddle", "expiry": "25MAY25"},
         )
     assert resp.status_code == 400
+
+
+def _options_strategy(json_body: dict, monkeypatch) -> tuple[int, dict, list[int]]:
+    seen: list[int] = []
+
+    def _capture(**kwargs):
+        seen.append(kwargs["lot_size"])
+        raise ValueError("stop after the lot is chosen")
+
+    monkeypatch.setattr(mod, "_build_strategy_legs", _capture)
+    with _make_app(basket_executor=MagicMock()).test_client() as c:
+        resp = c.post("/api/v1/orders/options-strategy", json=json_body)
+    return resp.status_code, resp.get_json(), seen
+
+
+def test_options_strategy_reads_the_lot_from_the_master(monkeypatch):
+    monkeypatch.setattr(mod, "lot_size_from_master", lambda underlying: 65 if underlying == "NIFTY" else None)
+    status, _body, seen = _options_strategy(
+        {"strategy_name": "short_straddle", "underlying": "NIFTY", "expiry": "25MAY25", "strike": 25000},
+        monkeypatch,
+    )
+    assert status == 400
+    assert seen == [65]
+
+
+def test_options_strategy_refuses_an_unknown_lot(monkeypatch):
+    monkeypatch.setattr(mod, "lot_size_from_master", lambda _underlying: None)
+    status, body, seen = _options_strategy(
+        {"strategy_name": "short_straddle", "underlying": "nifty", "expiry": "25MAY25", "strike": 25000},
+        monkeypatch,
+    )
+    assert status == 422
+    assert body == {"status": "error", "code": "lot_size_unknown", "message": "Not placed. The lot size for NIFTY isn't verified."}
+    assert seen == []
+
+
+def test_options_strategy_refuses_a_lot_that_disagrees_with_the_master(monkeypatch):
+    monkeypatch.setattr(mod, "lot_size_from_master", lambda _underlying: 65)
+    status, body, seen = _options_strategy(
+        {"strategy_name": "short_straddle", "underlying": "NIFTY", "expiry": "25MAY25", "strike": 25000, "lot_size": 50},
+        monkeypatch,
+    )
+    assert status == 422
+    assert body["code"] == "lot_size_mismatch"
+    assert body["message"] == "Lot size 50 doesn't match NIFTY. Use 65."
+    assert seen == []

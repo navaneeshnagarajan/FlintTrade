@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 # ===========================================================================
 # native broker HTTP-client errors (legacy tree)
 # ===========================================================================
@@ -67,39 +65,6 @@ class MFARequired(AuthError):
 class CredentialsInvalid(AuthError):
     """Credentials are malformed or rejected by the broker (not expired —
     fundamentally wrong)."""
-
-
-class BrokerSessionDegraded(AuthError):
-    """Identity N2: broker session is partially valid — credentials authentic,
-    but a runtime constraint blocks write operations.
-
-    Example: Dhan DH-903 static-IP mismatch (per dhan §11.4) — credentials are
-    fine, but the outbound IP doesn't match the registered static IP, so order
-    placement is rejected while read-side methods (quotes, historical, option
-    chain) still work.
-
-    The router MUST set ``session.read_only_until_at = now() + 5min`` on this
-    exception and refuse write methods until that timestamp passes.
-
-    Fields:
-        reason: machine-readable code (e.g. "STATIC_IP_MISMATCH").
-        read_only_until: when the read-only window ends.
-        broker_message: human-readable broker response (forensic context).
-        broker_raw_response: full broker payload preserved for the audit chain.
-    """
-
-    def __init__(
-        self,
-        reason: str,
-        read_only_until: datetime,
-        broker_message: str | None = None,
-        broker_raw_response: dict | None = None,
-    ) -> None:
-        self.reason = reason
-        self.read_only_until = read_only_until
-        self.broker_message = broker_message
-        self.broker_raw_response = broker_raw_response or {}
-        super().__init__(f"BrokerSessionDegraded(reason={reason!r}, read_only_until={read_only_until.isoformat()})")
 
 
 # ---------- order ----------

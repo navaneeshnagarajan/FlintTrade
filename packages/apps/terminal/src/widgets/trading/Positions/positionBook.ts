@@ -152,6 +152,17 @@ export function ltpMarker(
  * Real adapters send numerics as strings and mix snake_case with camelCase, so
  * every field is resolved through both spellings before any arithmetic.
  */
+function optionalPositivePrice(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function wireBidAsk(wire: Record<string, unknown>): { bid?: number; ask?: number } {
+  const bid = optionalPositivePrice(wire["bid"] ?? wire["best_bid"] ?? wire["bid_price"]);
+  const ask = optionalPositivePrice(wire["ask"] ?? wire["best_ask"] ?? wire["ask_price"]);
+  return { ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}) };
+}
+
 export function normalisePosition(raw: unknown): PositionRow {
   const wire = (raw ?? {}) as Record<string, unknown>;
   const symbol = str(wire["symbol"]);
@@ -195,6 +206,7 @@ export function normalisePosition(raw: unknown): PositionRow {
     ...(wire["priceSource"] === "ltp" || wire["priceSource"] === "last_close"
       ? { priceSource: wire["priceSource"] }
       : {}),
+    ...wireBidAsk(wire),
   };
 }
 

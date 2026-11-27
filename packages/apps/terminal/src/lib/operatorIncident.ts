@@ -48,7 +48,7 @@ export const FAILURE_CLASSES = [
   "broker_rate_limit",
   "broker_maintenance",
   "llm_provider",
-  "laya",
+  "decision_model",
   "host_unhealthy",
   "backend_unreachable",
   "network_local",
@@ -56,17 +56,20 @@ export const FAILURE_CLASSES = [
 
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
 
-/** Refusal shown when a new order is paused because Laya is Down. */
-export const LAYA_DOWN_REFUSAL =
-  "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+/** Shown while new orders are paused because the decision model is Down. */
+export const LAYA_DOWN_BANNER =
+  "Decision model is down. New orders are paused until it's ready. Closing positions still works.";
+
+/** Place refusal while the decision model is Down. */
+export const LAYA_DOWN_REFUSAL = "Not placed. Decision model is down. Start it from Status.";
 
 /**
- * Reduce-only exit acknowledgement while Laya is not Ready.
+ * Reduce-only exit acknowledgement while the decision model is not Ready.
  * Positions, the Practice Order Pad and the Live Order Pad share this sentence.
  * A request is not a fill.
  */
 export const EXIT_REQUESTED =
-  "Exit requested. Exits are allowed while Laya is Down. Check positions and orders for the outcome.";
+  "Exit requested. Check Positions and Orders for the result.";
 
 /** Exit-all acknowledgement. A request is not a fill. */
 export const EXIT_ALL_REQUESTED =
@@ -159,7 +162,7 @@ const PLAIN_CLASS: Record<FailureClass, string> = {
   broker_rate_limit: "broker rate limit",
   broker_maintenance: "broker maintenance",
   llm_provider: "chat provider",
-  laya: "Laya",
+  decision_model: "decision model",
   host_unhealthy: "host unhealthy",
   backend_unreachable: "backend unreachable",
   network_local: "local network",
@@ -182,7 +185,7 @@ const RECTIFY: Record<FailureClass, string> = {
     "The broker reports maintenance. Wait, then check the broker status page. Live orders stay closed. FlintTrade cannot file a dispute.",
   llm_provider:
     "Chat is unavailable. Retest or switch provider under Settings. Trading does not use Chat to place orders.",
-  laya: "Kill All stays available.",
+  decision_model: "Kill All stays available.",
   host_unhealthy:
     "Free disk space and restart the desk, then read the desk health detail. Live orders stay closed until the desk and broker trust are back. A restart does not recover broker fills. FlintTrade does not hold funds.",
   backend_unreachable:
@@ -209,7 +212,7 @@ export function liveWritesMuted(incident: OperatorIncident | null): boolean {
 
 /** Broker chrome stays Connected when only Laya is Down. */
 export function brokerSessionDarkened(incident: OperatorIncident | null): boolean {
-  return liveWritesMuted(incident) && incident?.failureClass !== "laya";
+  return liveWritesMuted(incident) && incident?.failureClass !== "decision_model";
 }
 
 export function honestBrokerStatus(input: {
@@ -224,7 +227,7 @@ export function honestBrokerStatus(input: {
   }
   if (
     incident
-    && incident.failureClass !== "laya"
+    && incident.failureClass !== "decision_model"
     && incident.moneyPath
     && incident.level !== "info"
     && (input.connected || input.connectedRead)
@@ -399,7 +402,7 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
   }
 
   if (signals.decisionStatus === "down") {
-    return makeIncident("laya", "blocked", true, false, LAYA_DOWN_REFUSAL);
+    return makeIncident("decision_model", "blocked", true, false, LAYA_DOWN_BANNER);
   }
 
   if (

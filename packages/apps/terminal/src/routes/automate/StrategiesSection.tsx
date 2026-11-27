@@ -240,7 +240,7 @@ function StrategyRow({ strategy, onStart, onStop, actionPending }: StrategyRowPr
                   )}
                   {logs?.map((entry, i) => (
                     <div key={`${entry.timestamp}-${i}`} className="flex items-start gap-2 leading-relaxed">
-                      <span className="text-text-disabled shrink-0 tabular-nums">
+                      <span className="text-text-muted shrink-0 tabular-nums">
                         {new Date(entry.timestamp).toLocaleTimeString("en-IN", {
                           timeZone: "Asia/Kolkata",
                           hour: "2-digit",

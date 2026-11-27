@@ -13,6 +13,9 @@ import { foSessionWindow } from "@/lib/muhuratSession";
 /** Human-readable schedule vintage shown on chip titles before 7 Dec 2026. */
 export const CAS_SCHEDULE_NOTE = "as of Aug 2026";
 
+/** First IST date of the closing auction rules and the 15:40 F&O close. */
+export const NSE_FO_AUCTION_START = "2026-08-03";
+
 /** First IST date of the revised auction and F&O close. */
 export const NSE_CAS_REVISION = "2026-12-07";
 
@@ -111,7 +114,11 @@ function preRevisionSchedule(): NseCashSchedule {
 
 /** Cash and F&O segment clock for an IST instant. A missing date is not used. */
 export function nseCashSchedule(on: Date): NseCashSchedule {
-  if (toIstIsoDate(on) < NSE_CAS_REVISION) return preRevisionSchedule();
+  const day = toIstIsoDate(on);
+  if (day < NSE_FO_AUCTION_START) {
+    return { ...preRevisionSchedule(), foClose: HM(15, 30), foSecondaryLabel: "F&O open · till 15:30" };
+  }
+  if (day < NSE_CAS_REVISION) return preRevisionSchedule();
   return {
     casStart: HM(15, 30),
     casEnd: HM(15, 40),

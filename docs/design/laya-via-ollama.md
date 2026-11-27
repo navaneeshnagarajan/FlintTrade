@@ -2,7 +2,7 @@
 
 Ollama can serve both advisory chat models and decision models. FlintTrade should use the existing managed Ollama runtime for the Laya decision role, instead of a separate Laya sidecar, once a gate benchmark passes. Until then the sidecar stays the default and keeps working.
 
-The switch is `FLINTTRADE_LAYA_BACKEND`. Unset, blank, and `sidecar` use the sidecar. `ollama` uses the route in this note. Any other value is an error: the process logs it once and pauses new orders. It does not fall back to the sidecar. A typo must not keep admitting.
+The switch is `FLINTTRADE_DECISION_MODEL_BACKEND`. Unset, blank, and `sidecar` use the sidecar. `ollama` uses the route in this note. Any other value is an error: the process logs it once and pauses new orders. It does not fall back to the sidecar. A typo must not keep admitting.
 
 This spike does not change the managed Ollama pin. Current main pins v0.35.0. A `systemone` entry still requires an owned runtime reporting at least v0.35, a reviewed digest, and passing model qualification; the shipped allowlist remains empty.
 
@@ -18,7 +18,7 @@ The Ollama backend replaces that client only. `decide` still receives the same s
 
 Any of the following refuses the new order. None of them admit. Closing a position is a server-proven reduce-only exit (`admit_reduce_only`). That path does not call the model, and Down does not block it.
 
-The operator sentence stays: "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+The operator sentence stays: "Decision model is down. New orders are paused until it's ready. Closing positions still works."
 
 | Condition | Result |
 |---|---|
@@ -43,11 +43,11 @@ An allowlist entry is a tag, a pinned SHA-256 digest, and a route. The tag is no
 
 On every admission the gate resolves the accepted source-to-locked-alias mapping, then opens one `ManagedOllamaAdmission` for the digest-derived immutable alias and holds it for the whole inference. The source mapping and its live digest are checked inside that scope before and after inference; a mutable source tag is never passed as the inference model. The digest Ollama reports for that call is compared with the pinned digest for the tag. A tag pulled again onto new weights fails the comparison. The chip shows Wrong model version. The response body is not allowed to vouch for itself.
 
-Docs and the Status menu detail line use this sentence. The chip stays exactly "Wrong model version". It does not mention the digest, Ollama, or the model tag. The existing tooltip stays "Laya is running a different model than FlintTrade expects."
+Docs and the Status menu detail line use this sentence. The chip stays exactly "Wrong model version". It does not mention the digest, Ollama, or the model tag. The existing tooltip stays "Decision model is running a different model than FlintTrade expects."
 
 > FlintTrade checks the digest Ollama reports for the exact model tag on every admission. The tag is not the proof. If that digest does not match the pinned digest, the gate shows Wrong model version and new orders stay paused. You can still close positions.
 
-The gate model tag is `FLINTTRADE_LAYA_OLLAMA_MODEL`. It is not the advisory model in Settings. If the tag is unset or not on the allowlist, the gate stays unverified and does not call the model.
+The gate model tag is `FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL`. It is not the advisory model in Settings. If the tag is unset or not on the allowlist, the gate stays unverified and does not call the model.
 
 ## 4. Determinism, and what the model is asked
 
@@ -77,7 +77,7 @@ The locked sentences do not change. The Ollama snapshot fills the same reason co
 
 | Chip | Ollama source |
 |---|---|
-| Checking Laya… | Managed server `state` is `starting`, or the desk has not confirmed a start or stop. New orders stay paused. The desk already shows this from the unconfirmed window. |
+| Checking decision model… | Managed server `state` is `starting`, or the desk has not confirmed a start or stop. New orders stay paused. The desk already shows this from the unconfirmed window. |
 | Downloading the model · X of Y GB | A model pull's completed and total bytes, or the runtime archive download while the server itself is downloading. A missing model uses this state; totals stay 0 until Ollama reports them. |
 | Can't download the model | The pull or the runtime download failed. |
 | Wrong model version | The reported digest is not the pinned digest, the pull is waiting for digest acceptance because the weights changed, or the model store records digest drift for that tag. |

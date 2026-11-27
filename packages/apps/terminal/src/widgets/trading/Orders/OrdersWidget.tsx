@@ -24,6 +24,11 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/services/queryKeys";
+import type { Position } from "@/types/api";
+import { StopLossNotFilledChip } from "@/components/orders/StopLossNotFilledChip";
+import { contractKeyOf, exitNowTicket, exitTicketQuote, isStopLossTriggeredNotFilled } from "@/lib/stopLossState";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
@@ -77,6 +82,8 @@ interface OrderRow {
   strategy: string;
   orderStatus: string;
   isOpen: boolean;
+  /** The stop triggered and its limit has not filled. */
+  stopNotFilled: boolean;
 }
 
 interface OrderActionIntent {
@@ -158,6 +165,7 @@ export function toOrderRow(o: RawOrderRecord): OrderRow {
     strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
     orderStatus: status,
     isOpen: isOpenOrderStatus(status),
+    stopNotFilled: isStopLossTriggeredNotFilled(o),
   };
 }
 
@@ -434,6 +442,13 @@ function OrdersWidget(_props: WidgetProps) {
     isLoading,
     fetchStatus,
   } = useOrders({ enabled: accountReadsEnabled, context: accountReadContext });
+  // Read the position book already cached for this account; the Orders
+  // widget does not fetch it.
+  const queryClient = useQueryClient();
+  const cachedPositions = useCallback(
+    (): Position[] => queryClient.getQueryData<Position[]>(queryKeys.positions.list(currentIdentity.scopeKey)) ?? [],
+    [currentIdentity.scopeKey, queryClient],
+  );
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
 
@@ -686,14 +701,38 @@ function OrdersWidget(_props: WidgetProps) {
       {
         accessorKey: "orderStatus",
         header: "Status",
-        cell: ({ row }) => (
-          <Badge
-            variant={statusVariant(row.original.orderStatus)}
-            className="text-xs font-medium"
-          >
-            {row.original.orderStatus}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const r = row.original;
+          if (!r.stopNotFilled) {
+            return (
+              <Badge
+                variant={statusVariant(r.orderStatus)}
+                className="text-xs font-medium"
+              >
+                {r.orderStatus}
+              </Badge>
+            );
+          }
+          // Full open quantity from the position book; without it, the
+          // quantity this stop was protecting.
+          const exitTicket = () => {
+            const position = cachedPositions().find(
+              (item) => contractKeyOf(item) === contractKeyOf(r) && item.quantity !== 0,
+            );
+            return position
+              ? exitNowTicket(position, exitTicketQuote(position))
+              : exitNowTicket(
+                {
+                  symbol: r.symbol,
+                  exchange: r.exchange,
+                  quantity: r.action === "SELL" ? r.quantityNum : -r.quantityNum,
+                  product: r.product || undefined,
+                },
+                null,
+              );
+          };
+          return <StopLossNotFilledChip symbol={r.symbol} ticket={exitTicket} textClassName="text-xs" />;
+        },
       },
       {
         id: "actions",
@@ -758,7 +797,7 @@ function OrdersWidget(_props: WidgetProps) {
         },
       },
     ],
-    [canManageOrders, isExplore, actionPending, currentIdentity],
+    [canManageOrders, isExplore, actionPending, currentIdentity, cachedPositions],
   );
 
   const table = useTable({
@@ -933,7 +972,7 @@ function OrdersWidget(_props: WidgetProps) {
               {table.getRowModel().rows.map((row, idx) => (
                 <TableRow
                   key={row.id}
-                  className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
+                  className={`h-8 border-t border-border-subtle hover:bg-surface-hover/50 ${
                     idx % 2 === 1 ? "bg-surface-stripe" : ""
                   }`}
                 >

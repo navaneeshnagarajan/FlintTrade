@@ -88,7 +88,7 @@ const SECTIONS: SectionDef[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "suggestions", label: "Suggest", icon: Lightbulb },
-  { id: "signals", label: "Signals", icon: Zap },
+  { id: "signals", label: "Analysis", icon: Zap },
   { id: "market-sentiment", label: "Market", icon: BarChart2 },
   { id: "regime", label: "Regime", icon: Activity },
   { id: "sentiment", label: "Sentiment", icon: TrendingUp },
@@ -258,10 +258,7 @@ function SignalsSection({ stream }: { stream: SignalStreamState }) {
   return (
     <div className="space-y-4" data-tour-target="ai-signals">
       <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold text-base text-text-primary">
-            Trading Signals
-          </h3>
+        <div className="flex items-center justify-end">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="h-6 gap-1.5 text-xs font-normal">
               <span
@@ -995,7 +992,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
   chat: "AI Chat",
   agent: "Autonomous Agent",
   suggestions: "AI Strategy Suggestions",
-  signals: "Signals",
+  signals: "Analysis",
   "market-sentiment": "Market Sentiment Dashboard",
   regime: "Regime Detector",
   sentiment: "Sentiment Analysis",

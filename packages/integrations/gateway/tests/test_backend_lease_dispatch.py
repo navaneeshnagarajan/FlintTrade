@@ -76,7 +76,7 @@ async def test_proof_loss_before_exact_invocation_never_reaches_adapter(owner, l
     adapter = _Adapter()
 
     class Throttle:
-        async def acquire(self, *_):
+        async def acquire(self, *_args, **_kwargs):
             if loss_at == "throttle":
                 proof.revoke()
 

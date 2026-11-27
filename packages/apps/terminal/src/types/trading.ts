@@ -21,6 +21,8 @@ export interface PlaceOrderParams extends TradeInstruction {
   lotSize?: number;
   /** Broker freeze quantity. Admission uses the NSE index circular when this is absent. */
   freezeQty?: number;
+  /** Only reduce the open position: the server caps the quantity to it and refuses when flat. */
+  exitOnly?: boolean;
 }
 export interface ModifyOrderParams extends TradeInstruction { orderId: string; strategy?: string; disclosedQuantity?: number }
 export interface OrderStatusParams { orderId: string; strategy?: string }
@@ -52,6 +54,7 @@ export interface Position extends ValuedQuantity {
   ltpBasis?: "ltp" | "last_close" | "fill_price";
   priceSource?: "ltp" | "last_close"; priceAgeS?: number; priceLabel?: string;
   markSource?: "avg" | "fallback"; settlementPrice?: number;
+  bid?: number; ask?: number;
 }
 export interface Order extends InstrumentIdentity {
   orderId: string; action: OrderSide; quantity: number; price: number;

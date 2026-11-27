@@ -1389,7 +1389,7 @@ baseTest("R161 owning authenticated desk registers current exact diagnostics", a
 baseTest("R161 Example heartbeat targets Practice without granting Live readiness", async ({ page }) => {
   const registry = await isolatedRegistration(page, registry => registerDiagnosticExampleReads(registry, { laya: "ready" }), "/ft-api/api/v1/ping");
   try {
-    expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: "down", laya_practice: "ready" });
+    expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", decision_model: "down", decision_model_practice: "ready" });
   } finally { await registry.dispose(); }
 });
 
@@ -1442,7 +1442,7 @@ for (const live of ["ready", "degraded", "down"] as const) {
     baseTest(`R161 ping keeps Live ${live} independent of Practice ${practice}`, async ({ page }) => {
       const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, laya: live, layaPractice: practice }), "/ft-api/api/v1/ping");
       try {
-        expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", laya: live, laya_practice: practice });
+        expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", decision_model: live, decision_model_practice: practice });
       } finally { await registry.dispose(); }
     });
   }
@@ -1452,7 +1452,7 @@ for (const options of [{}, { laya: "ready" as const }, { layaPractice: "degraded
   baseTest(`R161 ping does not invent an omitted field ${JSON.stringify(options)}`, async ({ page }) => {
     const registry = await isolatedRegistration(page, registry => registerOperatorStatusProbes(registry, { expectedCalls: 1, ...options }), "/ft-api/api/v1/ping");
     try {
-      expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", ...(options.laya ? { laya: options.laya } : {}), ...(options.layaPractice ? { laya_practice: options.layaPractice } : {}) });
+      expect(await fetchJson(page, "GET", "/ft-api/api/v1/ping")).toEqual({ status: "ok", ...(options.laya ? { decision_model: options.laya } : {}), ...(options.layaPractice ? { decision_model_practice: options.layaPractice } : {}) });
     } finally { await registry.dispose(); }
   });
 }

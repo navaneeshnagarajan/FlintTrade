@@ -43,10 +43,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import jwt
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from flinttrade_gateway.log_safety import account_ref, log_ref
 
+from .instrument_lots import lot_size_from_master, missing_lot_refusal
 from .order_input import json_object_body, normalise_order_type_fields
 from .order_outcome import (
     ORDER_CANCELLED,
@@ -60,6 +61,10 @@ from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.order_routes")
 
+# HTTP backstop above the 10-per-second-per-exchange cap, so an NSE burst and
+# a BSE order in the same second reach the order rate limiter.
+_ORDER_ROUTE_USER_RATE = 30
+
 
 @dataclass
 class _LiveWriteProgress:
@@ -72,8 +77,11 @@ class _LiveWriteProgress:
     started: bool = False
     invoked: bool = False
     failed_before_invoke: bool = False
+    before_invoke: Callable[[], None] | None = None
 
     def on_adapter_invoke(self) -> None:
+        if self.before_invoke is not None:
+            self.before_invoke()
         self.invoked = True
 
     @property
@@ -86,6 +94,66 @@ class _LiveWriteProgress:
         except BaseException:
             self.failed_before_invoke = not self.invoked
             raise
+
+
+@dataclass(frozen=True)
+class CompletedPreInvocationRefusal:
+    """Canonical completion proof, never inferred from an HTTP/error shape."""
+
+    cause: str = "canonical_completed_pre_invocation_refusal"
+
+
+@dataclass(frozen=True)
+class CanonicalDispatchOutcome:
+    """A completed canonical call and its independently observed write frontier."""
+
+    response: Any
+    status: int | None
+    refusal: CompletedPreInvocationRefusal | None = None
+
+
+def dispatch_native_command(body: dict[str, Any], *, adapter_id: str, account_id: str,
+                            authority: Any, cancel_order_id: str | None = None) -> CanonicalDispatchOutcome:
+    """Use the ordinary gate/router, retaining authoritative completion evidence.
+
+    The progress object is created here and passed through every queue site.
+    Returning before any queue, or an awaited coroutine's completed failure
+    before invocation, proves refusal. A pending task, wait timeout or invoked
+    adapter never does, regardless of exception class or HTTP status.
+    """
+    from .native_autonomy import NativeDispatchAuthority
+    if type(authority) is not NativeDispatchAuthority:
+        raise ValueError("trusted native command authority required")
+    progress = _LiveWriteProgress(before_invoke=authority.on_invoke)
+    response, status = None, None
+    try:
+        if cancel_order_id is not None:
+            with _require_live_safety().order_admission(f"{adapter_id}:{account_id}"):
+                response, status = _dispatch_live_cancel(
+                    {"orderid": cancel_order_id}, {}, adapter_id=adapter_id, account_id=account_id,
+                    native_authority=authority, progress=progress)
+        else:
+            from .l2_state import managed_safety_reads
+
+            def verify_reads() -> Any:
+                """Borrow only this retained command's current read authority."""
+                return authority.read_context(body, adapter_id, account_id)
+
+            from .account_setup import setup_for
+
+            app = current_app._get_current_object()
+            setup = setup_for(app)
+            reads = (managed_safety_reads(app, adapter_id, account_id, verify_reads)
+                     if setup is not None and setup.production else nullcontext())
+            with reads:
+                response, status = _dispatch_live_order(
+                    "place", body, {}, adapter_id=adapter_id, account_id=account_id,
+                    native_authority=authority, progress=progress)
+    except Exception:
+        # Completion is observed here; the exception's type is not evidence.
+        pass
+    refusal = CompletedPreInvocationRefusal() if not progress.started or progress.failed_before_invoke else None
+    return CanonicalDispatchOutcome(response, status, refusal)
 
 
 def _run_on_client_loop(coro: Any) -> Any:
@@ -110,12 +178,14 @@ def _run_on_client_loop(coro: Any) -> Any:
 def _http_broker_error_fields(exc: BaseException, adapter_id: str) -> dict[str, str]:
     """Detach whitelisted canonical error properties; never stringify an SDK fault."""
     from flinttrade_core import exceptions as errors  # noqa: PLC0415
+    from flinttrade_gateway.brokers.dhan_mapping import DhanApiRejection  # noqa: PLC0415
 
     known_types = (
         errors.BrokerError, errors.OrderError, errors.OrderRejectedByBroker,
         errors.InsufficientFunds, errors.InvalidPrice, errors.InvalidQuantity, errors.InvalidSymbol,
         errors.MarketClosed, errors.UnsupportedOrderType, errors.AuthError, errors.CredentialsInvalid,
         errors.SessionExpired, errors.RateLimitError, errors.NetworkError, errors.BrokerTimeout, errors.BrokerInternal,
+        DhanApiRejection,
     )
     if type(exc) not in known_types:
         return {}
@@ -147,6 +217,9 @@ def _http_broker_error_fields(exc: BaseException, adapter_id: str) -> dict[str, 
 
             redacted = redact_identity(message) or ""
             fields["broker_message"] = " ".join(redacted.split())[:256]
+    reason = properties.get("reason")
+    if type(exc) is DhanApiRejection and type(reason) is str and reason:
+        fields["broker_reason"] = reason
     return fields
 
 
@@ -171,11 +244,15 @@ def _live_write_error_status(
         SafetyBypassError,
         UnsupportedCapabilityError,
     )
+
+    # Match the real inheritance used by except, not a duck-typed __class__.
+    from flinttrade_core.order_rules import OrderRuleRefused  # noqa: PLC0415
     from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
-    # Match the real inheritance used by except, not a duck-typed __class__.
     error_type = type(exc)
+    if issubclass(error_type, OrderRuleRefused):
+        return int(error_type.http_status)
     if issubclass(error_type, SafetyBypassError):
         return 403
     disconnected = issubclass(error_type, (BrokerNotFoundError, KeyError))
@@ -211,6 +288,14 @@ def _live_write_error(
     if unknown:
         response["order_outcome"] = "unknown"
         response["reason"] = REASON_RESPONSE_UNCONFIRMED
+    else:
+        from flinttrade_core.order_rules import OrderRuleRefused, results_payload  # noqa: PLC0415
+
+        # Real inheritance only; a duck-typed ``__class__`` is never consulted.
+        if issubclass(type(exc), OrderRuleRefused):
+            response["message"] = str(exc)
+            response["code"] = "order_rule_blocked"
+            response["rule_results"] = results_payload(exc.results)
     return jsonify(response), (502 if http_status == 502 else 500) if unknown else http_status
 
 
@@ -478,6 +563,14 @@ def _body_to_order(
         extra["variety"] = str(requested_variety)
     if body.get("validity") is not None:
         extra["validity"] = str(body["validity"])
+    if "amoTime" in body:
+        raise ValueError("Native AMO timing alias requires canonical amo_time")
+    if body.get("amo_time") is not None:
+        if (adapter_id != "dhan" or str(requested_variety).lower() != "amo"
+                or type(body["amo_time"]) is not str
+                or body["amo_time"] not in {"PRE_OPEN", "OPEN", "OPEN_30", "OPEN_60"}):
+            raise ValueError("AMO timing is unsupported for the selected placement")
+        extra["amo_time"] = body["amo_time"]
 
     return Order(
         symbol=str(body.get("symbol") or ""),
@@ -492,6 +585,7 @@ def _body_to_order(
         strategy=str(body.get("strategy") or "Flint"),
         admission_note=str(body.get("rationale") or body.get("note") or body.get("admission_note") or ""),
         market_protection=body.get("market_protection"),
+        exit_only=body.get("exit_only") is True,
         **extra,
     )
 
@@ -584,7 +678,7 @@ def _laya_place_response(body: dict[str, Any], *, mode: str, source: str) -> tup
         return None
     status = int(blocked.pop("http_status"))
     logger.info(
-        "Laya %s | mode=%s symbol=%s",
+        "Decision model %s | mode=%s symbol=%s",
         blocked.get("code"),
         mode,
         body.get("symbol", "?"),
@@ -685,6 +779,31 @@ def _record_reduce_only(body: Mapping[str, Any], mode: str) -> None:
     process_laya().admit_reduce_only(proposal)
 
 
+def _exit_ticket_admission(
+    body: dict[str, Any], positions: Sequence[Mapping[str, Any]] | None
+) -> tuple[tuple[Any, int] | None, list[Any]]:
+    """Hold an exit ticket to the open position read just now.
+
+    Returns ``(refusal, results)``. A flat or same-side position refuses the
+    order; a larger quantity is cut to the open size in ``body`` and a warn
+    result says so. Bodies without ``exit_only`` pass through unchanged.
+    """
+    from flinttrade_core.order_rules import exit_admission  # noqa: PLC0415
+
+    if body.get("exit_only") is not True:
+        return None, []
+    net = _position_net(positions, body) if positions is not None else None
+    if net is None:
+        message = "Open position could not be read. Order not sent."
+        return (jsonify({"status": "error", "code": "exit_position_unreadable", "message": message}), 409), []
+    quantity, results = exit_admission(body, net)
+    if quantity < 1:
+        return _order_rule_refusal(results), results
+    if quantity != _quantity_from_body(body):
+        body["quantity"] = quantity
+    return None, results
+
+
 def _optional_positive_int(raw: object) -> int | None:
     """Positive integer from a JSON field. Strings of digits are accepted."""
     if isinstance(raw, bool) or raw is None:
@@ -701,21 +820,30 @@ def _quantity_admission_response(body: Mapping[str, Any]) -> tuple[Any, int] | N
     """Refuse a lot-size or freeze-quantity breach before Laya or a write.
 
     The broker's ``freeze_qty`` is used when the body carries one. Otherwise
-    the NSE index limits in ``qty_freeze`` apply. The order is not split.
+    the NSE index limits in ``qty_freeze`` apply. An unverified BSE value only
+    logs a warning. The order is not split.
     """
-    from flinttrade_engine.qty_freeze import quantity_admission_refusal  # noqa: PLC0415
+    from flinttrade_engine.qty_freeze import (  # noqa: PLC0415
+        quantity_admission_refusal,
+        quantity_freeze_warning,
+    )
 
     quantity = _quantity_from_body(body)
     if quantity < 1:
         return None
+    symbol = str(body.get("symbol") or "")
+    broker_freeze_qty = _optional_positive_int(body.get("freeze_qty"))
     message = quantity_admission_refusal(
-        str(body.get("symbol") or ""),
+        symbol,
         str(body.get("exchange") or ""),
         quantity,
         lot_size=_optional_positive_int(body.get("lot_size")),
-        broker_freeze_qty=_optional_positive_int(body.get("freeze_qty")),
+        broker_freeze_qty=broker_freeze_qty,
     )
     if message is None:
+        warning = quantity_freeze_warning(symbol, quantity, broker_freeze_qty=broker_freeze_qty)
+        if warning is not None:
+            logger.warning("Order quantity check: %s", warning)
         return None
     return jsonify(
         {
@@ -973,12 +1101,14 @@ def _prepare_live_reduce_only(
     *,
     adapter_id: str,
     account_id: str,
-) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str, str], int, int] | None]:
+) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str, str], int, int] | None, list[Any]]:
     """Classify one live place under the contract lock.
 
-    Returns ``(laya_block, reservation)``. A reservation is held only when
-    the order qualifies, so a second close sees it before the broker book does.
-    The reservation tuple is ``(key, quantity, position_net)``.
+    Returns ``(laya_block, reservation, exit_results)``. A reservation is held
+    only when the order qualifies, so a second close sees it before the broker
+    book does. The reservation tuple is ``(key, quantity, position_net)``. An
+    exit ticket is held to the position read here; ``exit_results`` explains
+    a reduced quantity.
     """
     from flinttrade_engine.reduce_only import (  # noqa: PLC0415
         contract_key,
@@ -999,8 +1129,13 @@ def _prepare_live_reduce_only(
     with contract_lock(key):
         positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
         if positions is None:
-            return _laya_place_response(body, mode=_MODE_LIVE, source="operator"), None
+            if body.get("exit_only") is True:
+                return _exit_ticket_admission(body, None)[0], None, []
+            return _laya_place_response(body, mode=_MODE_LIVE, source="operator"), None, []
         position_net = _position_net(positions, body)
+        exit_refusal, exit_results = _exit_ticket_admission(body, positions)
+        if exit_refusal is not None:
+            return exit_refusal, None, exit_results
         # Exact ACK coverage validates every supplied identity/quantity/state
         # alias again. A full book's aggregate pending quantity is not proof
         # that an invisible local ACK is represented. Unavailable books restore
@@ -1010,8 +1145,8 @@ def _prepare_live_reduce_only(
         if _own_exit_pending(body, positions, our_orders, reserved_exit(key)):
             label = _contract_label(body)
             if broker_orders is None:
-                return _exit_orders_unreadable_response(label), None
-            return _exit_pending_response(label), None
+                return _exit_orders_unreadable_response(label), None, exit_results
+            return _exit_pending_response(label), None, exit_results
         block, qualified = _admit_place(
             body,
             mode=_MODE_LIVE,
@@ -1022,10 +1157,10 @@ def _prepare_live_reduce_only(
             extra_pending=reserved_exit(key),
         )
         if not qualified or position_net is None:
-            return block, None
+            return block, None, exit_results
         quantity = _quantity_from_body(body)
         reserve_exit(key, quantity)
-        return None, (key, quantity, position_net)
+        return None, (key, quantity, position_net), exit_results
 
 
 def _safety_state_unavailable_response() -> tuple[Any, int]:
@@ -1481,6 +1616,8 @@ def _admit_and_route_live_order(
     body: dict[str, Any],
     lease: Any = None,
     progress: _LiveWriteProgress | None = None,
+    native_authority: Any = None,
+    preflight_target: Any = None,
 ) -> tuple[bool, Any]:
     """Atomically snapshot, check, gate, reserve, and dispatch one live order."""
     from pydantic import ValidationError  # noqa: PLC0415
@@ -1510,6 +1647,11 @@ def _admit_and_route_live_order(
                 type(exc).__name__,
             )
             return False, _safety_state_unavailable_response()
+        if native_authority is not None:
+            native_authority.check_account()
+        if preflight_target is not None:
+            router.check_preflight_target(preflight_target, typed_order, adapter_id=adapter_id,
+                                          account_id=account_id, request_ctx=request_ctx)
         active_lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
         admission = portfolio_state.admission_for(0)
         try:
@@ -1575,6 +1717,8 @@ def _admit_and_route_live_order(
             adapter_id=adapter_id,
             account_id=account_id,
         )
+        if native_authority is not None:
+            native_authority.on_admitted()
         reservation = active_lease.reserve(typed_order, admission.positions)
         progress = progress if progress is not None else _LiveWriteProgress()
         # Set before queueing: a client-loop wait failure cannot prove that the
@@ -1587,6 +1731,7 @@ def _admit_and_route_live_order(
                 safety_ctx=safety_ctx,
                 hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
                 on_adapter_invoke=progress.on_adapter_invoke,
+                **({"preflight_target": preflight_target} if preflight_target is not None else {}),
             )))
         except BaseException:
             if progress.failed_before_invoke:
@@ -1611,6 +1756,8 @@ def _dispatch_live_order(
     adapter_id: str = "",
     account_id: str | None = None,
     variety: str | None = None,
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """The single enforced execution channel for a live order placement (C1).
 
@@ -1708,23 +1855,64 @@ def _dispatch_live_order(
         selector=f"{adapter_id}:{account_id}",
     )
 
+    if native_authority is not None:
+        from .native_autonomy import NativeDispatchAuthority
+        if type(native_authority) is not NativeDispatchAuthority:
+            raise ValueError("trusted native command authority required")
+        request_ctx = native_authority.request_context(body, adapter_id, account_id)
+
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
         logger.error("Live order rejected because safety runtime is unavailable: %s", type(exc).__name__)
         return _safety_runtime_unavailable_response()
 
+    preflight_targets = []
     try:
+        if adapter_id in {"dhan", "kotakneo"}:
+            # These native fields have no representation or inactive/null
+            # meaning in the canonical Order. Presence is therefore refused,
+            # including zero, False and None, before selecting canonical fields.
+            # Existing represented controls keep their own presence rules;
+            # unrelated JSON metadata is not treated as contract authority.
+            unsupported_native_fields = {
+                "token", "source_digest", "record_digest", "triggerPrice", "orderType", "transactionType", "qty",
+                "ts", "es", "qt", "tt", "pt", "tp",
+            }
+            if unsupported_native_fields.intersection(body):
+                raise ValueError("Native identity or economic aliases require a reviewed canonical representation")
         body = normalise_order_type_fields(body)
+        if adapter_id in {"dhan", "kotakneo"} and str(body.get("exchange", "NSE")).upper() in {"NFO", "BFO"}:
+            # Order has no signed native identity/revision fields. Do not let
+            # supplied aliases disappear and masquerade as resolver evidence;
+            # only the canonical symbol/venue and trusted snapshot select it.
+            native_identity_fields = {
+                "instrument_id", "instrument_token", "security_id", "securityId", "pSymbol",
+                "broker_account_id", "dhanClientId", "exchangeSegment", "exchange_segment", "pExchSeg",
+                "trading_symbol", "tradingSymbol", "pTrdSymbol", "source_revision",
+            }
+            if native_identity_fields.intersection(body):
+                raise ValueError("Native contract identity overrides require a signed canonical representation")
         typed_order = _body_to_order(body, variety=variety, adapter_id=adapter_id)
         if str(adapter_id).strip().lower() == "dhan" and typed_order.variety.lower() in {"regular", "", "amo", "iceberg"}:
+            from flinttrade_core.exceptions import BrokerError  # noqa: PLC0415
             from flinttrade_gateway.brokers import dhan_mapping  # noqa: PLC0415
 
-            # The ordinary/AMO/slice builder is also the adapter's defence.
-            # This placeholder validates shape only, never instrument authority.
-            try:
+            # Preserve the original unrepresented-protection refusal before
+            # even resolving a symbol. Raw construction already proved these
+            # numeric fields finite; the ordinary builder owns their refusal.
+            if any(Decimal(getattr(typed_order, name)) != 0 for name in (
+                "target_price", "stop_loss_price", "trailing_jump",
+            )):
                 dhan_mapping.to_place_order_kwargs(typed_order, "preflight-only")
-            except dhan_mapping.DhanMappingError as exc:
+
+            # Invoke the actual selected adapter's pure builder, including its
+            # exact resolver, before reads, holds or one-shot authority. Never
+            # classify exceptions from the later possible-write path here.
+            try:
+                router.preflight_order(typed_order, adapter_id=adapter_id, request_ctx=request_ctx,
+                                       account_id=account_id, capture_target=preflight_targets.append)
+            except BrokerError as exc:
                 raise ValueError("Dhan ordinary placement intent is unsupported or invalid") from exc
         if str(adapter_id).strip().lower() == "groww" and typed_order.variety.lower() in {"regular", "amo"}:
             from flinttrade_core.exceptions import OrderError  # noqa: PLC0415
@@ -1737,14 +1925,14 @@ def _dispatch_live_order(
             except OrderError as exc:
                 raise ValueError("Groww ordinary placement intent is unsupported or invalid") from exc
         if str(adapter_id).strip().lower() == "kotakneo":
-            from flinttrade_gateway.brokers import kotakneo_mapping  # noqa: PLC0415
+            from flinttrade_core.exceptions import BrokerError  # noqa: PLC0415
 
-            # Reuse the adapter's pure shape guard before reads, reducing holds
-            # or one-shot authority. Symbol resolution and MTF eligibility remain
-            # the adapter's responsibility; it still validates defensively.
+            # Exact listed-contract validation belongs to the selected adapter,
+            # not a placeholder mapper or an untrusted body broker override.
             try:
-                kotakneo_mapping.validate_v3_order(typed_order)
-            except kotakneo_mapping.KotakNeoMappingError:
+                router.preflight_order(typed_order, adapter_id=adapter_id, request_ctx=request_ctx,
+                                       account_id=account_id, capture_target=preflight_targets.append)
+            except BrokerError:
                 return jsonify({
                     "status": "error", "message": "Kotak Neo placement intent is unsupported or invalid.",
                 }), 501
@@ -1795,18 +1983,49 @@ def _dispatch_live_order(
 
     reduce_hold: tuple[tuple[str, str, str, str, str, str], int, int] | None = None
     if ft_action == "place":
-        laya_block, reduce_hold = _prepare_live_reduce_only(
-            body,
-            adapter_id=adapter_id,
-            account_id=account_id,
-        )
+        exit_results: list[Any] = []
+        if native_authority is not None:
+            native_authority.bind_preparation(preflight_targets[0] if preflight_targets else None, typed_order)
+            # This bounded slice only permits new cash entries from an empty
+            # account; it cannot borrow the operator's reduce-only exception.
+            native_authority.capture_laya()
+            laya_block = _laya_place_response(body, mode=_MODE_LIVE, source="automate")
+        else:
+            laya_block, reduce_hold, exit_results = _prepare_live_reduce_only(
+                body,
+                adapter_id=adapter_id,
+                account_id=account_id,
+            )
         if laya_block is not None:
             return laya_block
+        if exit_results:
+            g.exit_rule_results = exit_results
+            typed_order = typed_order.model_copy(update={"quantity": str(_quantity_from_body(body))})
+            if preflight_targets:
+                from flinttrade_core.exceptions import BrokerError  # noqa: PLC0415
+
+                preflight_targets.clear()
+                try:
+                    router.preflight_order(
+                        typed_order,
+                        adapter_id=adapter_id,
+                        request_ctx=request_ctx,
+                        account_id=account_id,
+                        capture_target=preflight_targets.append,
+                    )
+                except BrokerError as exc:
+                    if str(adapter_id).strip().lower() == "kotakneo":
+                        return jsonify({
+                            "status": "error",
+                            "message": "Kotak Neo placement intent is unsupported or invalid.",
+                        }), 501
+                    raise ValueError("Dhan ordinary placement intent is unsupported or invalid") from exc
 
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     admitted_place = False
-    progress = _LiveWriteProgress()
+    progress = progress if progress is not None else _LiveWriteProgress(
+        before_invoke=native_authority.on_invoke if native_authority is not None else None)
     result: Any = None
     try:
         admitted, outcome = _admit_and_route_live_order(
@@ -1819,6 +2038,8 @@ def _dispatch_live_order(
             ft_action=ft_action,
             body=body,
             progress=progress,
+            native_authority=native_authority,
+            preflight_target=preflight_targets[0] if preflight_targets else None,
         )
         if not admitted:
             return outcome
@@ -1957,6 +2178,8 @@ def _gated_write_dispatch(
     exposure_order: Any = None,
     exposure_positions: list[Any] | tuple[Any, ...] = (),
     reservation_order_id: str = "",
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """Shared gate -> ACL -> one-shot dispatch + fail-closed mapping for modify/cancel.
 
@@ -1992,7 +2215,14 @@ def _gated_write_dispatch(
     )
     safe_account = account_ref(account_id)
     safe_order = log_ref(order_id, kind="order")
-    progress = _LiveWriteProgress()
+    if native_authority is not None:
+        from .native_autonomy import NativeDispatchAuthority
+        if type(native_authority) is not NativeDispatchAuthority:
+            raise ValueError("trusted native command authority required")
+        request_ctx = native_authority.request_context(canonical_order, adapter_id, account_id)
+        native_authority.check_account()
+    progress = progress if progress is not None else _LiveWriteProgress(
+        before_invoke=native_authority.on_invoke if native_authority is not None else None)
 
     try:
         safety_ctx = gate_order(
@@ -2002,6 +2232,8 @@ def _gated_write_dispatch(
             account_id=account_id,
             backend_lease_proof=router.backend_lease_proof,
         )
+        if native_authority is not None:
+            native_authority.on_admitted()
         reservation = None
         if exposure_order is not None:
             if admission_lease is None:
@@ -2268,6 +2500,8 @@ def _dispatch_live_cancel(
     *,
     adapter_id: str = "",
     account_id: str | None = None,
+    native_authority: Any = None,
+    progress: _LiveWriteProgress | None = None,
 ) -> tuple[Any, int]:
     """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
 
@@ -2367,6 +2601,8 @@ def _dispatch_live_cancel(
         "cancel",
         canonical,
         payload,
+        native_authority=native_authority,
+        progress=progress,
         adapter_id=adapter_id,
         account_id=account_id,
         order_id=order_id,
@@ -2483,6 +2719,15 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                     "message": ("Practice LIMIT and stop orders require tick capture to be running"),
                 }
             ), 503
+
+        if ft_action in {"modify", "cancel"}:
+            rate_body = dict(body)
+            looked = _practice_order_exchange(sandbox, rate_body)
+            if looked and not str(rate_body.get("exchange") or "").strip():
+                rate_body["exchange"] = looked
+            rate_refusal = _order_rate_refusal(rate_body, broker="practice", action=ft_action)
+            if rate_refusal is not None:
+                return rate_refusal
 
         # Placement is handled only by ``_dispatch_practice_place``. Cancel and
         # modify still reach the sandbox book; other actions do not create orders.
@@ -2750,6 +2995,60 @@ def _visible_practice_refusal(message: str, symbol: str) -> str:
     return practice_price_unavailable(symbol)
 
 
+
+def _resolve_practice_exit_fill(
+    body: Mapping[str, Any],
+    *,
+    limit: float,
+    order_type: str,
+) -> Any:
+    """Last-price fill for a Practice exit, or a refusal sentence, or None.
+
+    None means the last price does not honour the limit, so the order cannot
+    fill immediately. A MARKET fill is not used here: the request price is
+    the limit, not a live last.
+    """
+    if order_type not in {"LIMIT", "SL", "SL-M"}:
+        return None
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not symbol or not (isinstance(limit, (int, float)) and limit > 0):
+        return None
+    from flinttrade_data.practice_price import (  # noqa: PLC0415
+        lookup_stored_last_close,
+        resolve_practice_market_price,
+    )
+
+    exchange = str(body.get("exchange") or "").strip().upper()
+    stored = lookup_stored_last_close(symbol, exchange)
+    resolved = resolve_practice_market_price(
+        symbol=symbol,
+        exchange=exchange,
+        request_price=0.0,
+        price_basis="",
+        stored_close=stored,
+    )
+    if isinstance(resolved, str):
+        return resolved
+    last = resolved.price
+    action = str(body.get("action") or "").strip().upper()
+    if order_type in {"SL", "SL-M"}:
+        try:
+            trigger = float(body.get("trigger_price") or body.get("triggerPrice") or 0.0)
+        except (TypeError, ValueError):
+            trigger = 0.0
+        if trigger <= 0:
+            return None
+        if action == "SELL" and last > trigger:
+            return None
+        if action == "BUY" and last < trigger:
+            return None
+    if action == "SELL" and last < limit:
+        return None
+    if action == "BUY" and last > limit:
+        return None
+    return resolved
+
+
 def _resolve_practice_market_fill(
     body: Mapping[str, Any],
     *,
@@ -2801,7 +3100,7 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     """
     from flinttrade_engine.reduce_only import contract_key, contract_lock  # noqa: PLC0415
 
-    from .protection_scope import request_execution_binding  # noqa: PLC0415
+    from .protection_scope import practice_request_sandbox, request_execution_binding  # noqa: PLC0415
 
     binding = request_execution_binding()
     try:
@@ -2818,6 +3117,12 @@ def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
         product=str(body.get("product") or "MIS"),
     )
     with contract_lock(key):
+        if body.get("exit_only") is True:
+            positions, _orders = _practice_books(practice_request_sandbox())
+            exit_refusal, exit_results = _exit_ticket_admission(body, positions)
+            if exit_refusal is not None:
+                return exit_refusal
+            return _with_rule_results(_dispatch_practice_place_locked(body), exit_results)
         return _dispatch_practice_place_locked(body)
 
 
@@ -2830,7 +3135,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     positions, orders = _practice_books(sandbox)
     if _own_exit_pending(body, positions, orders):
         return _exit_pending_response(_contract_label(body))
-    laya_block, _qualified = _admit_place(
+    laya_block, qualified = _admit_place(
         body,
         mode=_MODE_PRACTICE,
         live=False,
@@ -2880,7 +3185,12 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         ), 500
 
     order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
-    if order_type != "MARKET" and current_app.config.get("TICK_RECORDER") is None:
+    exit_place = qualified or body.get("exit_only") is True
+    if (
+        order_type != "MARKET"
+        and current_app.config.get("TICK_RECORDER") is None
+        and not exit_place
+    ):
         return jsonify(
             {
                 "status": "error",
@@ -2902,14 +3212,30 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         trigger_price = 0.0
 
     fill = _resolve_practice_market_fill(body, price=price, order_type=order_type)
+    if fill is None and exit_place:
+        fill = _resolve_practice_exit_fill(body, limit=price, order_type=order_type)
     if isinstance(fill, str):
         return jsonify({"status": "error", "message": fill}), 400
-    place_price = price if fill is None else fill.price
+    if (
+        fill is None
+        and exit_place
+        and order_type != "MARKET"
+        and current_app.config.get("TICK_RECORDER") is None
+    ):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The last price is outside the limit.",
+            }
+        ), 400
+    place_price = price if fill is None or (exit_place and order_type != "MARKET") else fill.price
     provenance: dict[str, Any] = {}
     if fill is not None and fill.price_source:
         provenance["price_source"] = fill.price_source
         if fill.price_age_s is not None:
             provenance["price_age_s"] = fill.price_age_s
+    if fill is not None and exit_place and order_type != "MARKET":
+        provenance["fill_price"] = fill.price
 
     sandbox_write_started = False
     try:
@@ -2930,6 +3256,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                 trigger_price=trigger_price,
                 strategy=str(body.get("strategy") or "").strip(),
                 instrument_token=str(body.get("instrument_token") or body.get("security_id") or "").strip(),
+                exit_only=body.get("exit_only") is True,
                 **provenance,
             )
             if protection is not None:
@@ -2974,6 +3301,9 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
         result.get("status", "?"),
     )
     if str(result.get("status", "")).upper() == "REJECTED":
+        rule_detail = (
+            {"code": result.get("code"), "rule_results": result["rule_results"]} if result.get("rule_results") else {}
+        )
         return jsonify(annotate(
             {
                 "status": "error",
@@ -2981,6 +3311,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
                     str(result.get("message") or "Practice order rejected"),
                     str(body.get("symbol") or ""),
                 ),
+                **rule_detail,
             },
             outcome="rejected",
             reason=REASON_BROKER_REJECTED,
@@ -3032,6 +3363,139 @@ def _gtt_contract_refusal(body: Mapping[str, Any]) -> tuple[Any, int] | None:
     ), 422
 
 
+def _order_rule_results(body: Mapping[str, Any], *, broker: str) -> list[Any]:
+    """Evaluate the shared order rules for one request body.
+
+    The API, MCP tools, the ticket, Practice and backtests read the same rows,
+    so a refusal here carries the same level, source and message the ticket
+    shows. ``last_price`` is optional; without it the price-band warning is
+    skipped and the exchange decides.
+    """
+    from flinttrade_core.order_rules import evaluate_order, ist_minutes  # noqa: PLC0415
+    from flinttrade_gateway.service_profiles import order_entry_profile  # noqa: PLC0415
+
+    profile = order_entry_profile(broker)
+    try:
+        normalised = normalise_order_type_fields(body)
+    except ValueError:
+        normalised = dict(body)
+    return evaluate_order(
+        normalised,
+        broker=profile["broker"],
+        broker_name=profile["broker_name"],
+        last_price=body.get("last_price"),
+        at_minutes=ist_minutes(),
+    )
+
+
+def _order_rule_refusal(results: list[Any]) -> tuple[Any, int] | None:
+    """Return the 400 refusal for a block-level result, else None."""
+    from flinttrade_core.order_rules import blocking, headline, results_payload  # noqa: PLC0415
+
+    blocks = blocking(results)
+    if not blocks:
+        return None
+    return jsonify(
+        {
+            "status": "error",
+            "message": headline(blocks),
+            "code": "order_rule_blocked",
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
+            "rule_results": results_payload(results),
+        }
+    ), 400
+
+
+def _practice_order_rate_limiter() -> Any:
+    """The Practice-owned per-exchange order rate limiter."""
+    limiter = current_app.config.get("PRACTICE_ORDER_RATE_LIMITER")
+    if limiter is None:
+        from flinttrade_gateway.rate_limiter import BrokerRateLimiter  # noqa: PLC0415
+
+        limiter = BrokerRateLimiter({})
+        current_app.config["PRACTICE_ORDER_RATE_LIMITER"] = limiter
+    return limiter
+
+
+def _practice_order_exchange(sandbox: Any, body: Mapping[str, Any]) -> str | None:
+    """Exchange on the request, or on the Practice order it changes."""
+    exchange = str(body.get("exchange") or "").strip() or None
+    if exchange:
+        return exchange
+    order_id = str(body.get("order_id") or body.get("orderid") or "").strip()
+    if not order_id or sandbox is None:
+        return None
+    try:
+        rows = sandbox.get_orders()
+    except Exception:
+        return None
+    for row in rows or []:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("order_id") or "").strip() == order_id:
+            found = str(row.get("exchange") or "").strip()
+            return found or None
+    return None
+
+
+def _order_rate_refusal(
+    body: Mapping[str, Any], *, broker: str, action: str = "place"
+) -> tuple[Any, int] | None:
+    """Refuse the eleventh order in one second on one exchange, else None."""
+    from flinttrade_core.order_rules import (  # noqa: PLC0415
+        OrderBudgetExceeded,
+        headline,
+        results_payload,
+    )
+
+    limiter = _practice_order_rate_limiter()
+    admit = getattr(limiter, "admit_order", None)
+    if not callable(admit):
+        return None
+    exchange = str(body.get("exchange") or "").strip() or None
+    try:
+        admit(broker, exchange=exchange, action=action)
+    except OrderBudgetExceeded as exc:
+        return jsonify(
+            {
+                "status": "error",
+                "message": headline(exc.results),
+                "code": "order_rule_blocked",
+                "dispatch_outcome": "refused_before_dispatch",
+                "retry_safe": False,
+                "rule_results": results_payload(exc.results),
+            }
+        ), int(exc.http_status)
+    return None
+
+
+def _with_rule_results(response: tuple[Any, int], results: list[Any]) -> tuple[Any, int]:
+    """Attach warn and info results to a JSON order response."""
+    from flinttrade_core.order_rules import results_payload  # noqa: PLC0415
+
+    if not results:
+        return response
+    resp, status = response
+    try:
+        data = resp.get_json(silent=True)
+    except AttributeError:
+        return response
+    if not isinstance(data, dict):
+        return response
+    existing = data.get("rule_results") if isinstance(data.get("rule_results"), list) else []
+    seen = {item.get("rule_id") for item in existing if isinstance(item, dict)}
+    added = [item for item in results_payload(results) if item["rule_id"] not in seen]
+    if not added:
+        return response
+    data["rule_results"] = [*existing, *added]
+    new_resp = jsonify(data)
+    for header, value in resp.headers.items():
+        if header.lower() not in {"content-length", "content-type"}:
+            new_resp.headers[header] = value
+    return new_resp, status
+
+
 def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tuple[Any, int]:
     """Admit one live or Practice place, then SafetySystem or the sandbox.
 
@@ -3069,7 +3533,14 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
             }
         ), 403
     if mode == _MODE_PRACTICE:
-        return _dispatch_practice_place(payload_body)
+        practice_results = _order_rule_results(payload_body, broker="practice")
+        practice_refusal = _order_rule_refusal(practice_results)
+        if practice_refusal is not None:
+            return practice_refusal
+        rate_refusal = _order_rate_refusal(payload_body, broker="practice")
+        if rate_refusal is not None:
+            return _with_rule_results(rate_refusal, practice_results)
+        return _with_rule_results(_dispatch_practice_place(payload_body), practice_results)
     if not _is_live_mode_unlocked():
         return jsonify(
             {
@@ -3086,8 +3557,12 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
             }
         ), 401
     adapter_id, account_id = _gated_target(payload_body)
+    rule_results = _order_rule_results(payload_body, broker=adapter_id)
+    rule_refusal = _order_rule_refusal(rule_results)
+    if rule_refusal is not None:
+        return rule_refusal
     variety = _variety_from_body(payload_body)
-    return _dispatch_live_order(
+    response = _dispatch_live_order(
         "place",
         payload_body,
         live_payload,
@@ -3095,6 +3570,7 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
         account_id=account_id,
         variety=variety,
     )
+    return _with_rule_results(response, [*rule_results, *g.pop("exit_rule_results", [])])
 
 
 def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, int] | None:
@@ -3164,7 +3640,7 @@ def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, 
 
 
 @orders_bp.route("/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
     """Place a regular order — maps to native broker ``placeorder``.
 
@@ -3253,7 +3729,7 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
 
 
 @orders_bp.route("/<broker>/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_order_routed(broker: str) -> tuple[Any, int]:
     """Place a LIVE order through the safety-gated, selector-bound router (G5).
 
@@ -3277,18 +3753,23 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
     payload, error = _decode_routed_live_payload()
     if error is not None:
         return error
+    rule_results = _order_rule_results(body, broker=broker)
+    rule_refusal = _order_rule_refusal(rule_results)
+    if rule_refusal is not None:
+        return rule_refusal
 
-    return _dispatch_live_order(
+    response = _dispatch_live_order(
         "place",
         body,
         payload,
         adapter_id=broker,
         variety=_variety_from_body(body),
     )
+    return _with_rule_results(response, [*rule_results, *g.pop("exit_rule_results", [])])
 
 
 @orders_bp.route("/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def modify_order() -> tuple[Any, int]:
     """Modify an existing open order — maps to native broker ``modifyorder``.
 
@@ -3308,7 +3789,7 @@ def modify_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def modify_order_routed(broker: str) -> tuple[Any, int]:
     """Modify a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -3320,7 +3801,7 @@ def modify_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_order() -> tuple[Any, int]:
     """Cancel an open order — maps to native broker ``cancelorder``.
 
@@ -3337,7 +3818,7 @@ def cancel_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_order_routed(broker: str) -> tuple[Any, int]:
     """Cancel a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -3349,7 +3830,7 @@ def cancel_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel-all", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def cancel_all_orders() -> tuple[Any, int]:
     """Cancel all open orders — maps to native broker ``cancelallorder``.
 
@@ -3363,14 +3844,14 @@ def cancel_all_orders() -> tuple[Any, int]:
 
 
 @orders_bp.route("/options", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def options_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options")
 
 
 @orders_bp.route("/options-multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def options_multi_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("options-multi")
@@ -3384,21 +3865,21 @@ def options_multi_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/gtt-place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_place_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-place")
 
 
 @orders_bp.route("/gtt-modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_modify_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-modify")
 
 
 @orders_bp.route("/gtt-cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def gtt_cancel_order() -> tuple[Any, int]:
     """Refuse this action until an independently gated native implementation exists."""
     return _dispatch_order("gtt-cancel")
@@ -3949,7 +4430,7 @@ def _check_legs_through_safety(
 
 
 @orders_bp.route("/forever", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_place() -> tuple[Any, int]:
     """Refuse a forever (GTT) place.
 
@@ -3976,7 +4457,7 @@ def forever_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_modify(order_id: str) -> tuple[Any, int]:
     """Modify a resting forever (GTT) order — gated ``modify_forever`` verb.
 
@@ -4033,7 +4514,7 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def forever_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a resting forever (GTT) order — gated ``cancel_forever`` verb.
 
@@ -4082,7 +4563,7 @@ def super_order_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def super_order_modify(order_id: str) -> tuple[Any, int]:
     """Modify one leg of a pending super order — gated ``modify_super_order`` verb.
 
@@ -4155,7 +4636,7 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def super_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a super order or one leg — gated ``cancel_super_order`` verb.
 
@@ -4195,7 +4676,7 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_place() -> tuple[Any, int]:
     """Refuse a conditional-trigger place.
 
@@ -4224,7 +4705,7 @@ def trigger_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_modify(alert_id: str) -> tuple[Any, int]:
     """Modify a conditional trigger — gated ``modify_conditional_trigger`` verb.
 
@@ -4276,7 +4757,7 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def trigger_cancel(alert_id: str) -> tuple[Any, int]:
     """Cancel a conditional trigger — gated ``cancel_conditional_trigger`` verb."""
     payload, err = _require_live_payload(require_unlock=True)
@@ -4300,7 +4781,7 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def multi_order_place() -> tuple[Any, int]:
     """Refuse a batch place. Each leg is posted to ``/api/v1/orders/place``.
 
@@ -4328,7 +4809,7 @@ def multi_order_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def smart_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel one smart resource through broker-specific signed addressing.
 
@@ -4443,7 +4924,7 @@ _ADVANCED_STRATEGY_NAMES = {
 
 @orders_bp.route("/basket", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_basket() -> tuple[Any, int]:
     """Refuse a basket place. Each leg is posted to ``/api/v1/orders/place``.
 
@@ -4506,7 +4987,7 @@ def place_basket() -> tuple[Any, int]:
 
 @orders_bp.route("/split", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
+@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")
 def place_split() -> tuple[Any, int]:
     """Refuse a split place. Each chunk is posted to ``/api/v1/orders/place``.
 
@@ -4628,7 +5109,8 @@ def place_options_strategy() -> tuple[Any, int]:
 
     try:
         lots: int = int(body.get("lots", 1))
-        lot_size: int = int(body.get("lot_size", 50))
+        requested_lot_size = body.get("lot_size")
+        requested_lot = None if requested_lot_size is None else int(requested_lot_size)
         exchange: str = str(body.get("exchange", "NFO"))
         product: str = str(body.get("product", "NRML"))
         basket_strategy: str = str(body.get("strategy", strategy_name))
@@ -4638,6 +5120,24 @@ def place_options_strategy() -> tuple[Any, int]:
     from flinttrade_engine.basket_orders import _leg_to_order  # noqa: PLC0415
     from flinttrade_engine.bracket_routes import _request_principal  # noqa: PLC0415
     from flinttrade_engine.options_multi_order import OptionsStrategyBuilder  # noqa: PLC0415
+
+    lot_size = lot_size_from_master(underlying)
+    if lot_size is None:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "lot_size_unknown",
+                "message": missing_lot_refusal(underlying),
+            }
+        ), 422
+    if requested_lot is not None and requested_lot != lot_size:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "lot_size_mismatch",
+                "message": f"Lot size {requested_lot} doesn't match {underlying.strip().upper()}. Use {lot_size}.",
+            }
+        ), 422
 
     try:
         legs = _build_strategy_legs(

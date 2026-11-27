@@ -95,17 +95,44 @@ function parseRgb(value: string): string | null {
 function declaredCustomProperty(element: Element, name: string): string {
   let cursor: Element | null = element;
   while (cursor) {
+    const inline = (cursor as HTMLElement).style?.getPropertyValue(name).trim();
+    if (inline) return inline;
     const value = getComputedStyle(cursor).getPropertyValue(name).trim();
     if (value) return value;
     cursor = cursor.parentElement;
   }
-  return "";
+  return document.documentElement.style.getPropertyValue(name).trim();
+}
+
+function specifiedCssValue(element: Element, property: string): string {
+  const inline = (element as HTMLElement).style?.getPropertyValue(property).trim();
+  if (inline) return inline;
+  let specified = "";
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    for (const rule of Array.from(rules)) {
+      if (!(rule instanceof CSSStyleRule)) continue;
+      try {
+        if (!element.matches(rule.selectorText)) continue;
+      } catch {
+        continue;
+      }
+      const value = rule.style.getPropertyValue(property).trim();
+      if (value) specified = value;
+    }
+  }
+  return specified;
 }
 
 /**
- * jsdom returns the specified value (`var(...)`, `color-mix(...)`) rather
- * than a used colour. Follow that declaration on the element so a shadowed
- * custom property is the colour the tab actually paints.
+ * Follow `var(...)` and `color-mix(...)` declarations to a hex colour.
+ * jsdom 31 leaves an empty used value for those functions, so callers pass
+ * the specified declaration when `getComputedStyle` is empty.
  */
 function resolveCssColour(element: Element, raw: string, seen: Set<string> = new Set()): string {
   const value = raw.trim().replace(/\s+/g, " ");
@@ -148,10 +175,22 @@ function resolveCssColour(element: Element, raw: string, seen: Set<string> = new
   return "";
 }
 
+function paintedColour(element: Element, property: "color" | "background-color"): string {
+  const computed = getComputedStyle(element).getPropertyValue(property);
+  const fromComputed = resolveCssColour(element, computed);
+  if (fromComputed && fromComputed !== "transparent") return fromComputed;
+  const specified = specifiedCssValue(element, property);
+  if (specified && specified !== computed.trim()) {
+    const fromSpecified = resolveCssColour(element, specified);
+    if (fromSpecified && fromSpecified !== "transparent") return fromSpecified;
+  }
+  return fromComputed === "transparent" ? "" : fromComputed;
+}
+
 function paintedBackground(element: Element): string {
   let cursor: Element | null = element;
   while (cursor) {
-    const resolved = resolveCssColour(cursor, getComputedStyle(cursor).backgroundColor);
+    const resolved = paintedColour(cursor, "background-color");
     if (resolved && resolved !== "transparent") return resolved;
     cursor = cursor.parentElement;
   }
@@ -272,7 +311,7 @@ describe("unselected tab contrast", () => {
     for (const theme of CINEMATIC_THEMES) {
       useThemeStore.setState({ activeThemeId: theme.id, mode: "dark" });
       useThemeStore.getState().applyTheme();
-      const foreground = resolveCssColour(header, getComputedStyle(header).color);
+      const foreground = paintedColour(header, "color");
       const background = paintedBackground(header);
       const expected = unselectedTabColour(theme.dark.colors.text, theme.dark.colors.textSecondary);
       const ratio = foreground.startsWith("#") && background.startsWith("#")

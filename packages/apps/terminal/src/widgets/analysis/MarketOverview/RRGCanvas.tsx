@@ -14,6 +14,7 @@
 
 import { useRef, useState, useCallback, useEffect, memo } from "react";
 import type { MouseEvent } from "react";
+import { ExampleDataBadge } from "@/components/ui/ExampleDataBadge";
 import type { RRGResponse, SectorRRG, RRGQuadrant } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
@@ -271,8 +272,10 @@ export const RRGCanvas = memo(function RRGCanvas({ data, tailLength }: RRGCanvas
         onMouseLeave={() => setHoveredSector(null)}
       />
 
-      {/* Sample data indicator — fails closed, as PortfolioRRGTab already does. */}
-      
+      {/* Fails closed, as PortfolioRRGView does: only an explicit `false` is live. */}
+      {data.is_sample_data !== false && (
+        <ExampleDataBadge className="absolute top-1 right-1 bg-surface-card/80" />
+      )}
 
       {/* Hover tooltip */}
       {hoveredData && (
@@ -312,7 +315,7 @@ export const RRGCanvas = memo(function RRGCanvas({ data, tailLength }: RRGCanvas
       )}
 
       {/* Tail length label */}
-      <div className="absolute bottom-1 left-1 text-xxs text-text-disabled">
+      <div className="absolute bottom-1 left-1 text-xxs text-text-muted">
         tail: {tailLength}w · benchmark: {data.benchmark}
       </div>
     </div>

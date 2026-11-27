@@ -35,7 +35,7 @@
  *     layout can be previewed without a broker connection.
  */
 
-import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
 import { useAtomValue } from "jotai";
 import type { WidgetProps } from "@/types/widgets";
 import { ArrowUpDown, X, Loader2, AlertCircle } from "lucide-react";
@@ -471,7 +471,26 @@ function OrderLadderWidget(props: Props) {
 
   useEffect(() => { track("trade", "widget_view_order_ladder"); }, [track]);
 
-  const showMsg = useCallback((msg: string) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(null), 3000); }, []);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const statusOwnerActive = useRef(true);
+  useEffect(() => {
+    statusOwnerActive.current = true;
+    return () => {
+      statusOwnerActive.current = false;
+      clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = undefined;
+    };
+  }, []);
+  const showMsg = useCallback((msg: string) => {
+    // A late action result must not create a new timer after owner retirement.
+    if (!statusOwnerActive.current) return;
+    clearTimeout(statusTimerRef.current);
+    setStatusMsg(msg);
+    statusTimerRef.current = setTimeout(() => {
+      statusTimerRef.current = undefined;
+      setStatusMsg(null);
+    }, 3000);
+  }, []);
 
   // Persist the operator's exchange/tick into the panel params so a saved
   // layout reopens on the same book (this is also how the retired `depth` id
@@ -683,7 +702,7 @@ function OrderLadderWidget(props: Props) {
         </div>
       </div>
       <div className="flex-none px-2 py-1 border-b border-border-subtle">
-        <AdmissionNoteField id="ladder-admission-note" value={note} onChange={setNote} />
+        <AdmissionNoteField id="ladder-admission-note" value={note} onChange={setNote} collapsible />
       </div>
 
       <div className="flex-none flex items-center h-5 border-b border-border-default text-xxs font-medium uppercase tracking-wide bg-surface-card">

@@ -1,7 +1,0 @@
-# FlintTrade — integration
-
-> Generic HMAC-signed custom webhooks, alerter
-
-## Dependencies
-
-See `packages/integrations/webhooks/pyproject.toml` for declared dependencies and optional extras.

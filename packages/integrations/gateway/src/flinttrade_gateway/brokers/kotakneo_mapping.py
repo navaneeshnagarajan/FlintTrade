@@ -20,11 +20,13 @@ from __future__ import annotations
 import math
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Any
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import BrokerError
 
+from .kotakneo_contracts import is_selected_option_symbol
 from .kotakneo_sdk import validate_read_envelope
 
 # Exchange -> NEO exchange-segment code (from settings.exchange_segment).
@@ -706,6 +708,10 @@ def to_option_chain_request(request: dict[str, Any]) -> dict[str, Any]:
     if len(set(supplied_expiries)) > 1:
         raise KotakNeoMappingError("Conflicting Kotak Neo option-chain expiry aliases")
     expiry = supplied_expiries[0] if supplied_expiries else None
+    if "confirmed_expiry" in request:
+        confirmed = _canonical_iso_date(request["confirmed_expiry"], label="confirmed expiry")
+        if expiry != confirmed:
+            raise KotakNeoMappingError("A confirmed contract requires its explicit unchanged expiry")
 
     instrument_type = request.get("instrument_type", "option")
     if instrument_type is None:
@@ -756,6 +762,10 @@ def _option_leg(
         raise BrokerReadResponseInvalid from None
     prefix = "ce" if side == "CE" else "pe"
     mapped: dict[str, Any] = {f"{prefix}_instrument_id": neosymbol}
+    if "symbol" in instrument:
+        _response_identifier(instrument, "symbol")
+    if "moneyness" in instrument:
+        _response_text(instrument, "moneyness", required=True)
 
     if "quote" in row:
         quote = _response_record(row["quote"])
@@ -797,6 +807,11 @@ def from_kotak_option_chain(
         raise BrokerReadResponseInvalid from None
     if requested_expiry is not None and expiry != requested_expiry:
         raise BrokerReadResponseInvalid from None
+    for name in ("mktLot", "multiplier"):
+        if name in common:
+            number = _response_market_decimal(common[name], whole=name == "mktLot")
+            if number <= 0:
+                raise BrokerReadResponseInvalid from None
 
     by_strike: dict[Decimal, dict[str, Any]] = {}
     seen_by_side: dict[str, set[Decimal]] = {"CE": set(), "PE": set()}
@@ -829,6 +844,13 @@ def from_kotak_option_chain(
         "expiry": expiry,
         "expiry_date": expiry,
         "strikes": strikes,
+        "broker_fields": {
+            "common_data": _broker_fields(common, ("mktLot", "multiplier", "unlSymbol", "exSeg", "expiryDt")),
+            **{name: [{"instrument": _broker_fields(row["instrument"], (
+                "neoSymbol", "symbol", "optionType", "strikePrice", "moneyness",
+            ))} for row in data[name]] for name in ("call", "put")},
+            "expiry_selection": "explicit" if requested_expiry is not None else "nearest_expiry_discovery",
+        },
     }
 
 
@@ -863,12 +885,95 @@ def _norm(value: Any, default: str = "") -> str:
     return str(value).upper() if value is not None else default
 
 
-def validate_v3_order(order: Any) -> tuple[str, str, str, str, str, str]:
+def validate_option_terms(*, symbol: str, exchange: str, side: str, product: str,
+                          price_type: str, quantity: Decimal, price: Decimal, trigger: Decimal,
+                          lot_size: int | None = None, selected: bool = False,
+                          allow_market_conversion: bool = False) -> None:
+    """Exchange constraints, not operator limits or an execution guarantee.
+
+    NSE FAOP49677 prohibits option SL-M, BSE 20230921-43 prohibits derivative
+    SL-M. BSE 20260114-28/20260116-61 apply the index-option SL distance from
+    2026-02-09. The independent published index tick is INR 0.05; no raw
+    master tick scaling is inferred here.
+
+    Args:
+        symbol: Exact caller trading symbol or selected underlying intent.
+        exchange: Normalised FlintTrade exchange code.
+        side: Validated BUY/SELL side; required for stop-limit relation checks.
+        product: Validated product code; selected options require MIS or NRML.
+        price_type: Validated semantic type such as LIMIT, MARKET, SL or SL-M.
+        quantity: Already validated positive whole underlying-unit quantity.
+        price: Already validated non-negative exact INR limit price.
+        trigger: Already validated non-negative exact INR trigger price.
+        lot_size: Qualified positive listing lot, or None for shape-only checks.
+            None never supplies lot one or establishes executable qualification.
+        selected: True when an exact resolver identified an opaque selected
+            listing. False still classifies recognisable selected-option symbols.
+        allow_market_conversion: False refuses selected MKT intent. True is
+            reserved for the separately gated manual emergency path accepting
+            possible protected-LIMIT conversion, never a fill or price guarantee.
+
+    Raises:
+        KotakNeoMappingError: Terms violate a qualified exchange constraint.
+    """
+    option = symbol.endswith(("CE", "PE"))
+    selected = selected or is_selected_option_symbol(symbol, exchange)
+    if price_type == "SL-M" and (exchange == "BFO" or exchange == "NFO" and (option or selected)):
+        raise KotakNeoMappingError("Exchange prohibits SL-M for these derivatives")
+    if not selected:
+        return
+    if product not in {"MIS", "NRML"}:
+        raise KotakNeoMappingError("Kotak selected options require MIS or NRML")
+    if price_type == "MARKET" and not allow_market_conversion:
+        raise KotakNeoMappingError(
+            "Requested MKT may become broker protected-LIMIT; an explicit limit is required, not guaranteed execution"
+        )
+    if lot_size is not None and int(quantity) % lot_size:
+        raise KotakNeoMappingError("Kotak option quantity must be whole units in the exact listed lot")
+    tick = Fraction(1, 20)  # Exchange INR tick, not dTickSize / 100.
+    for value in (price, trigger):
+        if (Fraction(value) / tick).denominator != 1:
+            raise KotakNeoMappingError("Kotak selected option price/trigger must align to exchange INR tick 0.05")
+    if price_type == "LIMIT" and trigger != 0:
+        raise KotakNeoMappingError("A limit option order cannot carry an active stop trigger")
+    if price_type == "SL":
+        if side not in {"BUY", "SELL"}:
+            raise KotakNeoMappingError("Option SL modification requires explicit side context")
+        if side == "BUY" and trigger > price or side == "SELL" and trigger < price:
+            raise KotakNeoMappingError("Option SL trigger and limit have the wrong side relation")
+        if exchange == "BFO":
+            distance = abs(Fraction(price) - Fraction(trigger))
+            bound = Fraction(10) if trigger <= 50 else Fraction(trigger) / 5
+            if distance > bound:
+                raise KotakNeoMappingError(
+                    "BSE index-option stop limit order price range check failed (effective 2026-02-09)"
+                )
+
+
+def validate_v3_order(
+    order: Any, *, allow_market_conversion: bool = False, lot_size: int | None = None, selected: bool = False,
+) -> tuple[str, str, str, str, str, str]:
     """Validate the regular/AMO parameter shape supported by the v3 SDK.
 
     This is deliberately callable before symbol/token resolution so an
     unsupported shape cannot cause even a preparatory SDK request. This is
     not eligibility: the adapter separately refuses unverified MTF dispatch.
+
+    Args:
+        order: Caller order with the existing broker-neutral fields.
+        allow_market_conversion: False requires an explicit selected-option
+            limit. True preserves the separately gated manual emergency MKT
+            exception and its uncertain broker protected-LIMIT conversion.
+        lot_size: Qualified positive listing lot, or None for shape-only checks
+            before resolution. No executable lot is inferred from omission.
+        selected: True for an exact selected listing, including opaque symbols;
+            False still applies the recognisable selected-symbol classifier.
+
+    Returns:
+        Validated side, price type, product, exchange, validity and variety.
+
+    Raises:
+        KotakNeoMappingError: The shape or supplied listing-qualified terms fail.
     """
     side = _norm(order.action)
     if side not in SIDE_TO_KOTAK:
@@ -892,18 +997,39 @@ def validate_v3_order(order: Any) -> tuple[str, str, str, str, str, str]:
         raise KotakNeoMappingError(f"Kotak Neo v3 does not support order variety {variety!r}")
     if getattr(order, "market_protection", None) is not None:
         raise KotakNeoMappingError("Kotak Neo v3 does not support caller market protection")
-    _validated_order_numbers(order, price_type)
+    quantity, price, trigger, _ = _validated_order_numbers(order, price_type)
+    validate_option_terms(symbol=str(order.symbol), exchange=exchange, side=side, product=product,
+                          price_type=price_type, quantity=quantity, price=price, trigger=trigger,
+                          lot_size=lot_size, selected=selected,
+                          allow_market_conversion=allow_market_conversion)
     return side, price_type, product, exchange, validity, variety
 
 
-def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = None) -> dict[str, Any]:
+def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = None,
+                          allow_market_conversion: bool = False) -> dict[str, Any]:
     """Translate a FlintTrade ``Order`` into ``NeoAPI.place_order`` kwargs.
 
     ``trading_symbol`` is the NEO scrip symbol (e.g. ``"IDEA-EQ"``), resolved by
     the adapter via ``search_scrip``. NEO expects every numeric field as a string.
-    Raises ``KotakNeoMappingError`` for unmappable enum values.
+
+    Args:
+        order: Broker-neutral order; listing and authority checks remain separate.
+        trading_symbol: Exact resolved native symbol; selected listings cannot
+            be supplied through an unrelated legacy alias at the adapter seam.
+        tag: Optional explicit order tag; None omits it without inventing a tag.
+        allow_market_conversion: False requires an explicit selected-option
+            limit. True is only the separately gated manual emergency exception;
+            requested MKT may become protected LIMIT, with no execution guarantee.
+
+    Returns:
+        Exact v3 SDK keyword arguments, with numeric fields retained as strings.
+
+    Raises:
+        KotakNeoMappingError: Supplied enum, numeric or identifier fields fail.
     """
-    side, ptype, product, exchange, validity, variety = validate_v3_order(order)
+    side, ptype, product, exchange, validity, variety = validate_v3_order(
+        order, allow_market_conversion=allow_market_conversion,
+    )
     quantity, price, trigger, disclosed = _validated_order_numbers(order, ptype)
     resolved_symbol = _canonical_identifier(trading_symbol, label="trading symbol")
 
@@ -1030,6 +1156,9 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         raise KotakNeoMappingError(f"Kotak Neo {semantic_type} price must be positive")
     if semantic_type in {"SL", "SL-M"} and trigger <= 0:
         raise KotakNeoMappingError(f"Kotak Neo {semantic_type} trigger price must be positive")
+    validate_option_terms(symbol=str(changes.get("symbol", "")), exchange=exchange,
+                          side=_norm(changes.get("action")), product=_norm(changes.get("product")),
+                          price_type=semantic_type, quantity=quantity, price=price, trigger=trigger)
     params: dict[str, Any] = {
         "order_id": canonical_order_id_value,
         "order_type": mapped_order_type,
@@ -1243,7 +1372,8 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         order["variety"] = "cover"
     if "ordGenTp" in d:
         raw_generation = d["ordGenTp"]
-        if type(raw_generation) is not str or raw_generation != raw_generation.strip() or not raw_generation.isprintable():
+        if (type(raw_generation) is not str or raw_generation != raw_generation.strip()
+                or not raw_generation.isprintable()):
             raise BrokerReadResponseInvalid
         generation = raw_generation.upper()
         if generation not in {"", "NA", "--", "AMO"}:
@@ -1256,6 +1386,12 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "validity": _response_text(d, "vldt", "ordDur", empty_absent=True),
         "disclosed_quantity": _response_number_text(d, "dscQty", "dclQty", empty_absent=True),
         "tag": _response_text(d, "GuiOrdId"),
+        "correlation_id": _response_text(d, "GuiOrdId"),
+        "broker_account_id": _response_text(d, "actId", "accountId"),
+        "broker_exchange_segment": _response_text(d, "exSeg"),
+        "created_at": _response_text(d, "ordDtTm"),
+        "updated_at": _response_text(d, "flDtTm"),
+        "exchange_time": _response_text(d, "exchTmstp"),
     }.items():
         _put_present(order, field, value)
     rejection = _response_text(d, "rejRsn")
@@ -1272,6 +1408,11 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "average_price": "avgPrc",
     }.items():
         _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
+    order["broker_fields"] = _broker_fields(d, (
+        "nOrdNo", "exOrdId", "exchOrdId", "actId", "accountId", "usrId", "brkClnt", "GuiOrdId", "exSeg",
+        "ordDtTm", "ordEntTm", "exCfmTm", "exchTmstp", "flDtTm", "flDt", "flTm", "exTm",
+        "hsUpTm", "updRecvTm", "boeSec", "uSec", "ordGenTp", "qty", "fldQty", "prod", "prcTp", "tok",
+    ))
     return order
 
 
@@ -1294,24 +1435,151 @@ def order_history_rows(resp: Any) -> list[dict[str, Any]]:
     return [_response_record(row) for row in rows]
 
 
-def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a NEO trade-report record."""
+def _broker_fields(row: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any]:
+    """Detach an allowlisted exact-JSON observation without conversion hooks."""
+    def detached(value: object, depth: int = 0) -> Any:
+        if depth > 12:
+            raise BrokerReadResponseInvalid from None
+        kind = type(value)
+        if value is None or kind is bool or kind is int:
+            return value
+        if kind is str:
+            try:
+                return value.encode("utf-8").decode("utf-8")
+            except UnicodeError:
+                raise BrokerReadResponseInvalid from None
+        if kind is float and math.isfinite(value):
+            return value
+        if kind is list:
+            return [detached(item, depth + 1) for item in value]
+        if kind is dict and all(type(key) is str for key in value):
+            return {detached(key, depth + 1): detached(item, depth + 1) for key, item in value.items()}
+        raise BrokerReadResponseInvalid from None
+    return {name: detached(row[name]) for name in names if name in row}
+
+
+_ACCOUNT_FIELDS = ("actId", "usrId")
+
+
+def _response_account(row: dict[str, Any], expected: str | None) -> str | None:
+    """Validate every supplied account/client alias before optional projection."""
+    values = [_response_identifier(row, name) for name in _ACCOUNT_FIELDS if name in row]
+    if expected is not None:
+        expected = _response_identifier({"account": expected}, "account")
+    if not values:
+        return None
+    if any(value != values[0] for value in values) or expected is not None and values[0] != expected:
+        raise BrokerReadResponseInvalid from None
+    return values[0]
+
+
+_TRADE_FIELDS = (
+    "nOrdNo", "flId", "flLeg", "exOrdId", "exSeg", "trdSym", "sym", "trnsTp", "prod", "rptTp",
+    "fldQty", "qty", "avgPrc", "flPrc", "tok", "actId", "usrId", "flDt", "flTm", "exTm", "flDtTm",
+    "ordDtTm", "hsUpTm", "updRecvTm", "boeSec", "uSec", "lotSz", "brdLtQty", "multiplier",
+    "genNum", "genDen", "prcNum", "prcDen", "precision", "it", "optTp", "exp", "expDt", "stkPrc",
+    "prcTp", "ordDur", "ordGenTp", "GuiOrdId", "prc",
+)
+
+
+def from_kotak_trade(d: dict[str, Any], *, order_evidence: list[dict] | None = None,
+                    expected_account_id: str | None = None) -> dict[str, Any]:
+    """Preserve day-fill observations; qty/avgPrc are not order/fill aliases.
+
+    Args:
+        d: Native trade row, including each supplied actId/usrId observation.
+        order_evidence: Explicit same-order native rows for token resolution.
+            None performs no join or hidden request. Omitted account evidence
+            remains omitted; supplied account evidence must match the bound
+            session or the trade's independently observed account.
+        expected_account_id: Exact bound-session identity, or None for an
+            unbound observation. This never supplies a missing provider ID.
+
+    Returns:
+        Detached fill fields and independent native observations. An empty raw
+        tok is preserved even when a qualified same-order row resolves it.
+
+    Raises:
+        BrokerReadResponseInvalid: Supplied evidence is malformed, conflicts,
+            or identifies a different account or exact order instrument.
+    """
     d = _response_record(d)
+    account = _response_account(d, expected_account_id)
     side = _response_text(d, "trnsTp", required=True).upper()
     try:
         action = KOTAK_TO_SIDE[side]
     except KeyError:
         raise BrokerReadResponseInvalid from None
+    if "rptTp" in d and _response_text(d, "rptTp", required=True) != "fill":
+        raise BrokerReadResponseInvalid from None
+    for name in ("fldQty", "qty", "flLeg", "lotSz", "brdLtQty", "precision", "updRecvTm", "boeSec", "uSec"):
+        if name in d:
+            number = _response_decimal(d, name, required=True)
+            if number < 0 or number != number.to_integral_value() or name == "fldQty" and number == 0:
+                raise BrokerReadResponseInvalid from None
+    for name in ("avgPrc", "flPrc", "multiplier", "genNum", "genDen", "prcNum", "prcDen", "stkPrc"):
+        if name in d and _response_decimal(d, name, required=True) < 0:
+            raise BrokerReadResponseInvalid from None
     trade = {
         "orderid": _response_identifier(d, "nOrdNo"),
         "symbol": _response_text(d, "trdSym", "sym", required=True),
         "exchange": _response_exchange(d, "exSeg"),
         "action": action,
-        "quantity": _response_number_text(d, "fldQty", "qty", required=True),
+        "quantity": _response_number_text(d, "fldQty", required=True),
         "price": _response_number_text(d, "avgPrc", "flPrc", required=True),
         "product": _response_product(d),
         "timestamp": _response_text(d, "flDtTm", "exTm", required=True),
+        "broker_exchange_segment": _response_text(d, "exSeg", required=True),
+        "broker_product_type": _response_text(d, "prod", required=True),
     }
+    for target, source in (("fill_id", "flId"), ("exchange_order_id", "exOrdId")):
+        if source in d:
+            trade[target] = _response_identifier(d, source)
+    if "flLeg" in d:
+        trade["fill_leg"] = _response_number_text(d, "flLeg", required=True)
+    if account is not None:
+        trade["broker_account_id"] = account
+    for target, source in (
+        ("trade_date", "flDt"), ("fill_time", "flTm"),
+        ("exchange_time", "exTm"), ("created_at", "ordDtTm"), ("updated_at", "hsUpTm"),
+    ):
+        _put_present(trade, target, _response_text(d, source, empty_absent=True))
+    if "tok" in d and d["tok"] != "":
+        try:
+            trade["instrument_id"] = canonical_instrument_token(d["tok"])
+        except KotakNeoMappingError:
+            raise BrokerReadResponseInvalid from None
+    trade["broker_fields"] = _broker_fields(d, _TRADE_FIELDS)
+    if order_evidence is not None:
+        if type(order_evidence) is not list:
+            raise BrokerReadResponseInvalid from None
+        matches = []
+        for item in order_evidence:
+            row = _response_record(item)
+            if _response_identifier(row, "nOrdNo") == trade["orderid"]:
+                matches.append(row)
+        if len(matches) > 1:
+            raise BrokerReadResponseInvalid from None
+        if matches:
+            row = matches[0]
+            if (_response_text(row, "exSeg", required=True) != trade["broker_exchange_segment"]
+                    or _response_text(row, "trdSym", required=True) != trade["symbol"]):
+                raise BrokerReadResponseInvalid from None
+            join_account = expected_account_id if expected_account_id is not None else account
+            observed_account = _response_account(row, join_account)
+            if observed_account is not None and join_account is None:
+                raise BrokerReadResponseInvalid from None
+            if "prod" in row and row["prod"] not in ("", None) and row["prod"] != trade["broker_product_type"]:
+                raise BrokerReadResponseInvalid from None
+            try:
+                token = canonical_instrument_token(row.get("tok"))
+            except KotakNeoMappingError:
+                raise BrokerReadResponseInvalid from None
+            if trade.get("instrument_id", token) != token:
+                raise BrokerReadResponseInvalid from None
+            trade["instrument_id"] = token
+            trade["instrument_resolution"] = {"source": "same_order_report", "broker_fields": _broker_fields(
+                row, ("nOrdNo", "trdSym", "exSeg", "tok", "prod", *_ACCOUNT_FIELDS))}
     return trade
 
 
@@ -1492,16 +1760,24 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
         token = canonical_instrument_token(rec.get("pSymbol"))
     except KotakNeoMappingError:
         raise BrokerReadResponseInvalid from None
-    return {
+    result = {
         "trading_symbol": trading_symbol,
         "token": token,
         "name": "" if name is _MISSING else name,
         "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+        "broker_exchange_segment": seg,
         "isin": "" if isin is _MISSING else isin,
-        "lot_size": "0" if lot_size is _MISSING else lot_size,
-        "tick_size": "0" if tick_size is _MISSING else tick_size,
         "option_type": "" if option_type is _MISSING else option_type,
+        "broker_fields": _broker_fields(rec, (
+            "pSymbol", "pTrdSymbol", "pExchSeg", "pSymbolName", "pOptionType", "pInstType", "pISIN",
+            "lExpiryDate", "pExpiryDate", "dStrikePrice;", "lLotSize", "dTickSize", "lPrecision",
+            "pMultiplier", "lFreezeQty",
+        )),
     }
+    _put_present(result, "lot_size", lot_size)
+    _put_present(result, "raw_tick_size", tick_size)
+    _put_present(result, "raw_precision", _response_number_text(rec, "lPrecision", empty_absent=True))
+    return result
 
 
 def to_margin_params(order: Any, instrument_token: str) -> dict[str, Any]:
@@ -1562,21 +1838,34 @@ def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:
     if any(number < 0 for number in (order_margin, additional_margin, available_cash, insufficient)):
         raise BrokerReadResponseInvalid
     rms_validated = _response_text(data, "rmsVldtd", required=True)
-    if rms_validated != rms_validated.strip() or not rms_validated.isprintable():
+    if rms_validated not in {"OK", "NOT_OK"}:
         raise BrokerReadResponseInvalid
-    for optional_name in ("totMrgnUsd", "mrgnUsd", "avlMrgn"):
-        if optional_name in data:
-            optional = _response_decimal(data, optional_name, required=True)
-            if optional < 0:
-                raise BrokerReadResponseInvalid
-    return {
-        "required_margin": f"{order_margin:.2f}",
-        "order_margin": f"{order_margin:.2f}",
-        "provider_additional_margin": f"{additional_margin:.2f}",
-        "available_balance": f"{available_cash:.2f}",
-        "insufficient_balance": f"{insufficient:.2f}",
+
+    def exact_amount(number: Decimal) -> str:
+        # Preserve cent-compatible legacy formatting, never round a finer observation.
+        integer, _, fraction = format(number, "f").partition(".")
+        return integer + "." + fraction.rstrip("0").ljust(2, "0")
+
+    result = {
+        "required_margin": exact_amount(order_margin),
+        "order_margin": exact_amount(order_margin),
+        "provider_additional_margin": exact_amount(additional_margin),
+        "available_balance": exact_amount(available_cash),
+        "insufficient_balance": exact_amount(insufficient),
         "rms_validated": rms_validated,
     }
+    for native, target in (
+        ("totMrgnUsd", "total_used_margin"), ("mrgnUsd", "used_margin"), ("avlMrgn", "available_margin"),
+    ):
+        if native in data:
+            optional = _response_decimal(data, native, required=True)
+            if optional < 0:
+                raise BrokerReadResponseInvalid
+            result[target] = exact_amount(optional)
+    result["broker_fields"] = _broker_fields(data, (
+        "stat", "stCode", "ordMrgn", "reqdMrgn", "avlCash", "insufFund", "rmsVldtd", "totMrgnUsd", "mrgnUsd", "avlMrgn",
+    ))
+    return result
 
 
 def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:

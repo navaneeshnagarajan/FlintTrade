@@ -81,6 +81,16 @@ def test_put_persists_to_workspace(client, tmp_path):
     assert saved["brokers"]["rate_limits"]["dhan"] == {"order": 8.0, "data": 4.0}
 
 
+@pytest.mark.parametrize("requested", [20, 0])
+def test_put_order_rate_is_saved_and_applied_at_the_exchange_limit(app, client, tmp_path, requested):
+    resp = client.put("/v1/rate-limits", json={"broker_id": "dhan", "order": requested})
+    assert resp.status_code == 200
+    assert resp.get_json()["limits"]["dhan"]["order"] == 10.0
+    assert app.config["_TEST_LIMITER"]._rate("dhan", "order") == 10.0
+    saved = json.loads((tmp_path / "workspace.json").read_text())
+    assert saved["brokers"]["rate_limits"]["dhan"]["order"] == 10.0
+
+
 def test_put_does_not_follow_atomic_set_with_stale_full_save(client, monkeypatch):
     from flinttrade_core.workspace import Workspace
 

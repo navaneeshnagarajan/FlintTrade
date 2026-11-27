@@ -317,6 +317,12 @@ class ServiceTaskDispatcher:
                     expires_at=_instant(policy["entitlement"]["expires_at"]),
                 )
             with httpx.Client(transport=self.transport, trust_env=False, follow_redirects=False) as client:
+                # Recheck the caller's finite run after connection/credential
+                # waits, with no service/workspace locks held across the call.
+                # A committed attempt stays conservatively owned if this
+                # frontier refuses; it never becomes resend permission.
+                if authority_check is not None:
+                    authority_check()
                 # Stream the bytes for a bounded response and one overall local
                 # deadline. Expiry never claims remote cancellation or no charge.
                 with client.stream(

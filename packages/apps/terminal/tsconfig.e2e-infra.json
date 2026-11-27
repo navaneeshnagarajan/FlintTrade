@@ -24,6 +24,9 @@
     ]
   },
   "include": [
+    "e2e/incident-delivery-protocol.ts",
+    "e2e/incident-delivery-protocol.control.ts",
+    "playwright.incident-protocol.config.ts",
     "playwright.incidents.config.ts",
     "playwright.policy.config.ts",
     "e2e/incidents/SystemIncidents.spec.ts",
@@ -57,11 +60,13 @@
     "e2e/schema-csp.spec.ts",
     "e2e/fixture-registry.ts",
     "e2e/about-versions.spec.ts",
+    "e2e/order-safety.spec.ts",
     "e2e/infra-self-tests.spec.ts",
     "e2e/workspace-lifecycle.spec.ts",
     "e2e/public-demo-presets.spec.ts",
     "e2e/start-public-demo.ts",
     "e2e/order-pad-practice.spec.ts",
+    "e2e/order-pad-qty-row.spec.ts",
     "e2e/agent-practice.spec.ts",
     "e2e/learn-ai-polish.spec.ts",
     "e2e/visual-a11y.spec.ts",
@@ -74,6 +79,7 @@
     "e2e/structural-accessibility.spec.ts",
     "e2e/structural-accessibility.ts",
     "e2e/workspace-interactions.ts",
-    "e2e/observed-registry.ts"
+    "e2e/observed-registry.ts",
+    "e2e/designer-desk-measure.spec.ts"
   ]
 }

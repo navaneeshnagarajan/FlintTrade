@@ -669,7 +669,7 @@ export function SecuritySection() {
           <TextInput
             value={newIp}
             onChange={setNewIp}
-            placeholder="e.g. 192.168.1.100"
+            placeholder="e.g. 203.0.113.10"
             aria-label="IP address to ban"
           />
           <TextInput

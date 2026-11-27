@@ -62,36 +62,36 @@ describe("Laya chip status", () => {
     expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model version");
     expect(layaReasonPlain("unverified", 8000)).toBe("Can't verify the model");
     expect(layaReasonPlain("identity_absent", 8000)).toBeNull();
-    expect(layaReasonPlain("key_rejected", 8000)).toBe("Can't reach Laya");
-    expect(layaReasonPlain("key_missing", 8000)).toBe("The Laya API key file is missing.");
+    expect(layaReasonPlain("key_rejected", 8000)).toBe("Can't reach the decision model");
+    expect(layaReasonPlain("key_missing", 8000)).toBe("API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE.");
     expect(layaReasonPlain(null, 8000)).toBeNull();
     const loading = layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "still_loading" });
     expect(loading).toBe("Still loading");
     expect(loading).not.toMatch(/Down/);
     expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
     expect(layaReasonTooltip("downloading", 8000)).toBeNull();
-    expect(layaReasonTooltip("download_failed", 8000)).toBe("Check your connection, then Start Laya again.");
+    expect(layaReasonTooltip("download_failed", 8000)).toBe("Check your connection, then start the decision model again.");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "downloading" })).toBe(
       LAYA_DOWNLOADING_LABEL,
     );
     expect(layaChipLabel({ mode: "live", practice: "down", live: "down", reason: "downloading" })).toBe("Downloading");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "download_failed" })).toBe("Down");
     expect(layaReasonTooltip("unverified", 8000)).toBe(
-      "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
+      "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model.",
     );
     expect(layaReasonTooltip("wrong_revision", 8000)).toBe(
-      "Laya is running a different model than FlintTrade expects.",
+      "Wrong model loaded. Expected convaiinnovations/laya.",
     );
-    expect(layaReasonTooltip("key_rejected", 8000)).toBe("Laya restarted with a new key. Reconnecting…");
-    expect(layaReasonTooltip("key_missing", 8000)).toBe("The Laya API key file is missing.");
-    expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-laya");
+    expect(layaReasonTooltip("key_rejected", 8000)).toBe("Decision model restarted with a new key. Reconnecting…");
+    expect(layaReasonTooltip("key_missing", 8000)).toBe("API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE.");
+    expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-the-decision-model");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
   });
 
   it("says Checking instead of Ready while a stop or start is unconfirmed", () => {
     expect(LAYA_STATUS_POLL_MS).toBe(1_500);
-    expect(LAYA_CHECKING_DETAIL).toBe("Checking Laya…");
-    expect(LAYA_DOWN_PAUSE).toBe("Laya is Down. New orders are paused until it's Ready. You can still close positions.");
+    expect(LAYA_CHECKING_DETAIL).toBe("Checking decision model…");
+    expect(LAYA_DOWN_PAUSE).toBe("Not placed. Decision model is down. Start it from Status.");
     const checking = layaChipLabel({
       mode: "practice",
       practice: "ready",
@@ -101,13 +101,13 @@ describe("Laya chip status", () => {
     expect(checking).toBe(LAYA_CHECKING_LABEL);
     expect(checking).not.toMatch(/Ready/);
     expect(layaOrderRefused({
-      code: "laya_denied",
+      code: "decision_model_denied",
       message: LAYA_DOWN_PAUSE,
       reason: LAYA_DOWN_PAUSE,
     })).toBe(true);
     expect(layaOrderRefused({
-      code: "laya_denied",
-      message: "Laya denied this order. The note does not state a concrete reason.",
+      code: "decision_model_denied",
+      message: "Not placed. Decision model denied this order: no concrete reason in the note.",
     })).toBe(false);
   });
 
@@ -123,7 +123,7 @@ describe("Laya chip status", () => {
   });
 
   it("gives a managed install a Start line and an unmanaged install a plain line", () => {
-    expect(OLLAMA_NOT_STARTED_MANAGED).toBe("Ollama isn't running. Start it to bring Laya back.");
+    expect(OLLAMA_NOT_STARTED_MANAGED).toBe("Ollama not running. Start Ollama, then start the decision model.");
     expect(OLLAMA_NOT_STARTED_UNMANAGED).toBe(
       "Ollama isn't running. Start Ollama on this computer, then try again.",
     );
@@ -132,9 +132,9 @@ describe("Laya chip status", () => {
     const managed = ollamaRouteVisibleLines(true);
     const unmanaged = ollamaRouteVisibleLines(false);
     expect(managed).toContain(OLLAMA_NOT_STARTED_MANAGED);
-    expect(managed).toContain("Start Laya");
+    expect(managed).toContain("Start decision model");
     expect(unmanaged).toContain(OLLAMA_NOT_STARTED_UNMANAGED);
-    expect(unmanaged).not.toContain("Start Laya");
+    expect(unmanaged).not.toContain("Start decision model");
   });
 
   it("greps Ollama-route user-visible strings for sidecar", () => {

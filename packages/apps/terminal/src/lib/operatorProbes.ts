@@ -85,29 +85,29 @@ function layaStatusValue(value: unknown): LayaHeartbeat | null {
 
 export function layaHeartbeatFromBody(body: unknown): LayaHeartbeat | null {
   if (body === null || typeof body !== "object") return null;
-  return layaStatusValue((body as { laya?: unknown }).laya);
+  return layaStatusValue((body as { decision_model?: unknown }).decision_model);
 }
 
 export function layaPracticeFromBody(body: unknown): LayaHeartbeat | null {
   if (body === null || typeof body !== "object") return null;
-  return layaStatusValue((body as { laya_practice?: unknown }).laya_practice);
+  return layaStatusValue((body as { decision_model_practice?: unknown }).decision_model_practice);
 }
 
 export function layaLiveQualifiedFromBody(body: unknown): boolean {
   if (body === null || typeof body !== "object") return false;
-  return (body as { laya_live_qualified?: unknown }).laya_live_qualified === true;
+  return (body as { decision_model_live_qualified?: unknown }).decision_model_live_qualified === true;
 }
 
 export function layaReasonFromBody(body: unknown): string | null {
   if (body === null || typeof body !== "object") return null;
-  const value = (body as { laya_reason?: unknown }).laya_reason;
+  const value = (body as { decision_model_reason?: unknown }).decision_model_reason;
   if (typeof value !== "string" || !LAYA_REASON_CODES.has(value)) return null;
   return value;
 }
 
 export function layaPortFromBody(body: unknown): number {
   if (body === null || typeof body !== "object") return 8000;
-  const value = (body as { laya_port?: unknown }).laya_port;
+  const value = (body as { decision_model_port?: unknown }).decision_model_port;
   if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535) return value;
   return 8000;
 }
@@ -120,27 +120,27 @@ function byteCount(value: unknown): number | null {
 /** True only for a boolean `true`. A missing field stays false, which is the sidecar ping. */
 export function layaCheckingFromBody(body: unknown): boolean {
   if (body === null || typeof body !== "object") return false;
-  return (body as { laya_checking?: unknown }).laya_checking === true;
+  return (body as { decision_model_checking?: unknown }).decision_model_checking === true;
 }
 
 /** `ollama` only for that exact string. Any other value keeps the sidecar copy. */
 export function layaRouteFromBody(body: unknown): "ollama" | null {
   if (body === null || typeof body !== "object") return null;
-  return (body as { laya_route?: unknown }).laya_route === "ollama" ? "ollama" : null;
+  return (body as { decision_model_route?: unknown }).decision_model_route === "ollama" ? "ollama" : null;
 }
 
 /** True only for a boolean `true`. A missing field is not a managed install. */
 export function layaManagedFromBody(body: unknown): boolean {
   if (body === null || typeof body !== "object") return false;
-  return (body as { laya_managed?: unknown }).laya_managed === true;
+  return (body as { decision_model_managed?: unknown }).decision_model_managed === true;
 }
 
 /** Done and total bytes. Both must be present, or both are null. */
 export function layaDownloadProgressFromBody(body: unknown): { done: number | null; total: number | null } {
   if (body === null || typeof body !== "object") return { done: null, total: null };
-  const record = body as { laya_download_bytes?: unknown; laya_download_total?: unknown };
-  const done = byteCount(record.laya_download_bytes);
-  const total = byteCount(record.laya_download_total);
+  const record = body as { decision_model_download_bytes?: unknown; decision_model_download_total?: unknown };
+  const done = byteCount(record.decision_model_download_bytes);
+  const total = byteCount(record.decision_model_download_total);
   if (done === null || total === null) return { done: null, total: null };
   return { done, total };
 }
@@ -148,10 +148,10 @@ export function layaDownloadProgressFromBody(body: unknown): { done: number | nu
 /** An omitted route selects the legacy sidecar only on a recognised Laya heartbeat. */
 function isLayaHeartbeat(body: unknown): boolean {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
-  const record = body as { status?: unknown; laya?: unknown; laya_route?: unknown; laya_managed?: unknown };
-  if (record.status !== "ok" || layaStatusValue(record.laya) === null) return false;
-  if (record.laya_route === undefined) return true;
-  return record.laya_route === "ollama" && typeof record.laya_managed === "boolean";
+  const record = body as { status?: unknown; decision_model?: unknown; decision_model_route?: unknown; decision_model_managed?: unknown };
+  if (record.status !== "ok" || layaStatusValue(record.decision_model) === null) return false;
+  if (record.decision_model_route === undefined) return true;
+  return record.decision_model_route === "ollama" && typeof record.decision_model_managed === "boolean";
 }
 
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {

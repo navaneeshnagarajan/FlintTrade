@@ -596,8 +596,7 @@ class TestSubprocessIsolation:
     def test_subprocess_signal_with_datetime_metadata_succeeds(self):
         """Datetime in signal metadata gets JSON-coerced, not crashed on.
 
-        Regression for Codex stop-gate finding [P2] — strategies can
-        legitimately attach a ``datetime`` to signal metadata via
+        Strategies can legitimately attach a ``datetime`` to signal metadata via
         ``long_entry(at=datetime.now())`` because ``datetime`` is in
         ``_ALLOWED_MODULES``. The previous child crashed on
         ``json.dumps`` because ``datetime`` isn't JSON-serialisable;
@@ -628,8 +627,7 @@ class TestSubprocessIsolation:
     def test_subprocess_executable_path_works_outside_source_checkout(self):
         """Sandbox child is spawned by absolute path, not dotted module name.
 
-        Regression for Codex stop-gate finding [P1] — using ``python -m
-        flinttrade_engine._sandbox_child`` only resolves when the repo
+        Using ``python -m flinttrade_engine._sandbox_child`` only resolves when the repo
         root is on ``sys.path``. After ``pip install flint-engine``, the
         ``packages`` namespace doesn't exist and the default executor
         would silently produce ``SandboxCrash`` for every call. Confirm
@@ -653,9 +651,8 @@ class TestSubprocessIsolation:
     def test_subprocess_child_works_without_packages_on_pythonpath(self):
         """Simulate installed-wheel layout: no ``packages`` package on sys.path.
 
-        Codex stop-gate after 5779e59 flagged that I'd fixed the
-        spawn cmd but left ``from flinttrade_engine import
-        sandbox_executor`` inside ``_sandbox_child.py``. When the wheel
+        ``_sandbox_child.py`` must not import ``from flinttrade_engine
+        import sandbox_executor``. When the wheel
         is installed (``packages/services/engine/pyproject.toml`` maps ``src/``
         to ``flint_engine``), the dotted name doesn't exist and the
         child crashed with ``SandboxBootstrapError`` on every call.
