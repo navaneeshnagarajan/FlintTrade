@@ -36,7 +36,7 @@ from flask import Blueprint, current_app, jsonify, request
 from . import broker_registry_reads as broker_reads
 from .gex import calculate_gex
 from .iv_smile import calculate_iv_smile
-from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver, get_lot_size_sync, lot_size_unknown_message
+from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver, get_lot_size_sync, missing_lot_refusal
 from .oi_analysis import OIAnalysis
 from .oi_profile import calculate_oi_profile
 from .option_chain import OptionChainSnapshot, StrikeData
@@ -1513,7 +1513,7 @@ def straddle_pnl_endpoint() -> Any:
             {
                 "status": "error",
                 "code": "lot_size_unknown",
-                "message": lot_size_unknown_message(symbol),
+                "message": missing_lot_refusal(symbol),
             }
         ), 422
     spot = 24000.0

@@ -444,11 +444,11 @@ def _lot_unknown_name(symbol: str) -> str:
 
 
 def lot_unknown_message(symbol: str) -> str:
-    return f"The lot size for {_lot_unknown_name(symbol)} isn't known."
+    return f"The lot size for {_lot_unknown_name(symbol)} isn't verified."
 
 
 def missing_lot_refusal(symbol: str) -> str:
-    return f"{lot_unknown_message(symbol)} Order not placed."
+    return f"Not placed. The lot size for {_lot_unknown_name(symbol)} isn't verified."
 
 
 def contract_quantity_message(

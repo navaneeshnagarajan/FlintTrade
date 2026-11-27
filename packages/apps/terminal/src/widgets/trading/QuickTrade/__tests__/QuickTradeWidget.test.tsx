@@ -219,7 +219,7 @@ describe("QuickTradeWidget", () => {
     mockGetSymbol.mockRejectedValue(new Error("symbol not found"));
     renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
 
-    expect(await screen.findByText("The lot size for BANKNIFTY isn't known.")).toBeInTheDocument();
+    expect(await screen.findByText("The lot size for BANKNIFTY isn't verified.")).toBeInTheDocument();
     const buy = screen.getByRole("button", { name: /buy 1 lot /i });
     const sell = screen.getByRole("button", { name: /sell 1 lot /i });
     expect(buy).toBeDisabled();
@@ -238,7 +238,7 @@ describe("QuickTradeWidget", () => {
     });
     renderQuickTrade({ symbol: "NIFTY26DECFUT", exchange: "NFO" });
 
-    expect(await screen.findByText("The lot size for NIFTY isn't known.")).toBeInTheDocument();
+    expect(await screen.findByText("The lot size for NIFTY isn't verified.")).toBeInTheDocument();
     expect(screen.queryByText(/Qty: 1 × 1/)).toBeNull();
     const buy = screen.getByRole("button", { name: /buy 1 lot /i });
     expect(buy).toBeDisabled();

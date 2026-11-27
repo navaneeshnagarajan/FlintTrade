@@ -182,8 +182,8 @@ describe("lot unknown copy", () => {
     ["BANKNIFTY26JUN56000CE", "BANKNIFTY"],
     ["m&m26decfut", "M&M"],
   ])("names %s by its underlying", (symbol, underlying) => {
-    const fact = `The lot size for ${underlying} isn't known.`;
+    const fact = `The lot size for ${underlying} isn't verified.`;
     expect(lotUnknownMessage(symbol)).toBe(fact);
-    expect(missingLotRefusal(symbol)).toBe(`${fact} Order not placed.`);
+    expect(missingLotRefusal(symbol)).toBe(`Not placed. ${fact}`);
   });
 });

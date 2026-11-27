@@ -420,11 +420,11 @@ function lotUnknownName(symbol: string): string {
 }
 
 export function lotUnknownMessage(symbol: string): string {
-  return `The lot size for ${lotUnknownName(symbol)} isn't known.`;
+  return `The lot size for ${lotUnknownName(symbol)} isn't verified.`;
 }
 
 export function missingLotRefusal(symbol: string): string {
-  return `${lotUnknownMessage(symbol)} Order not placed.`;
+  return `Not placed. The lot size for ${lotUnknownName(symbol)} isn't verified.`;
 }
 
 /** Underlying of a desk symbol, so a compact option still finds its master row. */

@@ -99,10 +99,10 @@ def test_charges_and_validation_use_each_contracts_lot() -> None:
         "Quantity must be a multiple of the lot size (65)."
     )
     assert contract_quantity_message("missing", 75, rows, as_of=_AS_OF, contract="NIFTY 24500 CE") == (
-        "The lot size for NIFTY isn't known. Order not placed."
+        "Not placed. The lot size for NIFTY isn't verified."
     )
     assert contract_quantity_message("missing", 65, rows, as_of=_AS_OF, contract="NIFTY24APR2524500CE") == (
-        "The lot size for NIFTY isn't known. Order not placed."
+        "Not placed. The lot size for NIFTY isn't verified."
     )
 
 
@@ -117,9 +117,9 @@ def test_lot_unknown_copy_names_the_underlying() -> None:
         ("NIFTY-OCT2026-FUT", "NIFTY"),
     )
     for symbol, underlying in cases:
-        fact = f"The lot size for {underlying} isn't known."
+        fact = f"The lot size for {underlying} isn't verified."
         assert lot_unknown_message(symbol) == fact
-        assert missing_lot_refusal(symbol) == f"{fact} Order not placed."
+        assert missing_lot_refusal(symbol) == f"Not placed. {fact}"
 
 
 
@@ -351,7 +351,7 @@ def test_expired_contracts_are_dropped_when_the_date_is_frozen() -> None:
     assert scalper_lot_label("NIFTY", rows, as_of=october) == "65 · Nov expiry"
     assert lot_size_from_master("BANKNIFTY", rows, as_of=date(2026, 9, 25)) is None
     assert contract_quantity_message("13", 75, rows, as_of=october) == (
-        "The lot size for NIFTY isn't known. Order not placed."
+        "Not placed. The lot size for NIFTY isn't verified."
     )
 
 

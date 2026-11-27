@@ -723,7 +723,7 @@ class TestStraddlePnLEndpoint:
         assert body == {
             "status": "error",
             "code": "lot_size_unknown",
-            "message": "The lot size for NOTALISTEDINDEX isn't known.",
+            "message": "Not placed. The lot size for NOTALISTEDINDEX isn't verified.",
         }
 
     def test_straddlepnl_has_required_fields(self, client):

@@ -418,12 +418,12 @@ def test_unknown_lot_message_names_the_underlying(monkeypatch):
     )
 
     monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
-    assert lot_size_unknown_message("SENSEX26DEC85000CE") == "The lot size for SENSEX isn't known."
-    assert lot_size_unknown_message("notlisted 26 dec fut") == "The lot size for NOTLISTED isn't known."
-    assert lot_size_unknown_message("M&M26DECFUT") == "The lot size for M&M isn't known."
+    assert lot_size_unknown_message("SENSEX26DEC85000CE") == "The lot size for SENSEX isn't verified."
+    assert lot_size_unknown_message("notlisted 26 dec fut") == "The lot size for NOTLISTED isn't verified."
+    assert lot_size_unknown_message("M&M26DECFUT") == "The lot size for M&M isn't verified."
     assert missing_lot_refusal("SENSEX26DEC85000CE") == (
-        "The lot size for SENSEX isn't known. Order not placed."
+        "Not placed. The lot size for SENSEX isn't verified."
     )
     assert missing_lot_refusal("M&M26DECFUT") == (
-        "The lot size for M&M isn't known. Order not placed."
+        "Not placed. The lot size for M&M isn't verified."
     )

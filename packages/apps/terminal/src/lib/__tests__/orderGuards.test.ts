@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DERIVATIVE_EXCHANGES,
+  orderSymbolLabel,
   isDerivativeExchange,
   checkOrderEntryMode,
   checkLotSizeVerified,
@@ -12,6 +13,9 @@ import {
   quantityCapLabel,
   sliceOrderQuantities,
   NSE_INDEX_FREEZE_QUANTITY,
+  resolveFreezeQuantity,
+  quantityFreezeWarning,
+  unverifiedFreezeQuantity,
   checkOrderQuantityLimit,
   checkPriceForOrderType,
   orderQuantityLimit,
@@ -57,15 +61,15 @@ describe("checkLotSizeVerified", () => {
   it("fails closed on a derivative with an unverified lot size", () => {
     expect(
       checkLotSizeVerified("NFO", { lotSize: 75, verified: false }, "NIFTY25JUL22000CE"),
-    ).toBe("The lot size for NIFTY isn't known. Order not placed.");
+    ).toBe("Not placed. The lot size for NIFTY isn't verified.");
   });
 
   it("fails closed when the lot size is missing entirely", () => {
     expect(checkLotSizeVerified("NFO", { lotSize: null, verified: true }, "X")).toBe(
-      "The lot size for X isn't known. Order not placed.",
+      "Not placed. The lot size for X isn't verified.",
     );
     expect(checkLotSizeVerified("NFO", { lotSize: 0, verified: true }, "X")).toBe(
-      "The lot size for X isn't known. Order not placed.",
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 
@@ -99,7 +103,7 @@ describe("checkLotMultiple", () => {
 
   it("reports the unverified lot size before the multiple check", () => {
     expect(checkLotMultiple("NFO", 100, { lotSize: 75, verified: false }, "X")).toBe(
-      "The lot size for X isn't known. Order not placed.",
+      "Not placed. The lot size for X isn't verified.",
     );
   });
 
@@ -189,10 +193,10 @@ describe("checkFreezeQuantity", () => {
   it("uses NSE/FAOP/77189 when the broker does not send a freeze quantity", () => {
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1800)).toBeNull();
     expect(checkFreezeQuantity("NIFTY 24500 CE", 1820)).toBe(
-      "Max 1,800 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 1,800 per order for NIFTY. Place smaller orders.",
     );
     expect(checkFreezeQuantity("NIFTYNXT50-OCT2026-FUT", 601)).toBe(
-      "Max 600 per order for NIFTYNXT50-OCT2026-FUT. Place smaller orders.",
+      "Max 600 per order for NIFTYNXT50. Place smaller orders.",
     );
     expect(checkFreezeQuantity("BANKNIFTY", 900)).toBeNull();
     expect(checkFreezeQuantity("SBIN", 100)).toBeNull();
@@ -211,7 +215,7 @@ describe("checkFreezeQuantity", () => {
     expect(quantityAdmissionRefusal("NIFTY", 1801, 65)).toBe(overMax);
     expect(quantityAdmissionRefusal("NIFTY", 1800, 65)).toBe(overMax);
     expect(quantityAdmissionRefusal("NIFTY 24500 CE", 1800, 65)).toBe(
-      "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders.",
+      "Max 1,755 per order for NIFTY. Place smaller orders.",
     );
     expect(quantityAdmissionRefusal("BANKNIFTY", 901, 30)).toBe(
       "Max 900 per order for BANKNIFTY. Place smaller orders.",
@@ -322,5 +326,59 @@ describe("needsLargeOrderConfirmation", () => {
   it("stays quiet below the threshold", () => {
     expect(needsLargeOrderConfirmation(1)).toBe(false);
     expect(needsLargeOrderConfirmation(LARGE_ORDER_LOTS - 1)).toBe(false);
+  });
+});
+
+describe("unverified BSE freeze values", () => {
+  it.each([
+    ["SENSEX25DEC85000CE", 1000],
+    ["SENSEX 85000 PE", 1000],
+    ["SENSEX25DECFUT", 500],
+    ["BANKEX25DEC60000CE", 900],
+  ])("never refuses %s above %i", (symbol, freeze) => {
+    expect(resolveFreezeQuantity(symbol)).toBeNull();
+    expect(unverifiedFreezeQuantity(symbol)).toBe(freeze);
+    expect(quantityAdmissionRefusal(symbol, freeze * 10)).toBeNull();
+    expect(quantityAdmissionRefusal(symbol, freeze * 10, freeze)).toBeNull();
+  });
+
+  it("compares the SENSEX value with units, not lots", () => {
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 50 * 20)).toBeNull();
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 51 * 20)).toBe(
+      "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects.",
+    );
+  });
+
+  it("enforces a broker freeze quantity instead of warning", () => {
+    expect(quantityFreezeWarning("SENSEX25DEC85000CE", 2000, 900)).toBeNull();
+    expect(quantityAdmissionRefusal("SENSEX25DEC85000CE", 1000, 20, 900)).toBe(
+      "Max 900 per order for SENSEX. Place smaller orders.",
+    );
+  });
+
+  it("has no value for BANKEX futures", () => {
+    expect(unverifiedFreezeQuantity("BANKEX25DECFUT")).toBeNull();
+    expect(quantityFreezeWarning("BANKEX25DECFUT", 100000)).toBeNull();
+    expect(quantityAdmissionRefusal("BANKEX25DECFUT", 99990, 30)).toBeNull();
+  });
+
+  it("has no value for SENSEX50", () => {
+    expect(unverifiedFreezeQuantity("SENSEX5025DEC30000CE")).toBeNull();
+    expect(quantityFreezeWarning("SENSEX5025DEC30000CE", 100000)).toBeNull();
+  });
+});
+
+
+describe("freeze refusal label", () => {
+  it.each([
+    ["NIFTY 24500 CE", "NIFTY"],
+    ["NIFTY28MAR2422000CE", "NIFTY"],
+    ["BANKNIFTY-OCT2026-FUT", "BANKNIFTY"],
+    ["NIFTYNXT5026DECFUT", "NIFTYNXT50"],
+    ["SENSEX26NOV2680000CE", "SENSEX"],
+    ["RELIANCE26APRFUT", "RELIANCE"],
+    ["", "this contract"],
+  ])("names %s as %s", (symbol, label) => {
+    expect(orderSymbolLabel(symbol)).toBe(label);
   });
 });

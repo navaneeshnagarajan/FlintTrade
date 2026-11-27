@@ -648,4 +648,4 @@ def test_lot_based_mirror_refuses_when_the_sensex_lot_is_unknown(
     assert router.calls == []
     assert result.successful == 0
     assert result.skipped == 2
-    assert {item.error for item in result.results} == {"The lot size for SENSEX isn't known. Order not placed."}
+    assert {item.error for item in result.results} == {"Not placed. The lot size for SENSEX isn't verified."}

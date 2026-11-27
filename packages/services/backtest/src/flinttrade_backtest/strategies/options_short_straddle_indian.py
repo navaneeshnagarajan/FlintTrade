@@ -78,7 +78,7 @@ from typing import Any, Literal
 
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, lot_size_unknown_message
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, missing_lot_refusal
 
 from ._mixin import _BacktestStrategyMixin
 
@@ -330,7 +330,7 @@ class IndianShortStraddle(BaseStrategy, _BacktestStrategyMixin):
         self._underlying = underlying_upper
         lot_size = lot_size_for(underlying_upper)
         if lot_size is None:
-            raise ValueError(lot_size_unknown_message(underlying_upper))
+            raise ValueError(missing_lot_refusal(underlying_upper))
         self._lot_size: int = lot_size
         self._strike_interval: int = strike_interval_for(underlying_upper)
         self._quantity: int = lots * self._lot_size

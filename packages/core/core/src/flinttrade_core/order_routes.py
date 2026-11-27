@@ -702,21 +702,30 @@ def _quantity_admission_response(body: Mapping[str, Any]) -> tuple[Any, int] | N
     """Refuse a lot-size or freeze-quantity breach before Laya or a write.
 
     The broker's ``freeze_qty`` is used when the body carries one. Otherwise
-    the NSE index limits in ``qty_freeze`` apply. The order is not split.
+    the NSE index limits in ``qty_freeze`` apply. An unverified BSE value only
+    logs a warning. The order is not split.
     """
-    from flinttrade_engine.qty_freeze import quantity_admission_refusal  # noqa: PLC0415
+    from flinttrade_engine.qty_freeze import (  # noqa: PLC0415
+        quantity_admission_refusal,
+        quantity_freeze_warning,
+    )
 
     quantity = _quantity_from_body(body)
     if quantity < 1:
         return None
+    symbol = str(body.get("symbol") or "")
+    broker_freeze_qty = _optional_positive_int(body.get("freeze_qty"))
     message = quantity_admission_refusal(
-        str(body.get("symbol") or ""),
+        symbol,
         str(body.get("exchange") or ""),
         quantity,
         lot_size=_optional_positive_int(body.get("lot_size")),
-        broker_freeze_qty=_optional_positive_int(body.get("freeze_qty")),
+        broker_freeze_qty=broker_freeze_qty,
     )
     if message is None:
+        warning = quantity_freeze_warning(symbol, quantity, broker_freeze_qty=broker_freeze_qty)
+        if warning is not None:
+            logger.warning("Order quantity check: %s", warning)
         return None
     return jsonify(
         {

@@ -161,9 +161,9 @@ def test_strategies_refuse_an_unknown_derivatives_lot(monkeypatch) -> None:
 
     monkeypatch.delitem(FALLBACK_LOT_SIZES, "SENSEX", raising=False)
 
-    with pytest.raises(ValueError, match="The lot size for SENSEX isn't known."):
+    with pytest.raises(ValueError, match="The lot size for SENSEX isn't verified."):
         IndianShortStraddle(underlying="SENSEX")
-    with pytest.raises(ValueError, match="The lot size for SENSEX isn't known."):
+    with pytest.raises(ValueError, match="The lot size for SENSEX isn't verified."):
         EMASuperTrendDEMA(symbol="SENSEX", exchange="BFO")
 
 
@@ -183,7 +183,7 @@ def test_order_command_with_lots_refuses_an_unknown_lot(monkeypatch) -> None:
     call = parse_order_command("Buy SENSEX26DEC85000CE 2 lots")
     assert call is not None
     assert call.tool_name == "lot_size_unknown"
-    assert call.arguments == {"message": "The lot size for SENSEX isn't known. Order not placed."}
+    assert call.arguments == {"message": "Not placed. The lot size for SENSEX isn't verified."}
     assert parse_order_command("Buy RELIANCE 10 shares") is not None
 
 
