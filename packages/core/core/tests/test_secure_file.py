@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
+import struct
 import sys
 import time
 from pathlib import Path
@@ -859,3 +861,123 @@ def test_windows_durable_owner_copy_installs_descriptor_dacl_before_write(tmp_pa
     secure_file.copy_owner_owned_file_durable(source, destination)
 
     assert events.index("reopen-write-dacl") < events.index("dacl") < events.index("write")
+
+
+_OWNER_SID = b"\x01\x05\x00\x00\x00\x00\x00\x05\x15\x00\x00\x00" + bytes(range(16))
+
+
+class _FakeAdvapi:
+    def __init__(self, control: int, acl: ctypes.Array, offsets: list[int]):
+        self._control = control
+        self._acl = acl
+        self._offsets = offsets
+
+    def GetSecurityDescriptorControl(self, _descriptor, control, _revision):
+        control._obj.value = self._control
+        return 1
+
+    def GetAce(self, _dacl, index, pointer):
+        pointer._obj.value = ctypes.addressof(self._acl) + self._offsets[index]
+        return 1
+
+    @staticmethod
+    def IsValidSid(sid):
+        return 1
+
+    @staticmethod
+    def GetLengthSid(sid):
+        address = sid.value if isinstance(sid, ctypes.c_void_p) else sid
+        return 8 + 4 * ctypes.string_at(address + 1, 1)[0]
+
+
+def _windows_dacl_fixture(monkeypatch, *, protected: bool, ace_flags: list[int]):
+    aces = []
+    for sid, flags in zip((_OWNER_SID, secure_file._SYSTEM_SID), ace_flags):
+        size = 8 + len(sid)
+        aces.append(
+            struct.pack("<BBHI", secure_file._ACCESS_ALLOWED_ACE_TYPE, flags, size, secure_file._FILE_ALL_ACCESS) + sid
+        )
+    body = b"".join(aces)
+    header = struct.pack("<BBHHH", secure_file._ACL_REVISION, 0, 8 + len(body), len(aces), 0)
+    acl = ctypes.create_string_buffer(header + body)
+    offsets = [8, 8 + len(aces[0])]
+    control = secure_file._SE_DACL_PROTECTED if protected else 0
+    advapi = _FakeAdvapi(control, acl, offsets)
+    monkeypatch.setattr(secure_file, "_windows_security_libraries", lambda: (None, advapi))
+    monkeypatch.setattr(secure_file, "_windows_account_sid", lambda user=None: _OWNER_SID)
+    owner = ctypes.create_string_buffer(_OWNER_SID)
+    return owner, acl
+
+
+def _verify_fixture(owner, acl, expected_ace_flags: int = 0) -> tuple[bool, str]:
+    return secure_file._verify_windows_security_descriptor(
+        ctypes.c_void_p(ctypes.addressof(owner)),
+        ctypes.c_void_p(ctypes.addressof(acl)),
+        ctypes.c_void_p(1),
+        user=None,
+        expected_ace_flags=expected_ace_flags,
+    )
+
+
+def test_windows_protected_explicit_dacl_is_hardened(monkeypatch):
+    owner, acl = _windows_dacl_fixture(monkeypatch, protected=True, ace_flags=[0, 0])
+    assert _verify_fixture(owner, acl) == (True, "")
+
+
+def test_windows_member_inheriting_a_hardened_parent_is_hardened(monkeypatch):
+    inherited = secure_file._INHERITED_ACE
+    owner, acl = _windows_dacl_fixture(monkeypatch, protected=False, ace_flags=[inherited, inherited])
+    assert _verify_fixture(owner, acl) == (True, "")
+
+
+def test_windows_directory_with_only_inherited_aces_is_not_hardened(monkeypatch):
+    flags = secure_file._DIRECTORY_ACE_FLAGS | secure_file._INHERITED_ACE
+    owner, acl = _windows_dacl_fixture(monkeypatch, protected=False, ace_flags=[flags, flags])
+    assert _verify_fixture(owner, acl, secure_file._DIRECTORY_ACE_FLAGS) == (False, "DACL inheritance is not protected")
+
+
+def test_windows_protected_directory_dacl_is_hardened(monkeypatch):
+    flags = secure_file._DIRECTORY_ACE_FLAGS
+    owner, acl = _windows_dacl_fixture(monkeypatch, protected=True, ace_flags=[flags, flags])
+    assert _verify_fixture(owner, acl, flags) == (True, "")
+
+
+@pytest.mark.parametrize(
+    ("protected", "ace_flags", "reason"),
+    [
+        (False, [0, 0], "DACL inheritance is not protected"),
+        (False, [secure_file._INHERITED_ACE, 0], "DACL inheritance is not protected"),
+        (True, [secure_file._INHERITED_ACE, secure_file._INHERITED_ACE], "DACL contains an inherited ACE"),
+    ],
+)
+def test_windows_mixed_or_unprotected_explicit_dacls_are_refused(monkeypatch, protected, ace_flags, reason):
+    owner, acl = _windows_dacl_fixture(monkeypatch, protected=protected, ace_flags=ace_flags)
+    assert _verify_fixture(owner, acl) == (False, reason)
+
+
+def test_windows_directory_barrier_renames_write_through_and_leaves_nothing(tmp_path, monkeypatch):
+    moves = []
+
+    def write_through(source, destination, *, replace=True):
+        moves.append((Path(source).parent, Path(destination).parent))
+        os.replace(source, destination)
+
+    monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
+    monkeypatch.setattr(secure_file, "_windows_replace_write_through", write_through)
+    secure_file.barrier_directory(tmp_path)
+    assert moves == [(tmp_path, tmp_path)]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_windows_directory_barrier_tolerates_a_pending_scratch_tombstone(tmp_path, monkeypatch):
+    def refuse_delete(path):
+        raise PermissionError("held by scanner")
+
+    monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        secure_file, "_windows_replace_write_through", lambda source, destination: os.replace(source, destination)
+    )
+    monkeypatch.setattr(secure_file, "_windows_delete_file", refuse_delete)
+    secure_file.barrier_directory(tmp_path)
+    remaining = [path.name for path in tmp_path.iterdir()]
+    assert len(remaining) == 1 and remaining[0].endswith(".delete-pending")

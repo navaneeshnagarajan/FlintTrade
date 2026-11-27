@@ -21,6 +21,11 @@ internal static class Program
     private const int JobObjectExtendedLimitInformation = 9;
 
     private const uint SYNCHRONIZE = 0x00100000;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
+    private const int ERROR_INVALID_PARAMETER = 87;
+    private const int JobObjectBasicProcessIdList = 3;
+    private const int MaxListedJobProcesses = 64;
+    private const int ConsoleHostDrainMilliseconds = 5000;
     private const uint WAIT_OBJECT_0 = 0;
     private const uint WAIT_TIMEOUT = 258;
     private const uint WAIT_FAILED = 0xffffffff;
@@ -171,6 +176,15 @@ internal static class Program
 
             uint leaderExit = ReadExitCode(process);
             uint activeProcesses = QueryActiveProcesses(job);
+
+            // Windows attaches the leader's console host to the job; it exits
+            // on its own once its last client is gone and is not an orphan.
+            if (activeProcesses != 0 &&
+                OnlyConsoleHostsRemain(job) &&
+                WaitForJobEmpty(job, ConsoleHostDrainMilliseconds))
+            {
+                activeProcesses = 0;
+            }
 
             if (activeProcesses != 0)
             {
@@ -343,6 +357,72 @@ internal static class Program
         }
 
         return accounting.ActiveProcesses;
+    }
+
+    private static bool OnlyConsoleHostsRemain(IntPtr job)
+    {
+        string consoleHost = Path.Combine(Environment.SystemDirectory, "conhost.exe");
+        int headerBytes = 2 * sizeof(uint);
+        int bufferBytes = headerBytes + MaxListedJobProcesses * IntPtr.Size;
+        IntPtr buffer = Marshal.AllocHGlobal(bufferBytes);
+        try
+        {
+            if (!QueryInformationJobObject(
+                    job,
+                    JobObjectBasicProcessIdList,
+                    buffer,
+                    (uint)bufferBytes,
+                    IntPtr.Zero))
+            {
+                return false;
+            }
+
+            int assigned = Marshal.ReadInt32(buffer, 0);
+            int listed = Marshal.ReadInt32(buffer, sizeof(uint));
+            if (listed != assigned || listed > MaxListedJobProcesses)
+                return false;
+
+            for (int index = 0; index < listed; index++)
+            {
+                long processId = Marshal.ReadIntPtr(buffer, headerBytes + index * IntPtr.Size).ToInt64();
+                string image;
+                if (!TryReadProcessImage(processId, out image))
+                    return false;
+                if (image != null && !String.Equals(image, consoleHost, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    // A null image means the process has already exited.
+    private static bool TryReadProcessImage(long processId, out string image)
+    {
+        image = null;
+        if (processId <= 0 || processId > UInt32.MaxValue)
+            return false;
+
+        IntPtr handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)processId);
+        if (handle == IntPtr.Zero)
+            return Marshal.GetLastWin32Error() == ERROR_INVALID_PARAMETER;
+
+        try
+        {
+            StringBuilder path = new StringBuilder(1024);
+            uint length = (uint)path.Capacity;
+            if (!QueryFullProcessImageNameW(handle, 0, path, ref length))
+                return false;
+            image = path.ToString(0, (int)length);
+            return true;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
     }
 
     private static bool WaitForJobEmpty(IntPtr job, int timeoutMilliseconds)
@@ -1110,6 +1190,23 @@ internal static class Program
         ref JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information,
         uint informationLength,
         IntPtr returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryInformationJobObject(
+        IntPtr job,
+        int informationClass,
+        IntPtr information,
+        uint informationLength,
+        IntPtr returnLength);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageNameW(
+        IntPtr process,
+        uint flags,
+        StringBuilder path,
+        ref uint length);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

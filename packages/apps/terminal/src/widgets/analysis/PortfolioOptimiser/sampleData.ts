@@ -2,7 +2,7 @@
  * Sample optimiser result for the PortfolioOptimiser widget in explore /
  * disconnected mode. Mirrors the /ft-api/v1/portfolio/optimise PortfolioResult
  * shape so the widget renders identically whether sample or live. Used ONLY
- * when no broker is connected; a "Sample data" badge is shown.
+ * when no broker is connected; the widget shows the Example data badge.
  */
 
 import type { PortfolioResult } from "@/services/ftApi";

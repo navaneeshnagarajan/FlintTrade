@@ -217,7 +217,7 @@ export default function SmartOrderWidget() {
                     "px-3 h-7 text-xs font-semibold transition-colors",
                     action === side
                       ? side === "BUY"
-                        ? "bg-profit text-white"
+                        ? "bg-profit-action text-profit-foreground"
                         : "bg-loss text-white"
                       : "bg-surface-elevated text-text-muted hover:text-text-primary",
                   )}

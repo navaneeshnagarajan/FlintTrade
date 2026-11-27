@@ -124,7 +124,7 @@ const ModeButton = forwardRef<HTMLButtonElement, ModeButtonProps>(
         aria-label={`${labels[mode]} mode`}
       >
         {icons[mode]}
-        <span className="text-[10px] leading-none">{labels[mode]}</span>
+        <span className="text-xxs leading-none">{labels[mode]}</span>
       </button>
     );
   },
@@ -190,7 +190,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
         {practiceMode && (
           <Badge
             variant="outline"
-            className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
+            className="text-xxs px-1.5 py-0 border-amber-500/50 text-amber-400 bg-amber-500/10"
           >
             Practice
           </Badge>
@@ -517,7 +517,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <span className="text-xs font-medium text-text-primary">Trading Mode</span>
-            <p className="text-[10px] text-text-muted leading-snug">
+            <p className="text-xxs text-text-muted leading-snug">
               Switch from the mode pill in the top bar
             </p>
           </div>
@@ -553,7 +553,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                 aria-label={`Go to ${label} settings`}
               >
                 <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="text-[10px]">{label}</span>
+                <span className="text-xxs">{label}</span>
               </button>
             ))}
           </div>

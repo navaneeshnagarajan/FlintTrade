@@ -117,12 +117,21 @@ function HighsLowsBar({ highs, lows }: HighsLowsBarProps) {
 // Per-index breadth split (ported from Market Intelligence — sample only)
 // ---------------------------------------------------------------------------
 
+/**
+ * The stacked bar draws its in-bar percentages in white, which is unreadable
+ * on the bright profit green of dark themes and on the light themes' pale
+ * Unchanged fill. Advances therefore uses the Order Pad's action fill and
+ * foreground pair, and Unchanged follows the theme's body text.
+ */
+const BREADTH_LABEL_CONTRAST =
+  "[&_[data-stacked-bar-segment=Advances]>span]:text-profit-foreground [&_[data-stacked-bar-segment=Unchanged]>span]:text-text-primary";
+
 function IndexBreadthSplit() {
   const labels = SAMPLE_INDEX_BREADTH.map((row) => row.label);
   const series: FlintStackedBarSeries[] = [
     {
       label: "Advances",
-      color: "var(--color-profit, #22c55e)",
+      color: "var(--color-profit-action, var(--color-profit, #22c55e))",
       values: SAMPLE_INDEX_BREADTH.map((row) => (row.advances / row.total) * 100),
     },
     {
@@ -150,7 +159,7 @@ function IndexBreadthSplit() {
         labels={labels}
         series={series}
         valueFormatter={(value) => `${value.toFixed(0)}%`}
-        className="text-text-primary"
+        className={cn("text-text-primary", BREADTH_LABEL_CONTRAST)}
       />
       <div className="mt-2 space-y-1.5">
         {SAMPLE_INDEX_BREADTH.map((row) => {

@@ -28,7 +28,7 @@ internal static class Program
     private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
     private const uint INVALID_FILE_ATTRIBUTES = 0xffffffff;
     private const int FILE_ID_INFO_CLASS = 18;
-    private const int FILE_RENAME_INFO_CLASS = 3;
+    private const int FILE_RENAME_INFORMATION_CLASS = 10;
     private const int FILE_DISPOSITION_INFO_CLASS = 4;
     private const int FILE_DISPOSITION_INFO_EX_CLASS = 21;
     private const uint FILE_DISPOSITION_FLAG_DELETE = 0x00000001;
@@ -87,9 +87,12 @@ internal static class Program
             EmitError(CodeForNativeError(error.NativeErrorCode), error.NativeErrorCode);
             return IsLockError(error.NativeErrorCode) ? 75 : 5;
         }
-        catch
+        catch (Exception error)
         {
-            EmitError("FILESYSTEM_ERROR", 0);
+            // IOException and UnauthorizedAccessException carry the Win32
+            // code in the low word of HResult. Report it so a refusal can be
+            // traced to the failing call.
+            EmitError("FILESYSTEM_ERROR", error.HResult & 0xFFFF);
             return 5;
         }
     }
@@ -1155,14 +1158,19 @@ internal static class Program
             Marshal.WriteIntPtr(information, IntPtr.Size == 8 ? 8 : 4, parent.Handle);
             Marshal.WriteInt32(information, IntPtr.Size == 8 ? 16 : 8, name.Length);
             Marshal.Copy(name, 0, IntPtr.Add(information, headerBytes), name.Length);
-            if (!SetFileInformationByHandle(
-                    source.Handle,
-                    FILE_RENAME_INFO_CLASS,
-                    information,
-                    (uint)(headerBytes + name.Length)))
-            {
-                throw NativeError("SetFileInformationByHandle(FileRenameInfo)");
-            }
+            // kernel32 SetFileInformationByHandle(FileRenameInfo) rejects a
+            // non-null RootDirectory with ERROR_INVALID_PARAMETER. The native
+            // call accepts a parent handle plus a bare entry name, which keeps
+            // the rename relative to the pinned parent.
+            IO_STATUS_BLOCK status;
+            int ntStatus = NtSetInformationFile(
+                source.Handle,
+                out status,
+                information,
+                (uint)(headerBytes + name.Length),
+                FILE_RENAME_INFORMATION_CLASS);
+            if (ntStatus < 0)
+                throw NativeError("NtSetInformationFile(FileRenameInformation)", RtlNtStatusToDosError(ntStatus));
         }
         finally
         {
@@ -1733,6 +1741,24 @@ internal static class Program
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool FlushFileBuffers(IntPtr file);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_STATUS_BLOCK
+    {
+        public IntPtr Status;
+        public UIntPtr Information;
+    }
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(
+        IntPtr file,
+        out IO_STATUS_BLOCK ioStatusBlock,
+        IntPtr information,
+        uint length,
+        int informationClass);
+
+    [DllImport("ntdll.dll")]
+    private static extern int RtlNtStatusToDosError(int status);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

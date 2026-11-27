@@ -223,7 +223,7 @@ function AnnouncementsList({ announcements }: { announcements: CorporateAnnounce
               <Badge variant="outline" className="text-xxs h-4 border-border-default text-text-muted shrink-0">
                 {ann.category}
               </Badge>
-              <span className="text-xxs text-text-disabled">{ann.date}</span>
+              <span className="text-xxs text-text-muted">{ann.date}</span>
             </div>
             <p className="text-xs text-text-secondary mt-0.5 leading-snug">{ann.headline}</p>
           </div>
