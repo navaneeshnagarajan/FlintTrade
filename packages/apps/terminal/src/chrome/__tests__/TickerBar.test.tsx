@@ -253,7 +253,7 @@ describe("TickerBar", () => {
     const nse = screen.getByLabelText("NSE closed");
     expect(nse).toBeInTheDocument();
     expect(nse).toHaveClass("text-[12px]", "ticker-venue-chip");
-    expect(nse).toHaveStyle({ color: "var(--color-ticker-venue)" });
+    expect(nse.style.color).toBe("var(--color-ticker-venue)");
   });
 
   it("does not show connect prompt when live data exists", () => {
@@ -320,7 +320,7 @@ describe("TickerBar", () => {
       const badge = screen.getByLabelText("MCX open");
       expect(badge).toBeInTheDocument();
       expect(badge).toHaveClass("text-[12px]", "ticker-venue-chip");
-      expect(badge).toHaveStyle({ color: "var(--color-ticker-venue)" });
+      expect(badge.style.color).toBe("var(--color-ticker-venue)");
       expect(badge).toHaveAttribute("title", "MCX session is open (09:00–23:30 IST)");
     });
 
