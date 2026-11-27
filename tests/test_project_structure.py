@@ -34,11 +34,7 @@ PACKAGES = [
 ]
 
 # Files every fresh clone must have at the repo root for the project to make
-# sense to a contributor or user. As of the public-repo policy
-# (see memory feedback_public_repos_ci_policy / commit bc7f5374), the
-# contributor-facing CLAUDE.md / AGENTS.md / PLAN.md are TRACKED at the root so
-# every human or agent picking up the repo gets the same in-repo guidance; the
-# templates/agent-context/ tree remains for per-package scaffolding.
+# sense to a contributor or user.
 REQUIRED_ROOT_FILES = [
     "readme.md",
     "VERSION",
@@ -52,10 +48,9 @@ REQUIRED_ROOT_FILES = [
     "changelog.md",
     "code-of-conduct.md",
     "security.md",
-    "CLAUDE.md",
-    "AGENTS.md",
     "PLAN.md",
     "ROADMAP.md",
+    "RETICLE.md",
 ]
 
 
@@ -92,36 +87,31 @@ def test_version():
     assert len(base.split(".")) == 3, f"VERSION is not 3-part semver: {v!r}"
 
 
-def test_agent_guidance_files_tracked_at_root():
-    """CLAUDE.md / AGENTS.md / PLAN.md are tracked at the repo root.
+# These paths must not be tracked in the public repository.
+UNTRACKED_TOOLING_PATHS = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".cursor",
+    "templates/agent-context",
+    "scripts/setup-agent-context.sh",
+]
 
-    Per the public-repo policy (every repo is public and open for
-    contributions), the in-repo guidance files are the single source of truth
-    for how any human or agent works on the repo and must travel with a clone.
-    """
-    for f in ["CLAUDE.md", "AGENTS.md", "PLAN.md"]:
-        assert is_tracked(f), f"{f} must be tracked at the repo root for contributors"
+
+def test_removed_tooling_files_are_not_tracked():
+    for path in UNTRACKED_TOOLING_PATHS:
+        result = subprocess.run(
+            ["git", "ls-files", "--", path],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout == "", f"{path} must stay untracked"
 
 
 def test_no_tracked_per_package_agent_files():
-    """packages/<pkg>/CLAUDE.md and AGENTS.md must not exist after the move."""
+    """packages/<pkg>/CLAUDE.md and AGENTS.md stay untracked."""
     for pkg in PACKAGES:
         for f in ["CLAUDE.md", "AGENTS.md"]:
             path = os.path.join("packages", pkg, f)
             assert not is_tracked(path), f"{path} should be gitignored — tracked in git"
-
-
-def test_agent_context_templates_present():
-    """The tracked template tree that scripts/setup-agent-context.sh reads."""
-    assert os.path.isdir(
-        os.path.join(ROOT, "templates", "agent-context")
-    ), "Missing templates/agent-context/"
-    for f in ["CLAUDE.md.template", "AGENTS.md.template", "PLAN.md.template"]:
-        assert os.path.exists(
-            os.path.join(ROOT, "templates", "agent-context", f)
-        ), f"Missing templates/agent-context/{f}"
-    for pkg in PACKAGES:
-        for f in ["CLAUDE.md.template", "AGENTS.md.template"]:
-            assert os.path.exists(
-                os.path.join(ROOT, "templates", "agent-context", "packages", pkg, f)
-            ), f"Missing templates/agent-context/packages/{pkg}/{f}"

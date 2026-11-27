@@ -6,8 +6,7 @@ provider config, or a CLI binary on ``PATH``), how to invoke it, and which
 auth model it uses. The registry (layer 2) turns these descriptions into
 detection + session-construction behaviour.
 
-Six backends are catalogued, in two categories that mirror the AI-backends
-design:
+Six backends are catalogued, in two categories:
 
 * **LLM providers** (``kind == "llm"``) — chat/completion backends driven by
   the existing ``LLMClient``. Detection is *configured-if provider + key set*:
