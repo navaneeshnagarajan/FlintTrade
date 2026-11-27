@@ -62,7 +62,7 @@ class TestAddIp:
 
     def test_add_cidr(self):
         wl = self._wl()
-        wl.add_ip("alice", "192.168.1.0/24", label="LAN")
+        wl.add_ip("alice", "203.0.113.0/24", label="Office")
         assert len(wl.list_ips("alice")) == 1
 
     def test_add_is_idempotent(self):
@@ -140,10 +140,10 @@ class TestIsWhitelisted:
 
     def test_cidr_match(self):
         wl = IPWhitelist()
-        wl.add_ip("alice", "192.168.1.0/24")
+        wl.add_ip("alice", "203.0.113.0/24")
         wl.enable("alice")
-        assert wl.is_whitelisted("alice", "192.168.1.100") is True
-        assert wl.is_whitelisted("alice", "192.168.2.1") is False
+        assert wl.is_whitelisted("alice", "203.0.113.10") is True
+        assert wl.is_whitelisted("alice", "198.51.100.1") is False
 
     def test_unknown_user_allows_all(self):
         wl = IPWhitelist()

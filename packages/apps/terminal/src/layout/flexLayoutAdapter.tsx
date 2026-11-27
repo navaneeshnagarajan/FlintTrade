@@ -8,8 +8,7 @@
  * workspace API handle stored in `layoutStore`, and the TabNode → props
  * bridge used by the widget factory — lives here.
  *
- * Known FlexLayout traps this module is shaped around (from the
- * layout-fluidness assessment, now .local/specs/finos-migration/):
+ * Known FlexLayout traps this module is shaped around:
  *  - Model recreation remounts every tab (#456/#524): the Model instance is
  *    owned by TerminalRoute state and only replaced on explicit loads
  *    (preset apply, clear, saved-layout restore) — never derived in render.

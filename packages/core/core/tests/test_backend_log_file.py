@@ -197,3 +197,43 @@ def test_unwritable_log_dir_does_not_raise(tmp_path: Path, monkeypatch: pytest.M
 
     assert not any(getattr(h, _LOG_FILE_SENTINEL, False) for h in scratch_logger.handlers)
     assert not (tmp_path / "logs" / "flinttrade.log").exists()
+
+
+def test_unidentified_handler_does_not_close_a_reused_descriptor(tmp_path: Path) -> None:
+    """A handler that cannot prove it owns the descriptor must not close a reuse."""
+    from flinttrade_core.app import _WorkspaceLogFileHandler
+
+    path = tmp_path / "flinttrade.log"
+    path.write_bytes(b"")
+    handler = _WorkspaceLogFileHandler(path, maxBytes=100, backupCount=1, delay=True)
+    handler._log_identity = None
+    handler.stream = path.open("a", encoding="utf-8")
+    descriptor = handler.stream.fileno()
+    os.close(descriptor)
+    held = os.open(os.devnull, os.O_RDONLY)
+    try:
+        if held != descriptor:
+            os.dup2(held, descriptor)
+            os.close(held)
+            held = -1
+        handler.close()
+        os.fstat(descriptor)
+        assert os.read(descriptor, 1) == b""
+    finally:
+        if held >= 0 and held != descriptor:
+            os.close(held)
+        os.close(descriptor)
+
+
+def test_should_rollover_releases_a_closed_descriptor_before_tell(tmp_path: Path) -> None:
+    """A closed stream is dropped before RotatingFileHandler asks for its position."""
+    from flinttrade_core.app import _WorkspaceLogFileHandler
+
+    path = tmp_path / "flinttrade.log"
+    path.write_bytes(b"x" * 80)
+    handler = _WorkspaceLogFileHandler(path, maxBytes=10, backupCount=1, delay=True)
+    handler.stream = path.open("a", encoding="utf-8")
+    handler.stream.close()
+    record = logging.LogRecord("test", logging.INFO, __file__, 1, "more", (), None)
+    assert handler.shouldRollover(record) is False
+    assert handler.stream is None

@@ -72,6 +72,7 @@ def preflight_stack(request, route_stack, monkeypatch):
     session = Session("synthetic", 4102444800.0, "route-account", broker)
     gate = SafetyGate()
     minted, consumed, invoked, builds, reads, checks = [], [], [], [], [], []
+    dhan_build_phases = []
 
     def consume(identifier):
         result = gate.consume(identifier)
@@ -111,6 +112,11 @@ def preflight_stack(request, route_stack, monkeypatch):
     original_build = getattr(mapper, name)
 
     def build(order, *args, **kwargs):
+        if broker == "dhan":
+            dhan_build_phases.append({
+                "reads": len(reads), "checks": len(checks), "minted": len(minted),
+                "consumed": len(consumed), "invoked": len(invoked), "wire": len(wire.calls),
+            })
         builds.append(order.model_dump(mode="json"))
         return original_build(order, *args, **kwargs)
 
@@ -132,7 +138,8 @@ def preflight_stack(request, route_stack, monkeypatch):
 
     monkeypatch.setattr(app.config["SAFETY"], "check_order", check)
     state = SimpleNamespace(app=app, broker=broker, wire=wire, minted=minted, consumed=consumed,
-                            invoked=invoked, builds=builds, reads=reads, checks=checks, resolved=resolved)
+                            invoked=invoked, builds=builds, reads=reads, checks=checks, resolved=resolved,
+                            dhan_build_phases=dhan_build_phases)
     yield state
     router.revoke_and_drain(timeout=0)
 
@@ -223,7 +230,16 @@ def test_ordinary_inactive_day_ioc_and_amo_controls_remain_ack_only(preflight_st
           **observed}, sort_keys=True), flush=True)
     assert response.status_code == 200, observed
     assert len(stack.minted) == 1 and stack.consumed == [True] and stack.invoked == [True] and len(stack.wire.calls) == 1
-    assert len(stack.builds) == 2 and stack.reads and stack.checks == [[True] * 5]
+    expected_builds = 3 if stack.broker == "dhan" and fields.get("variety") == "amo" else 2
+    assert len(stack.builds) == expected_builds and stack.reads and stack.checks == [[True] * 5]
+    if stack.broker == "dhan" and fields.get("variety") == "amo":
+        # Ingress, adapter defence, then AMO body construction: the exact third
+        # call must not hide removal of the original pre-read validation.
+        assert stack.dhan_build_phases == [
+            {"reads": 0, "checks": 0, "minted": 0, "consumed": 0, "invoked": 0, "wire": 0},
+            {"reads": len(stack.reads), "checks": 1, "minted": 1, "consumed": 1, "invoked": 1, "wire": 0},
+            {"reads": len(stack.reads), "checks": 1, "minted": 1, "consumed": 1, "invoked": 1, "wire": 0},
+        ]
     assert observed["reducing_hold"] == 2
     assert observed["exposure_holds"] == [{"quantity": "2", "broker_order_id": "preflight-ack"}]
     assert not {"filled", "closed", "execution_confirmed"}.intersection(observed["body"])

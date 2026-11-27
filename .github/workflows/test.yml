@@ -13,8 +13,10 @@ on:
 # Cancel earlier in-flight pull request runs when a new commit lands on the
 # same branch: only the newest matrix matters there. Protected-branch pushes
 # queue instead, so every commit on main and dev keeps a complete result.
+# Every main run gets its own group, so a later merge never replaces a queued
+# main run either.
 concurrency:
-  group: test-${{ github.ref }}
+  group: test-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -129,7 +131,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.14' }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
       - run: uv sync --frozen
@@ -221,7 +223,8 @@ jobs:
   python-shards:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    # The locked install plus the shard does not finish inside 30 minutes.
+    timeout-minutes: 45
     env:
       OMP_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
@@ -251,9 +254,19 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.14' }
       - if: steps.classify.outputs.python == 'true'
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - if: steps.classify.outputs.python == 'true'
         run: uv sync --frozen --extra ml
+      - if: steps.classify.outputs.python == 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - if: steps.classify.outputs.python == 'true'
+        run: pnpm install --frozen-lockfile
       - name: Run Python package shard
         if: steps.classify.outputs.python == 'true'
         run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=${{ matrix.shard }} --ft-shard-count=5 --ft-shard-durations=scripts/pytest_shard_durations.json -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-${{ matrix.shard }}.xml
@@ -304,9 +317,19 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.14' }
       - if: steps.classify.outputs.python == 'true'
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - if: steps.classify.outputs.python == 'true'
         run: uv sync --frozen --extra ml
+      - if: steps.classify.outputs.python == 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - if: steps.classify.outputs.python == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - if: steps.classify.outputs.python == 'true'
+        run: pnpm install --frozen-lockfile
       - name: Run Python package shard
         if: steps.classify.outputs.python == 'true'
         run: uv run python -m pytest packages/*/*/tests/ -p scripts.pytest_shard --ft-shard-index=0 --ft-shard-count=5 --ft-shard-durations=scripts/pytest_shard_durations.json -n auto -q --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread --durations=20 --junitxml=test-results/python-0.xml
@@ -370,7 +393,7 @@ jobs:
       - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
         run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/ src/generated/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check (strict TypeScript check already passed)
@@ -542,7 +565,7 @@ jobs:
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
   # directory package on every non-draft code change; the weekly workflow
   # covers platform-specific packaging.
-  electron-desktop-tests:
+  electron-desktop-suite:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.desktop == 'true'
     # ubuntu-26.04 matches flint.toml os_requires. This job packages a directory
@@ -576,5 +599,36 @@ jobs:
         run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
       - name: Verify packaged Electron security contract
         run: pnpm --filter @flinttrade/desktop verify:package
+
+  # Branch protection requires this exact name. It runs on every non-draft
+  # pull request, so a failed classifier or a cancelled suite cannot be
+  # reported as a skipped, passing check.
+  electron-desktop-tests:
+    needs: [changed-surfaces, electron-desktop-suite]
+    if: always() && github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the selected Electron suite
+        env:
+          CLASSIFIER_RESULT: ${{ needs.changed-surfaces.result }}
+          DESKTOP_REQUIRED: ${{ needs.changed-surfaces.outputs.desktop }}
+          SUITE_RESULT: ${{ needs.electron-desktop-suite.result }}
+        run: |
+          python - <<'PYTHON'
+          import os
+          import sys
+          selected = os.environ["DESKTOP_REQUIRED"]
+          expected = "success" if selected == "true" else "skipped"
+          valid = (
+              selected in {"true", "false"}
+              and os.environ["CLASSIFIER_RESULT"] == "success"
+              and os.environ["SUITE_RESULT"] == expected
+          )
+          if not valid:
+              print("The Electron suite failed, was cancelled or did not run.")
+              sys.exit(1)
+          print("Electron suite passed." if selected == "true" else "No desktop changes.")
+          PYTHON
 
 # No-op marker. A diff that includes this workflow is classified as code so required Test jobs run.

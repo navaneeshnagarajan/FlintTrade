@@ -84,6 +84,11 @@ chroma_data/
 .vercel/
 .claude/
 .codex/
+.cursor/
+AGENTS.md
+CLAUDE.md
+templates/agent-context/
+scripts/setup-agent-context.sh
 # Agent Skills (agentskills.io) install artifacts — machine-local agent tooling,
 # installed per-contributor via e.g. `npx skills add dhan-oss/dhanhq-skills --skill dhanhq`.
 .agents/

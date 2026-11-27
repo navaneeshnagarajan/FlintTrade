@@ -45,7 +45,6 @@ from .analysis_routes import (
     _sample_strike_step,
 )
 from .oi_analytics import OIAnalytics, OISnapshot
-from .option_chain import LOT_SIZES  # noqa: F401 — imported for symmetry with analysis_routes
 
 logger = logging.getLogger("flinttrade.screener.oi_analytics_routes")
 

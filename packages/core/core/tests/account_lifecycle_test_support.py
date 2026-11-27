@@ -65,6 +65,7 @@ class SyntheticAdapter:
             "dhan",
             read_only_until_at=time.time() + 1800 if self.read_only else None,
         )
+        session.extra["client"] = type("SyntheticClient", (), {"_closed": False})()
         self.sessions.append(session)
         if self.after_auth is not None:
             self.after_auth()

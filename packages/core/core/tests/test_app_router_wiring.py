@@ -1823,13 +1823,9 @@ def test_native_adapter_kwargs_thread_local_state_provider(*, backend_lease_fact
 
 @pytest.mark.unit
 def test_native_adapter_kwargs_adds_cached_dhan_security_resolver(monkeypatch) -> None:
-    """App-activated Dhan adapters must resolve symbols like the live probe.
-
-    Dhan market-data and order-write calls require a security id. The app
-    factory injects a lazy resolver only for Dhan, so the resolver works for
-    reads/writes without making every native adapter accept Dhan-only kwargs.
-    """
+    """Explicit snapshots keep identity interfaces without hidden GET fetches."""
     from flinttrade_core.app import _native_adapter_kwargs_for
+    from flinttrade_gateway.brokers import dhan_mapping as dhan_map
 
     csv_text = "\n".join(
         [
@@ -1853,6 +1849,16 @@ def test_native_adapter_kwargs_adds_cached_dhan_security_resolver(monkeypatch) -
     assert dhan_kwargs["local_state_provider"] is sentinel_provider
     assert upstox_kwargs == {"local_state_provider": sentinel_provider}
     resolve = dhan_kwargs["security_resolver"]
+    with pytest.raises(dhan_map.DhanMappingError):
+        resolve("RELIANCE", "NSE")
+    assert downloads == []
+
+    # Data acquisition is explicit; no read/validation path may download it.
+    from flinttrade_gateway.brokers.dhan import load_scrip_master_rows
+    snapshot = dhan_map.build_security_resolver(load_scrip_master_rows("compact"))
+    supplied = _native_adapter_kwargs_for(sentinel_provider, reference_resolvers={"dhan": snapshot})("dhan")
+    resolve = supplied["security_resolver"]
+    assert resolve is snapshot and callable(resolve.reverse) and callable(resolve.contract)
     assert resolve("RELIANCE", "NSE") == "11536"
     assert resolve("RELIANCE", "NSE") == "11536"
     assert len(downloads) == 1

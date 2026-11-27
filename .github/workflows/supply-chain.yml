@@ -5,9 +5,12 @@ name: Supply Chain
 # drift, install enforcement, Windows ACL hardening, cross-platform smoke, lockfile
 # drift, and the CLA GPG binding (external forks only).
 #
-# Linux audits run on dependency or installation changes in PRs, and in full on
-# protected-branch pushes, the weekly schedule and manual runs. Cross-platform
-# jobs remain scheduled/manual. Test owns Electron package verification.
+# The Python, Rust and Node audits run on every non-draft PR, because advisories
+# change without any change to the repository and a main push always runs them.
+# The transitive licence sweep runs on dependency or installation changes in
+# PRs, and in full on protected-branch pushes, the weekly schedule and manual
+# runs. Cross-platform jobs remain scheduled/manual. Test owns Electron package
+# verification.
 
 on:
   pull_request:
@@ -20,8 +23,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  group: supply-chain-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   # Superseded pull request runs are cancelled; protected-branch pushes queue.
+  # Every main run gets its own group, so a later merge never replaces it.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -94,8 +98,7 @@ jobs:
     name: Python audit (pip-audit + lock/licence/provenance/install gates)
     runs-on: ubuntu-26.04
     timeout-minutes: 15
-    needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
+    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Remove stale pip-audit evidence from checkout
@@ -104,7 +107,7 @@ jobs:
           rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: "3.14.10" }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
         id: pip_audit
@@ -140,8 +143,7 @@ jobs:
     name: Rust audit (cargo audit)
     runs-on: ubuntu-26.04
     timeout-minutes: 15
-    needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
+    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
@@ -161,8 +163,7 @@ jobs:
     name: Node audit (pnpm audit)
     runs-on: ubuntu-26.04
     timeout-minutes: 15
-    needs: changed-surfaces
-    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.dependencies == 'true'
+    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -218,7 +219,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: "3.14.10" }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync --frozen
       - name: ACL test
         run: uv run python -m pytest tests/test_secure_file_windows_acl.py -v
@@ -236,7 +237,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: "3.14.10" }
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 

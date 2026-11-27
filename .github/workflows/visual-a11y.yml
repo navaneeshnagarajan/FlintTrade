@@ -38,8 +38,9 @@ on:
       - '.github/actions/**'
 
 concurrency:
-  group: visual-a11y-${{ github.ref }}
+  group: visual-a11y-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   # Superseded pull request runs are cancelled; protected-branch pushes queue.
+  # Every main run gets its own group, so a later merge never replaces it.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

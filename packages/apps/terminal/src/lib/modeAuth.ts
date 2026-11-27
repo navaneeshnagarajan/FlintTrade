@@ -4,8 +4,7 @@
  * The three-mode state machine (Explore / Practice / Live) is enforced
  * server-side from the JWT `mode` claim. The UI mode and the JWT claim MUST
  * stay in lockstep: a session showing "Practice" while holding an Explore or
- * Live JWT is the exact divergence class the Phase 1 audit flagged
- * (`.local/specs/auth-phase1/DESIGN_LOG.md`, findings A4/A5). UI mode changes
+ * Live JWT is the divergence this module prevents. UI mode changes
  * go through these calls so the server mints a matching token. Unlock is the
  * exception: it restores the session and does not change Mode.
  *

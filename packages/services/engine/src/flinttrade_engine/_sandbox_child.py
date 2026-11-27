@@ -301,8 +301,7 @@ def main() -> None:
     # dotted name doesn't exist and the child crashed with ImportError
     # on every single sandbox call. Loading the sibling file directly
     # via ``importlib.util.spec_from_file_location`` sidesteps package
-    # naming entirely. Codex stop-gate 2026-05-19 BLOCK after commit
-    # 5779e59.
+    # naming entirely.
     se = _load_executor_module()
     if se is None:
         # _load_executor_module already wrote the error frame to stdout

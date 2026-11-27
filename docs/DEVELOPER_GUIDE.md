@@ -136,11 +136,14 @@ screen, sign-in, and setup. Each one runs at 1440×900 and 2560×1440.
 
 The checks use Example sample data, a frozen clock, motion turned off,
 fonts loaded, and masks on the ticker and canvases. Route mocks come from
-the same fail-closed registry as the other Playwright specs, so an
+the same strict mock registry as the other Playwright specs, so an
 unmocked `/ft-api` call still fails the fixture.
 
 Reticle does not judge these pictures. Reticle reads network, app state,
-and the console. It cannot see contrast, spacing, or clipping.
+and the console. It cannot see contrast, spacing, or clipping. The procedure
+is [RETICLE.md](../RETICLE.md). When a change is visible in the running
+terminal or site, verify that flow with Reticle before calling the work done.
+Report an unknown verdict as unknown.
 
 The lane is advisory. `.github/workflows/visual-a11y.yml` writes diffs and
 axe results to the job summary, uploads the images, and finishes green
@@ -456,6 +459,12 @@ without presenting them as ready to connect.
    reason. If a hook is broken, fix the hook in the same PR.
 5. **No `dangerouslySkipPermissions`.** Anywhere.
 6. **Sign-off** is optional. Conventional commit format is mandatory.
+
+### Design notes and the changelog
+
+Write the intended behaviour down before changing it. The public roadmap
+is [ROADMAP.md](../ROADMAP.md). [changelog.md](../changelog.md) records
+shipped behaviour only, not in-flight design.
 
 ---
 
@@ -924,8 +933,10 @@ Disagreeing old sizes stay `—`, and an expired security id still cannot
 be ordered.
 `missing_lot_refusal` is the order text:
 `Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Order Pad shows that
-sentence once, inline, when a derivative has no verified lot. The Order Pad also shows a lot-multiple refusal once, inline:
+`<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. The Order Pad shows that
+sentence once, inline, when a derivative has no verified lot. Places
+that do not refuse an order show only `lot_unknown_message`:
+`The lot size for <name> isn't verified.` The Order Pad also shows a lot-multiple refusal once, inline:
 `Quantity must be a multiple of the lot size (N).`
 A quantity that is not a positive multiple of the lot is refused before
 the decision model, with HTTP 400 `quantity_admission`. NIFTY 1,800, BANKNIFTY 900,
@@ -1014,6 +1025,3 @@ screen-reader list, `Positions without a heat map tile`.
 - **Question issue template** — focused usage questions, design questions, and ideas.
 - **GitHub Issues** — bug reports, feature requests.
 - **GitHub Security Advisories (private)** — security disclosures.
-
-The public roadmap is [ROADMAP.md](../ROADMAP.md). Shipped behaviour
-belongs in the changelog.

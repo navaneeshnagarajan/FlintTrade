@@ -544,12 +544,15 @@ export function useDrawingTools({
         for (const series of dsMap.values()) {
           try { chart.removeSeries(series); } catch { /* ignore */ }
         }
+        // useChartInit clears chartRef after removing the whole chart. In that
+        // case its price lines are already gone: removing one again schedules
+        // a new native paint against the disposed canvas.
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+        for (const ref of hlineSeriesRef.current.values()) {
+          try { ref._series.removePriceLine(ref._priceLine); } catch { /* gone */ }
+        }
       }
       dsMap.clear();
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-      for (const ref of hlineSeriesRef.current.values()) {
-        try { ref._series.removePriceLine(ref._priceLine); } catch { /* gone */ }
-      }
       hlineSeriesRef.current.clear();
       drawingRenderPlanRef.current = { lineSeries: [], priceLines: [], markers: [] };
     };

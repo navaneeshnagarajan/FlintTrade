@@ -123,7 +123,7 @@ class TestLotSizeLookup:
 
     def test_finnifty_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("FINNIFTY") == 65
+        assert lot_size_for("FINNIFTY") == 60
 
     def test_sensex_lot_size(self):
         _, LOT_SIZES, _, _, _, _, _, lot_size_for, _ = _import_strategy()
@@ -145,9 +145,9 @@ class TestLotSizeLookup:
         assert lot_size_for("nifty") == lot_size_for("NIFTY")
         assert lot_size_for("banknifty") == lot_size_for("BANKNIFTY")
 
-    def test_unknown_symbol_returns_default(self):
+    def test_unknown_symbol_has_no_lot_size(self):
         _, _, _, _, _, _, _, lot_size_for, _ = _import_strategy()
-        assert lot_size_for("UNKNOWN_XYZ") == 1
+        assert lot_size_for("UNKNOWN_XYZ") is None
 
 
 # ===========================================================================
