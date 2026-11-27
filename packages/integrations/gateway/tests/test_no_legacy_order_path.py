@@ -4707,7 +4707,7 @@ def _proven_strategy_route_lines(
         return set()
     if [ast.unparse(d) for d in ingress[0].decorator_list] != [
         "orders_bp.route('/place', methods=['POST'])",
-        "rate_limit('orders', user_rate=10, global_rate=100, identity='jwt')",
+        "rate_limit('orders', user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity='jwt')",
     ] or [ast.unparse(n) for n in ingress[0].body if not isinstance(n, ast.Expr)] != [
         "return _dispatch_live_place_from_request()"
     ]:
@@ -4878,7 +4878,7 @@ def test_strategy_adapter_qualification_rejects_rebinding_and_extra_calls(mutati
     ("adapter", "make_response(place_order())", "make_response(place_order.__wrapped__())"),
     ("adapter", "return self._dispatch(body, context, cached_on_drain=cached_on_drain)", "return raw_client.place_order(body)"),
     ("adapter", '"/api/v1/orders/place",', '"/other/place",'),
-    ("ingress", '@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")\ndef place_order', 'def place_order'),
+    ("ingress", '@rate_limit("orders", user_rate=_ORDER_ROUTE_USER_RATE, global_rate=100, identity="jwt")\ndef place_order', 'def place_order'),
     ("ingress", "return _dispatch_live_place_from_request()", "return raw_client.place_order()"),
 ])
 def test_strategy_adapter_qualification_requires_decorated_canonical_chain(target: str, old: str, new: str) -> None:

@@ -3407,17 +3407,14 @@ def _order_rule_refusal(results: list[Any]) -> tuple[Any, int] | None:
     ), 400
 
 
-def _order_rate_limiter() -> Any:
-    """The process order rate limiter, or a Practice-only fallback."""
-    router = current_app.config.get("BROKER_ROUTER")
-    limiter = getattr(router, "rate_limiter", None) if router is not None else None
-    if limiter is None:
-        limiter = current_app.config.get("ORDER_RATE_LIMITER")
+def _practice_order_rate_limiter() -> Any:
+    """The Practice-owned per-exchange order rate limiter."""
+    limiter = current_app.config.get("PRACTICE_ORDER_RATE_LIMITER")
     if limiter is None:
         from flinttrade_gateway.rate_limiter import BrokerRateLimiter  # noqa: PLC0415
 
         limiter = BrokerRateLimiter({})
-        current_app.config["ORDER_RATE_LIMITER"] = limiter
+        current_app.config["PRACTICE_ORDER_RATE_LIMITER"] = limiter
     return limiter
 
 
@@ -3446,9 +3443,13 @@ def _order_rate_refusal(
     body: Mapping[str, Any], *, broker: str, action: str = "place"
 ) -> tuple[Any, int] | None:
     """Refuse the eleventh order in one second on one exchange, else None."""
-    from flinttrade_core.order_rules import OrderBudgetExceeded, results_payload  # noqa: PLC0415
+    from flinttrade_core.order_rules import (  # noqa: PLC0415
+        OrderBudgetExceeded,
+        headline,
+        results_payload,
+    )
 
-    limiter = _order_rate_limiter()
+    limiter = _practice_order_rate_limiter()
     admit = getattr(limiter, "admit_order", None)
     if not callable(admit):
         return None
@@ -3459,7 +3460,7 @@ def _order_rate_refusal(
         return jsonify(
             {
                 "status": "error",
-                "message": str(exc),
+                "message": headline(exc.results),
                 "code": "order_rule_blocked",
                 "dispatch_outcome": "refused_before_dispatch",
                 "retry_safe": False,

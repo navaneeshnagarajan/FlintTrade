@@ -122,6 +122,7 @@ def _reset_rate_limiter(flask_app):
     for candidate in (
         getattr(router, "rate_limiter", None) if router is not None else None,
         flask_app.config.get("ORDER_RATE_LIMITER"),
+        flask_app.config.get("PRACTICE_ORDER_RATE_LIMITER"),
     ):
         clear = getattr(candidate, "clear", None)
         if callable(clear):
@@ -526,13 +527,10 @@ class TestOrderRateLimiting:
     def _freeze_order_rate_clock(self, flask_app, monkeypatch, now: float = 1000.0):
         from flinttrade_gateway.rate_limiter import BrokerRateLimiter
 
-        router = flask_app.config.get("BROKER_ROUTER")
-        limiter = getattr(router, "rate_limiter", None) if router is not None else None
-        if limiter is None:
-            limiter = flask_app.config.get("ORDER_RATE_LIMITER")
+        limiter = flask_app.config.get("PRACTICE_ORDER_RATE_LIMITER")
         if limiter is None:
             limiter = BrokerRateLimiter({}, clock=lambda: now)
-            flask_app.config["ORDER_RATE_LIMITER"] = limiter
+            flask_app.config["PRACTICE_ORDER_RATE_LIMITER"] = limiter
             return limiter
         monkeypatch.setattr(limiter, "_clock", lambda: now)
         return limiter

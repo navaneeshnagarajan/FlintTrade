@@ -4572,8 +4572,10 @@ def create_flask_app(
     # Register the sole Practice sandbox blueprint (/v1/sandbox/*).
     from flinttrade_data.sandbox_routes import data_sandbox_bp  # noqa: PLC0415
     from flinttrade_data.sandbox_engine import SandboxEngine as _DataSandboxEngine  # noqa: PLC0415
+    from flinttrade_gateway.rate_limiter import BrokerRateLimiter  # noqa: PLC0415
 
     app.config["DATA_SANDBOX_ENGINE"] = _DataSandboxEngine()
+    app.config["PRACTICE_ORDER_RATE_LIMITER"] = BrokerRateLimiter({})
     app.register_blueprint(data_sandbox_bp)
 
     # ------------------------------------------------------------------
