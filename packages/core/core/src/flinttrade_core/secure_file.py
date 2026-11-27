@@ -902,7 +902,12 @@ def _verify_windows_security_descriptor(
         ctypes.byref(revision),
     ):
         return False, "DACL control flags could not be inspected"
-    if not control.value & _SE_DACL_PROTECTED:
+    # A file may carry an unprotected DACL only when every ACE was inherited
+    # from a hardened parent: that is how SQLite sidecars created inside an
+    # owner-only directory receive their permissions. Directories still need
+    # their own protected DACL, so an interrupted creation stays detectable.
+    inherited = not control.value & _SE_DACL_PROTECTED
+    if inherited and expected_ace_flags:
         return False, "DACL inheritance is not protected"
 
     acl = ctypes.cast(dacl, ctypes.POINTER(_Acl)).contents
@@ -916,9 +921,11 @@ def _verify_windows_security_descriptor(
         ace = ctypes.cast(ace_pointer, ctypes.POINTER(_AccessAllowedAce)).contents
         if ace.header.ace_type != _ACCESS_ALLOWED_ACE_TYPE:
             return False, "DACL contains a non-allow ACE"
-        if ace.header.ace_flags & _INHERITED_ACE:
+        if inherited and not ace.header.ace_flags & _INHERITED_ACE:
+            return False, "DACL inheritance is not protected"
+        if not inherited and ace.header.ace_flags & _INHERITED_ACE:
             return False, "DACL contains an inherited ACE"
-        if ace.header.ace_flags != expected_ace_flags:
+        if ace.header.ace_flags & ~_INHERITED_ACE != expected_ace_flags:
             # A directory hardened before inheritance flags were introduced
             # carries flag-less ACEs that strip every pre-existing child's
             # inherited DACL — failing here makes harden() reinstall the
@@ -1175,6 +1182,22 @@ def fsync_parent_directory(path: pathlib.Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def barrier_directory(directory: pathlib.Path) -> None:
+    """Commit earlier entry changes in *directory* to stable storage on Windows.
+
+    Python cannot open a Windows directory for ``fsync``. A write-through rename
+    of a scratch member forces the NTFS metadata log, which already holds every
+    earlier change to the directory.
+    """
+    descriptor, name = tempfile.mkstemp(prefix=".flinttrade-barrier-", suffix=".tmp", dir=directory)
+    os.close(descriptor)
+    try:
+        durable_unlink(pathlib.Path(name))
+    except PendingDurableUnlinkError:
+        # The write-through rename committed; only the scratch tombstone remains.
+        pass
 
 
 def _is_reparse_point(path_stat: os.stat_result) -> bool:

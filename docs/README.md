@@ -34,7 +34,7 @@ in the repository notice and source headers.
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |
 | [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, and backup notes. |
 | [GLOSSARY.md](GLOSSARY.md) | Everyone | Shared product vocabulary. |
-| [product-modes.mdx](product-modes.mdx) | User / Contributor | Practice and Live are Modes. Connected (read) is a broker status. Example is sample data, versus Sample / Unavailable / Live / Stale provenance, and Home versus Trade ownership. |
+| [product-modes.mdx](product-modes.mdx) | User / Contributor | Practice and Live are the session Modes. Connected (read) is a broker status. In that state FlintTrade reads the account and places no orders. Example is sample data, versus Sample / Unavailable / Live / Stale provenance, and Home versus Trade ownership. |
 | [screenshots/](screenshots/) | Documentation | UI screenshots referenced from user-facing docs. |
 
 ## Two-column quick links

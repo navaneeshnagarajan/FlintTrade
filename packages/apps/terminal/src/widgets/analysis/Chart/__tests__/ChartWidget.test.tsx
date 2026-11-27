@@ -748,6 +748,13 @@ describe("ChartWidget", () => {
     expect(searchInput).toBeInTheDocument();
   });
 
+  it("gives the symbol search input an accessible name", () => {
+    render(<ChartWidget />);
+    expect(screen.getByRole("textbox", { name: "Search symbol" })).toBe(
+      screen.getByPlaceholderText("Search symbol..."),
+    );
+  });
+
   it("retires A symbol-search results and cannot let A hide B loading", async () => {
     const user = userEvent.setup();
     const pendingA = deferred<unknown[]>();

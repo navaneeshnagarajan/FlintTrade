@@ -755,7 +755,10 @@ describe("OptionChainWidget", () => {
       "NIFTY",
       "NFO",
     ])).toEqual({ lotsize: 50 }));
-    fireEvent.change(screen.getByLabelText("Add a reason (optional)"), {
+    // The note is collapsed behind a link until asked for, as on the Order Pad.
+    expect(screen.queryByRole("textbox", { name: "Add a reason (optional)" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Add a reason (optional)" }), {
       target: { value: "Buy the call" },
     });
     act(() => gridMocks.onCellClicked?.([0, 0]));
@@ -1048,5 +1051,37 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     // A NEW broadcast still retargets the chain.
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SENSEX", exchange: "BSE_INDEX" }));
     expect(screen.getByText(/strikes loaded for SENSEX/)).toBeInTheDocument();
+  });
+});
+
+describe("OptionChainWidget broker-required notice", () => {
+  beforeEach(() => {
+    queryClient.clear();
+    vi.clearAllMocks();
+    optionChainHookMocks.overrides = {};
+    useModeStore.setState({ mode: "live" });
+  });
+
+  it("shows a neutral connect-a-broker notice instead of a red error", () => {
+    const refusal = "Chain error: A connected native broker account is required for optionchain.";
+    optionChainHookMocks.overrides = { error: refusal };
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    expect(screen.getByTestId("broker-required-notice")).toHaveTextContent(
+      "Connect a broker to load the option chain.",
+    );
+    expect(screen.getByRole("button", { name: "Open Brokers" })).toBeInTheDocument();
+    expect(screen.queryByText(refusal)).not.toBeInTheDocument();
+  });
+
+  it("keeps the red error banner for every other failure", () => {
+    optionChainHookMocks.overrides = { error: "Chain error: upstream timed out" };
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    const banner = screen.getByText("Chain error: upstream timed out").closest("div");
+    expect(banner).toHaveClass("text-loss");
+    expect(screen.queryByTestId("broker-required-notice")).not.toBeInTheDocument();
   });
 });

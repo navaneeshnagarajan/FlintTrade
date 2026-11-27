@@ -462,7 +462,7 @@ export default function ConditionalTriggersWidget() {
                   className={`h-7 px-3 rounded-none text-xs font-semibold ${
                     action === side
                       ? side === "BUY"
-                        ? "bg-profit text-white hover:bg-profit hover:text-white"
+                        ? "bg-profit-action text-profit-foreground hover:bg-profit-action hover:text-profit-foreground"
                         : "bg-loss text-white hover:bg-loss hover:text-white"
                       : "text-text-muted"
                   }`}

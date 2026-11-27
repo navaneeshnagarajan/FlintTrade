@@ -683,7 +683,7 @@ function OrderLadderWidget(props: Props) {
         </div>
       </div>
       <div className="flex-none px-2 py-1 border-b border-border-subtle">
-        <AdmissionNoteField id="ladder-admission-note" value={note} onChange={setNote} />
+        <AdmissionNoteField id="ladder-admission-note" value={note} onChange={setNote} collapsible />
       </div>
 
       <div className="flex-none flex items-center h-5 border-b border-border-default text-xxs font-medium uppercase tracking-wide bg-surface-card">

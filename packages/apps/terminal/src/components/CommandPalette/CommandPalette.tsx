@@ -356,7 +356,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
 function FooterHint({ keys, label }: { keys: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-text-muted">
-      <kbd className="font-mono text-[10px] bg-glass-l2 border border-glass-l1 rounded px-1 py-0.5 leading-none">
+      <kbd className="font-mono text-xxs bg-glass-l2 border border-glass-l1 rounded px-1 py-0.5 leading-none">
         {keys}
       </kbd>
       <span>{label}</span>

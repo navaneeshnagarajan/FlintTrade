@@ -247,6 +247,17 @@ describe("SmartOrderWidget", () => {
     );
   });
 
+  it("uses the readable action foreground, not white, on the selected BUY fill", () => {
+    renderWidget();
+    const buy = screen.getByRole("button", { name: "BUY" });
+    expect(buy).toHaveAttribute("aria-pressed", "true");
+    expect(buy).toHaveClass("bg-profit-action", "text-profit-foreground");
+    expect(buy).not.toHaveClass("text-white");
+
+    fireEvent.click(screen.getByRole("button", { name: "SELL" }));
+    expect(buy).not.toHaveClass("bg-profit-action", "text-profit-foreground");
+  });
+
   it("toggles BUY/SELL side", () => {
     renderWidget();
     const sell = screen.getByRole("button", { name: "SELL" });

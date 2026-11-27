@@ -164,7 +164,6 @@ def get_timings() -> tuple[Any, int]:
         from flinttrade_engine.market_hours import (  # noqa: PLC0415
             STANDARD_HOURS,
             admit_session,
-            get_market_hours,
             get_standard_hours,
             is_special_session,
             list_upcoming_sessions,
@@ -217,10 +216,8 @@ def get_timings() -> tuple[Any, int]:
         special_row = is_special_session(session_date, exchange=exchange)
         if special_row is not None:
             open_t = special_row.open_time
-        elif exchange in {"NFO", "BFO"}:
-            open_t = get_market_hours(exchange, session_date)[0]
         else:
-            open_t = get_standard_hours(exchange)[0]
+            open_t = get_standard_hours(exchange, session_date)[0]
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 
