@@ -59,8 +59,6 @@ const REPO_ROOT_DIRECTORIES = new Set([
 ]);
 
 const REPO_ROOT_FILES = new Set([
-  'AGENTS.md',
-  'CLAUDE.md',
   'LICENSE',
   'Makefile',
   'PLAN.md',

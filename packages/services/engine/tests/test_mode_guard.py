@@ -7,8 +7,7 @@ Covers both decorators end-to-end against a real Flask app with
 - :func:`require_live_unlocked` — full explore/practice/live × locked/unlocked
   fan-out matching :func:`flinttrade_core.order_routes._dispatch_order`.
 
-These tests are the regression guard for the 2026-05-19 Codex stop-gate
-finding ("advanced order routing is not mode-safe"): basket/split/
+Advanced order routing must be mode-safe: basket/split/
 options-strategy/bracket execute orders directly via FT executors that
 bypass ``orders_bp``, so they need the strict guard rather than
 ``require_non_explore``.

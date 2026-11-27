@@ -1,7 +1,0 @@
-# FlintTrade — ai
-
-> LLM chat, RAG, ML signals, news sentiment, autonomous trading workflows
-
-## Dependencies
-
-See `packages/services/ai/pyproject.toml` for declared dependencies and optional extras.
