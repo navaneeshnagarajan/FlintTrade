@@ -928,7 +928,7 @@ Disagreeing old sizes stay `—`, and an expired security id still cannot
 be ordered.
 `missing_lot_refusal` is the order text:
 `Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Order Pad shows that
+`<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. The Order Pad shows that
 sentence once, inline, when a derivative has no verified lot. Places
 that do not refuse an order show only `lot_unknown_message`:
 `The lot size for <name> isn't verified.` The Order Pad also shows a lot-multiple refusal once, inline:

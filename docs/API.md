@@ -66,7 +66,7 @@ shows the lot sentence once,
 inline: `Quantity must be a multiple of the lot size (N).` `N` is that
 contract's lot. An unverified lot is
 `Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name, shown once, inline. The Practice
+`<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. The Order Pad shows it once, inline. The Practice
 sandbox returns that sentence as HTTP 400 with `status: error` and no
 `code` field. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800, MIDCPNIFTY 2,800,
 NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order above the cap,
