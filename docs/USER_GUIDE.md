@@ -277,7 +277,7 @@ redirect (HTTP 308) to `/demo-app/welcome`.
 
 | Label | What it means |
 |---|---|
-| **Practice** | Simulated fills, no real money. Mode line: `Practice — simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
+| **Practice** | Simulated fills, no real money. Mode line: `Practice. Simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
 | **Connected (read)** | Broker status for a native Dhan or Kotak Neo account after a read check succeeds. It is not a session claim, not a Mode, and not in the Mode menu. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.` A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
 | **Example** | Sample data. The chip reads **Example** for claim `explore`, including **Try with example data**, which has no JWT payload. A JWT whose `mode` is missing or not `explore`, `practice`, or `live` reads **Unavailable**, never Example. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
@@ -384,7 +384,7 @@ September 2026 consultation stays out of the UI.
 
 **Mode line.** One line under the TopBar, always, owned by the active
 label. Example data reads `Example data. No broker is connected and no orders are sent.`
-Practice reads `Practice — simulated fills, no real money.`
+Practice reads `Practice. Simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
 Widgets identify illustrative and fallback figures with Sample/Example source labels.
 Mode is not provenance. A figure that stays fabricated in Practice and Live,
@@ -907,6 +907,8 @@ button reads `Exit at ₹{price}`. When any option position is open,
 `{symbol}: Exit at ₹{price} limit (within 3% of last price).` for each option
 and shows
 `Option exits fill at their limit or better and may not fill in a fast move.`
+When other positions are open too, the next line reads
+`Other positions exit at market. The fill price may differ significantly, and execution isn't guaranteed.`
 An option position with no last price is not sent. Square off then reads
 `No last price is available. Exit now opens a limit ticket.` with the button
 `Open Exit now`, Exit all lists
