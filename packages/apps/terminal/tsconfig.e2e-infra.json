@@ -62,6 +62,7 @@
     "e2e/public-demo-presets.spec.ts",
     "e2e/start-public-demo.ts",
     "e2e/order-pad-practice.spec.ts",
+    "e2e/order-pad-qty-row.spec.ts",
     "e2e/agent-practice.spec.ts",
     "e2e/learn-ai-polish.spec.ts",
     "e2e/visual-a11y.spec.ts",

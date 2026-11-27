@@ -57,6 +57,7 @@ import {
   useAccountAuthorityIdentity,
   useMarketDataScope,
 } from "@/hooks/useDataScope";
+import { missingLotRefusal } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOptionChainData } from "./useOptionChainData";
@@ -449,7 +450,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       });
       if (quantity == null) {
         setOrderMsg({
-          text: `Not placed. The lot size for ${orderSymbol} isn't verified.`,
+          text: missingLotRefusal(orderSymbol),
           ok: false,
         });
         clearTimeout(orderMsgTimerRef.current);
