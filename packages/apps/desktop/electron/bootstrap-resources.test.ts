@@ -1353,7 +1353,8 @@ exit 0
     expect(helper).toContain("FILE_ID_INFO_CLASS");
     expect(helper).toContain("FILE_FLAG_OPEN_REPARSE_POINT");
     expect(helper).toContain("SetFileInformationByHandle");
-    expect(helper).toContain("FILE_RENAME_INFO_CLASS");
+    expect(helper).toContain("FILE_RENAME_INFORMATION_CLASS");
+    expect(helper).toContain("NtSetInformationFile(");
     expect(helper).toContain("FILE_DISPOSITION_INFO_CLASS");
     expect(helper).toContain("exclusiveMutation ? 0 : FILE_SHARE_DELETE");
     expect(helper).toContain("(shareWrite ? FILE_SHARE_WRITE : 0)");
