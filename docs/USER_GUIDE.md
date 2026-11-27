@@ -227,8 +227,7 @@ Exchange stays disabled until Live order safety and unattended deadman
 flattening are proven. Its configured authentication method uses an API key and secret for one venue
 (India or Global, production or testnet): `india_prod`, `india_testnet`,
 `global_prod`, or `global_testnet`. India and Global keys are not
-interchangeable, and the venue has no default. Setup → Brokers still fails on those routes. Read smoke on a static-IP host
-uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+interchangeable, and the venue has no default. Setup → Brokers still fails on those routes. Read smoke uses the in-process native read path, not a restored Brokers HTTP session. Brokers require orders from a registered static IP. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 See [Broker static IP](#broker-static-ip).

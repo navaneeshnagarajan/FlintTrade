@@ -25,8 +25,8 @@ it directly in your broker's developer console.
 
 ## Native Dhan + Kotak Neo Connected (read) / API smoke
 
-The locked path is **native** Dhan + Kotak Neo on a static-IP host
-whose public IP is allow-listed at both brokers. Smoke uses **non-funded**
+The locked path is **native** Dhan + Kotak Neo. Brokers require orders from
+a registered static IP, allow-listed at both brokers. Smoke uses **non-funded**
 accounts and live REST API reads (quotes / depth / hist / chain where the
 SDK allows). That historical evidence is REST API smoke, not proof of the
 now-wired v3 async SFeed/order-feed lifecycle and not funded Live unlock. The

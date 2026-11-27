@@ -29,7 +29,7 @@ Current source version: v0.0.1 (tracked in `VERSION`).
 ## Workflow
 
 1. Read the current root guidance and work queue before selecting a task.
-2. Keep design and working evidence in `.local/specs/<area>/DESIGN_LOG.md`.
+2. Keep design and working evidence in gitignored local working notes.
 3. Implement within the authorised scope and preserve order-safety gates.
 4. Run required checks and independent multi-agent review; fix findings and re-audit.
 5. Fetch and verify live `main` before opening or merging a PR, and follow maintainer authorisation requirements for push and merge.
