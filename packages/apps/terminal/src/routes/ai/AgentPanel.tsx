@@ -287,7 +287,7 @@ function AgentModePanel({ appMode }: { appMode: AppMode }) {
             <label htmlFor="agent-entry-rationale" className="block text-xs text-text-secondary">Operator entry rationale (optional)</label>
             <Textarea id="agent-entry-rationale" value={entryRationale} onChange={(e) => setEntryRationale(e.target.value)} maxLength={2000} aria-describedby="agent-entry-rationale-help" className="text-xs" />
             <p id="agent-entry-rationale-help" className="text-xxs text-text-muted">
-              Your session plan is stored with this Practice run and passed to admission for each entry. Laya still decides every entry; the agent does not automatically accept clamps.
+              Your session plan is stored with this Practice run and passed to admission for each entry. The decision model still decides every entry; the agent does not automatically accept clamps.
               Do not include credentials or secrets. Maximum 2,000 characters.
             </p>
           </div>}

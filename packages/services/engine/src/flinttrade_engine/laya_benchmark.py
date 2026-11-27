@@ -407,15 +407,15 @@ def run_fail_closed_drills() -> tuple[DrillResult, ...]:
     )
 
     saved_allowlist = ollama_mod.LAYA_OLLAMA_ALLOWLIST
-    saved_backend = os.environ.get("FLINTTRADE_LAYA_BACKEND")
-    saved_model = os.environ.get("FLINTTRADE_LAYA_OLLAMA_MODEL")
+    saved_backend = os.environ.get("FLINTTRADE_DECISION_MODEL_BACKEND")
+    saved_model = os.environ.get("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL")
     calls: list[str] = []
 
     def restore() -> None:
         ollama_mod.LAYA_OLLAMA_ALLOWLIST = saved_allowlist
         reset_laya_ollama_transport_for_tests()
-        _restore_env("FLINTTRADE_LAYA_BACKEND", saved_backend)
-        _restore_env("FLINTTRADE_LAYA_OLLAMA_MODEL", saved_model)
+        _restore_env("FLINTTRADE_DECISION_MODEL_BACKEND", saved_backend)
+        _restore_env("FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL", saved_model)
 
     arm = set_laya_ollama_transport_for_tests
     try:
@@ -817,8 +817,8 @@ def _drill_transport(
     from flinttrade_engine.laya_ollama import LayaOllamaModel  # noqa: PLC0415
 
     ollama_mod.LAYA_OLLAMA_ALLOWLIST = (LayaOllamaModel(tag=_DRILL_TAG, digest=_EXAMPLE_DIGEST, route=route),)
-    os.environ["FLINTTRADE_LAYA_BACKEND"] = "ollama"
-    os.environ["FLINTTRADE_LAYA_OLLAMA_MODEL"] = _DRILL_TAG
+    os.environ["FLINTTRADE_DECISION_MODEL_BACKEND"] = "ollama"
+    os.environ["FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL"] = _DRILL_TAG
 
     @contextmanager
     def session(model: str):

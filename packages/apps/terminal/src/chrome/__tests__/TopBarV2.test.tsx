@@ -438,7 +438,7 @@ describe("TopBarV2", () => {
     expect(screen.queryByTestId("feed-freshness-chip")).not.toBeInTheDocument();
   });
 
-  it("folds broker, Laya and LLM into one Status control", async () => {
+  it("folds broker, decision model and LLM into one Status control", async () => {
     useModeStore.setState({ mode: "explore" });
     renderTopBarV2();
 
@@ -450,7 +450,7 @@ describe("TopBarV2", () => {
     fireEvent.click(status);
     const panel = await screen.findByTestId("system-status-panel");
     expect(panel).toHaveTextContent("Broker");
-    expect(panel).toHaveTextContent("Laya");
+    expect(panel).toHaveTextContent("Decision model");
     expect(panel).toHaveTextContent("LLM");
     expect(panel).toHaveTextContent("Manage brokers");
   });

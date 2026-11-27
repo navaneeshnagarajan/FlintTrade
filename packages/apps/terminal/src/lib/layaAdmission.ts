@@ -1,5 +1,5 @@
 /**
- * Desk copy for a Laya place verdict. The server reason is shown as returned.
+ * Desk copy for a decision model place verdict. The server reason is shown as returned.
  */
 
 import { OrderApiError } from "@/services/api";
@@ -25,9 +25,9 @@ function readMaxQuantity(body: Record<string, unknown>): number | null {
   return typeof max === "number" && Number.isInteger(max) && max >= 1 ? max : null;
 }
 
-const LAYA_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+const LAYA_DOWN_PAUSE = "Not placed. Decision model is down. Start it from Status.";
 
-const LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again.";
+const LAYA_DECISION_UNVERIFIED = "Not placed. Decision model not verified. Try again.";
 
 function readAppliedQuantity(body: Record<string, unknown>): number | null {
   const applied = body.applied_quantity;
@@ -45,7 +45,7 @@ export function layaNoticeFromOrderError(
   if (!(err instanceof OrderApiError)) return null;
   const body = readRecord(err.body);
   if (!body) return null;
-  if (body.code === "laya_denied") {
+  if (body.code === "decision_model_denied") {
     if (options?.suppressDeny) return null;
     const reason = typeof body.reason === "string" && body.reason
       ? body.reason
@@ -58,13 +58,13 @@ export function layaNoticeFromOrderError(
       : readMaxQuantity(body);
     return {
       kind: "deny",
-      headline: "Laya denied",
+      headline: "Denied by decision model",
       reason,
       limitsLine: max === null ? null : `Max quantity ${max}.`,
       appliedQuantity: null,
     };
   }
-  if (body.code === "laya_unverified") {
+  if (body.code === "decision_model_unverified") {
     const message = typeof body.message === "string" && body.message
       ? body.message
       : LAYA_DECISION_UNVERIFIED;
@@ -76,13 +76,13 @@ export function layaNoticeFromOrderError(
       appliedQuantity: null,
     };
   }
-  if (body.code === "laya_clamp") {
+  if (body.code === "decision_model_clamp") {
     const applied = readAppliedQuantity(body);
     const headline = typeof body.message === "string" && body.message
       ? body.message
       : applied === null
         ? "Not placed. Review the quantity and resubmit."
-        : `Not placed. Laya allows up to ${applied}.`;
+        : `Not placed. Decision model allows up to ${applied}.`;
     return {
       kind: "clamp",
       headline,
@@ -94,4 +94,4 @@ export function layaNoticeFromOrderError(
   return null;
 }
 
-export const LAYA_DEGRADED_LIMITS = "Laya Degraded — tighter limits";
+export const LAYA_DEGRADED_LIMITS = "Decision model degraded. Tighter limits apply.";

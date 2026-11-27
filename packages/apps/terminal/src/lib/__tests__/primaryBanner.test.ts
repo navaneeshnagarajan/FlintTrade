@@ -91,21 +91,21 @@ describe("primary banner priority", () => {
     ).toBeNull();
   });
 
-  it("Laya Down outranks a disconnected feed and Chat does not", () => {
+  it("Decision model Down outranks a disconnected feed and Chat does not", () => {
     const laya = classifyOperatorSignals({
       ...closedHost(),
       health: "healthy",
       llmChrome: "ready",
       decisionStatus: "down",
     });
-    expect(laya?.failureClass).toBe("laya");
+    expect(laya?.failureClass).toBe("decision_model");
     expect(
       selectPrimaryBanner({
         mode: "live",
         feedDisconnected: true,
         incident: laya,
       }),
-    ).toBe("laya");
+    ).toBe("decision_model");
   });
 
   it("Chat and a public-site outage do not hide a disconnected feed", () => {

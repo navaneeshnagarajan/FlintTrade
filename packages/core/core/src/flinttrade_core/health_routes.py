@@ -11,7 +11,7 @@ Provides a Blueprint with these routes:
 - ``GET /api/v1/operator/status`` — authenticated read-only operator status
 - ``GET /api/v1/versions`` — authenticated, read-only About metadata
 - ``GET /api/v1/versions/ollama`` — bounded, observational Ollama version probe
-- ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
+- ``POST /api/v1/decision-model/start``: start or restart the managed decision model
 - ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
   disk, memory) via :class:`HealthAggregator`
 
@@ -293,10 +293,11 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
-        ``laya_live_qualified``, ``laya_reason``, ``laya_port``, and, while a
-        model download is in progress, ``laya_download_bytes`` and
-        ``laya_download_total``. ``laya`` starts Down. A ping reconciles the
+        JSON with ``decision_model`` (Live-facing), ``decision_model_practice``
+        (sidecar), ``decision_model_live_qualified``, ``decision_model_reason``,
+        ``decision_model_port``, and, while a model download is in progress,
+        ``decision_model_download_bytes`` and ``decision_model_download_total``.
+        ``decision_model`` starts Down. A ping reconciles the
         watched pid, key, and runtime record the same way an order does, then
         returns that stored status. It does not invent Ready when those files
         have not changed, and it does not probe the port on its own.
@@ -311,20 +312,20 @@ def ping() -> tuple[Any, int]:
     body = {
         "status": "ok",
         "timestamp": datetime.now(_IST).isoformat(),
-        "laya": live.value,
-        "laya_practice": practice.value,
-        "laya_live_qualified": qualified,
-        "laya_reason": reason,
-        "laya_port": port,
-        "laya_download_bytes": None if progress is None else progress[0],
-        "laya_download_total": None if progress is None else progress[1],
+        "decision_model": live.value,
+        "decision_model_practice": practice.value,
+        "decision_model_live_qualified": qualified,
+        "decision_model_reason": reason,
+        "decision_model_port": port,
+        "decision_model_download_bytes": None if progress is None else progress[0],
+        "decision_model_download_total": None if progress is None else progress[1],
     }
     from flinttrade_engine.laya_ollama import laya_backend  # noqa: PLC0415
 
     if laya_backend() == "ollama":
-        body["laya_checking"] = engine.gate_checking()
-        body["laya_route"] = "ollama"
-        body["laya_managed"] = _ollama_install_is_managed()
+        body["decision_model_checking"] = engine.gate_checking()
+        body["decision_model_route"] = "ollama"
+        body["decision_model_managed"] = _ollama_install_is_managed()
     return jsonify(body), 200
 
 
@@ -355,9 +356,9 @@ def _start_managed_ollama_for_gate() -> None:
     runtime.start_async()
 
 
-@health_bp.route("/api/v1/laya/start", methods=["POST"])
+@health_bp.route("/api/v1/decision-model/start", methods=["POST"])
 def start_laya() -> tuple[Any, int]:
-    """Start the runtime behind the current Laya route.
+    """Start the runtime behind the current decision model route.
 
     The sidecar route starts the managed sidecar. The Ollama route starts a
     FlintTrade-managed Ollama install and leaves an unmanaged Ollama alone.
@@ -372,7 +373,7 @@ def start_laya() -> tuple[Any, int]:
         return denied
     backend = laya_backend()
     if backend == "closed":
-        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+        return jsonify({"status": "error", "message": "Decision model failed to start."}), 503
     ollama = backend == "ollama"
     try:
         if ollama:
@@ -386,7 +387,7 @@ def start_laya() -> tuple[Any, int]:
             logger.warning("Managed Ollama could not be started", exc_info=True)
         else:
             logger.warning("Laya sidecar could not be started", exc_info=True)
-        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+        return jsonify({"status": "error", "message": "Decision model failed to start."}), 503
     return jsonify({"status": "ok"}), 200
 
 

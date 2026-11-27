@@ -56,9 +56,7 @@ _PRICE_REQUIRED = frozenset({"LIMIT", "SL"})
 _TRIGGER_REQUIRED = frozenset({"SL", "SL-M"})
 _ADMITTED_SOURCES = frozenset({"operator", "automate"})
 
-LAYA_DOWN_REASON = (
-    "Laya is Down. New orders are paused until it's Ready. You can still close positions."
-)
+LAYA_DOWN_REASON = "Not placed. Decision model is down. Start it from Status."
 
 
 class DecisionStatus(StrEnum):
@@ -98,18 +96,22 @@ LAYA_REASON_CODES = frozenset(
 
 LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start"
 LAYA_DOWNLOAD_FAILED_DETAIL = "Can't download the model"
-LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then Start Laya again."
+LAYA_DOWNLOAD_FAILED_TOOLTIP = "Check your connection, then start the decision model again."
 # Decimal gigabytes, so 1_200_000_000 of 3_400_000_000 reads "1.2 of 3.4 GB".
 _DECIMAL_GB = 1_000_000_000
 
+# Model id the runtime is pinned to. Shown as a value, never as the feature name.
+PINNED_MODEL_ID = "convaiinnovations/laya"
+LAYA_KEY_MISSING = "API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE."
+
 _REASON_TOOLTIPS = {
     LAYA_REASON_UNVERIFIED: (
-        "The installed model couldn't be checked against the pinned version. "
-        "Restart Laya. If it keeps happening, reinstall it."
+        "Installed model doesn't match the pinned version. "
+        "Restart the decision model. If it repeats, reinstall the model."
     ),
-    LAYA_REASON_WRONG_REVISION: "Laya is running a different model than FlintTrade expects.",
-    LAYA_REASON_KEY_REJECTED: "Laya restarted with a new key. Reconnecting…",
-    LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
+    LAYA_REASON_WRONG_REVISION: f"Wrong model loaded. Expected {PINNED_MODEL_ID}.",
+    LAYA_REASON_KEY_REJECTED: "Decision model restarted with a new key. Reconnecting…",
+    LAYA_REASON_KEY_MISSING: LAYA_KEY_MISSING,
     LAYA_REASON_DOWNLOAD_FAILED: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 }
 
@@ -144,8 +146,8 @@ def laya_reason_detail(
         LAYA_REASON_UNREACHABLE: "Unreachable",
         LAYA_REASON_WRONG_REVISION: "Wrong model version",
         LAYA_REASON_UNVERIFIED: "Can't verify the model",
-        LAYA_REASON_KEY_REJECTED: "Can't reach Laya",
-        LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
+        LAYA_REASON_KEY_REJECTED: "Can't reach the decision model",
+        LAYA_REASON_KEY_MISSING: LAYA_KEY_MISSING,
     }
     if reason is None:
         return None
@@ -723,12 +725,14 @@ class Laya:
         return ""
 
 
-_DOWN_PAUSE = "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+_DOWN_PAUSE = LAYA_DOWN_REASON
 
-LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again."
+LAYA_DECISION_UNVERIFIED = "Not placed. Decision model not verified. Try again."
+
+_DENIED_PREFIX = "Not placed. Decision model denied this order: "
 
 
-_UNQUALIFIED_LIVE = "Laya isn't qualified for Live yet. Practice orders are available."
+_UNQUALIFIED_LIVE = "Decision model not qualified for Live. Use Practice."
 
 
 def proposal_from_place_fields(
@@ -780,7 +784,7 @@ def _reason_for_decision_failure(code: str) -> str | None:
     """Map a host failure onto a chip reason in the same request.
 
     A connect error or a timeout is ``unreachable``. A 401 or 403 from the
-    sidecar is ``key_rejected`` (chip "Can't reach Laya"). Other failures
+    sidecar is ``key_rejected`` (chip "Can't reach the decision model"). Other failures
     stay with the probe.
     """
     if code in {"revision_mismatch", "digest_mismatch"}:
@@ -798,9 +802,14 @@ def _reason_for_decision_failure(code: str) -> str | None:
     return None
 
 
+def denied_message(detail: str) -> str:
+    """Desk sentence for a deny with a stated reason."""
+    return f"{_DENIED_PREFIX}{detail}"
+
+
 def clamp_place_message(applied_quantity: int) -> str:
     """Desk sentence for a clamp. Nothing has been placed."""
-    return f"Not placed. Laya allows up to {applied_quantity}."
+    return f"Not placed. Decision model allows up to {applied_quantity}."
 
 
 def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | None:
@@ -817,7 +826,7 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
     if kind == "clamp":
         return {
             "status": "error",
-            "code": "laya_clamp",
+            "code": "decision_model_clamp",
             "message": clamp_place_message(verdict.applied_quantity),
             "reason": verdict.reason,
             "limits": limits,
@@ -827,14 +836,14 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
     if verdict.reason == LAYA_DECISION_UNVERIFIED:
         return {
             "status": "error",
-            "code": "laya_unverified",
+            "code": "decision_model_unverified",
             "message": LAYA_DECISION_UNVERIFIED,
             "reason": LAYA_DECISION_UNVERIFIED,
             "http_status": 409,
         }
     body: dict[str, Any] = {
         "status": "error",
-        "code": "laya_denied",
+        "code": "decision_model_denied",
         "message": verdict.reason,
         "reason": verdict.reason,
         "http_status": 403,

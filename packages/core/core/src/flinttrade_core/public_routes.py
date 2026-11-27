@@ -12,7 +12,7 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     # Process probes. Status only: no version, paths, or config.
     ("GET", "/healthz"),
     ("GET", "/readyz"),
-    # Desk liveness. Status, timestamp, and Laya state only — no version,
+    # Desk liveness. Status, timestamp, and decision model state only. No version,
     # paths, or config. Detailed health stays behind a session.
     ("GET", "/api/v1/ping"),
     # Auth status is read before a session exists, including first-run setup.

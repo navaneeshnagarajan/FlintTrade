@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 
 from flinttrade_core.service_providers import EvidenceUseScope
 
-from .laya import LAYA_DECISION_UNVERIFIED, DecisionStatus
+from .laya import LAYA_DECISION_UNVERIFIED, DecisionStatus, denied_message
 
 _QUESTION_ORDER = ("rationale", "tilt", "side")
 _MAX_NOTE_CHARS = 4_000
@@ -761,13 +761,13 @@ def _uncertain_decision(
     if mode.strip().lower() == "live":
         return TextDecision(
             effect="deny",
-            reason="Laya is uncertain. Live stays closed.",
+            reason="Decision model uncertain. Live stays closed.",
             applied_quantity=0,
             evidence=evidence,
         )
     return TextDecision(
         effect="clamp",
-        reason="Laya is uncertain. Quantity stays inside the tighter limit.",
+        reason="Decision model uncertain. Quantity held to the tighter limit.",
         applied_quantity=min(requested_quantity, degraded_ceiling),
         evidence=evidence,
     )
@@ -790,10 +790,10 @@ def _down_decision(policy: LayaPolicy, code: str) -> TextDecision:
 
 def _deny_reason(question_id: str) -> str:
     if question_id == "rationale":
-        return "Laya denied this order. The note does not state a concrete reason."
+        return denied_message("no concrete reason in the note.")
     if question_id == "tilt":
-        return "Laya denied this order. The note shows tilt or revenge."
-    return "Laya denied this order. The stated plan contradicts the order side."
+        return denied_message("note shows tilt or revenge.")
+    return denied_message("plan contradicts the order side.")
 
 
 def _reported_digest(payload: Mapping[str, Any], policy: LayaPolicy) -> str | None:

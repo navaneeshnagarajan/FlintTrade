@@ -299,7 +299,7 @@ describe("QuickTradeWidget", () => {
 
   it("shows Laya denied under Buy and Sell and leaves both off", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
-      code: "laya_denied",
+      code: "decision_model_denied",
       reason: "Quantity must be a positive whole number.",
       message: "Quantity must be a positive whole number.",
       limits: { max_quantity: 1 },
@@ -308,7 +308,7 @@ describe("QuickTradeWidget", () => {
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     const denied = await screen.findByTestId("laya-denied");
-    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Denied by decision model");
     expect(denied).toHaveTextContent("Quantity must be a positive whole number.");
     expect(denied).toHaveTextContent("Max quantity 1.");
     expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
@@ -318,18 +318,18 @@ describe("QuickTradeWidget", () => {
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Not placed. Decision model is down. Start it from Status.",
       403,
       {
-      code: "laya_denied",
-      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
+      code: "decision_model_denied",
+      reason: "Not placed. Decision model is down. Start it from Status.",
+      message: "Not placed. Decision model is down. Start it from Status.",      limits: { max_quantity: 100 },
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     const denied = await screen.findByTestId("laya-denied");
-    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Not placed. Decision model is down. Start it from Status.");
     expect(denied).not.toHaveTextContent("Max quantity");
     expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
 

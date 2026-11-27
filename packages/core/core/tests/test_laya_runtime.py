@@ -179,7 +179,7 @@ def test_start_binds_loopback_mints_a_key_and_pins_the_checkpoint(runtime: LayaR
     assert load_policy().sha256 in env["LAYA_SHA256_DIGESTS"]
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["TRANSFORMERS_OFFLINE"] == "1"
-    assert env["LAYA_WEIGHTS_PATH"]
+    assert env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
     assert env["LAYA_API_KEY"]
     first_key = env["LAYA_API_KEY"]
     runtime.publish_status()
@@ -340,10 +340,10 @@ def test_health_route_records_sidecar_status(runtime: LayaRuntime) -> None:
     assert process_laya().effective_status("practice") is DecisionStatus.READY
     ping = app.test_client().get("/api/v1/ping").get_json()
     assert ping is not None
-    assert ping["laya"] == "down"
-    assert ping["laya_practice"] == "ready"
-    assert ping["laya_live_qualified"] is False
-    assert ping["laya_reason"] is None
+    assert ping["decision_model"] == "down"
+    assert ping["decision_model_practice"] == "ready"
+    assert ping["decision_model_live_qualified"] is False
+    assert ping["decision_model_reason"] is None
 
 
 @pytest.mark.unit
@@ -402,10 +402,10 @@ def test_two_venvs_sharing_one_base_interpreter_can_install(tmp_path: Path, monk
 
 @pytest.mark.unit
 def test_rocm_install_needs_an_https_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LAYA_TORCH_INDEX", raising=False)
-    with pytest.raises(LayaRuntimeError, match="LAYA_TORCH_INDEX"):
+    monkeypatch.delenv("FLINTTRADE_DECISION_MODEL_TORCH_INDEX", raising=False)
+    with pytest.raises(LayaRuntimeError, match="FLINTTRADE_DECISION_MODEL_TORCH_INDEX"):
         install_commands(tmp_path / "venv", accelerator="rocm")
-    monkeypatch.setenv("LAYA_TORCH_INDEX", "https://download.pytorch.org/whl/rocm6.3")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_TORCH_INDEX", "https://download.pytorch.org/whl/rocm6.3")
     commands = install_commands(tmp_path / "venv", accelerator="rocm")
     assert "https://download.pytorch.org/whl/rocm6.3" in commands[0]
     assert CPU_TORCH_INDEX not in commands[0]
@@ -439,9 +439,9 @@ def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
     key_path = tmp_path / "runtime" / "laya" / "api.key"
     key_path.parent.mkdir(parents=True)
     key_path.write_text("sidecar-key\n", encoding="utf-8")
-    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key_path))
-    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
-    monkeypatch.setenv("LAYA_PORT", "8000")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_API_KEY_FILE", str(key_path))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_HOST", "127.0.0.1")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", "8000")
     runtime = attach_from_environment(tmp_path)
     assert runtime is not None
     client = process_laya()._decision_client  # noqa: SLF001
@@ -471,11 +471,11 @@ def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
 
 @pytest.mark.unit
 def test_attach_refuses_a_public_host_and_a_missing_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LAYA_API_KEY_FILE", str(tmp_path / "missing.key"))
-    monkeypatch.setenv("LAYA_HOST", "0.0.0.0")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_API_KEY_FILE", str(tmp_path / "missing.key"))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_HOST", "0.0.0.0")
     with pytest.raises(LayaRuntimeError, match="127.0.0.1"):
         attach_from_environment(tmp_path)
-    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_HOST", "127.0.0.1")
     process_laya().set_status(DecisionStatus.READY)
     assert attach_from_environment(tmp_path) is None
     assert process_laya().status is DecisionStatus.DOWN
@@ -485,9 +485,9 @@ def test_attach_refuses_a_public_host_and_a_missing_key(tmp_path: Path, monkeypa
 
 @pytest.mark.unit
 def test_laya_port_selects_the_loopback_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LAYA_PORT", raising=False)
+    monkeypatch.delenv("FLINTTRADE_DECISION_MODEL_PORT", raising=False)
     assert LayaRuntime(tmp_path).base_url == "http://127.0.0.1:8000"
-    monkeypatch.setenv("LAYA_PORT", "8123")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", "8123")
     envs: list[dict[str, str]] = []
 
     def factory(_argv: list[str], env: dict[str, str]) -> _Process:
@@ -501,7 +501,7 @@ def test_laya_port_selects_the_loopback_origin(tmp_path: Path, monkeypatch: pyte
     assert envs[-1]["LAYA_PORT"] == "8123"
     explicit = LayaRuntime(tmp_path, port=9000)
     assert explicit.base_url == "http://127.0.0.1:9000"
-    monkeypatch.setenv("LAYA_PORT", "nope")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", "nope")
     with pytest.raises(LayaRuntimeError, match="invalid"):
         LayaRuntime(tmp_path)
     reset_process_laya_for_tests()
@@ -515,7 +515,7 @@ def test_status_reports_a_port_clash_as_down(tmp_path: Path, monkeypatch: pytest
     sock.bind((LAYA_BIND_HOST, 0))
     sock.listen(1)
     port = int(sock.getsockname()[1])
-    monkeypatch.setenv("LAYA_PORT", str(port))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_PORT", str(port))
     try:
         runtime = LayaRuntime(tmp_path, health_reader=lambda _url: None)
         report = runtime.status()
@@ -553,7 +553,7 @@ def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path:
         Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
     )
     assert verdict.allow is False
-    assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert verdict.reason == "Not placed. Decision model is down. Start it from Status."
     assert "Live" not in verdict.reason
     payload = _healthy()
     runtime.publish_status()
@@ -567,7 +567,7 @@ def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path:
         Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
     )
     assert later.allow is False
-    assert later.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert later.reason == "Not placed. Decision model is down. Start it from Status."
     runtime.stop()
     reset_process_laya_for_tests()
 
@@ -693,7 +693,7 @@ def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.Monk
     app.config["TESTING"] = True
     app.register_blueprint(health_bp)
     client = app.test_client()
-    missing = client.post("/api/v1/laya/start")
+    missing = client.post("/api/v1/decision-model/start")
     assert missing.status_code == 401
 
     def fail() -> str:
@@ -702,9 +702,9 @@ def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.Monk
     monkeypatch.setattr("flinttrade_core.laya_runtime.start_managed_sidecar", fail)
     token = _create_token("operator", mode="practice")
     headers = {"Authorization": f"Bearer {token}"}
-    failed = client.post("/api/v1/laya/start", headers=headers)
+    failed = client.post("/api/v1/decision-model/start", headers=headers)
     assert failed.status_code == 503
-    assert failed.get_json()["message"] == "Laya could not be started."
+    assert failed.get_json()["message"] == "Decision model failed to start."
     assert "private path" not in failed.get_data(as_text=True)
 
     calls: list[str] = []
@@ -714,7 +714,7 @@ def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.Monk
         return "http://127.0.0.1:8000"
 
     monkeypatch.setattr("flinttrade_core.laya_runtime.start_managed_sidecar", started)
-    ok = client.post("/api/v1/laya/start", headers=headers)
+    ok = client.post("/api/v1/decision-model/start", headers=headers)
     assert ok.status_code == 200
     assert ok.get_json()["status"] == "ok"
     assert calls == ["start"]
@@ -749,8 +749,8 @@ def _attached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checker: Artifact
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
     key_path = tmp_path / "api.key"
     key_path.write_text("old-key\n", encoding="utf-8")
-    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key_path))
-    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_API_KEY_FILE", str(key_path))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_HOST", "127.0.0.1")
     runtime = LayaRuntime(tmp_path, artifact_checker=lambda: checker)
     runtime.attach(key_path)
     return runtime
@@ -809,8 +809,8 @@ def test_leftover_verification_from_an_earlier_run_is_rejected(tmp_path: Path, m
     assert process_laya().runtime_reason()[0] == "unverified"
     assert laya_reason_detail("unverified", 8000) == "Can't verify the model"
     assert laya_reason_tooltip("unverified", 8000) == (
-        "The installed model couldn't be checked against the pinned version. "
-        "Restart Laya. If it keeps happening, reinstall it."
+        "Installed model doesn't match the pinned version. "
+        "Restart the decision model. If it repeats, reinstall the model."
     )
     client = process_laya()._decision_client  # noqa: SLF001
     assert client is not None
@@ -904,7 +904,7 @@ def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path, monkeypatch: p
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "wrong_revision"
     assert laya_reason_detail("wrong_revision", 8000) == "Wrong model version"
-    assert laya_reason_tooltip("wrong_revision", 8000) == ("Laya is running a different model than FlintTrade expects.")
+    assert laya_reason_tooltip("wrong_revision", 8000) == ("Wrong model loaded. Expected convaiinnovations/laya.")
     reset_process_laya_for_tests()
 
 
@@ -929,9 +929,9 @@ def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(tmp_path: Path, m
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "key_rejected"
-    assert laya_reason_detail("key_rejected", runtime._port) == "Can't reach Laya"  # noqa: SLF001
+    assert laya_reason_detail("key_rejected", runtime._port) == "Can't reach the decision model"  # noqa: SLF001
     assert laya_reason_tooltip("key_rejected", runtime._port) == (  # noqa: SLF001
-        "Laya restarted with a new key. Reconnecting…"
+        "Decision model restarted with a new key. Reconnecting…"
     )
     assert process_laya().effective_status("practice") is not DecisionStatus.READY
 
@@ -1083,7 +1083,7 @@ def test_clean_weight_is_logged_and_launched_offline(
     assert not (runtime.runtime_root / "launch").exists()
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["TRANSFORMERS_OFFLINE"] == "1"
-    assert env["LAYA_WEIGHTS_PATH"] == resolved
+    assert env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"] == resolved
     digests = json.loads(env["LAYA_SHA256_DIGESTS"])
     assert digests[policy.weight_file] == policy.sha256
     assert dict(policy.manifest).items() <= digests.items()
@@ -1092,7 +1092,7 @@ def test_clean_weight_is_logged_and_launched_offline(
     assert policy.repo not in env.values()
     assert policy.revision not in env.values()
     child = "\n".join(argv)
-    assert "LAYA_WEIGHTS_PATH" in child
+    assert "FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH" in child
     assert "HF_HUB_OFFLINE" in child
     assert "TRANSFORMERS_OFFLINE" in child
     assert policy.repo not in child
@@ -1490,20 +1490,20 @@ def test_clean_cache_downloads_then_launches_offline(
     def download(argv: list[str], env: dict[str, str]) -> int:
         order.append("download")
         assert env["HF_HUB_OFFLINE"] == "0"
-        assert env["LAYA_REPO"] == policy.repo
+        assert env["FLINTTRADE_DECISION_MODEL_REPO"] == policy.repo
         assert env["LAYA_REVISION"] == policy.revision
         assert env["LAYA_REVISION"] == _PINNED_REVISION
         assert env["LAYA_REVISION"] != "main"
         assert "HUGGINGFACE_HUB_CACHE" not in env
-        assert "LAYA_DOWNLOAD_DIR" in env
-        staging = Path(env["LAYA_DOWNLOAD_DIR"])
+        assert "FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR" in env
+        staging = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"])
         assert staging.name == "staging"
         assert staging != runtime_root_checkpoint(staging)
         assert "snapshot_download" in "\n".join(argv)
         assert "revision=revision" in "\n".join(argv)
         assert "laya-serve" not in "\n".join(argv)
         assert env.get("TRANSFORMERS_OFFLINE") != "1"
-        assert "LAYA_WEIGHTS_PATH" not in env
+        assert "FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH" not in env
         _write_pinned_tree(staging)
         return 0
 
@@ -1527,10 +1527,10 @@ def test_clean_cache_downloads_then_launches_offline(
     assert env["TRANSFORMERS_OFFLINE"] == "1"
     assert "LAYA_REVISION" not in env
     assert "LAYA_MODELS" not in env
-    assert env["LAYA_WEIGHTS_PATH"].endswith(policy.weight_file)
-    assert "checkpoint" in env["LAYA_WEIGHTS_PATH"]
-    assert "staging" not in env["LAYA_WEIGHTS_PATH"]
-    assert str(cache) not in env["LAYA_WEIGHTS_PATH"]
+    assert env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"].endswith(policy.weight_file)
+    assert "checkpoint" in env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
+    assert "staging" not in env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
+    assert str(cache) not in env["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
     assert not runtime.staging_dir.exists()
     assert (runtime.checkpoint_dir / policy.weight_file).is_file()
     assert not cache.exists() or not any(cache.rglob("*"))
@@ -1591,7 +1591,7 @@ def test_tampered_download_is_removed_and_does_not_launch(tmp_path: Path, monkey
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        path = _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
+        path = _write_pinned_tree(Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]))
         (path.parent / "encoder" / "config.json").write_bytes(b"tampered")
         return 0
 
@@ -1632,7 +1632,7 @@ def test_failed_download_does_not_launch(tmp_path: Path, monkeypatch: pytest.Mon
     keeper.write_bytes(b"keep")
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]) / policy.weight_file
         partial.write_bytes(b"partial")
         return 1
 
@@ -1653,13 +1653,13 @@ def test_failed_download_does_not_launch(tmp_path: Path, monkeypatch: pytest.Mon
     report = runtime.status()
     assert report["reason"] == "download_failed"
     assert report["detail"] == "Can't download the model"
-    assert report["tooltip"] == "Check your connection, then Start Laya again."
+    assert report["tooltip"] == "Check your connection, then start the decision model again."
     assert "Next:" not in str(report["tooltip"])
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "download_failed"
     assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
     assert laya_reason_tooltip("download_failed", runtime._port) == (  # noqa: SLF001
-        "Check your connection, then Start Laya again."
+        "Check your connection, then start the decision model again."
     )
     reset_process_laya_for_tests()
 
@@ -1716,8 +1716,8 @@ def test_download_progress_updates_the_chip_text(tmp_path: Path, monkeypatch: py
         verdict = process_laya().admit(
             Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice")
         )
-        assert verdict.reason == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
-        _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
+        assert verdict.reason == "Not placed. Decision model is down. Start it from Status."
+        _write_pinned_tree(Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]))
         return 0
 
     runtime = LayaRuntime(
@@ -1777,7 +1777,7 @@ def test_pin_upgrade_replaces_the_checkpoint_and_removes_the_old_one(
     runtime = LayaRuntime(
         tmp_path,
         process_factory=lambda _argv, _env: _Process(),
-        downloader=lambda _argv, env: _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"])) and 0,
+        downloader=lambda _argv, env: _write_pinned_tree(Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"])) and 0,
         health_reader=lambda _url: _healthy(),
         watch=False,
     )
@@ -1793,7 +1793,7 @@ def test_pin_upgrade_replaces_the_checkpoint_and_removes_the_old_one(
     runtime.start()
     assert launched
     assert launched[0]["HF_HUB_OFFLINE"] == "1"
-    assert "checkpoint" in launched[0]["LAYA_WEIGHTS_PATH"]
+    assert "checkpoint" in launched[0]["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
     assert (runtime.checkpoint_dir / policy.weight_file).read_bytes() == b"pinned-weights"
     assert not (runtime.checkpoint_dir / "README.md").exists()
     assert _old_checkpoint_names(runtime) == []
@@ -1817,7 +1817,7 @@ def test_failed_upgrade_rename_restores_the_old_checkpoint(tmp_path: Path, monke
     monkeypatch.setattr("flinttrade_core.laya_runtime.os.replace", flaky)
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
+        _write_pinned_tree(Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]))
         return 0
 
     runtime = LayaRuntime(
@@ -1840,7 +1840,7 @@ def test_failed_upgrade_rename_restores_the_old_checkpoint(tmp_path: Path, monke
     report = runtime.status()
     assert report["reason"] == "download_failed"
     assert report["detail"] == "Can't download the model"
-    assert report["tooltip"] == "Check your connection, then Start Laya again."
+    assert report["tooltip"] == "Check your connection, then start the decision model again."
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "download_failed"
     reset_process_laya_for_tests()
@@ -1856,7 +1856,7 @@ def test_failed_upgrade_download_reports_download_failed_not_wrong_revision(
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]) / policy.weight_file
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"partial")
         return 1
@@ -1890,7 +1890,7 @@ def test_failed_download_with_old_snapshot_is_download_failed_not_wrong_revision
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]) / policy.weight_file
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"partial")
         return 1
@@ -1928,7 +1928,7 @@ def test_failed_download_with_extra_loadable_snapshot_is_download_failed(
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]) / policy.weight_file
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"partial")
         return 1
@@ -1963,7 +1963,7 @@ def test_failed_download_with_missing_companion_is_download_failed(
     launched: list[object] = []
 
     def download(_argv: list[str], env: dict[str, str]) -> int:
-        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial = Path(env["FLINTTRADE_DECISION_MODEL_DOWNLOAD_DIR"]) / policy.weight_file
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"partial")
         return 1
@@ -2236,23 +2236,23 @@ def test_missing_key_refusal_survives_a_health_tick(tmp_path: Path, monkeypatch:
     """A refused start keeps its reason. The next health check does not say Not started."""
     from flinttrade_core.laya_runtime import refresh_process_laya_status
 
-    monkeypatch.setenv("LAYA_API_KEY_FILE", str(tmp_path / "missing.key"))
-    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_API_KEY_FILE", str(tmp_path / "missing.key"))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_HOST", "127.0.0.1")
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
     runtime = LayaRuntime(
         tmp_path,
         process_factory=lambda _argv, _env: _Process(),
         watch=False,
     )
-    with pytest.raises(LayaRuntimeError, match="API key file is missing"):
+    with pytest.raises(LayaRuntimeError, match="API key file missing"):
         runtime.start()
     assert process_laya().runtime_reason()[0] == "key_missing"
-    assert laya_reason_detail("key_missing", runtime._port) == "The Laya API key file is missing."  # noqa: SLF001
+    assert laya_reason_detail("key_missing", runtime._port) == "API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE."  # noqa: SLF001
     refresh_process_laya_status()
     assert process_laya().runtime_reason()[0] == "key_missing"
     report = runtime.status()
     assert report["reason"] == "key_missing"
-    assert report["detail"] == "The Laya API key file is missing."
+    assert report["detail"] == "API key file missing. Set FLINTTRADE_DECISION_MODEL_API_KEY_FILE."
     runtime.stop()
     assert process_laya().runtime_reason()[0] == "not_started"
     reset_process_laya_for_tests()
@@ -2261,23 +2261,23 @@ def test_missing_key_refusal_survives_a_health_tick(tmp_path: Path, monkeypatch:
 def _bootstrap_accepts_weights(path: str) -> bool:
     """Run the sidecar path guard. True when that path is the checkpoint file."""
     prefix = LAYA_PINNED_WEIGHT_BOOTSTRAP.split("from laya.router", 1)[0]
-    previous = os.environ.get("LAYA_WEIGHTS_PATH")
-    os.environ["LAYA_WEIGHTS_PATH"] = path
+    previous = os.environ.get("FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH")
+    os.environ["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"] = path
     try:
         exec(compile(prefix, "<laya-bootstrap>", "exec"), {"__name__": "laya_bootstrap"})  # noqa: S102
     except SystemExit:
         return False
     finally:
         if previous is None:
-            os.environ.pop("LAYA_WEIGHTS_PATH", None)
+            os.environ.pop("FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH", None)
         else:
-            os.environ["LAYA_WEIGHTS_PATH"] = previous
+            os.environ["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"] = previous
     return True
 
 
 @pytest.mark.unit
 def test_start_rewrites_the_runtime_key_the_environment_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``LAYA_API_KEY_FILE`` at ``runtime/laya/api.key`` is the file start writes."""
+    """``FLINTTRADE_DECISION_MODEL_API_KEY_FILE`` at ``runtime/laya/api.key`` is the file start writes."""
     runtime = LayaRuntime(
         tmp_path,
         process_factory=lambda _argv, _env: _Process(),
@@ -2288,7 +2288,7 @@ def test_start_rewrites_the_runtime_key_the_environment_names(tmp_path: Path, mo
     assert key == runtime.runtime_root / "api.key"
     key.parent.mkdir(parents=True)
     key.write_text("old-key", encoding="utf-8")
-    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key))
+    monkeypatch.setenv("FLINTTRADE_DECISION_MODEL_API_KEY_FILE", str(key))
     runtime.start()
     written = key.read_text(encoding="utf-8").strip()
     assert written
@@ -2340,7 +2340,7 @@ def test_standard_cache_symlink_is_the_snapshot_checkpoint(tmp_path: Path, monke
     )
     runtime.start()
     assert launched
-    weights = launched[0]["LAYA_WEIGHTS_PATH"]
+    weights = launched[0]["FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH"]
     assert Path(weights) == snapshot.parent.resolve() / snapshot.name
     assert Path(weights).name == "model.safetensors"
     assert Path(weights).resolve() == blob.resolve()
@@ -2388,8 +2388,8 @@ def test_ping_and_the_order_gate_share_a_cli_stop(tmp_path: Path) -> None:
     app.register_blueprint(health_bp)
     ping = app.test_client().get("/api/v1/ping").get_json()
     assert ping is not None
-    assert ping["laya_practice"] == "down"
-    assert ping["laya_reason"] == "stopped"
+    assert ping["decision_model_practice"] == "down"
+    assert ping["decision_model_reason"] == "stopped"
     verdict = process_laya().admit(
         Proposal(
             symbol="RELIANCE",
@@ -2402,6 +2402,6 @@ def test_ping_and_the_order_gate_share_a_cli_stop(tmp_path: Path) -> None:
     )
     blocked = place_block(verdict, 1)
     assert blocked is not None
-    assert blocked["message"] == "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+    assert blocked["message"] == "Not placed. Decision model is down. Start it from Status."
     runtime.stop()
     reset_process_laya_for_tests()

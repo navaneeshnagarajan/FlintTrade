@@ -179,13 +179,13 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
         assert set(ping.get_json()) == {
             "status",
             "timestamp",
-            "laya",
-            "laya_practice",
-            "laya_live_qualified",
-            "laya_reason",
-            "laya_port",
-            "laya_download_bytes",
-            "laya_download_total",
+            "decision_model",
+            "decision_model_practice",
+            "decision_model_live_qualified",
+            "decision_model_reason",
+            "decision_model_port",
+            "decision_model_download_bytes",
+            "decision_model_download_total",
         }
         assert client.get("/api/v1/health").status_code == 401
         assert client.get("/health").status_code == 401

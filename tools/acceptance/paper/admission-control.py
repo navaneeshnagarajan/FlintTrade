@@ -16,7 +16,7 @@ before=run.fingerprint(); run.save('sources-before.json',before)
 desk=owned.Desk.__new__(owned.Desk); code=1
 try:
     desk.__init__('owned-cycle')
-    ping=desk.refresh(); assert ping['laya_practice']=='ready' and ping['laya']=='down' and not ping['laya_live_qualified']
+    ping=desk.refresh(); assert ping['decision_model_practice']=='ready' and ping['decision_model']=='down' and not ping['decision_model_live_qualified']
     desk.start_run(); desk.clock.release.set()
     owned.wait_for(lambda:any(e['kind']=='cycle_finished' for e in desk.owner.store.events(desk.owner.run.run_id,limit=1000)))
     owned.wait_for(lambda:desk.owner.store.get_run(desk.owner.run.run_id)['snapshot'].get('cycle_count',0)>=1)
