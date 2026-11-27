@@ -1422,6 +1422,8 @@ describe("OrderPadWidget F&O lot-size validation", () => {
       params: { symbol: "SENSEX26NOV2680000CE", exchange: "BFO" },
     })} />);
     await screen.findByText("Lot: 20");
+    fireEvent.click(screen.getByRole("radio", { name: "LIMIT" }));
+    fireEvent.change(document.getElementById("orderpad-price") as HTMLInputElement, { target: { value: "200" } });
     const hint = document.getElementById("orderpad-qty-hint") as HTMLElement;
     const errorRow = document.getElementById("orderpad-qty-error") as HTMLElement;
     expect(hint).toHaveClass("min-h-8", "text-xs", "leading-4", "text-text-muted");
