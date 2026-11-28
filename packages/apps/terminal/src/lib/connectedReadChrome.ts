@@ -14,12 +14,7 @@ export const API_SMOKE_LABEL = "API smoke";
 export const NEO_OPERATOR_COPY = "Live read only until funded unlock.";
 
 export function isConnectedReadBroker(broker: string): boolean {
-  return broker === "dhan" || broker === "kotakneo";
-}
-
-/** Dhan + Neo stay selectable for Connected (read) even if a stale catalogue says Coming soon. */
-export function connectedReadConnectable(brokerId: string, catalogConnectable = false): boolean {
-  return isConnectedReadBroker(brokerId) || catalogConnectable;
+  return (CONNECTED_READ_BROKERS as readonly string[]).includes(broker);
 }
 
 export function connectedReadChrome(

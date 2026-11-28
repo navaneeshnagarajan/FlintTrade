@@ -84,7 +84,6 @@ if (import.meta.env.DEV) {
       "location",
       "feed-freshness-chip",
       "badge",
-      "native-connect-blockers",
       "native-broker-sdk-status",
       "native-broker-static-ip",
       "rate-limits-panel",

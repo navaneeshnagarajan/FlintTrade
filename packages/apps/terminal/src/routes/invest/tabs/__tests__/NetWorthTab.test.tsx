@@ -111,7 +111,7 @@ describe("NetWorthTab", () => {
     expect(screen.getAllByText("Equity Holdings").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Cash").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
-    expect(screen.getByText("Gold")).toBeInTheDocument();
+    expect(screen.queryByText("Gold")).not.toBeInTheDocument();
     expect(screen.queryByText("Fixed Deposits")).not.toBeInTheDocument();
   });
 
@@ -130,6 +130,24 @@ describe("NetWorthTab", () => {
 
     expect(screen.queryByText("Fixed Deposits")).not.toBeInTheDocument();
     expect(screen.queryByText("Track fixed deposits with maturity dates and interest tracking — coming soon.")).not.toBeInTheDocument();
+  });
+
+  it("does not show a Gold card, note or tooltip", () => {
+    render(<NetWorthTab />);
+
+    expect(screen.queryByText("Gold")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Gold" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/future update/i)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/gold tracking/i)).not.toBeInTheDocument();
+  });
+
+  it("gives every remaining Add button a reason and no card promises a future update", () => {
+    render(<NetWorthTab />);
+
+    for (const button of screen.getAllByRole("button", { name: /^Add / })) {
+      expect(button.getAttribute("title")?.trim()).toBeTruthy();
+    }
+    expect(document.body).not.toHaveTextContent(/coming soon|future update/i);
   });
 
   it("renders live asset visuals through Flint primitives", () => {

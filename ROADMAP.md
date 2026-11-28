@@ -2,7 +2,7 @@
 
 FlintTrade `v0.0.1` is self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows on Indian markets. This page states what works today, what is in progress, and what comes next. Shipped detail lives in [changelog.md](changelog.md).
 
-Broker connections use six native adapters: Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
+Native adapter code exists for Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. The terminal broker list offers Dhan and Kotak Neo. Upstox adapter code exists but is not offered in the UI. A saved account for a broker that is not offered keeps its row, without Reconnect, and shows `<Broker> can't be reconnected. Disconnect to remove it.` A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 ## Done
 

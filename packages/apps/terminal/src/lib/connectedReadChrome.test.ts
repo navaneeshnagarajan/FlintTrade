@@ -7,7 +7,7 @@ import {
   isConnectedReadBroker,
   connectedAccountStatusLine,
   connectedReadChrome,
-  connectedReadConnectable,
+  CONNECTED_READ_BROKERS,
 } from "./connectedReadChrome";
 
 describe("connectedReadChrome", () => {
@@ -20,10 +20,8 @@ describe("connectedReadChrome", () => {
     expect(connectedReadChrome({ broker: "dhan", status: "connected" })).toBeNull();
     expect(connectedReadChrome({ broker: "dhan", status: "disconnected", read_smoke_ok: true })).toBeNull();
     expect(connectedReadChrome({ broker: "upstox", status: "connected", read_smoke_ok: true })).toBeNull();
-    expect(connectedReadConnectable("kotakneo", false)).toBe(true);
-    expect(connectedReadConnectable("dhan", false)).toBe(true);
-    expect(connectedReadConnectable("groww", false)).toBe(false);
-    expect(connectedReadConnectable("upstox", true)).toBe(true);
+    expect(CONNECTED_READ_BROKERS.every(isConnectedReadBroker)).toBe(true);
+    expect(isConnectedReadBroker("groww")).toBe(false);
   });
 
   it("never implies live order capability and never offers Neo Practice", () => {
