@@ -15,7 +15,7 @@ import {
 import { registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 
 const CANCEL = "/ft-api/api/v1/orders/dhan/cancel";
-const REQUESTED = "Cancellation requested";
+const REQUESTED = "1 cancellation requested";
 const CANCELLED = "Order cancelled";
 
 /**
@@ -178,7 +178,8 @@ test.describe("lost Orders cancels settle one order at a time", () => {
     await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
     await tickUntil(page, page.locator('[data-cancelled-order="SYNTHETIC-ORDER-A"]'));
     await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-A"]')).toHaveCount(0);
-    await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-B"]')).toHaveText(/Cancellation requested/);
+    await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-B"]')).toHaveCount(1);
+    await expect(page.getByTestId("orders-notice-slot")).toContainText("1 cancellation requested");
     await expect(page.locator('[data-cancelled-order="SYNTHETIC-ORDER-B"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Cancel order SYNTHETIC-ORDER-B", exact: true })).toBeDisabled();
     expect(cancels).toBe(2);

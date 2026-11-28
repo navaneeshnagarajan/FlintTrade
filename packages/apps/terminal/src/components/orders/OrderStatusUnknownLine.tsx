@@ -35,6 +35,31 @@ export function OrderStatusUnknownLink({ className = "" }: { className?: string 
   );
 }
 
+/** Short label used when a Scalper panel is narrower than 260px. */
+export const ORDER_STATUS_UNKNOWN_COMPACT = "Status unknown";
+
+/**
+ * One-line unknown status for a narrow Scalper panel. The approved sentence
+ * is the tooltip and accessible description.
+ */
+export function OrderStatusUnknownCompact({ className = "" }: { className?: string }) {
+  const id = useId();
+  return (
+    <p
+      role="status"
+      title={ORDER_STATUS_UNKNOWN}
+      aria-describedby={id}
+      className={`flex items-center gap-1 text-xs text-warning whitespace-nowrap ${className}`}
+    >
+      <AlertTriangle size={12} aria-hidden className="shrink-0" />
+      <span>{ORDER_STATUS_UNKNOWN_COMPACT}</span>
+      <span aria-hidden="true">·</span>
+      <OpenOrdersButton title={ORDER_STATUS_UNKNOWN} describedBy={id} />
+      <span id={id} hidden>{ORDER_STATUS_UNKNOWN}</span>
+    </p>
+  );
+}
+
 /**
  * Persistent line beside locked Buy/Sell controls after a lost submit.
  * `linkOnly` drops the sentence while the widget's own outcome line already

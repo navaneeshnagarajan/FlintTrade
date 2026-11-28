@@ -64,7 +64,7 @@ const fixtures: Array<{ name: string; status: number; raw?: unknown; body?: stri
   { name: "matching completed pre-dispatch refusal retains bounded native reason and code", status: 400, raw: { ...errorRaw("refused_before_dispatch"), message: "Unsupported protection intent", broker_message: "Protection is unavailable", broker_code: "UNSUPPORTED" }, refused: true, native: true },
   { name: "missing body on failed response remains unknown", status: 500, body: "upstream connection closed" },
   { name: "unstructured optimistic 5xx cannot become Not placed or Retry", status: 500, raw: { status: "error", message: "Not placed. Try again.", code: "gtt_unsupported" } },
-  { name: "contradictory retry-safe true and unsupported code remain unknown", status: 400, raw: { ...errorRaw("refused_before_dispatch"), retry_safe: true, code: "gtt_unsupported", message: "Not placed" } },
+  { name: "unsupported code on an unknown dispatch remains unknown", status: 400, raw: { ...errorRaw(), code: "gtt_unsupported", message: "Not placed" } },
   { name: "mismatched affected account cannot retarget origin", status: 400, raw: { ...errorRaw("refused_before_dispatch"), affected_item: { ...errorRaw().affected_item, account_id: ERROR_B } } },
   { name: "hostile oversized fields and raw response remain absent", status: 500, raw: { ...errorRaw(), broker_code: "SECRET".repeat(20), broker_message: "SECRET".repeat(100), raw_response: { token: "RAW_SECRET" }, exception: "EXCEPTION_SECRET" } },
   { name: "native 64 and 256 field limits remain literal in a narrow panel", status: 500, raw: { ...errorRaw(), broker_code: "C".repeat(64), broker_message: "R".repeat(256) }, native: true },

@@ -44,7 +44,7 @@ import { CANCELLATION_REQUESTED, ORDER_CANCELLED, ORDER_NO_LONGER_IN_ORDERS, ORD
 import { presentCancelResult } from "@/lib/orderOutcome";
 import { pendingOrderScope } from "@/lib/pendingOrderStore";
 import { useSettleUnknownSubmits, useUnknownOrderSubmits } from "@/hooks/useOrderSubmitGuard";
-import { unknownSubmitSentence } from "@/lib/orderSubmitGuard";
+import { ordersNoticeSummary, unknownSubmitRowLabel, unknownSubmitSentence } from "@/lib/orderSubmitGuard";
 import { usePendingOrderCancels, type PendingCancelSettlement } from "./usePendingOrderCancels";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
@@ -767,9 +767,15 @@ function OrdersWidget(_props: WidgetProps) {
           );
           if (!legLine) return statusBadge;
           return (
-            <span className="inline-flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1">
               {statusBadge}
-              <span className="text-xs text-warning">{legLine}</span>
+              <span
+                data-testid="orders-leg-unknown"
+                className="text-xxs text-warning whitespace-nowrap"
+                title={legLine}
+              >
+                {unknownSubmitRowLabel(legLine)}
+              </span>
             </span>
           );
         },
@@ -943,54 +949,74 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       )}
 
-      <div className="mx-3 mt-2 min-h-[2.75rem] space-y-2" data-testid="orders-notice-slot">
-        {(actionNotice
-          || unknownSubmits.length > 0
-          || pendingCancels.pending.length > 0) && (
-          <div
-            role="status"
-            className="px-3 py-2 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning"
-          >
-            {actionNotice && <p>{actionNotice}</p>}
-            {unknownSubmits.map((record) => (
-              <p key={`unknown-${record.key}`} data-unknown-submit={record.key}>
-                <span className="font-mono">
-                  {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
-                </span>
-                {" · "}
-                {unknownSubmitSentence(record)}
-              </p>
-            ))}
-            {pendingCancels.pending.map((record) => (
-              <p key={`pending-${record.orderId}`} data-pending-cancel={record.orderId}>
-                {CANCELLATION_REQUESTED}
-                <span className="text-text-secondary"> · Order ID {record.orderId}</span>
-              </p>
-            ))}
-          </div>
-        )}
-        {pendingCancels.confirmed.map((orderId) => (
-          <p
-            key={`cancelled-${orderId}`}
-            role="status"
-            data-cancelled-order={orderId}
-            className="px-3 py-2 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default"
-          >
-            {ORDER_CANCELLED}
-            <span className="text-text-secondary"> · Order ID {orderId}</span>
-          </p>
-        ))}
-        {pendingCancels.left.map((orderId) => (
-          <p
-            key={`left-${orderId}`}
-            role="status"
-            data-left-order={orderId}
-            className="px-3 py-2 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default"
-          >
-            {ORDER_NO_LONGER_IN_ORDERS}
-            <span className="text-text-secondary"> · Order ID {orderId}</span>
-          </p>
-        ))}
+      <div className="mx-3 mt-2 h-11 overflow-hidden" data-testid="orders-notice-slot">
+        {(() => {
+          const summary = ordersNoticeSummary(pendingCancels.pending.length, unknownSubmits.length);
+          const noticeClass = "h-11 flex items-center px-3 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning";
+          const settledClass = "h-11 flex items-center px-3 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default truncate whitespace-nowrap";
+          const hiddenUnknown = unknownSubmits.map((record) => (
+            <span key={`unknown-${record.key}`} data-unknown-submit={record.key} hidden>
+              {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
+            </span>
+          ));
+          const hiddenPending = pendingCancels.pending.map((record) => (
+            <span key={`pending-${record.orderId}`} data-pending-cancel={record.orderId} hidden />
+          ));
+          const hiddenConfirmed = (ids: string[]) => ids.map((orderId) => (
+            <span key={`cancelled-${orderId}`} data-cancelled-order={orderId} hidden>
+              {ORDER_CANCELLED} · Order ID {orderId}
+            </span>
+          ));
+          const hiddenLeft = (ids: string[]) => ids.map((orderId) => (
+            <span key={`left-${orderId}`} data-left-order={orderId} hidden>
+              {ORDER_NO_LONGER_IN_ORDERS} · Order ID {orderId}
+            </span>
+          ));
+          if (summary) {
+            return (
+              <div role="status" className={noticeClass}>
+                <p className="truncate whitespace-nowrap">{summary}</p>
+                {hiddenUnknown}
+                {hiddenPending}
+                {hiddenConfirmed(pendingCancels.confirmed)}
+                {hiddenLeft(pendingCancels.left)}
+              </div>
+            );
+          }
+          if (actionNotice) {
+            return (
+              <div role="status" className={noticeClass}>
+                <p className="truncate whitespace-nowrap">{actionNotice}</p>
+              </div>
+            );
+          }
+          if (pendingCancels.confirmed.length > 0) {
+            const orderId = pendingCancels.confirmed[0];
+            return (
+              <>
+                <p role="status" data-cancelled-order={orderId} className={settledClass}>
+                  {ORDER_CANCELLED}
+                  <span className="text-text-secondary"> · Order ID {orderId}</span>
+                </p>
+                {hiddenConfirmed(pendingCancels.confirmed.slice(1))}
+                {hiddenLeft(pendingCancels.left)}
+              </>
+            );
+          }
+          if (pendingCancels.left.length > 0) {
+            const orderId = pendingCancels.left[0];
+            return (
+              <>
+                <p role="status" data-left-order={orderId} className={settledClass}>
+                  {ORDER_NO_LONGER_IN_ORDERS}
+                  <span className="text-text-secondary"> · Order ID {orderId}</span>
+                </p>
+                {hiddenLeft(pendingCancels.left.slice(1))}
+              </>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       {/* Cancel/modify failure banner */}

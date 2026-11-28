@@ -373,7 +373,7 @@ describe("OrdersWidget", () => {
     fireEvent.click(screen.getByLabelText("Cancel order ORD123"));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(await screen.findByRole("status")).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockCancelOrder).toHaveBeenCalledTimes(1);
@@ -403,7 +403,7 @@ describe("OrdersWidget", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
 
     const outcome = await screen.findByRole("status");
-    expect(outcome).toHaveTextContent("Cancellation requested");
+    expect(outcome).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(mockCancelOrder).toHaveBeenCalledTimes(1);
   });
@@ -658,7 +658,7 @@ describe("OrdersWidget pending cancels", () => {
     render(ui());
     await cancel("ORD123");
 
-    expect(screen.getByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     // The row's own cancel is not offered again while the request is pending.
@@ -673,7 +673,7 @@ describe("OrdersWidget pending cancels", () => {
 
     newerRead([{ ...OPEN_ORDER, order_status: "open" }, SECOND_ORDER]);
     view.rerender(ui());
-    expect(screen.getByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
 
     newerRead([{ ...OPEN_ORDER, order_status: "cancelled" }, SECOND_ORDER]);
@@ -693,7 +693,7 @@ describe("OrdersWidget pending cancels", () => {
     first.unmount();
 
     render(ui());
-    expect(screen.getByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
     expect(document.querySelector('[data-pending-cancel="ORD123"]')).not.toBeNull();
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(mockCancelOrder).toHaveBeenCalledTimes(1);
@@ -704,12 +704,14 @@ describe("OrdersWidget pending cancels", () => {
     const view = render(ui());
     await cancel("ORD123");
     await cancel("ORD789");
+    expect(screen.getByRole("status")).toHaveTextContent("2 cancellations requested");
 
     newerRead([{ ...OPEN_ORDER, order_status: "cancelled" }, SECOND_ORDER]);
     view.rerender(ui());
     await waitFor(() => expect(document.querySelector('[data-cancelled-order="ORD123"]')).not.toBeNull());
     expect(document.querySelector('[data-cancelled-order="ORD789"]')).toBeNull();
-    expect(document.querySelector('[data-pending-cancel="ORD789"]')).toHaveTextContent("Cancellation requested");
+    expect(document.querySelector('[data-pending-cancel="ORD789"]')).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
   });
 
   it("clears the pending line without Order cancelled when a complete list omits the order", async () => {
@@ -768,7 +770,7 @@ describe("OrdersWidget pending cancels", () => {
 
     mockBrokerType.value = "";
     view.rerender(ui());
-    expect(screen.getByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
   });
 
   it("drops a corrupted stored value instead of showing it", () => {
@@ -787,7 +789,8 @@ describe("OrdersWidget pending cancels", () => {
     const view = render(ui());
     const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
     expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
-    expect(line).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    expect(screen.queryByText("Order status unknown. Check Orders before trying again.")).not.toBeInTheDocument();
 
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
     mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], isFetching: true, dataUpdatedAt: 0 }));
@@ -810,8 +813,12 @@ describe("OrdersWidget pending cancels", () => {
     )).rejects.toBe(bracketLost);
     render(ui());
     const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
-    expect(line).toHaveTextContent("Entry filled · Stop-loss status unknown");
-    expect(screen.getByText("Entry filled · Stop-loss status unknown")).toBeInTheDocument();
+    expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
+    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    const chip = screen.getByTestId("orders-leg-unknown");
+    expect(chip).toHaveTextContent("SL unknown");
+    expect(chip).toHaveAttribute("title", "Entry placed · Stop-loss status unknown");
+    expect(screen.queryByText("Entry placed · Stop-loss status unknown")).not.toBeInTheDocument();
   });
 });
 

@@ -7,6 +7,8 @@ import {
   readUnknownOrderSubmits,
   reconcileUnknownOrderSubmits,
   submitOrderOnce,
+  ordersNoticeSummary,
+  unknownSubmitRowLabel,
   unknownSubmitSentence,
 } from "@/lib/orderSubmitGuard";
 
@@ -115,7 +117,17 @@ describe("order submit guard", () => {
       body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
     });
     await expect(submitOrderOnce(SCOPE, INTENT, () => Promise.reject(bracketLost))).rejects.toBe(bracketLost);
-    expect(unknownSubmitSentence(readUnknownOrderSubmits(SCOPE)[0])).toBe("Entry filled · Stop-loss status unknown");
+    expect(unknownSubmitSentence(readUnknownOrderSubmits(SCOPE)[0])).toBe("Entry placed · Stop-loss status unknown");
+  });
+
+  it("shortens a mixed-leg sentence to the status-column chip and summarizes notices", () => {
+    const sentence = "Entry placed · Stop-loss status unknown";
+    expect(unknownSubmitRowLabel(sentence)).toBe("SL unknown");
+    expect(unknownSubmitRowLabel("Entry placed · Target status unknown")).toBe("Target unknown");
+    expect(ordersNoticeSummary(2, 1)).toBe("2 cancellations requested · 1 order status unknown");
+    expect(ordersNoticeSummary(1, 0)).toBe("1 cancellation requested");
+    expect(ordersNoticeSummary(0, 2)).toBe("2 orders status unknown");
+    expect(ordersNoticeSummary(0, 0)).toBeNull();
   });
 
   it("keeps the approved sentence for a lone unknown entry", async () => {

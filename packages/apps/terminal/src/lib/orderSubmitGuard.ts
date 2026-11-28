@@ -81,7 +81,7 @@ const LEG_LABEL: Record<"entry" | "target" | "stop_loss", string> = {
 /**
  * Copy shown on the unknown submit in Orders. A lone unknown entry uses the
  * approved sentence. A bracket that reports mixed legs names each one, e.g.
- * "Entry filled · Stop-loss status unknown".
+ * "Entry placed · Stop-loss status unknown".
  */
 export function unknownSubmitSentence(record: Pick<UnknownOrderSubmit, "legs">): string {
   const named = (["entry", "target", "stop_loss"] as const).filter((leg) => {
@@ -92,8 +92,26 @@ export function unknownSubmitSentence(record: Pick<UnknownOrderSubmit, "legs">):
   if (named.length === 0 || onlyUnknownEntry) return ORDER_STATUS_UNKNOWN;
   return named.map((leg) => {
     const label = LEG_LABEL[leg];
-    return record.legs[leg] === "confirmed" ? `${label === "Entry" ? "Entry filled" : `${label} filled`}` : `${label} status unknown`;
+    return record.legs[leg] === "confirmed" ? `${label} placed` : `${label} status unknown`;
   }).join(" · ");
+}
+
+/** Short status-column chip for a mixed-leg unknown submit. The full sentence is the tooltip. */
+export function unknownSubmitRowLabel(sentence: string): string {
+  if (sentence.includes("Stop-loss status unknown")) return "SL unknown";
+  if (sentence.includes("Target status unknown")) return "Target unknown";
+  if (sentence.includes("Entry status unknown")) return "Entry unknown";
+  return "Status unknown";
+}
+
+/** One-line Orders notice for pending cancels and unknown submits. */
+export function ordersNoticeSummary(pendingCancels: number, unknownOrders: number): string | null {
+  const parts: string[] = [];
+  if (pendingCancels === 1) parts.push("1 cancellation requested");
+  else if (pendingCancels > 1) parts.push(`${pendingCancels} cancellations requested`);
+  if (unknownOrders === 1) parts.push("1 order status unknown");
+  else if (unknownOrders > 1) parts.push(`${unknownOrders} orders status unknown`);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /** Lock key for one instrument. Every ticket for the same contract shares it. */

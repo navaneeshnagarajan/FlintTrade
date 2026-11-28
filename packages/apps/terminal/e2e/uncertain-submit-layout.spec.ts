@@ -836,7 +836,7 @@ for (const viewport of VIEWPORTS) {
         action: "BUY",
         quantity: 75,
       });
-      const line = page.getByTestId("orders-notice-slot").getByText(UNKNOWN);
+      const line = page.getByTestId("orders-notice-slot").getByText("1 order status unknown");
       let lineAdvanced = 0;
       await expect.poll(async () => {
         if (lineAdvanced < 2_000) {
@@ -846,6 +846,155 @@ for (const viewport of VIEWPORTS) {
         return line.isVisible();
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
       expectUnmoved(before, await collectBoxes(await rows.all()), `orders rows ${viewport.width}`);
+      const noticeBox = await page.getByTestId("orders-notice-slot").boundingBox();
+      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(44);
+      const rowBox = await table.getByRole("row").nth(1).boundingBox();
+      expect(rowBox?.height, `orders row ${viewport.width}`).toBeLessThanOrEqual(33);
     });
   });
 }
+
+const SHIFT_VIEWPORTS = [
+  { width: 1280, height: 800 },
+  { width: 2560, height: 1440 },
+] as const;
+
+const REFUSAL = "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second.";
+const REFUSAL_MESSAGE = `Regulation · ${REFUSAL}`;
+const SL_UNKNOWN = "Entry placed · Stop-loss status unknown";
+
+async function recordLostBracketSubmit(page: Page): Promise<void> {
+  await page.evaluate(async ({ scope }) => {
+    const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+    const { submitOrderOnce } = await importModule("/src/lib/orderSubmitGuard.ts") as {
+      submitOrderOnce: (scope: string, intent: unknown, send: () => Promise<unknown>) => Promise<unknown>;
+    };
+    const error = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    await submitOrderOnce(
+      scope,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(error),
+    ).catch(() => undefined);
+  }, { scope: `live:${BROKER}:${ACCOUNT_A}` });
+}
+
+for (const viewport of SHIFT_VIEWPORTS) {
+  test.describe(`Order Pad refusal stays in the reserved slot at ${viewport.width}×${viewport.height}`, () => {
+    test.use({
+      viewport,
+      benignConsoleErrors: [{
+        text: "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+        url: `http://localhost:5173${PLACE}`,
+        expectedCalls: 1,
+      }],
+    });
+
+    test("Buy does not move when a Not placed refusal appears", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      await seedOrderPadWorkspace(page);
+      registerPracticePadReads(syntheticApi);
+      await page.route(`**${PLACE}`, async (route) => {
+        await route.fulfill({
+          status: 429,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "error",
+            code: "order_rule_blocked",
+            message: REFUSAL_MESSAGE,
+          }),
+        });
+      });
+      const buy = page.getByRole("button", { name: "Practice Buy" });
+      let before: Box | null = null;
+      await confirmLostPracticeBuy(page, undefined, async () => {
+        before = await expectOnScreenAndUncovered(page, buy, `Buy before refusal at ${viewport.width}`);
+      });
+      const review = page.getByRole("dialog", { name: "Review Practice order" });
+      await expect(review).toBeVisible();
+      await review.getByRole("button", { name: "Back to edit" }).click();
+      await expect(review).toHaveCount(0);
+      const slot = page.getByTestId("order-pad-status-slot");
+      const outcome = slot.getByTestId("order-pad-outcome");
+      await expect(outcome).toBeVisible({ timeout: 15_000 });
+      await expect(outcome).toContainText("Not placed.");
+      await expect(outcome).toContainText(REFUSAL);
+      const after = await expectOnScreenAndUncovered(page, buy, `Buy after refusal at ${viewport.width}`);
+      expectUnmoved([before!], [after], `Order Pad Buy refusal ${viewport.width}`);
+    });
+  });
+}
+
+for (const viewport of SHIFT_VIEWPORTS) {
+  test.describe(`Orders mixed-leg row stays compact at ${viewport.width}×${viewport.height}`, () => {
+    test.use({ viewport });
+
+    test("SL unknown sits on the row and the notice stays h-11", async ({ page, syntheticApi }) => {
+      test.setTimeout(60_000);
+      registerOrdersReads(syntheticApi);
+      await mountWidget(page, "orders");
+      const table = page.getByRole("tabpanel", { name: "Orders" }).getByRole("table");
+      let advanced = 0;
+      await expect.poll(async () => {
+        if (advanced < 5_000) {
+          await page.clock.runFor(50);
+          advanced += 50;
+        }
+        return table.isVisible();
+      }, { timeout: 15_000, intervals: [50] }).toBe(true);
+      await recordLostBracketSubmit(page);
+      const chip = page.getByTestId("orders-leg-unknown");
+      let chipAdvanced = 0;
+      await expect.poll(async () => {
+        if (chipAdvanced < 2_000) {
+          await page.clock.runFor(25);
+          chipAdvanced += 25;
+        }
+        return chip.isVisible();
+      }, { timeout: 15_000, intervals: [50] }).toBe(true);
+      await expect(chip).toHaveText("SL unknown");
+      await expect(chip).toHaveAttribute("title", SL_UNKNOWN);
+      await expect(page.getByTestId("orders-notice-slot")).toContainText("1 order status unknown");
+      await expect(page.getByText(SL_UNKNOWN, { exact: true })).toHaveCount(0);
+      const noticeBox = await page.getByTestId("orders-notice-slot").boundingBox();
+      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(44);
+      const rowBox = await table.getByRole("row").nth(1).boundingBox();
+      expect(rowBox?.height, `orders mixed-leg row ${viewport.width}`).toBeLessThanOrEqual(33);
+    });
+  });
+}
+
+test.describe("Scalper unknown line compact below 260px", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("shows Status unknown · Open Orders with the full sentence as the tooltip", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    registerScalperReads(syntheticApi);
+    await mountWidget(page, "scalper");
+    await page.clock.runFor(5_000);
+    await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+    const slot = page.getByTestId("scalper-ce-status-slot");
+    await slot.evaluate((node) => {
+      const panel = node.parentElement as HTMLElement;
+      panel.style.width = "180px";
+      panel.style.maxWidth = "180px";
+      panel.style.flex = "0 0 180px";
+    });
+    await recordLostSubmit(page, { key: `NFO:${CE}`, symbol: CE, exchange: "NFO", action: "BUY", quantity: 65 });
+    const compact = slot.getByText("Status unknown", { exact: true });
+    let advanced = 0;
+    await expect.poll(async () => {
+      if (advanced < 2_000) {
+        await page.clock.runFor(25);
+        advanced += 25;
+      }
+      return compact.isVisible();
+    }, { timeout: 15_000, intervals: [50] }).toBe(true);
+    await expect(slot.getByRole("button", { name: "Open Orders" })).toBeVisible();
+    await expect(slot.getByText(UNKNOWN, { exact: true })).toBeHidden();
+    await expect(slot.getByRole("status")).toHaveAttribute("title", UNKNOWN);
+    await expectLineFits(slot, "scalper 180px compact");
+  });
+});

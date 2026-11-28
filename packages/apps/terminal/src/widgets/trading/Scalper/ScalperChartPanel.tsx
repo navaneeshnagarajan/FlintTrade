@@ -1,11 +1,36 @@
 // ─── Scalper — 3-panel chart area (CE / Spot / PE) ───────────────────────────
 
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
-import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { OrderStatusUnknownCompact, OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
 import { fmtInt } from "./helpers";
 import type { IntervalValue, OrderAction, TickMap } from "./types";
+
+const SCALPER_UNKNOWN_COMPACT_BELOW_PX = 260;
+
+function ScalperStatusSlot({ unknown, testId }: { unknown: boolean; testId: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const width = el.getBoundingClientRect().width;
+      setNarrow(width > 0 && width < SCALPER_UNKNOWN_COMPACT_BELOW_PX);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="shrink-0 h-8 overflow-hidden px-2 py-1" data-testid={testId}>
+      {unknown ? (narrow ? <OrderStatusUnknownCompact /> : <OrderStatusUnknownLine />) : null}
+    </div>
+  );
+}
 
 export interface ScalperChartPanelProps {
   symbol: string;
@@ -121,9 +146,7 @@ export function ScalperChartPanel({
             aria-label={`Buy CE ${ceSymbol ?? symbol} ${ceStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
-        <div className="shrink-0 h-16 overflow-hidden px-2 py-1" data-testid="scalper-ce-status-slot">
-          {ceStatusUnknown ? <OrderStatusUnknownLine /> : null}
-        </div>
+        <ScalperStatusSlot unknown={ceStatusUnknown} testId="scalper-ce-status-slot" />
       </div>
 
       {/* SPOT PANEL */}
@@ -243,9 +266,7 @@ export function ScalperChartPanel({
             aria-label={`Sell PE ${peSymbol ?? symbol} ${peStrike ?? ""} ${lots} lot${lots > 1 ? "s" : ""}`}
           />
         </div>
-        <div className="shrink-0 h-16 overflow-hidden px-2 py-1" data-testid="scalper-pe-status-slot">
-          {peStatusUnknown ? <OrderStatusUnknownLine /> : null}
-        </div>
+        <ScalperStatusSlot unknown={peStatusUnknown} testId="scalper-pe-status-slot" />
       </div>
     </div>
   );

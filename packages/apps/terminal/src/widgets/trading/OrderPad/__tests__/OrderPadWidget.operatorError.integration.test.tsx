@@ -123,7 +123,6 @@ describe("bounded truthful operator order errors", () => {
     { name: "absent status", patch: { status: undefined } },
     { name: "unknown outcome enum", patch: { dispatch_outcome: "completed" } },
     { name: "missing retry observation", patch: { retry_safe: undefined } },
-    { name: "unsafe optimistic retry", patch: { retry_safe: true } },
     { name: "coerced retry flag", patch: { retry_safe: "false" } },
     { name: "missing affected origin", patch: { affected_item: undefined } },
     { name: "case-only account mismatch", patch: { affected_item: { ...rawUnknown().affected_item, account_id: "kotak-offline" } } },

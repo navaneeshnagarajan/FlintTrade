@@ -395,12 +395,12 @@ function Toast({ msg }: { msg: ToastMsg | null }) {
       role={unknown ? "status" : "alert"}
       aria-live={unknown ? "polite" : "assertive"}
       data-testid="order-pad-outcome"
-      className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
+      className={`flex items-start gap-2 text-xs leading-tight ${
         unknown
-          ? "bg-warning/10 border-warning/20 text-warning"
+          ? "text-warning"
           : ok
-            ? "bg-profit/10 border-profit/20 text-profit"
-            : "bg-loss/10 border-loss/20 text-loss"
+            ? "text-profit"
+            : "text-loss"
       }`}
     >
       {unknown ? <AlertCircle size={13} aria-hidden="true" /> : ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
@@ -2202,7 +2202,7 @@ function OrderPadWidget(props: WidgetProps) {
             pad, so a short window never hides them behind the scroll edge. */}
         <div
           data-testid="order-pad-actions"
-          className="sticky bottom-0 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border-subtle bg-surface-base px-3 pt-2 pb-3"
+          className="sticky -bottom-3 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border-subtle bg-surface-base px-3 pt-2 pb-3"
         >
         {openQty > 0 && exitSide ? (
           <Button
@@ -2228,13 +2228,17 @@ function OrderPadWidget(props: WidgetProps) {
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
-        {/* Reserved so Buy does not move when the line appears. */}
-        <div data-testid="order-pad-status-slot" className="min-h-5">
+        {/* Reserved so Buy does not move when a refusal or unknown line appears. */}
+        <div data-testid="order-pad-status-slot" className="min-h-9">
           {padStatusUnknown ? (
-            <div data-testid="order-pad-status-unknown">
+            <div data-testid="order-pad-status-unknown" className="line-clamp-2">
               <OrderStatusUnknownLine />
             </div>
-          ) : null}
+          ) : (
+            <div className="line-clamp-2">
+              <Toast msg={toast?.scopeKey === dataScope && toast.type !== "unknown" ? toast : null} />
+            </div>
+          )}
         </div>
         </div>
         {showPracticeLayaDown ? (
@@ -2257,9 +2261,6 @@ function OrderPadWidget(props: WidgetProps) {
           />
         )}
       </form>
-
-      {/* Toast */}
-      <Toast msg={toast?.scopeKey === dataScope && toast.type !== "unknown" ? toast : null} />
 
       {practiceReview && appMode !== "unavailable" ? (
         <PracticeOrderReviewStage
