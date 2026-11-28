@@ -792,8 +792,8 @@ function AISettingsSection() {
           Configuration
         </h3>
         <p className="text-xs text-text-secondary leading-relaxed mb-4">
-          The LLM provider, model, API keys, and RAG settings are read from
-          workspace.json. Edit that file to change them.
+          LLM provider, model, API keys and RAG settings come from workspace.json.
+          Edit that file to change them.
         </p>
         <div className="space-y-3">
           {[

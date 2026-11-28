@@ -560,7 +560,7 @@ describe("AIRoute", () => {
 
     await user.click(screen.getByLabelText("Settings"));
     expect(
-      screen.getByText(/read from\s+workspace\.json\. Edit that file to change them\./),
+      screen.getByText(/LLM provider, model, API keys and RAG settings come from\s+workspace\.json\. Edit that file to change them\./),
     ).toBeInTheDocument();
     expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/coming soon|next release|in the meantime/i);
