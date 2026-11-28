@@ -228,10 +228,10 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const brokerAccounts = useBrokerStore((s) => s.accounts);
   const operatorIncident = useOperatorIncident();
 
-  const brokers = (brokersQuery.data ?? []).filter((b) => isConnectedReadBroker(b.adapter_id));
+  const catalogue = brokersQuery.data ?? [];
+  const brokers = catalogue.filter((b) => isConnectedReadBroker(b.adapter_id));
   const mcpBrokers = mcpQuery.data ?? [];
   const accounts = brokerAccounts.filter((a) => a.source === "native");
-  const connectableNativeLabel = joinBrokerNames(brokers.map((b) => b.display_name));
   const [selectedBroker, setSelectedBroker] = useState<string>("");
   const [selectedMethodId, setSelectedMethodId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
@@ -714,15 +714,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <div className="space-y-2">
           <BrokerSummary connectedAccounts={accounts.filter((account) => account.status === "connected").length} />
-          <p className="text-xs text-text-muted">
-            Native broker HTTP connectivity is unavailable while native-session support is completed.
-            Local Practice trading remains available.
-          </p>
-          {connectableNativeLabel && (
-            <p className="text-xs text-text-muted">
-              Native connection options: {connectableNativeLabel}.
-            </p>
-          )}
         </div>
       </div>
 
@@ -908,6 +899,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               const retryLater = !!a.login_retryable;
               const canSetPrimary = canPromotePrimaryAccount(a);
               const connectedReadBroker = isConnectedReadBroker(a.broker);
+              const brokerName = catalogue.find((b) => b.adapter_id === a.broker)?.display_name ?? a.broker;
               const honest = honestBrokerStatus({
                 connected,
                 connectedRead: connected && connectedReadChrome(a) !== null,
@@ -955,6 +947,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     {!connected && (needsFreshLogin || retryLater) && a.error_message && (
                       <div className="text-xxs text-warning mt-0.5">{a.error_message}</div>
                     )}
+                    {!connectedReadBroker && (
+                      <div className="text-xxs text-warning mt-0.5">
+                        {brokerName} can't be reconnected. Disconnect to remove it.
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -969,7 +966,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                       <Star className="size-4" aria-hidden="true" />
                     </Button>
                   )}
-                  {!connected && (
+                  {!connected && connectedReadBroker && (
                     <Button
                       variant="ghost"
                       size="sm"

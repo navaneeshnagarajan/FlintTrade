@@ -583,13 +583,8 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
     expect(screen.getByText("No connected broker accounts are listed.")).toBeInTheDocument();
     expect(screen.getByText(/Connecting an account does not enable live orders/i)).toBeInTheDocument();
-    expect(screen.getByText(/Native broker HTTP connectivity is unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/Local Practice trading remains available/i)).toBeInTheDocument();
-    await waitFor(() => {
-      const availability = screen.getByText(/Native connection options:/i);
-      expect(availability).toHaveTextContent("Native connection options: Dhan and Kotak Neo.");
-      expect(availability).not.toHaveTextContent(/Upstox|INDmoney|Groww|unavailable/);
-    });
+    expect(screen.queryByText(/native-session support/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Native connection options/i)).not.toBeInTheDocument();
   });
 
   it("does not expose retired account snapshots as managed native accounts", async () => {
@@ -1600,5 +1595,73 @@ describe("BrokersSection — disconnect feedback", () => {
     fireEvent.click(screen.getByLabelText(/disconnect upstox UPX1/i));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Vault is locked");
+  });
+});
+
+describe("BrokersSection — brokers that can no longer be connected", () => {
+  const UPSTOX_ACCOUNT = makeNativeAccount({
+    account_id: "UPX1",
+    broker: "upstox",
+    label: "Upstox swing",
+    status: "token_expired",
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
+    (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([UPSTOX_ACCOUNT]);
+    useBrokerStore.setState({ accounts: [], activeAccountId: null });
+  });
+
+  it("keeps the account row and names the broker from the catalogue", async () => {
+    renderSection();
+
+    expect(await screen.findByText("Upstox swing · UPX1")).toBeInTheDocument();
+    expect(screen.getByText("Upstox can't be reconnected. Disconnect to remove it.")).toBeInTheDocument();
+  });
+
+  it("uses the catalogue display name rather than a fixed broker name", async () => {
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(
+      BROKERS.map((broker) =>
+        broker.adapter_id === "upstox" ? { ...broker, display_name: "Upstox Pro" } : broker,
+      ),
+    );
+    renderSection();
+
+    expect(
+      await screen.findByText("Upstox Pro can't be reconnected. Disconnect to remove it."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no reconnect action for the row", async () => {
+    renderSection();
+    await screen.findByText(/can't be reconnected/);
+
+    expect(screen.queryByLabelText(/re-authenticate upstox/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps Disconnect working for the row", async () => {
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    renderSection();
+
+    fireEvent.click(await screen.findByLabelText(/disconnect upstox UPX1/i));
+
+    await waitFor(() =>
+      expect(removeBrokerAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "native", broker: "upstox", account_id: "UPX1" }),
+        expect.any(String),
+      ),
+    );
+  });
+
+  it("does not add the note to accounts that can still connect", async () => {
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeNativeAccount({ account_id: "D1", broker: "dhan", status: "token_expired" }),
+    ]);
+    renderSection();
+
+    expect(await screen.findByLabelText(/re-authenticate dhan/i)).toBeInTheDocument();
+    expect(screen.queryByText(/can't be reconnected/)).not.toBeInTheDocument();
   });
 });
