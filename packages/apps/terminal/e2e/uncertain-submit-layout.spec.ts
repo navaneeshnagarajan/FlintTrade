@@ -830,7 +830,7 @@ for (const viewport of VIEWPORTS) {
         action: "BUY",
         quantity: 75,
       });
-      const line = page.getByTestId("orders-notice-slot").getByText("1 order status unknown");
+      const line = page.getByTestId("orders-notice-slot").getByText("BUY 75 NIFTY24APR24000CE · order status unknown");
       let lineAdvanced = 0;
       await expect.poll(async () => {
         if (lineAdvanced < 2_000) {
@@ -950,7 +950,7 @@ for (const viewport of SHIFT_VIEWPORTS) {
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
       await expect(chip).toHaveText("SL unknown");
       await expect(chip).toHaveAttribute("title", SL_UNKNOWN);
-      await expect(page.getByTestId("orders-notice-slot")).toContainText("1 order status unknown");
+      await expect(page.getByTestId("orders-notice-slot")).toContainText("BUY 75 NIFTY24APR24000CE · order status unknown");
       await expect(page.getByText(SL_UNKNOWN, { exact: true })).toHaveCount(0);
       const noticeBox = await page.getByTestId("orders-notice-slot").boundingBox();
       expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(44);

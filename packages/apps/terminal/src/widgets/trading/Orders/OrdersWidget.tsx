@@ -951,7 +951,7 @@ function OrdersWidget(_props: WidgetProps) {
 
       <div className="mx-3 mt-2 h-11 overflow-hidden" data-testid="orders-notice-slot">
         {(() => {
-          const summary = ordersNoticeSummary(pendingCancels.pending.length, unknownSubmits.length);
+          const summary = ordersNoticeSummary(pendingCancels.pending.length, unknownSubmits);
           const noticeClass = "h-11 flex items-center px-3 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning";
           const settledClass = "h-11 flex items-center px-3 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default truncate whitespace-nowrap";
           const hiddenUnknown = unknownSubmits.map((record) => (
