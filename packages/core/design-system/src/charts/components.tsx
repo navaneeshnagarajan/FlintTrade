@@ -437,7 +437,6 @@ export interface FlintChartToolDefinition<TTool extends string = FlintChartDrawT
   id: TTool
   label: string
   icon: ReactNode
-  comingSoon?: boolean
 }
 
 export interface FlintChartToolGroup<TTool extends string = FlintChartDrawToolId> {
@@ -2662,13 +2661,13 @@ function safeReadJson(value: string | null): unknown {
 function implementedToolIds<TTool extends string>(
   groups: readonly FlintChartToolGroup<TTool>[],
 ): Set<TTool> {
-  return new Set(groups.flatMap((group) => group.tools.filter((tool) => !tool.comingSoon).map((tool) => tool.id)))
+  return new Set(groups.flatMap((group) => group.tools.map((tool) => tool.id)))
 }
 
 function getDefaultToolForGroup<TTool extends string>(
   group: FlintChartToolGroup<TTool>,
 ): FlintChartToolDefinition<TTool> | undefined {
-  return group.tools.find((tool) => !tool.comingSoon) ?? group.tools[0]
+  return group.tools[0]
 }
 
 function loadActiveTools<TTool extends string>(
@@ -3151,7 +3150,6 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
   const activeStorageKey = `${storageKeyPrefix}:active`
   const favouritesStorageKey = `${storageKeyPrefix}:favourites`
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [activeTools, setActiveTools] = useState<Record<string, TTool>>(() =>
     loadActiveTools(activeStorageKey, groups),
@@ -3160,7 +3158,6 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
     loadFavourites(favouritesStorageKey, groups),
   )
   const [openGroup, setOpenGroup] = useState<string | null>(null)
-  const [comingSoonTip, setComingSoonTip] = useState<string | null>(null)
   const horizontal = orientation === "horizontal"
 
   const groupedTools = useMemo(() => groups.flatMap((group) => group.tools), [groups])
@@ -3178,21 +3175,11 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
   useEffect(() => { saveJson(activeStorageKey, activeTools) }, [activeStorageKey, activeTools])
   useEffect(() => { saveJson(favouritesStorageKey, favourites) }, [favouritesStorageKey, favourites])
 
-  const showComingSoon = useCallback((label: string) => {
-    if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current)
-    setComingSoonTip(`${label} - coming soon`)
-    comingSoonTimer.current = setTimeout(() => setComingSoonTip(null), 2000)
-  }, [])
-
   const handleToolClick = useCallback((tool: FlintChartToolDefinition<TTool>, groupKey: string) => {
-    if (tool.comingSoon) {
-      showComingSoon(tool.label)
-      return
-    }
     setActiveTools((prev) => ({ ...prev, [groupKey]: tool.id }))
     setOpenGroup(null)
     onToggle(tool.id)
-  }, [onToggle, showComingSoon])
+  }, [onToggle])
 
   const toggleFavourite = useCallback((id: TTool) => {
     setFavourites((prev) =>
@@ -3214,40 +3201,34 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
         role="menuitem"
         className={cn(
           "grid grid-cols-[1fr_auto] items-center gap-1 rounded transition-colors",
-          tool.comingSoon
-            ? "opacity-50"
-            : isSelected
-              ? "bg-accent/15 text-accent"
-              : "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+          isSelected
+            ? "bg-accent/15 text-accent"
+            : "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
         )}
       >
         <button
           type="button"
-          disabled={tool.comingSoon}
           onClick={() => handleToolClick(tool, groupKey)}
-          className="flex min-w-0 items-center gap-2 px-2 py-1 text-left disabled:cursor-not-allowed"
+          className="flex min-w-0 items-center gap-2 px-2 py-1 text-left"
         >
           <span className="shrink-0" aria-hidden="true">{tool.icon}</span>
           <span className="flex-1 whitespace-nowrap text-xs">{tool.label}</span>
-          {tool.comingSoon && <span className="text-xxs text-text-muted">soon</span>}
         </button>
-        {!tool.comingSoon && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              toggleFavourite(tool.id)
-            }}
-            className={cn(
-              "mr-1 rounded p-0.5 transition-colors",
-              isFavourite ? "text-amber-400 hover:text-amber-300" : "text-text-muted hover:text-text-primary",
-            )}
-            title={isFavourite ? "Remove from favourites" : "Add to favourites"}
-            aria-label={isFavourite ? "Remove from favourites" : "Add to favourites"}
-          >
-            <Star size={9} fill={isFavourite ? "currentColor" : "none"} />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            toggleFavourite(tool.id)
+          }}
+          className={cn(
+            "mr-1 rounded p-0.5 transition-colors",
+            isFavourite ? "text-amber-400 hover:text-amber-300" : "text-text-muted hover:text-text-primary",
+          )}
+          title={isFavourite ? "Remove from favourites" : "Add to favourites"}
+          aria-label={isFavourite ? "Remove from favourites" : "Add to favourites"}
+        >
+          <Star size={9} fill={isFavourite ? "currentColor" : "none"} />
+        </button>
       </div>
     )
   }
@@ -3255,13 +3236,11 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
   function renderToolRow(group: FlintChartToolGroup<TTool>) {
     const defaultFace = getDefaultToolForGroup(group)
     const faceId = activeTools[group.key] ?? defaultFace?.id
-    const faceDef = group.tools.find((tool) => tool.id === faceId && !tool.comingSoon) ?? defaultFace
+    const faceDef = group.tools.find((tool) => tool.id === faceId) ?? defaultFace
     if (!faceDef) return null
 
     const isOpen = openGroup === group.key
-    const faceComingSoon = faceDef.comingSoon === true
-    const faceLabel = faceComingSoon ? `${faceDef.label} coming soon` : faceDef.label
-    const isActive = !faceComingSoon && drawMode === faceDef.id
+    const isActive = drawMode === faceDef.id
     const hasArrow = group.tools.length > 1
 
     return (
@@ -3269,20 +3248,17 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
         key={group.key}
         className={cn("relative flex items-center", horizontal ? "w-auto" : "w-full")}
       >
-        <Tooltip text={faceLabel} side={horizontal ? "bottom" : "right"}>
+        <Tooltip text={faceDef.label} side={horizontal ? "bottom" : "right"}>
           <button
             type="button"
-            disabled={faceComingSoon}
-            onClick={() => !faceComingSoon && handleToolClick(faceDef, group.key)}
+            onClick={() => handleToolClick(faceDef, group.key)}
             className={cn(
               "flex h-7 w-7 items-center justify-center rounded transition-colors",
-              faceComingSoon
-                ? "cursor-not-allowed opacity-50 text-text-muted"
-                : isActive
+              isActive
                 ? "bg-accent/15 text-accent"
                 : "text-text-muted hover:bg-surface-hover hover:text-text-primary",
             )}
-            aria-label={faceLabel}
+            aria-label={faceDef.label}
             aria-pressed={isActive}
           >
             {faceDef.icon}
@@ -3405,17 +3381,6 @@ export function FlintChartDrawingToolbar<TTool extends string = FlintChartDrawTo
         className,
       )}
     >
-      {comingSoonTip && (
-        <div
-          className={cn(
-            "pointer-events-none absolute z-200 whitespace-nowrap rounded border border-border-default bg-surface-card px-2 py-1 text-xs text-text-muted shadow-2xl",
-            horizontal ? "left-2 top-full mt-2" : "left-full top-2 ml-2",
-          )}
-        >
-          {comingSoonTip}
-        </div>
-      )}
-
       {renderFavouritesRow()}
       {favourites.length > 0 && (
         <div className={cn("bg-border-default", horizontal ? "mx-0.5 h-5 w-px" : "mx-1 my-0.5 h-px w-full")} />

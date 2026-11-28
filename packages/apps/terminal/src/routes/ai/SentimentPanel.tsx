@@ -427,39 +427,28 @@ export default function SentimentPanel() {
 
       {/* Loading state */}
       {isLoading && (
-        <div className="flex flex-col items-center gap-3 py-10 text-text-muted">
+        <div className="flex min-h-[8.5rem] flex-col items-center justify-center gap-3 py-10 text-text-muted">
           <Loader2 className="w-6 h-6 animate-spin" />
           <span className="text-sm">Generating market summary…</span>
         </div>
       )}
 
-      {/* Unavailable state — honest "coming soon" rather than an error.
-          The AI sentiment service is not yet enabled in this build (the
-          endpoint is not wired / no LLM is configured), so the request
-          fails closed. We degrade to a calm preview placeholder instead of
-          surfacing a raw backend error. */}
       {isError && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <div className="flex items-start gap-3 text-text-secondary">
-            <Eye className="w-4 h-4 shrink-0 mt-0.5 text-text-muted" />
-            <div>
-              <p className="text-sm font-semibold mb-1 text-text-primary">
-                Market sentiment coming soon
-              </p>
-              <p className="text-xs text-text-muted">
-                AI-generated market sentiment is not yet available in this build.
-                Once the AI backend is enabled and an LLM is configured, the live
-                dashboard will appear here.
-              </p>
-            </div>
+        <Card className="flex min-h-[8.5rem] flex-col justify-center bg-surface-card border border-bearish-border rounded-lg p-4">
+          <div className="flex items-start gap-2 text-loss text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Market sentiment unavailable. Start Core and set an LLM in
+              workspace.json.
+            </span>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
-            className="mt-3 text-text-muted hover:text-text-primary text-xs"
+            className="mt-2 text-text-muted hover:text-text-primary text-xs"
           >
-            Check again
+            Retry
           </Button>
         </Card>
       )}

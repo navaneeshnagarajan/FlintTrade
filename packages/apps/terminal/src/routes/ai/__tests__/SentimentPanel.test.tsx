@@ -227,28 +227,45 @@ describe("SentimentPanel", () => {
     });
   });
 
-  it("shows an honest 'coming soon' state on API failure", async () => {
-    // The endpoint fails closed (e.g. 404 / no LLM configured); the panel
-    // degrades to a calm preview placeholder, not a raw backend error.
+  it("states the fact and the fix when the sentiment request fails", async () => {
     mockGetMarketSentimentSummary.mockRejectedValue(
       new Error("Backend unavailable"),
     );
     renderPanel();
     await waitFor(() => {
       expect(
-        screen.getByText("Market sentiment coming soon"),
+        screen.getByText(
+          "Market sentiment unavailable. Start Core and set an LLM in workspace.json.",
+        ),
       ).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available|AI backend/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Backend unavailable")).not.toBeInTheDocument();
   });
 
-  it("'Check again' button re-fetches after the coming-soon state", async () => {
+  it("shows only the score when the summary has no indices or key points", async () => {
+    mockGetMarketSentimentSummary.mockResolvedValue({
+      ...MOCK_SUMMARY,
+      indices: [],
+      key_points: [],
+    });
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText("Market Sentiment Dashboard")).toBeInTheDocument();
+      expect(screen.queryByText("Indices")).not.toBeInTheDocument();
+      expect(screen.queryByText("Key Points")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/unavailable/i)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon/i);
+  });
+
+  it("Retry re-fetches from the down state", async () => {
     mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
     renderPanel();
-    await waitFor(() => screen.getByText("Market sentiment coming soon"));
-    expect(screen.getByText("Check again")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Check again"));
+    await waitFor(() => screen.getByText(/Market sentiment unavailable/));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     // Refetch is triggered — mock gets called again
     await waitFor(() => {
       expect(mockGetMarketSentimentSummary).toHaveBeenCalledTimes(2);
@@ -303,3 +320,37 @@ describe("SentimentPanel", () => {
     });
   });
 });
+
+describe("SentimentPanel: error state matches the loading slot", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTickerSentiments.mockResolvedValue({ tickers: [] });
+  });
+
+  const MIN_HEIGHT = "min-h-[8.5rem]";
+
+  it("keeps the error card as tall as the loading slot so the swap does not shift the layout", async () => {
+    mockGetMarketSentimentSummary.mockReturnValue(new Promise(() => {}));
+    const loading = renderPanel();
+    const slot = screen.getByText(/Generating market summary/).parentElement as HTMLElement;
+    expect(slot).toHaveClass(MIN_HEIGHT);
+    loading.unmount();
+
+    mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const card = (await screen.findByText(/Market sentiment unavailable/)).closest("[class*='bearish-border']") as HTMLElement;
+    expect(card).toHaveClass(MIN_HEIGHT);
+  });
+
+  it("gives the Retry button the standard Button focus ring and retries on click", async () => {
+    mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(retry).toHaveClass("focus-visible:ring-[3px]", "focus-visible:ring-ring/50", "outline-none");
+
+    const before = mockGetMarketSentimentSummary.mock.calls.length;
+    fireEvent.click(retry);
+    await waitFor(() => expect(mockGetMarketSentimentSummary.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+

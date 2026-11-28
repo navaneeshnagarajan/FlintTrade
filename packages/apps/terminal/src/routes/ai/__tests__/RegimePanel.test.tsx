@@ -205,18 +205,31 @@ describe("RegimePanel", () => {
     });
   });
 
-  it("shows an honest 'coming soon' state on API failure", async () => {
-    // The endpoint fails closed (e.g. 404 / no historical data); the panel
-    // degrades to a calm preview placeholder, not a raw backend error.
+  it("states the fact and the fix when the regime request fails", async () => {
     mockGetRegimeDetector.mockRejectedValue(new Error("Not enough bars"));
     renderPanel();
     await waitFor(() => {
       expect(
-        screen.getByText("Regime detection coming soon"),
+        screen.getByText(
+          "Regime unavailable for NIFTY. Start Core and load price history, then retry.",
+        ),
       ).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available|AI backend/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Not enough bars")).not.toBeInTheDocument();
+  });
+
+  it("names the selected instrument in the down state", async () => {
+    mockGetRegimeDetector.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    await waitFor(() => screen.getByText(/Regime unavailable for NIFTY/));
+
+    fireEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Regime unavailable for BANKNIFTY/)).toBeInTheDocument();
+    });
   });
 
   it("clicking a quick symbol updates the query symbol", async () => {
@@ -297,17 +310,51 @@ describe("RegimePanel", () => {
     );
   });
 
-  it("'Check again' button triggers refetch after the coming-soon state", async () => {
+  it("Retry triggers a refetch from the down state", async () => {
     mockGetRegimeDetector
       .mockRejectedValueOnce(new Error("fail"))
       .mockResolvedValueOnce(TRENDING_UP_RESULT);
 
     renderPanel();
-    await waitFor(() => screen.getByText("Regime detection coming soon"));
+    await waitFor(() => screen.getByText(/Regime unavailable for NIFTY/));
 
-    fireEvent.click(screen.getByText("Check again"));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(mockGetRegimeDetector).toHaveBeenCalledTimes(2);
     });
   });
 });
+
+describe("RegimePanel: error state matches the loading slot", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+  });
+
+  const MIN_HEIGHT = "min-h-[8.5rem]";
+
+  it("keeps the error card as tall as the loading slot so the swap does not shift the layout", async () => {
+    mockGetRegimeDetector.mockReturnValue(new Promise(() => {}));
+    const loading = renderPanel();
+    const slot = screen.getByText(/Detecting regime for NIFTY/).parentElement as HTMLElement;
+    expect(slot).toHaveClass(MIN_HEIGHT);
+    loading.unmount();
+
+    mockGetRegimeDetector.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const card = (await screen.findByText(/Regime unavailable for NIFTY/)).closest("[class*='bearish-border']") as HTMLElement;
+    expect(card).toHaveClass(MIN_HEIGHT);
+  });
+
+  it("gives the Retry button the standard Button focus ring and retries on click", async () => {
+    mockGetRegimeDetector.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(retry).toHaveClass("focus-visible:ring-[3px]", "focus-visible:ring-ring/50", "outline-none");
+
+    const before = mockGetRegimeDetector.mock.calls.length;
+    fireEvent.click(retry);
+    await waitFor(() => expect(mockGetRegimeDetector.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+

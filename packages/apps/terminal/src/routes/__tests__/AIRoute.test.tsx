@@ -174,8 +174,9 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import AIRoute, { signalEventToCard } from "../AIRoute";
-import { getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
+import { analyzeSentiment, getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
 import type { SignalEvent } from "@/services/ftApi";
+import { FtApiError } from "@/services/ftApi.helpers";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -550,8 +551,70 @@ describe("AIRoute", () => {
 
     await user.click(screen.getByLabelText("Settings"));
     expect(screen.getByText(/Local vector-store path, embedding model/)).toBeInTheDocument();
-    expect(screen.getByText(/local vector-store paths/)).toBeInTheDocument();
     expect(screen.queryByText(/ChromaDB/i)).not.toBeInTheDocument();
+  });
+
+  it("points the settings tab at workspace.json without a Coming soon badge", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Settings"));
+    expect(
+      screen.getByText(/LLM provider, model, API keys and RAG settings come from\s+workspace\.json\. Edit that file to change them\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|next release|in the meantime/i);
+  });
+
+  it.each([
+    ["a network error", new TypeError("Failed to fetch")],
+    ["a rejection without a message", "offline"],
+  ])("says Core is not reachable on port 5100 for %s, never the raw error", async (_label, failure) => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(analyzeSentiment).mockRejectedValue(failure);
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Sentiment"));
+    await user.type(screen.getByLabelText("Symbol for sentiment analysis"), "NIFTY{Enter}");
+
+    expect(await screen.findByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to fetch/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sentiment analysis failed/)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+  });
+
+  it("points at the LLM in workspace.json when Core answers the analysis with an HTTP error", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(analyzeSentiment).mockRejectedValue(new FtApiError("upstream failed", 502));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Sentiment"));
+    await user.type(screen.getByLabelText("Symbol for sentiment analysis"), "NIFTY{Enter}");
+
+    expect(
+      await screen.findByText("Sentiment analysis failed. Check the LLM in workspace.json, then retry."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/upstream failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Core not reachable/)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+  });
+
+  it("names Core and port 5100 when the LLM status request fails", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 503 }));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Settings"));
+
+    expect(await screen.findByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+    fetchSpy.mockRestore();
   });
 
   it("accepts the older response envelope when answer is absent", async () => {
