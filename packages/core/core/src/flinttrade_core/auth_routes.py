@@ -300,6 +300,29 @@ def _next_8am_ist() -> datetime:
     return today_8am_ist - _IST_OFFSET
 
 
+_NEAR_SESSION_END = timedelta(hours=1)
+SESSION_EXPIRES_SOON_CODE = "session_expires_soon"
+SESSION_EXPIRES_SOON_MESSAGE = "Not started. Session ends at 08:00 IST. Sign in again to continue."
+
+
+class SessionExpiresSoon(Exception):
+    """The requested grant would outlast the current sign-in."""
+
+    public_code = SESSION_EXPIRES_SOON_CODE
+
+
+def _session_expiry() -> datetime:
+    """Expiry for a newly issued sign-in token.
+
+    Sessions end at the next 08:00 IST. A sign-in in the hour before that
+    boundary lasts until 08:00 IST the following day.
+    """
+    at = _next_8am_ist()
+    if at - datetime.now(UTC) < _NEAR_SESSION_END:
+        return at + timedelta(days=1)
+    return at
+
+
 def _create_token(
     username: str,
     *,
@@ -309,7 +332,10 @@ def _create_token(
     setup_bound: str = "",
     scopes: tuple[str, ...] | None = None,
 ) -> str:
-    """Create a JWT that expires at next 8:00 AM IST.
+    """Create a JWT that expires at the next 08:00 IST.
+
+    A sign-in in the hour before that boundary lasts until 08:00 IST
+    the following day.
 
     Includes a unique ``jti`` (JWT ID) for server-side revocation and a
     ``mode`` claim so that ``order_routes`` can enforce the trading mode
@@ -335,7 +361,7 @@ def _create_token(
     """
     from .auth_scopes import DEFAULT_SESSION_SCOPES  # noqa: PLC0415 — avoid import cycle
 
-    exp = _next_8am_ist()
+    exp = _session_expiry()
     payload = {
         "sub": username,
         "iat": datetime.now(UTC),
@@ -1211,7 +1237,7 @@ def auth_login() -> tuple[Any, int]:
             "data": {
                 "token": token,
                 "username": profile.get("username"),
-                "expires_at": _next_8am_ist().isoformat(),
+                "expires_at": _session_expiry().isoformat(),
                 "mode": "practice",
             },
         }

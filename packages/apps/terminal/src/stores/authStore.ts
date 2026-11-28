@@ -3,8 +3,9 @@
  *
  * Token is held in memory and mirrored to tab-scoped sessionStorage so a
  * same-tab address-bar load, refresh, or bookmark of `/home` can restore the
- * session. Never localStorage. Session expires at 08:00 IST
- * daily (enforced via startExpiryTimer).
+ * session. Never localStorage. The session ends at the expiry returned
+ * at sign-in, which is the next 08:00 IST, or the following 08:00 IST
+ * when signed in during the hour before that boundary.
  */
 import { create } from "zustand";
 import { clearDemoSession } from "@/lib/demoSession";
@@ -52,7 +53,7 @@ interface AuthState {
   lastActivity: number;
   /** Monotonic fence for async work started under an older auth context. */
   sessionGeneration: number;
-  /** Internal: timer ID for the 08:00 IST daily expiry. */
+  /** Internal: timer ID for the signed-in session expiry. */
   _expiryTimerId: ReturnType<typeof setTimeout> | null;
 
   setLoggedIn: (token: string, username: string, expiresAt: string) => void;
@@ -68,7 +69,7 @@ interface AuthState {
   setSetupRequired: () => void;
   touchActivity: () => void;
   checkIdle: () => void;
-  /** Schedules automatic logout at the next 08:00 IST. Called by setLoggedIn. */
+  /** Schedules automatic logout at the signed-in session expiry. Called by setLoggedIn. */
   startExpiryTimer: () => void;
   /**
    * Replace the active JWT in-place (used after PIN unlock or
@@ -199,7 +200,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
       const existing = get()._expiryTimerId;
       if (existing !== null) clearTimeout(existing);
 
-      const ms = msUntilNext8amIST();
+      const untilExpiry = Date.parse(get().expiresAt ?? "") - Date.now();
+      const ms = Number.isFinite(untilExpiry) ? Math.max(0, untilExpiry) : msUntilNext8amIST();
       const timerId = setTimeout(() => {
         get().setLoggedOut();
       }, ms);

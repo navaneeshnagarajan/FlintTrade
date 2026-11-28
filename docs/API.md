@@ -635,7 +635,7 @@ The JWT carries three claims you care about:
 | Claim | Meaning |
 |---|---|
 | `sub` | User identifier. |
-| `exp` | Expiry timestamp. **Every token expires at 8 AM IST the next day.** Refresh by signing in again. |
+| `exp` | Expiry timestamp. Every token expires at the next 08:00 IST. A sign-in in the hour before that boundary lasts until 08:00 IST the following day. Refresh by signing in again. |
 | `mode` | One of `explore` (example data; not a menu Mode), `practice`, `live`. Server-enforced on every order path. Password login and account setup default to `practice`. |
 | `live_mode_unlocked` | `true` on a Live session issued by the Live switch `POST /v1/auth/live`. Required for live order paths. Quick Unlock (`POST /v1/auth/pin`) keeps it when that session is already Live, and leaves it false on every other session. Both calls revoke the presented `jti` and return a new token. |
 | `oid`, `epoch` | Operator id and account epoch. Reset and operator re-creation bump the epoch, which ends other sessions. |

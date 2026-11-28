@@ -285,15 +285,29 @@ describe("authStore", () => {
     });
 
     it("triggers setLoggedOut when the timer fires", () => {
+      vi.setSystemTime(new Date("2026-04-08T10:00:00.000Z"));
       useAuthStore
         .getState()
         .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
 
       expect(useAuthStore.getState().status).toBe("logged-in");
 
-      // Advance past 24 hours (worst case for next 08:00 IST)
-      vi.advanceTimersByTime(24 * 60 * 60 * 1000 + 1000);
+      vi.advanceTimersByTime(16 * 60 * 60 * 1000 + 30 * 60 * 1000 + 1000);
 
+      expect(useAuthStore.getState().status).toBe("logged-out");
+      expect(useAuthStore.getState().token).toBeNull();
+    });
+
+    it("keeps a 07:59:40 IST sign-in until the following 08:00 IST", () => {
+      vi.setSystemTime(new Date("2026-11-28T02:29:40.000Z"));
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2026-11-29T02:30:00.000Z");
+
+      vi.advanceTimersByTime(20 * 1000);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+
+      vi.advanceTimersByTime(24 * 60 * 60 * 1000);
       expect(useAuthStore.getState().status).toBe("logged-out");
       expect(useAuthStore.getState().token).toBeNull();
     });

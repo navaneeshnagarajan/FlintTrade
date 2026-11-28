@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 import os
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -158,29 +157,6 @@ def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
     scratch = _scratch_workspace()
     scratch.release_all()
     scratch.sweep_stale()
-
-
-_MIN_SESSION_REMAINING = timedelta(hours=1)
-
-
-@pytest.fixture(autouse=True)
-def _session_outlives_the_test(monkeypatch) -> None:
-    """Keep a test session clear of the daily 08:00 IST expiry.
-
-    Real sessions end at the next 08:00 IST, so a test that signs in just before
-    then holds a token that dies mid-test while grants are still being issued.
-    Test sessions are given the following day's expiry instead whenever the
-    boundary is less than an hour away.
-    """
-    from flinttrade_core import auth_routes
-
-    daily_expiry = auth_routes._next_8am_ist
-
-    def expiry() -> datetime:
-        at = daily_expiry()
-        return at if at - datetime.now(UTC) >= _MIN_SESSION_REMAINING else at + timedelta(days=1)
-
-    monkeypatch.setattr(auth_routes, "_next_8am_ist", expiry)
 
 
 @pytest.fixture(autouse=True)

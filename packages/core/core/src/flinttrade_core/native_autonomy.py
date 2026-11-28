@@ -648,7 +648,11 @@ class NativeAutonomy:
         _text(body["grant_id"])
         for key in keys - {"grant_id", "instruments", "actions"}:
             _positive(body[key], integer=key in {"max_order_quantity", "max_total_quantity", "max_commands"})
-        if (not time.time() < body["expires_at"] <= min(time.time() + 86400, claims["exp"])
+        now = time.time()
+        if now < body["expires_at"] <= now + 86400 and body["expires_at"] > claims["exp"]:
+            from .auth_routes import SessionExpiresSoon
+            raise SessionExpiresSoon
+        if (not now < body["expires_at"] <= min(now + 86400, claims["exp"])
                 or body["max_order_quantity"] > body["max_total_quantity"]
                 or body["max_loss"] < body["max_total_notional"]
                 or body["actions"] not in (["place"], ["place", "cancel"])):
