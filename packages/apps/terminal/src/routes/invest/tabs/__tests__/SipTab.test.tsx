@@ -45,7 +45,7 @@ vi.mock("@/components/motion/StaggeredList", () => ({
   StaggeredList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("../../DisabledActionButton", () => ({
+vi.mock("@/components/DisabledActionButton", () => ({
   DisabledActionButton: ({ label }: { label: string }) => (
     <button disabled>{label}</button>
   ),

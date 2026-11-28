@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
-import { DisabledActionButton } from "../DisabledActionButton";
+import { DisabledActionButton } from "@/components/DisabledActionButton";
 import {
   accountNetWorth,
   accountNetWorthAccessibleName,

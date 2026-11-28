@@ -42,7 +42,7 @@ vi.mock("@/components/motion/StaggeredList", () => ({
 }));
 
 // DisabledActionButton
-vi.mock("../../DisabledActionButton", () => ({
+vi.mock("@/components/DisabledActionButton", () => ({
   DisabledActionButton: ({ label }: { label: string }) => (
     <button disabled>{label}</button>
   ),

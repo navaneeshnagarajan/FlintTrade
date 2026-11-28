@@ -39,6 +39,21 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
+// 2b. ResizeObserver stub.
+//
+// jsdom does not implement ResizeObserver. Radix tooltips and popovers size
+// themselves with it, so a focused tooltip needs one. A test that measures
+// layout installs its own before rendering.
+// ---------------------------------------------------------------------------
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 3. window.matchMedia stub.
 //
 // jsdom does not implement window.matchMedia. Several components (themeStore,

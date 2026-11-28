@@ -36,7 +36,7 @@ import {
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { StaggeredList } from "@/components/motion/StaggeredList";
-import { DisabledActionButton } from "../DisabledActionButton";
+import { DisabledActionButton } from "@/components/DisabledActionButton";
 import { cn } from "@/lib/utils";
 import { formatINR, formatINRCompact } from "../formatters";
 
