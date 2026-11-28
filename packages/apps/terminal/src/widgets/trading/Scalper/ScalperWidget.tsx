@@ -480,7 +480,7 @@ function ScalperWidget(props: WidgetProps) {
         // Mirrors the backend's oco_unsupported refusal — no fill monitor
         // exists to cancel the sibling leg, so refuse before sending.
         showStatus(
-          "SL and Target together are not supported yet — enter exactly one",
+          "SL and Target together are not supported. Enter exactly one.",
           "error",
           6000,
         );

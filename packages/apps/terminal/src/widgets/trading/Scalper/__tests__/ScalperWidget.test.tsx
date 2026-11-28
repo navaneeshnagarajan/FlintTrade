@@ -761,7 +761,7 @@ describe("ScalperWidget", () => {
     setLimit("150");
     await buyCeWithConfirm();
 
-    await screen.findByText(/SL and Target together are not supported yet — enter exactly one/);
+    await screen.findByText(/SL and Target together are not supported. Enter exactly one./);
     expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
