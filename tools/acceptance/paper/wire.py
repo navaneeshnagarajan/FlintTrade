@@ -91,9 +91,9 @@ class Wires:
         urllib.request.urlopen = self.text
         key = desk.workspace / 'synthetic-attached-key'
         key.write_text(secrets.token_urlsafe(32)); key.chmod(0o600)
-        os.environ['LAYA_HOST'] = '127.0.0.1'
-        os.environ['LAYA_PORT'] = '5177'
-        os.environ['LAYA_API_KEY_FILE'] = str(key)
+        os.environ['FLINTTRADE_DECISION_MODEL_HOST'] = '127.0.0.1'
+        os.environ['FLINTTRADE_DECISION_MODEL_PORT'] = '5177'
+        os.environ['FLINTTRADE_DECISION_MODEL_API_KEY_FILE'] = str(key)
         owner = self
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):

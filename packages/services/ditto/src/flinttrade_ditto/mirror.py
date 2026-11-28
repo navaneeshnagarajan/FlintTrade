@@ -29,7 +29,7 @@ from typing import Any, Callable, Literal
 from flinttrade_core.indian_charges import statutory_mirror_defaults
 from flinttrade_core.models import Order, OrderResponse
 from flinttrade_gateway.log_safety import account_ref
-from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES, missing_lot_refusal
 
 from .account_manager import BrokerAccount
 
@@ -55,12 +55,9 @@ class MirrorRiskError(RuntimeError):
     """Raised when authoritative target-account risk cannot admit a mirror write."""
 
 
-# Lot sizes for F&O instruments — single source of truth is the screener's
-# contract-size table (union-merged 2026-07-07; live symbol-master values are
-# served by flinttrade_screener.lot_sizes.LotSizeResolver). This module held
-# its own badly stale copy (BANKNIFTY 15, FINNIFTY 25) that mis-sized mirror
-# quantities.
-LOT_SIZES: dict[str, int] = FALLBACK_LOT_SIZES
+# Lot sizes for F&O instruments come from the screener's shared lot table
+# (live symbol-master values are served by
+# flinttrade_screener.lot_sizes.LotSizeResolver). This module keeps no copy.
 
 
 @dataclass
@@ -142,13 +139,16 @@ def compute_allocation(
 
     elif mode_val == AllocationMode.LOT_BASED.value:
         lot_size = _get_lot_size(symbol)
+        if lot_size is None:
+            logger.warning("Mirror: no lot size for %s, so no account is allocated", symbol)
+            return result
         total_weight = sum(a.allocation_weight for a in accounts)
         if total_weight <= 0:
             total_weight = len(accounts)
         for acc in accounts:
             frac = acc.allocation_weight / total_weight
             raw_qty = master_qty * frac
-            lots = max(1, round(raw_qty / lot_size)) if lot_size > 0 else max(1, int(raw_qty))
+            lots = max(1, round(raw_qty / lot_size))
             result[acc.account_id] = lots * lot_size
 
     # MULTIPLIER mode is handled by compute_multiplier_allocation; reaching
@@ -161,18 +161,18 @@ def compute_allocation(
     return result
 
 
-def _get_lot_size(symbol: str) -> int:
-    """Determine lot size from symbol name.
+def _get_lot_size(symbol: str) -> int | None:
+    """Determine lot size from symbol name, or ``None`` when it is unknown.
 
     Prefers the LONGEST matching underlying — plain substring iteration
     resolved ``BANKNIFTY24JULFUT`` to NIFTY's lot (``"NIFTY" in sym`` is true
     for every *NIFTY contract) depending on dict order.
     """
     sym = symbol.upper()
-    matches = [key for key in LOT_SIZES if key in sym]
+    matches = [key for key in FALLBACK_LOT_SIZES if key in sym]
     if matches:
-        return LOT_SIZES[max(matches, key=len)]
-    return 1
+        return FALLBACK_LOT_SIZES[max(matches, key=len)]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +789,13 @@ class PositionMirror:
             timestamp=now,
         )
 
+        lot_unknown = mode_val == AllocationMode.LOT_BASED.value and _get_lot_size(order.symbol) is None
+        skip_error = (
+            missing_lot_refusal(order.symbol)
+            if lot_unknown
+            else "Allocation is zero. Not mirrored."
+        )
+
         # Execute in parallel using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
             futures = {}
@@ -798,7 +805,7 @@ class PositionMirror:
                     result.skipped += 1
                     result.results.append(MirrorOrderResult(
                         account_id=acc.account_id,
-                        error="Zero allocation — skipped",
+                        error=skip_error,
                     ))
                     continue
                 futures[pool.submit(self._place_on_account, order, acc, qty)] = acc.account_id

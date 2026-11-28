@@ -998,9 +998,8 @@ class TestModeSwitchEndpoint:
         """If JTI revocation raises, the endpoint MUST return 5xx and
         MUST NOT mint a new Practice token. Otherwise the frontend would
         flip the UI to Practice while the stale live-unlocked JWT in
-        memory remained replayable. Codex stop-gate caught this gap on
-        commit 00c06e7 — the original best-effort revoke was a silent
-        defeat of the whole mode-downgrade safety property.
+        memory remained replayable. A best-effort revoke would defeat the
+        mode-downgrade safety property.
         """
         c, _ = client
         live_token = self._setup_and_pin_unlock(client)
@@ -1267,12 +1266,11 @@ class TestUnlockRestoresSession:
 
 
 class TestRateLimitRegistration:
-    """Codex stop-gate caught that the new `/mode`, `/forgot-password`,
-    and `/reset-password` decorators were never registered with
-    Flask-Limiter because `_apply_rate_limits` had a hardcoded list of
-    five legacy endpoints. The fix swaps that for module-globals
-    auto-discovery; this test asserts every `@_rate_limit`-decorated
-    view in the module gets at least one rule registered.
+    """Every `@_rate_limit`-decorated view gets a Flask-Limiter rule.
+
+    `_apply_rate_limits` discovers decorated views from module globals, so
+    `/mode`, `/forgot-password` and `/reset-password` cannot be left out the
+    way a hardcoded endpoint list allowed.
     """
 
     def test_every_decorated_view_is_registered(self):

@@ -46,7 +46,7 @@ describe("OperatorStatusStrip", () => {
     expect(strip).not.toHaveTextContent("Connected");
   });
 
-  it("marks Laya Down as Blocked on its own class and leaves Chat as Info", () => {
+  it("marks Decision model Down as Blocked on its own class and leaves Chat as Info", () => {
     const laya = classifyOperatorSignals(signals({
       brokerReject: null,
       sessionClockClosed: false,
@@ -56,20 +56,20 @@ describe("OperatorStatusStrip", () => {
     const client = new QueryClient();
     render(
       <QueryClientProvider client={client}>
-        <OperatorStatusStrip kind="laya" incident={laya} />
+        <OperatorStatusStrip kind="decision_model" incident={laya} />
       </QueryClientProvider>,
     );
     const strip = screen.getByTestId("incident-strip");
-    expect(strip).toHaveAttribute("data-failure-class", "laya");
+    expect(strip).toHaveAttribute("data-failure-class", "decision_model");
     expect(strip).toHaveAttribute("data-strip-level", "blocked");
     expect(strip).toHaveTextContent("Blocked");
     expect(strip).toHaveTextContent(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Decision model is down. New orders are paused until it's ready. Closing positions still works.",
     );
-    const sentence = "Laya is Down. New orders are paused until it's Ready. You can still close positions.";
+    const sentence = "Decision model is down. New orders are paused until it's ready. Closing positions still works.";
     expect(strip.textContent?.split(sentence).length).toBe(2);
     expect(strip).not.toHaveTextContent("Laya — Laya is Down");
-    expect(strip).not.toHaveTextContent("Decision");
+    expect(strip).not.toHaveTextContent("Laya");
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("operator-rectify")).toHaveTextContent(/Kill All stays available/i);
 

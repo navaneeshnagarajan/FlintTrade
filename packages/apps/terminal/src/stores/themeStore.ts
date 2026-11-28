@@ -47,6 +47,8 @@ export interface ThemeState {
   /** Whether glass/backdrop-blur effects are enabled (default: true) */
   glass: boolean;
   reduceMotion: boolean;
+  /** Runtime-only publication after applyTheme has written the complete palette. */
+  appliedThemeRevision: number;
 
   // --- Actions ---
   setTheme: (id: string) => void;
@@ -185,6 +187,7 @@ const storeImpl: StateCreator<
   customThemes:  [],
   glass:         true,
   reduceMotion:  false,
+  appliedThemeRevision: 0,
 
   // --- setTheme ---
   setTheme: (id) => {
@@ -310,19 +313,24 @@ const storeImpl: StateCreator<
     // These scoped opaque action roles keep enabled labels stable. Existing
     // global trading/brand colours and disabled opacity remain independent.
     // Old custom themes get the explicit mode foreground; invalid custom pairs
-    // use the existing Graphite palette only on these two action surfaces.
+    // use the existing Graphite palette only on these action surfaces.
     const fallback = CINEMATIC_THEMES[0][resolvedMode];
     const profitBackground = resolvedMode === "light" ? variant.trading.profitText : variant.trading.profit;
     const fallbackProfit = resolvedMode === "light" ? fallback.trading.profitText : fallback.trading.profit;
     const profitForeground = resolvedMode === "light" ? "#ffffff" : "#0a0a0f";
+    const lossBackground = variant.trading.lossAction ?? "#991b1b";
+    const lossForeground = variant.trading.lossForeground ?? "#ffffff";
+    const fallbackLoss = fallback.trading.lossAction ?? "#991b1b";
     const actionPalettes = {
       profit: resolveActionPalette(profitBackground, variant.trading.profitForeground ?? profitForeground,
         { background: fallbackProfit, foreground: profitForeground }),
       confirmation: resolveActionPalette(variant.colors.accent, variant.colors.accentText,
         { background: fallback.colors.accent, foreground: fallback.colors.accentText }),
+      loss: resolveActionPalette(lossBackground, lossForeground,
+        { background: fallbackLoss, foreground: "#ffffff" }),
     };
     for (const [role, palette] of Object.entries(actionPalettes)) {
-      style.setProperty(`--color-${role === "profit" ? "profit-action" : role}`, palette.background);
+      style.setProperty(`--color-${role === "profit" || role === "loss" ? `${role}-action` : role}`, palette.background);
       style.setProperty(`--color-${role}-foreground`, palette.foreground);
       style.setProperty(`--color-${role}-hover`, palette.hover);
       style.setProperty(`--color-${role}-pressed`, palette.pressed);
@@ -556,6 +564,10 @@ const storeImpl: StateCreator<
     } else {
       root.classList.remove("reduce-motion");
     }
+    // CSS consumers update directly, but canvas consumers need a store event.
+    // Publish after all writes: a subscriber may render synchronously and must
+    // never memoise the previous palette under the newly selected theme/mode.
+    set((state) => ({ appliedThemeRevision: state.appliedThemeRevision + 1 }));
   },
 });
 
@@ -566,6 +578,9 @@ const storeImpl: StateCreator<
 const persistedStore = persist(storeImpl, {
   name:    "flinttrade-theme",
   version: 4,
+  partialize: ({ activeThemeId, mode, customThemes, glass, reduceMotion }) => ({
+    activeThemeId, mode, customThemes, glass, reduceMotion,
+  }),
   migrate: (persisted: unknown, version: number): Partial<ThemeState> => {
     const p = (persisted ?? {}) as Record<string, unknown>;
 

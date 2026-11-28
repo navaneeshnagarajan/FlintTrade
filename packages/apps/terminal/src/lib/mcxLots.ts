@@ -106,12 +106,9 @@ export const MCX_UNITS: Record<string, string> = {
 /** Known MCX commodity symbols. */
 export const MCX_COMMODITIES = Object.keys(MCX_LOT_SIZES);
 
-/**
- * Get the lot size for an MCX commodity.
- * Returns 1 if the symbol is unknown.
- */
-export function getMCXLotSize(symbol: string): number {
-  return MCX_LOT_SIZES[symbol.toUpperCase()] ?? 1;
+/** Lot size for an MCX commodity, or null when it is not listed. */
+export function getMCXLotSize(symbol: string): number | null {
+  return MCX_LOT_SIZES[symbol.toUpperCase()] ?? null;
 }
 
 /**

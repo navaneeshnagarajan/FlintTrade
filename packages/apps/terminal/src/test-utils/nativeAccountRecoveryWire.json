@@ -1,0 +1,238 @@
+{
+  "provenance": "isolated synthetic actual normal-factory HTTP; not provider qualification",
+  "source_manifest_sha256": "9991dccbeb5bc0dc52dec48b593a62155bbec401cbc1028d2e8dfa7de51431f1",
+  "samples": [
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:0",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R09_restart_keeps_duties_and_replay_does_not_reconstruct_a_session",
+      "body": "{\"receipt\":{\"credentialGeneration\":3,\"kind\":\"reconnect\",\"operationId\":\"1b69b052-96e5-43ab-aac1-77727203a9b6\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"0097ad13d2f859235c21ee14de40372947644031f316e8387f6776968a2c993f\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "1b69b052-96e5-43ab-aac1-77727203a9b6",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:1",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_P03_kotak_installed_auth_identity_and_supported_option_allocation[kotak_acl]",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"cb01ee93-d526-49b0-a093-ae0cb72de1d8\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"KotakMounted\",\"broker\":\"kotakneo\",\"census\":{\"complete\":true,\"revision\":\"b11afe54e4adad8c5b23f3b727404d02f474736cb6c296272a3a36f634fa0c34\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/kotakneo/KotakMounted/login",
+      "key": "cb01ee93-d526-49b0-a093-ae0cb72de1d8",
+      "broker": "kotakneo",
+      "accountId": "KotakMounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:2",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R05_foreign_execution_owner_never_substitutes_for_the_factory_custody",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"eeefe467-8fbd-4dc5-8ec9-85ffb80a7a75\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"ae61dcdbc9140b2376c4c32000f0ea75d574511c13a7960c21c46f7de82a3486\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "eeefe467-8fbd-4dc5-8ec9-85ffb80a7a75",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:3",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R04_active_model_owner_prevents_replacement_until_same_owner_drains",
+      "body": "{\"receipt\":{\"credentialGeneration\":3,\"kind\":\"reconnect\",\"operationId\":\"b345b2b0-2f45-4176-8b64-b4b307ebb123\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"3de5cff1b722233ead66fec4b6f9c61cd1c209a80a00019218383d1e4e21487f\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "b345b2b0-2f45-4176-8b64-b4b307ebb123",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:4",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_U01_public_recovery_envelope_is_not_session_or_trading_readiness",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"c5167368-4d8d-430f-8900-2ece6980a145\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"83d0dc8f3bfa1b86b0af0a182fbec59922d33634a2d0be24c364660ffc997b1b\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "c5167368-4d8d-430f-8900-2ece6980a145",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:5",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R11_recovery_preserves_human_read_acl_and_unavailable_books",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"812dc276-8016-46f2-b9f7-7e5081189af4\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"5d1b78358654bc8d41bced9fc5aac35aeb7936158c9ad3b047cce02800fd83bc\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "812dc276-8016-46f2-b9f7-7e5081189af4",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:6",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_P01_verified_same_account_recovery_preserves_cash_custody",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"71c5a748-f5c0-4b6f-90c6-e726a3bfd70f\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"f5eb25acce08623f12e159a4fa6b15614bad88e4c9eaba3e3ace2eb26bb2b43c\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "71c5a748-f5c0-4b6f-90c6-e726a3bfd70f",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:7",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_P01_verified_same_account_recovery_preserves_cash_custody",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"71c5a748-f5c0-4b6f-90c6-e726a3bfd70f\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"f5eb25acce08623f12e159a4fa6b15614bad88e4c9eaba3e3ace2eb26bb2b43c\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "71c5a748-f5c0-4b6f-90c6-e726a3bfd70f",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:8",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_P02_options_unknown_model_cost_survives_read_only_recovery",
+      "body": "{\"receipt\":{\"credentialGeneration\":3,\"kind\":\"reconnect\",\"operationId\":\"bf12ec0b-ab71-4ed5-be71-1f518cee5a4a\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"b4276fb3dfd23fa98a262fb6d3ee81a5b92a7eb684d9552d80821ae6b5a5aaf1\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "bf12ec0b-ab71-4ed5-be71-1f518cee5a4a",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:9",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R10_foreign_and_case_only_targets_remain_strict",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"e38373d2-0164-43b2-8d61-c0cb16c26855\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"a603074845a06e461b68f6a569d15d05a49b15433ff90f920ca1d53b148cf72d\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "e38373d2-0164-43b2-8d61-c0cb16c26855",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:10",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R08_recovered_session_never_grants_or_rearms_old_or_new_runs",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"8efb03be-43cd-4665-9eca-298c4e33f15a\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"5622b00b7bf7c580ed4f22266298a23764e4ad8ada76c73714d240261cea988d\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "8efb03be-43cd-4665-9eca-298c4e33f15a",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:11",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R07_recovery_replay_and_conflicting_key_do_not_authenticate",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"63dca8bc-f9ec-4e46-8238-7c92cdc76373\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"4be93dc3c38411d9a8eb6d79f0b3b34f11676e80cb4ad78fcd93a7379cb4579f\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "63dca8bc-f9ec-4e46-8238-7c92cdc76373",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-HTTP-SAMPLES-current:12",
+      "producerCase": "packages/core/core/tests/test_native_read_only_recovery.py::test_R07_recovery_replay_and_conflicting_key_do_not_authenticate",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"63dca8bc-f9ec-4e46-8238-7c92cdc76373\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"4be93dc3c38411d9a8eb6d79f0b3b34f11676e80cb4ad78fcd93a7379cb4579f\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}\n",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "63dca8bc-f9ec-4e46-8238-7c92cdc76373",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-REFUSAL-HTTP-SAMPLES-current:0",
+      "producerCase": "R02",
+      "body": "{\"receipt\":{\"credentialGeneration\":null,\"kind\":\"reconnect\",\"operationId\":\"4df3fe19-0759-427a-84d8-5f030059da80\",\"reason\":\"authentication_outcome_unknown\",\"state\":\"authentication_unknown\"},\"runtimeStatus\":\"blocked\"}",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "4df3fe19-0759-427a-84d8-5f030059da80",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-REFUSAL-HTTP-SAMPLES-current:1",
+      "producerCase": "R01",
+      "body": "{\"receipt\":{\"credentialGeneration\":null,\"kind\":\"reconnect\",\"operationId\":\"a703cd49-4f88-4989-8236-da45c238c645\",\"reason\":\"authentication_outcome_unknown\",\"state\":\"authentication_unknown\"},\"runtimeStatus\":\"blocked\"}",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "a703cd49-4f88-4989-8236-da45c238c645",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-REFUSAL-HTTP-SAMPLES-current:2",
+      "producerCase": "R06",
+      "body": "{\"receipt\":{\"credentialGeneration\":null,\"kind\":\"reconnect\",\"operationId\":\"8b5572c0-1e03-4df5-b5f8-6811f7942972\",\"reason\":\"authentication_outcome_unknown\",\"state\":\"authentication_unknown\"},\"runtimeStatus\":\"blocked\"}",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "8b5572c0-1e03-4df5-b5f8-6811f7942972",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    },
+    {
+      "id": "RECOVERY-REFUSAL-HTTP-SAMPLES-current:3",
+      "producerCase": "R09",
+      "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"f733b56b-1d13-46c2-9ac9-00c43d970127\",\"reason\":null,\"state\":\"committed\"},\"recovery\":{\"accountId\":\"Mounted\",\"broker\":\"dhan\",\"census\":{\"complete\":true,\"revision\":\"a8521024df0e802e7d35a1ec0566cd55171d86987ed1f03c75ba8bbd2fba081d\",\"runIds\":[\"mounted-native\"]},\"grantAuthority\":\"none\",\"readOnly\":true,\"reconciliationRequired\":true,\"writeAuthority\":\"none\"},\"runtimeStatus\":\"read_only_recovery\"}",
+      "status": 200,
+      "path": "/api/v1/native/accounts/dhan/Mounted/login",
+      "key": "f733b56b-1d13-46c2-9ac9-00c43d970127",
+      "broker": "dhan",
+      "accountId": "Mounted"
+    }
+  ],
+  "restartReplay": {
+    "case": "packages/core/core/tests/test_native_read_only_recovery.py::test_R09_restart_keeps_duties_and_replay_does_not_reconstruct_a_session",
+    "path": "/api/v1/native/accounts/dhan/Mounted/login",
+    "method": "POST",
+    "request_json": {},
+    "status": 200,
+    "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"f733b56b-1d13-46c2-9ac9-00c43d970127\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"session_unavailable\"}\n",
+    "provenance": "isolated-synthetic-normal-factory-not-provider-qualification"
+  },
+  "accountReadouts": {
+    "dhan": {
+      "path": "/api/v1/native/accounts",
+      "method": "GET",
+      "status": 200,
+      "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Mounted\",\"adapter_id\":\"dhan\",\"expires_at\":1793426700.0,\"has_session\":true,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":true,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n"
+    },
+    "kotakneo": {
+      "path": "/api/v1/native/accounts",
+      "method": "GET",
+      "status": 200,
+      "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Mounted\",\"adapter_id\":\"dhan\",\"expires_at\":1793426700.0,\"has_session\":true,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false},{\"account_id\":\"KotakMounted\",\"adapter_id\":\"kotakneo\",\"expires_at\":1793505960.129277,\"has_session\":true,\"is_primary\":false,\"label\":\"kotakneo\",\"read_only\":true,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n"
+    }
+  },
+  "catalogue": {
+    "path": "/api/v1/native/brokers",
+    "method": "GET",
+    "status": 200,
+    "body": "{\"data\":{\"brokers\":[{\"adapter_id\":\"dhan\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Approve a DhanHQ app-consent login. Register the shown redirect URL in your DhanHQ app; Dhan redirects back with a tokenId that FlintTrade consumes for a 24h access token.\",\"fields\":[{\"help\":\"\",\"label\":\"App ID\",\"name\":\"api_key\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"App secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"oauth\",\"kind\":\"oauth\",\"label\":\"Log in with Dhan (OAuth)\"},{\"credential_defaults\":{},\"description\":\"Paste a 24h access token from web.dhan.co \\u2192 Profile \\u2192 Access DhanHQ APIs.\",\"fields\":[{\"help\":\"\",\"label\":\"Dhan client ID\",\"name\":\"client_id\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"},{\"credential_defaults\":{},\"description\":\"Mint a fresh 24h token from your PIN and authenticator code (TOTP must be enabled on the account).\",\"fields\":[{\"help\":\"\",\"label\":\"Dhan client ID\",\"name\":\"client_id\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"PIN\",\"name\":\"pin\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false}],\"id\":\"pin_totp\",\"kind\":\"direct\",\"label\":\"PIN + TOTP\"}],\"connectable\":true,\"display_name\":\"Dhan\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"CDS\",\"BCD\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Dhan's hosted MCP flow from the client.\",\"cautions\":[\"Broker MCP trade tools are outside FlintTrade's in-process safety gate; FlintTrade automation must still use gate_order or gate_broker_write through BrokerRouter.\",\"Dhan's agent skill pack is reference/setup help; it does not establish a FlintTrade broker session or remove order-confirmation requirements.\",\"Dhan's documented skill guardrails require explicit confirmation before place/modify/cancel, use LIMIT defaults, and validate F&O lot sizes.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"url\":\"https://mcp.dhan.co/mcp\"},\"id\":\"remote_url\",\"label\":\"Claude / ChatGPT / custom connector\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[\"mcp\",\"add\",\"--transport\",\"http\",\"dhan\",\"https://mcp.dhan.co/mcp\"],\"command\":\"claude\",\"config\":{},\"id\":\"claude_code\",\"label\":\"Claude Code CLI\",\"url\":null},{\"args\":[\"mcp\",\"add\",\"dhan\",\"--url\",\"https://mcp.dhan.co/mcp\"],\"command\":\"codex\",\"config\":{},\"id\":\"codex_cli\",\"label\":\"Codex CLI\",\"url\":null},{\"args\":[],\"command\":null,\"config\":{\"mcpServers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}},\"id\":\"cursor\",\"label\":\"Cursor direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"mcp\":{\"servers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}}},\"id\":\"vscode_copilot\",\"label\":\"VS Code direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"mcpServers\":{\"dhan\":{\"url\":\"https://mcp.dhan.co/mcp\"}}},\"id\":\"kiro\",\"label\":\"Kiro direct URL\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[],\"command\":null,\"config\":{\"name\":\"dhan\",\"oauth\":true,\"type\":\"remote\",\"url\":\"https://mcp.dhan.co/mcp\"},\"id\":\"opencode\",\"label\":\"OpenCode remote OAuth\",\"url\":\"https://mcp.dhan.co/mcp\"},{\"args\":[\"add\",\"dhan-oss/dhanhq-skills\",\"--skill\",\"dhanhq\"],\"command\":\"skills\",\"config\":{},\"id\":\"dhanhq_skill_pack\",\"label\":\"DhanHQ agent skill pack\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://docs.dhanhq.co/mcp/\",\"login_steps\":[\"Add the Dhan remote MCP URL to a supported MCP client.\",\"Complete the Dhan browser authorisation and explicit consent flow opened by that client.\"],\"read_only\":false,\"reauth\":\"Re-authorize in the MCP client when Dhan prompts for a fresh session.\",\"remote_url\":\"https://mcp.dhan.co/mcp\",\"trading_supported\":true,\"use_cases\":[\"Portfolio and account review\",\"Order placement, modification, cancellation, and Super Orders in the external MCP client\",\"Market data, historical OHLC, option chain with Greeks, and live-feed lookup\",\"Margin, funds, instruments, alerts, ScanX, options analysis, and backtesting workflows\"]},\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/dhan\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"2.3.0rc1\",\"pin\":\"dhanhq\",\"pinned_version\":\"2.3.0rc1\",\"source_kind\":\"published-rc\",\"status\":\"ok\"},\"sdk_pin\":\"dhanhq\"},{\"adapter_id\":\"upstox\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Approve access on upstox.com. In Developer \\u2192 Apps, register the shown redirect URL and your current outbound public IP under Primary/Secondary IP before using order APIs; changing those IPs invalidates Upstox access tokens. Leave the optional Notifier Webhook Endpoint blank.\",\"fields\":[{\"help\":\"\",\"label\":\"API key (client ID)\",\"name\":\"api_key\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"oauth\",\"kind\":\"oauth\",\"label\":\"Log in with Upstox (OAuth)\"},{\"credential_defaults\":{},\"description\":\"Paste a trading-capable token you already generated, such as a prior OAuth login or sandbox app token. Use the Analytics token method below for Upstox Developer \\u2192 Apps analytics tokens.\",\"fields\":[{\"help\":\"\",\"label\":\"Client ID\",\"name\":\"client_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"},{\"credential_defaults\":{\"read_only\":\"true\",\"token_scope\":\"analytics\"},\"description\":\"Paste the one-year Analytics Access Token from Upstox Developer \\u2192 Apps. Upstox documents this token as read-only: market data/streaming, plus portfolio/account/funds reads only when static IP is configured. FlintTrade will block place/modify/cancel through this session.\",\"fields\":[{\"help\":\"\",\"label\":\"Client ID\",\"name\":\"client_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"Analytics access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"analytics_access_token\",\"kind\":\"direct\",\"label\":\"Analytics access token (read-only)\"}],\"connectable\":true,\"display_name\":\"Upstox\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"CDS\",\"BCD\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\",\"GLOBAL_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Upstox's hosted MCP flow from the client.\",\"cautions\":[\"Upstox MCP cannot place, modify, or cancel orders.\",\"Treat AI-generated analysis as research support; verify critical data directly on Upstox before acting.\",\"If the MCP client starts the wrong Node.js/npx binary, configure full node and npx paths instead of relying on PATH.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"developer_mode\":true,\"name\":\"Upstox MCP\",\"url\":\"https://mcp.upstox.com/mcp\"},\"id\":\"remote_url\",\"label\":\"ChatGPT / custom connector URL\",\"url\":\"https://mcp.upstox.com/mcp\"},{\"args\":[\"mcp-remote\",\"https://mcp.upstox.com/mcp\"],\"command\":\"npx\",\"config\":{\"mcpServers\":{\"Upstox MCP\":{\"args\":[\"mcp-remote\",\"https://mcp.upstox.com/mcp\"],\"command\":\"npx\"}}},\"id\":\"claude_cursor_mcp_remote\",\"label\":\"Claude Desktop / Cursor mcp-remote\",\"url\":null},{\"args\":[],\"command\":null,\"config\":{\"mcp\":{\"inputs\":[],\"servers\":{\"Upstox MCP\":{\"url\":\"https://mcp.upstox.com/mcp\"}}}},\"id\":\"vscode_copilot\",\"label\":\"VS Code GitHub Copilot\",\"url\":\"https://mcp.upstox.com/mcp\"}],\"daily_reauthorization\":true,\"docs_url\":\"https://upstox.com/developer/api-documentation/mcp-integration/\",\"login_steps\":[\"Install Node.js, then add the Upstox MCP configuration to Claude Desktop, ChatGPT, Cursor, or VS Code.\",\"Use an active, non-dormant Upstox account; dormant accounts cannot complete MCP authorisation.\",\"Complete the OAuth authorisation opened by that client.\",\"Repeat authorisation daily before relying on account context.\"],\"read_only\":true,\"reauth\":\"Daily re-authorisation is required.\",\"remote_url\":\"https://mcp.upstox.com/mcp\",\"trading_supported\":false,\"use_cases\":[\"Read-only holdings, orders, positions, mutual funds, funds, and profile lookup\",\"Account-scoped portfolio composition, performance, risk, and buying-power analysis\",\"Individual stock research in the context of current holdings\",\"Technical indicator, chart, trend, market-quote, and market-context analysis\",\"Activity summaries, margins, historical trading information, and P&L overviews\",\"Portfolio beta and correlation studies against NIFTY over multi-year windows\",\"Professional investment-model reviews over the operator's current portfolio\",\"Board-meeting, AGM/EGM, corporate-governance, and hold-or-sell context checks\"]},\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/upstox\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"2.30.0\",\"pin\":\"upstox-python-sdk\",\"pinned_version\":\"2.30.0\",\"source_kind\":\"git\",\"status\":\"ok\"},\"sdk_pin\":\"upstox-python-sdk\"},{\"adapter_id\":\"kotakneo\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Kotak Neo two-step 2FA. Paste the Trade API access token from NEO \\u2192 Invest \\u2192 Trade API (the Python SDK calls this consumer key), then enter TOTP and MPIN.\",\"fields\":[{\"help\":\"Kotak's docs call this the Trade API access token; FlintTrade maps it to the SDK's consumer_key field internally.\",\"label\":\"Trade API access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"Mobile number (with country code)\",\"name\":\"mobile_number\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"UCC (client code)\",\"name\":\"ucc\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false},{\"help\":\"\",\"label\":\"MPIN\",\"name\":\"mpin\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"Neo fin key\",\"name\":\"neo_fin_key\",\"required\":false,\"secret\":false}],\"id\":\"totp_mpin\",\"kind\":\"direct\",\"label\":\"TOTP + MPIN\"}],\"connectable\":true,\"display_name\":\"Kotak Neo\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":null,\"native_connect_blockers\":[],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/kotakneo\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"3.0.9\",\"pin\":\"kotakneoapi\",\"pinned_version\":\"3.0.9\",\"source_kind\":\"git\",\"status\":\"ok\"},\"sdk_pin\":\"kotakneoapi\"},{\"adapter_id\":\"groww\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Enter the Groww Trade API key and the current TOTP code from your authenticator. FlintTrade mints the daily access token locally before creating the broker session.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"6-digit TOTP\",\"name\":\"totp\",\"required\":true,\"secret\":false}],\"id\":\"api_key_totp\",\"kind\":\"direct\",\"label\":\"API key + TOTP\"},{\"credential_defaults\":{},\"description\":\"Enter the Groww Trade API key and secret from Groww Cloud/API Keys. FlintTrade mints the daily access token locally before creating the broker session. Live account reads have passed with an approved key; live order placement still requires static outbound IP setup.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"If Groww says session approval is required, approve the API-key session in Groww Cloud/API Keys and retry.\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true}],\"id\":\"api_key_secret\",\"kind\":\"direct\",\"label\":\"API key + secret\"},{\"credential_defaults\":{},\"description\":\"Paste an already minted Groww Trade API access token from Groww Cloud/API Keys. Groww tokens expire at 06:00 IST and live order placement still requires static outbound IP setup.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"Generate a fresh Groww Trade API token after the 06:00 IST expiry window.\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"}],\"connectable\":false,\"display_name\":\"Groww\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"MCX\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":{\"auth_mode\":\"Authorize through Groww's hosted MCP flow from the client with explicit account permission.\",\"cautions\":[\"Sell orders through Groww MCP require DDPI authorisation.\",\"Groww describes MCP as early-stage and not investment advice; verify outputs before trading.\",\"Groww documents explicit permission, no background syncing, and no AI-server data storage for MCP access.\",\"Groww native token minting may require approving the API-key session in Groww Cloud before FlintTrade can log in.\",\"Groww native account reads and margin checks have passed with an approved key, but native connect stays disabled until market-data/API permissions, static IP setup, and order-safety verification pass.\"],\"client_configs\":[{\"args\":[],\"command\":null,\"config\":{\"name\":\"GrowwMCP\",\"url\":\"https://mcp.groww.in/mcp\"},\"id\":\"remote_url\",\"label\":\"Claude Pro custom connector\",\"url\":\"https://mcp.groww.in/mcp\"},{\"args\":[\"mcp-remote@0.1.18\",\"https://mcp.groww.in/mcp\",\"52155\"],\"command\":\"npx\",\"config\":{\"mcpServers\":{\"growwmcp\":{\"args\":[\"mcp-remote@0.1.18\",\"https://mcp.groww.in/mcp\",\"52155\"],\"command\":\"npx\"}}},\"id\":\"mcp_remote_cursor_vscode\",\"label\":\"Cursor / VS Code / Windsurf mcp-remote\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://groww.in/updates/groww-mcp\",\"login_steps\":[\"For Claude Pro, add a custom connector named GrowwMCP with the Groww MCP URL.\",\"For Cursor, VS Code, or Windsurf, add the mcp-remote configuration and install Node.js if needed.\",\"Confirm DDPI status before sell-order workflows.\"],\"read_only\":false,\"reauth\":\"Grant access when the MCP client asks; Groww documents explicit permission rather than background sync.\",\"remote_url\":\"https://mcp.groww.in/mcp\",\"trading_supported\":true,\"use_cases\":[\"Portfolio performance, exposure, benchmark, and market-fall analysis\",\"F&O position, candle, expiry, and P&L analysis\",\"Smart order management in the external MCP client\",\"Market context and holdings near 52-week highs\",\"Stocks and F&O today; mutual funds, IPOs, bonds, and fundamental analysis are future broker scope\"]},\"native_connect_blockers\":[\"Broker-side market-data/API permission\",\"Live order-safety proof\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/groww\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":\"1.5.0\",\"pin\":\"growwapi\",\"pinned_version\":\"1.5.0\",\"source_kind\":\"published-release\",\"status\":\"ok\"},\"sdk_pin\":\"growwapi\"},{\"adapter_id\":\"indmoney\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Generate an access token on the INDstocks API dashboard and paste it here. Save your static outbound IP before live algo orders; INDstocks resets tokens daily at 06:00 IST and allows up to five active tokens.\",\"fields\":[{\"help\":\"\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false},{\"help\":\"Generate a fresh INDstocks token after the daily 06:00 IST reset.\",\"label\":\"Access token\",\"name\":\"access_token\",\"required\":true,\"secret\":true}],\"id\":\"access_token\",\"kind\":\"direct\",\"label\":\"Access token\"}],\"connectable\":false,\"display_name\":\"INDmoney\",\"exchanges\":[\"NSE\",\"BSE\",\"NFO\",\"BFO\",\"NSE_INDEX\",\"BSE_INDEX\"],\"mcp\":null,\"native_connect_blockers\":[\"Authoritative smart-parent cancellation discriminator\",\"Broker-native atomic reduce-only close primitive\",\"Live order-safety proof\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/indmoney\",\"requires_static_ip\":true,\"sdk_attestation\":{\"installed_version\":null,\"pin\":null,\"pinned_version\":null,\"status\":\"not_required\"},\"sdk_pin\":null},{\"adapter_id\":\"deltaexchange\",\"auth_methods\":[{\"credential_defaults\":{},\"description\":\"Paste a Delta Exchange API key and secret for one venue. India and Global keys are not interchangeable, and the environment has no default.\",\"fields\":[{\"help\":\"\",\"label\":\"API key\",\"name\":\"api_key\",\"required\":true,\"secret\":true},{\"help\":\"\",\"label\":\"API secret\",\"name\":\"api_secret\",\"required\":true,\"secret\":true},{\"help\":\"One of india_prod, india_testnet, global_prod, global_testnet. A key from another venue is rejected.\",\"label\":\"Venue\",\"name\":\"environment\",\"required\":true,\"secret\":false},{\"help\":\"Required only for close-all.\",\"label\":\"User ID\",\"name\":\"user_id\",\"required\":false,\"secret\":false}],\"id\":\"api_key\",\"kind\":\"direct\",\"label\":\"API key + secret\"}],\"connectable\":false,\"display_name\":\"Delta Exchange\",\"exchanges\":[\"CRYPTO\"],\"mcp\":{\"auth_mode\":\"Local stdio server. FlintTrade does not proxy Delta MCP orders.\",\"cautions\":[\"India and Global keys are not interchangeable.\",\"DELTA_MCP_MODE=trade must not drive FlintTrade orders. Writes stay behind the router.\",\"Native connect stays disabled until live order-safety proof and a deadman runtime proof exist.\"],\"client_configs\":[{\"args\":[\"delta-exchange-mcp\"],\"command\":\"uvx\",\"config\":{\"mcpServers\":{\"delta-exchange\":{\"args\":[\"delta-exchange-mcp\"],\"command\":\"uvx\"}}},\"id\":\"stdio_uvx\",\"label\":\"Local stdio via uvx\",\"url\":null}],\"daily_reauthorization\":false,\"docs_url\":\"https://mcp.delta.exchange/docs\",\"login_steps\":[\"Install the official server with uvx delta-exchange-mcp.\",\"Set DELTA_API_KEY, DELTA_API_SECRET, and DELTA_MCP_ENV to one venue.\",\"Leave DELTA_MCP_MODE unset. Do not enable trade mode for FlintTrade orders.\"],\"read_only\":true,\"reauth\":\"Rotate the API key in the MCP client. FlintTrade orders still go through the router.\",\"remote_url\":\"https://mcp.delta.exchange\",\"trading_supported\":false,\"use_cases\":[\"Read products, tickers, positions, and wallet state from an external MCP client\"]},\"native_connect_blockers\":[\"Live order-safety proof\",\"Deadman heartbeat runtime proof for unattended flatten\"],\"oauth_redirect_uri\":\"http://127.0.0.1:5100/api/v1/native/oauth/callback\",\"postback_uri\":\"http://127.0.0.1:5100/api/v1/native/postbacks/deltaexchange\",\"requires_static_ip\":false,\"sdk_attestation\":{\"installed_version\":null,\"pin\":null,\"pinned_version\":null,\"status\":\"not_required\"},\"sdk_pin\":null}]},\"status\":\"success\"}\n"
+  },
+  "cleanupContinuation": {
+    "case": "packages/core/core/tests/test_account_cleanup_continuation.py::test_committed_cleanup_pending_retries_exact_owner_without_reauthentication",
+    "path": "/api/v1/native/accounts/dhan/Synthetic/login",
+    "method": "POST",
+    "request_json": {},
+    "status": 200,
+    "body": "{\"receipt\":{\"credentialGeneration\":2,\"kind\":\"reconnect\",\"operationId\":\"592ef102-176a-463f-aafe-b47feec750ec\",\"reason\":null,\"state\":\"committed\"},\"runtimeStatus\":\"cleanup_pending\"}\n",
+    "provenance": "isolated-synthetic-normal-factory-not-provider-qualification"
+  },
+  "expiredAccountReadouts": {
+    "kotakneo": {
+      "case": "packages/core/core/tests/test_native_read_only_recovery.py::test_P03_kotak_installed_auth_identity_and_supported_option_allocation[kotak_acl] [canonical expiration capture variant]",
+      "target": {
+        "broker": "kotakneo",
+        "accountId": "KotakMounted"
+      },
+      "path": "/api/v1/native/accounts",
+      "method": "GET",
+      "status": 200,
+      "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Mounted\",\"adapter_id\":\"dhan\",\"expires_at\":1793426940.0,\"has_session\":true,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false},{\"account_id\":\"KotakMounted\",\"adapter_id\":\"kotakneo\",\"expires_at\":null,\"has_session\":false,\"is_primary\":false,\"label\":\"kotakneo\",\"read_only\":false,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n"
+    },
+    "dhan": {
+      "case": "packages/core/core/tests/test_native_read_only_recovery.py::test_P01_verified_same_account_recovery_preserves_cash_custody [canonical expiration capture variant]",
+      "target": {
+        "broker": "dhan",
+        "accountId": "Mounted"
+      },
+      "path": "/api/v1/native/accounts",
+      "method": "GET",
+      "status": 200,
+      "body": "{\"data\":{\"accounts\":[{\"account_id\":\"Mounted\",\"adapter_id\":\"dhan\",\"expires_at\":null,\"has_session\":false,\"is_primary\":false,\"label\":\"dhan\",\"read_only\":false,\"read_smoke_ok\":false}]},\"status\":\"success\"}\n"
+    }
+  }
+}

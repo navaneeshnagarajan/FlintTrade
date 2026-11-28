@@ -11,6 +11,10 @@ regulatory responsibilities remain with the operator and their broker.
 
 ## Order-Gating Model
 
+Exchange, broker, and product order rules (option market and stop-market
+orders, BSE stop-loss gap, price bands, broker order-rate windows) are listed
+in [Broker and Exchange Order Rules](BROKER_AND_EXCHANGE_RULES.md).
+
 **Placement.** Every order FlintTrade submits goes through admission
 when it's placed. The HTTP routes that submit an order are
 `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`,
@@ -31,7 +35,7 @@ Settings → Practice does not place.
    fill on the client for example data (`Example order placed`, id starting
    `SAMPLE-`). This guard is the server path.
 2. `Laya.admit` then admits or refuses the proposal. A refusal
-   (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
+   (`decision_model_denied`) or a quantity clamp (`decision_model_clamp`) stops before
    SafetySystem on Live and before the native sandbox on Practice.
    Neither quantity is placed.
 3. An allowed Live place runs `SafetySystem.check_order` in runtime order
@@ -44,24 +48,33 @@ Settings → Practice does not place.
    ACL, and consumes the one-shot gate.
 
 An allowed Practice place is admitted, then goes to the native sandbox. It
-does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before Laya,
-place refuses a quantity that is not a positive multiple of the lot, or
-that is above the freeze limit, with HTTP 400 `quantity_admission`. The
-Order Pad shows the lot sentence once, inline:
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Before the decision model,
+a quantity that is not a positive multiple of the lot is refused with
+HTTP 400 `quantity_admission`. The Order Pad shows the lot sentence
+once, inline:
 `Quantity must be a multiple of the lot size (N).`
 `N` is that contract's lot. It is not a published constant. A missing
 verified lot is a different sentence, also shown once, inline:
 `Not placed. The lot size for <name> isn't verified.`
-`<name>` is the contract's display name. The Practice sandbox returns
+`<name>` is the underlying, for example NIFTY for NIFTY 24500 CE. The Practice sandbox returns
 that sentence as HTTP 400 with `status: error` and no `code` field, and
-it does not fill the order. An order over the per-order freeze limit is
-refused with HTTP 400 and code `quantity_admission`. The message gives
-the limit, names the instrument, and asks for smaller orders. The order
-is not split. The limit is the broker freeze field when the order carries
-one, otherwise the exchange figure. The routed place route is Live only and uses the same
+it does not fill the order. NIFTY 1,800, BANKNIFTY 900, FINNIFTY 1,800,
+MIDCPNIFTY 2,800, NIFTYNXT50 600, and NIFTYFPI 8,500 each refuse an order
+above the cap, with HTTP 400 and code `quantity_admission`. A broker
+`freeze_qty` on the order refuses the same way and is used ahead of that
+table. `message` is `Max {cap} per order for {symbol}. Place smaller orders.`
+`{cap}` is the limit rounded down to a whole number of lots when the lot
+size is known, and the limit itself when it is not. `{symbol}` is the
+underlying, or `this contract` when the symbol is empty. The order is
+not split. SENSEX options 1,000, SENSEX futures 500, and BANKEX options
+900 are unverified and do not refuse when the broker sends no
+`freeze_qty`. Above one of them, the Order Pad shows one line under
+Quantity, `Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.`,
+and the order continues. `{symbol}` is that index. `{freeze}` is that
+value. The routed place route is Live only and uses the same
 Live admission. Modify and cancel are not this admission. `POST /api/v1/orders/cancel-all` only
 cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
-before Laya, SafetySystem, and any broker call, on place, routed place,
+before the decision model, SafetySystem, and any broker call, on place, routed place,
 exit-all, and a bracket. The message is `Not placed. GTT orders aren't supported right now.`
 No submit route reaches a broker forever or super-order endpoint. The
 Kotak Neo adapter refuses a `gtt` place. `POST /api/v1/orders/forever` returns
@@ -97,10 +110,12 @@ Forever, basket, split, and trigger *place* are not submit routes.
 New integrations must preserve this split. Do not invent a third path, and
 do not send an extended verb through `gate_order` alone.
 
-## Laya admission
+<a id="decision-model-admission"></a>
+
+## Decision model admission
 
 An operator or automate proposal is admitted or refused as a typed verdict
-with `allow`, `reason`, and `limits`. Laya does not place an order and does
+with `allow`, `reason`, and `limits`. The decision model does not place an order and does
 not mint the one-shot write ticket. `gate_order` remains the only mint.
 Chat may suggest and explain only: bring your own API key, use managed
 Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
@@ -108,11 +123,11 @@ Chat is not an admission source, and Chat downtime does not close Live.
 
 Operator and automate place run the mode guard, then `Laya.admit`.
 **Live** place then runs SafetySystem L1–L5, `gate_order`, and
-`BrokerRouter`. Laya does not replace those layers, and `gate_order`
+`BrokerRouter`. The decision model does not replace those layers, and `gate_order`
 remains the only mint after an allowed Live place. **Practice** place is
 admitted before the sandbox and does not enter SafetySystem, `gate_order`,
 or `BrokerRouter`. Example data stays `mode_blocked` before admit. A refusal
-(`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
+(`decision_model_denied`) or a quantity clamp (`decision_model_clamp`) stops before
 SafetySystem on Live and before the sandbox on Practice. A clamp names
 the reduced quantity. Neither size is placed. Order Pad and Quick Trade
 require the operator to place that reduced quantity. An automate clamp is
@@ -121,12 +136,12 @@ Chat is not an admission source. Modify, cancel, and cancel-all are not
 admitted as place. Forever place, basket, split, and conditional-trigger
 place do not submit. A Live bracket with exactly one stop-loss or one
 target does submit. A GTT body is refused on every submit route
-before Laya admission and SafetySystem. No submit route reaches a broker
+before decision-model admission and SafetySystem. No submit route reaches a broker
 forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place.
 
 Admission order is fixed. Down is checked first. The existing hard rules
 then run unchanged (source, mode, symbol, side, quantity, price, trigger).
-Only after those rules pass does Laya ask typed A/B questions about free
+Only after those rules pass does the decision model ask typed A/B questions about free
 text: whether a note states a reason, whether it shows tilt or revenge, and
 whether the stated plan contradicts the order side. Expiry, quantity, price,
 and symbol are not sent to the model. Thresholds sit on option probabilities
@@ -134,22 +149,19 @@ in the versioned `laya_policy.toml`. There is no confidence field in the
 gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
-Down copy is the same in every mode: "Laya is Down. New orders are paused until it's Ready. You can still close positions." A non-exit order is HTTP 403. That refusal carries no quantity ceiling. A Practice
-refusal never says Live. When Laya is Ready
+Down copy is the same in every mode: the Status line is "Decision model is down. New orders are paused until it's ready. Closing positions still works." and a refused new order is "Not placed. Decision model is down. Start it from Status." A non-exit order is HTTP 403. That refusal carries no quantity ceiling. A Practice
+refusal never says Live. When the decision model is Ready
 or Degraded and a Live place is refused only because Live is not qualified,
-the reason is "Laya isn't qualified for Live yet. Practice orders are
-available." An uncertain answer, including an empty note, clamps in
+the reason is "Decision model not qualified for Live. Use Practice." An uncertain answer, including an empty note, clamps in
 Practice and denies in Live. It is not a hard reject. The Practice server
-reason is "Laya is uncertain. Quantity stays inside the tighter limit."
-The Live server reason is "Laya is uncertain. Live stays closed." On a
+reason is "Decision model uncertain. Quantity held to the tighter limit."
+The Live server reason is "Decision model uncertain. Live stays closed." On a
 denial, Order Pad and Quick Trade show that server reason inside one
-alert (`role="alert"`), the only live region. The reason line is named
-"Laya decision" and is not its own status. The desk
+alert (`role="alert"`), the only live region. The reason line is named "Decision model check" and is not its own status. The desk
 does not auto-place. A clamp is only when the requested quantity is
-greater than the allowed one. Order Pad and Quick Trade show "Not placed.
-Laya allows up to N." with Place N and Cancel. Place N sends that
+greater than the allowed one. Order Pad and Quick Trade show "Not placed. Decision model allows up to N." with Place N and Cancel. Place N sends that
 quantity. On Order Pad, "Review Practice order" then shows the placed
-quantity. Place 1 on "Not placed. Laya allows up to 1." places, because
+quantity. Place 1 on "Not placed. Decision model allows up to 1." places, because
 that request is already at the allowed quantity.
 
 Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
@@ -157,37 +169,34 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `downloading` (`Downloading the model · X of Y GB`), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
 (Can't verify the model), `wrong_revision` (Wrong model version),
-`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). A health check does not replace `key_missing` with Not started. `<n>` is the managed Laya port. For
+`key_rejected` (Can't reach the decision model), and `key_missing` (API key file missing. Set `FLINTTRADE_DECISION_MODEL_API_KEY_FILE`.). A health check does not replace `key_missing` with Not started. `<n>` is the managed decision-model port. For
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
 has no tooltip and no Next line, and it is not Still loading. The
-`download_failed` tooltip is "Check your connection, then Start Laya again."
+`download_failed` tooltip is "Check your connection, then start the decision model again."
 `downloading` and `download_failed` use the status word Down. Orders are
-refused with "Laya is Down. New orders are paused until it's Ready. You can still close positions."
-The `unverified` tooltip is "The installed model couldn't be checked
-against the pinned version. Restart Laya. If it keeps happening, reinstall
-it." That code applies when this start did not download. A failed download,
+refused with "Not placed. Decision model is down. Start it from Status."
+The `unverified` tooltip is "Installed model doesn't match the pinned version. Restart the decision model. If it repeats, reinstall the model." That code applies when this start did not download. A failed download,
 including one over an older unverified snapshot, is `download_failed`
-("Can't download the model"). The `wrong_revision` tooltip is "Laya is running a different model
-than FlintTrade expects." That code is only a real mismatch: a complete
+("Can't download the model"). The `wrong_revision` tooltip is `Wrong model loaded. Expected {pinned id}.` That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
-that this start is not replacing, or a running managed Laya process that reports
+that this start is not replacing, or a running managed decision-model process that reports
 another revision or digest. A dropped connection, a partial download, or
 a failed download or swap, including one that puts the previous
 checkpoint back, is not this code. The
-`key_rejected` tooltip is "Laya restarted with a new key. Reconnecting…"
+`key_rejected` tooltip is "Decision model restarted with a new key. Reconnecting…"
 The chip stays Down and orders are refused. When a place is refused
-because Laya cannot be reached, or because it rejects the key, the chip
-updates on that same order: Unreachable, or Can't reach Laya. The
-refusal text stays "Laya is Down. New orders are paused until it's Ready. You can still close positions."
+because the decision model cannot be reached, or because it rejects the key, the chip
+updates on that same order: Unreachable, or Can't reach the decision model. The
+refusal text stays "Not placed. Decision model is down. Start it from Status."
 Every chip-Down refusal reads that sentence.
 
 `identity_absent` is not a chip code. When the chip is Ready and a single
-decision carries no proof, the refusal code is `laya_unverified` and the
-refusal reads "Not placed. Laya's decision couldn't be verified. Try again."
+decision carries no proof, the refusal code is `decision_model_unverified` and the
+refusal reads "Not placed. Decision model not verified. Try again."
 
-On each managed Laya start FlintTrade hashes `model.safetensors` and every
+On each managed decision-model start FlintTrade hashes `model.safetensors` and every
 file in `[checkpoint.manifest]` before launch. The runtime record holds
 the sha256, pid, and start token, and the inode, size, and modification
 time of the weights file and of each pinned file
@@ -201,12 +210,11 @@ or `proof=runtime`. An admitted Practice place with an empty note skips
 the model and writes one line, `effect=clamp` with `failure=note_absent`
 and no proof, including when the quantity already fits. When this run's
 record stood in, each model allow keeps its own `effect=allow`
-`proof=runtime` line. There is no dedupe. A model decision with no proof is refused with "Not placed.
-Laya's decision couldn't be verified. Try again." A health document that
+`proof=runtime` line. There is no dedupe. A model decision with no proof is refused with "Not placed. Decision model not verified. Try again." A health document that
 omits the digest is Ready when that record matches the pin. If the
 record cannot be checked, the chip reason is `unverified`. Stopping the
-managed Laya process records Down before an in-flight probe can publish Ready. Desk
-place surfaces go through this admission. Laya is not Ready by default.
+managed decision-model process records Down before an in-flight probe can publish Ready. Desk
+place surfaces go through this admission. The decision model is not Ready by default.
 
 The pins live in
 `packages/services/engine/src/flinttrade_engine/laya_policy.toml`.
@@ -217,16 +225,16 @@ The pins live in
 When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index (`model.safetensors.index.json`),
 or any extra weights file or other file the launcher could read shows
-Can't verify the model (`unverified`) and the managed Laya process does not start. A
+Can't verify the model (`unverified`) and the managed decision-model process does not start. A
 changed byte in a snapshot that this start is not replacing shows Wrong
-model version (`wrong_revision`) and the managed Laya process does not start. A changed
-byte in the runtime checkpoint starts the download below; the managed Laya process does
-not start on that tree. Laya does not reach Ready in these cases. `start`
+model version (`wrong_revision`) and the managed decision-model process does not start. A changed
+byte in the runtime checkpoint starts the download below; the managed decision-model process does
+not start on that tree. The decision model does not reach Ready in these cases. `start`
 downloads the commit in `[checkpoint] revision`, not the model repository's
 default branch, into `<workspace>/runtime/laya/staging` when the weights
 file or a manifest file is not on disk, and when the runtime checkpoint
 is on disk but its hashes are not the pin. The download does not start
-the managed Laya process. That download sets `HF_HOME` to
+the managed decision-model process. That download sets `HF_HOME` to
 `<workspace>/runtime/laya/hf-home` and `HF_HUB_DISABLE_XET=1`, so transfer
 logs stay out of the shared cache. The model is about 2.37 GB, and that
 size is reported once. While it runs, including a pin change, the chip is
@@ -243,7 +251,7 @@ model"), not `wrong_revision`. A complete download whose files do not
 match the pin is `wrong_revision`, staging is deleted, and the checkpoint
 already on disk stays. An extra loadable file in a complete download is
 `unverified`. A dropped connection, a partial or missing file, or a read
-error is also `download_failed`. The managed Laya process does not start on files that
+error is also `download_failed`. The managed decision-model process does not start on files that
 do not match the pin. If the download does not finish, the chip is `download_failed`, not
 `wrong_revision` and not `unverified`, whatever older snapshot is on
 disk. `unverified` stays when this start did not download. A snapshot
@@ -256,21 +264,21 @@ more `checkpoint.old-*` copies remain, the last `checkpoint.old-*` name
 is restored onto `checkpoint` and any other aside copies are removed. If that restore
 fails, the aside copy stays where it is and that cleanup is skipped. A
 copy that was restored is then checked against the pin. If it does not
-match, the managed Laya process does not start on it; the pinned download runs
+match, the managed decision-model process does not start on it; the pinned download runs
 instead, and a failed download leaves `download_failed` with that copy
 still on disk.
 A verified boot
-sets `LAYA_WEIGHTS_PATH` to that hashed weights file. A model already in
+sets `FLINTTRADE_DECISION_MODEL_WEIGHTS_PATH` to that hashed weights file. A model already in
 the standard Hugging Face cache is accepted. When that file is the cache
 symlink (`snapshots/<revision>/model.safetensors` into `blobs/`), the
 launch path is the snapshot file, not the blob. A blob path is still
 refused. The boot runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. When the managed Laya process health document leaves the revision
+id or a revision. When the managed decision-model process health document leaves the revision
 empty, FlintTrade fills the pinned revision from the verified manifest, so
 the chip leaves Still loading. The launch log line is
 `laya weights path=<path> sha256=<digest>`. The recorded inode, size,
-and modification time are rechecked, without hashing again, when Laya
+and modification time are rechecked, without hashing again, when the decision model
 reports Ready and on each watch tick, about every 1.5 seconds. If one
 changes, the chip shows Can't verify the model and the log line is
 `laya weights path=<path> changed=<field>`, where `<field>` is `inode`,
@@ -281,22 +289,21 @@ stop or start, or a key rotation, is reconciled by that watch. The desk
 polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the
 pid, the key, and the runtime record the same way an order does, so the
 chip and the order gate read the same state. A stop or a start shows on
-the chip by the next 1.5-second check. After Start Laya, until the ping confirms
+the chip by the next 1.5-second check. After Start decision model, until the ping confirms
 the new state, the chip says Checking in the neutral colour and the
-popover says Checking Laya…. It does not show a stale Ready during that
+popover says Checking decision model…. It does not show a stale Ready during that
 wait. An admitted place while the chip is not Ready or Degraded also
 shows Checking until the next ping. A confirmed first load still says Still loading. A place refused
-with exactly "Laya is Down. New orders are paused until it's Ready. You can still close positions." sets
+with exactly "Not placed. Decision model is down. Start it from Status." sets
 the chip to Down on that response. The refusal line stays that sentence.
 New orders stay paused. A reduce-only close is unchanged.
 
-When decision status is Down, the desk opens incident class `laya` ("Laya is
-Down. New orders are paused until it's Ready. You can still close positions.").
+When decision status is Down, the desk opens incident class `decision_model` ("Decision model is down. New orders are paused until it's ready. Closing positions still works.").
 That class closes a new Live place on the shared
 client place path. The server decides reduce-only. A client flag is ignored.
 A close qualifies inside either place route when it reduces the same contract without changing its sign. Its opposite-side quantity cannot exceed the open quantity minus pending exits. On Live, available position and broker-order books must establish that bound; this desk’s pending exits also count. Missing, malformed or contradictory books cannot establish a reduce-only close or known flatness. There is no unreadable-book fallback.
 
-Laya records a qualifying close with proof kind `reduce_only` and does not deny or clamp it. Down and Degraded do not block that verified close. Live still runs SafetySystem after the record. A second exit on the same exact broker account and contract, while this desk’s earlier exit remains unfilled, returns HTTP 409 `exit_pending`: `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
+The decision model records a qualifying close with proof kind `reduce_only` and does not deny or clamp it. Down and Degraded do not block that verified close. Live still runs SafetySystem after the record. A second exit on the same exact broker account and contract, while this desk’s earlier exit remains unfilled, returns HTTP 409 `exit_pending`: `"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."`
 
 Practice uses that code on the Practice book. On Live, readable broker evidence and this desk’s retained reservations determine the refusal. If a retained exit exists but broker orders are unavailable, the response is HTTP 409 `exit_orders_unreadable`: `"Not placed. Broker orders for <symbol> are unavailable. Reconcile them before another exit."` The response’s `message` and `reason` contain the same text. The label is the symbol, or `this contract` when the symbol is empty.
 The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
@@ -306,16 +313,16 @@ until dismissed.
 Anything that would flip or add to a position takes the full admit.
 `POST /api/v1/positions/exit-all` requires a server-side reducing proof before requesting exits. Unavailable position evidence returns HTTP 503; ambiguous evidence returns HTTP 409. Neither response sends a square-off. An accepted exit-all or reducing place means requested, not filled or flat: check broker positions and orders for the outcome.
 
-`POST /api/v1/orders/cancel-all` requests cancellation only. Cancellation acknowledgement does not establish terminal cancellation or closed exposure. Layer 5 also requests exits after resting-order cancellation; those emergency paths remain reachable while Laya is Down. Only independently confirmed reducing execution may be described as closed.
-Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
-`GET /health` records Ready, Degraded, or Down from the opt-in managed Laya process when
+`POST /api/v1/orders/cancel-all` requests cancellation only. Cancellation acknowledgement does not establish terminal cancellation or closed exposure. Layer 5 also requests exits after resting-order cancellation; those emergency paths remain reachable while the decision model is Down. Only independently confirmed reducing execution may be described as closed.
+Broker may stay **Connected** or **Connected (read)**. The decision model starts Down.
+`GET /health` records Ready, Degraded, or Down from the opt-in managed decision-model process when
 one is registered. The desk polls `GET /api/v1/ping` every 1.5 seconds. That ping reconciles the watched pid, key, and runtime record the same way an order does, then
-publishes Live-facing `laya`, sidecar `laya_practice`,
-`laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
-the current mode, so Practice shows the managed Laya process and does not read Down while
+publishes Live-facing `decision_model`, sidecar `decision_model_practice`,
+`decision_model_live_qualified`, `decision_model_reason`, and `decision_model_port`. It does not invent Ready. The decision-model chip label follows
+the current mode, so Practice shows the managed decision-model process and does not read Down while
 Practice orders are being admitted. During the first load the chip says
 Still loading. "Not qualified for Live" is the chip tooltip and the popover
-line when the managed Laya process is up and Live is not qualified. A base checkpoint is not
+line when the managed decision-model process is up and Live is not qualified. A base checkpoint is not
 qualified for Live, so Live stays Down until a qualification record exists
 for the exact model revision, weight digest, and policy version
 (`EvidenceUseScope.LIVE_DECISION`). Practice can be Ready or Degraded from
@@ -323,11 +330,11 @@ the same probe. Degraded does not open that class and does not mute Live.
 Degraded enforces the tighter quantity ceiling and the desk says so. Down
 does not add a second deny under a Live control that is already muted.
 Other Live write verbs still reach SafetySystem without this admission.
-Other Practice verbs go straight to the sandbox. The managed Laya process install is in
-[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#laya-decision-process).
-Operator steps are in [Start Laya](USER_GUIDE.md#start-laya).
+Other Practice verbs go straight to the sandbox. The managed decision-model process install is in
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#decision-model-process).
+Operator steps are in [Start the decision model](USER_GUIDE.md#start-the-decision-model).
 
-| Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
+| Concern | Automate risk note | SafetySystem | Ticket guards | Decision model |
 | --- | --- | --- | --- | --- |
 | Allow or deny | `allowed` and `reason` | L1–L5 pass or fail | refusal string | verdict `allow` and `reason` |
 | Size | `position_qty` | L1 quantity, L2 limits | lot multiple | `limits.max_quantity` |
@@ -465,10 +472,11 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Smart orders | 2 per second | Same split: proxy 429 plus client-side throttle. |
+| Orders | 10 per second per broker per exchange | `BrokerRouter` in Live, and the Practice order routes (place, modify, cancel). Place, modify and cancel share one budget. The eleventh in that second is refused with HTTP 429 `order_rule_blocked`, and the first words name the action: `Regulation · Not placed. Limit is 10 orders per second per exchange. Retry in 1 second.`, `Regulation · Not modified. Limit is 10 orders per second per exchange. Retry in 1 second.` or `Regulation · Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second.` Practice and Live use the same cap; Practice counts against its own budget. A lower value applies. 0 or a value above 10 is used as 10, with a warning in the log. |
+| Data | Per broker | A data limit of 0 turns off FlintTrade's own limiter for that category. "Data requests: 0 turns off this limit. Broker limits still apply." |
+| Smart orders | 2 per second per signed-in user | HTTP 429 from `@rate_limit` on smart-route start. The process limit is 20 per second. Each child order uses the Orders budget. |
 
-Limits apply across configured exchanges for the running FlintTrade instance.
-Operators should also configure any limits available in their broker dashboard.
+NFO and CDS count as NSE. BFO and BCD count as BSE. The order budget is per broker and per exchange. Operators should also configure any limits available in their broker dashboard.
 
 ## Sessions And Credentials
 

@@ -305,7 +305,7 @@ async def test_laya_down_and_clamp_preserved_without_resubmission(runtime, mode)
     process_laya().set_decision_client(SimpleNamespace(decide=lambda *_: pytest.fail("Empty note reached host")))
     result = await runtime.create().route_order(_order(quantity="4"))
     assert not result.passed
-    assert result.response["code"] == ("laya_denied" if mode == DecisionStatus.DOWN else "laya_clamp")
+    assert result.response["code"] == ("decision_model_denied" if mode == DecisionStatus.DOWN else "decision_model_clamp")
     if mode == DecisionStatus.READY:
         assert result.response["applied_quantity"] == 1
     assert runtime.sandbox.get_orders() == []

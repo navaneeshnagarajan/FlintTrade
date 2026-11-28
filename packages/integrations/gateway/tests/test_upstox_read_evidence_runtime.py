@@ -34,7 +34,7 @@ pytestmark = pytest.mark.integration
 def native_resource() -> dict:
     """SP-02's observed facade-returned resource, using synthetic identities.
 
-    Resource status/protection are extension observations. The 2.30.0 response
+    Resource status/protection are extension observations. The 2.31.0 response
     model omits those properties; this does not claim it deserialises them.
     """
     return {
@@ -52,7 +52,7 @@ def native_resource() -> dict:
 
 @pytest.fixture
 def read_stack(bind_adapter, monkeypatch):
-    assert version("upstox-python-sdk") == "2.30.0"
+    assert version("upstox-python-sdk") == "2.31.0"
     facade = UpstoxClient("synthetic-not-a-broker-token")
     assert type(facade._order_v3) is upstox_client.OrderApiV3
     response = upstox_client.GetGttOrderResponse(status="success", data=[native_resource()])

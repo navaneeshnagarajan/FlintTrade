@@ -297,7 +297,7 @@ describe("BacktestResultDisplay", () => {
 
     expect(screen.queryByText("Net trade P&L")).not.toBeInTheDocument();
     expect(metricCardText("Trade log P&L")).toContain(fmtInr(1500));
-    expect(screen.getByText("Gross — net P&L not in result")).toBeInTheDocument();
+    expect(screen.getByText("Gross P&L")).toBeInTheDocument();
     expect(
       screen.getByText("Trade log sum ≠ equity change — fees / open marks"),
     ).toBeInTheDocument();
@@ -315,7 +315,7 @@ describe("BacktestResultDisplay", () => {
 
     expect(metricCardText("Net trade P&L")).toContain(fmtInr(1380));
     expect(metricCardText("Net trade P&L")).not.toContain(fmtInr(1500));
-    expect(screen.queryByText("Gross — net P&L not in result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gross P&L")).not.toBeInTheDocument();
   });
 
   it("quietly notes when Net trade P&L matches the equity-curve change", () => {

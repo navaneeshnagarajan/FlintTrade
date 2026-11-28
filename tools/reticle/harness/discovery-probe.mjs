@@ -1,5 +1,8 @@
 // Read-only CDP logpoints. No source transform, query options or store writes.
-export async function installDiscoveryProbe(page, cdp) {
+import {installPeriodicReadProbe} from './periodic-probe.mjs';
+
+export async function installDiscoveryProbe(page, cdp, info) {
+  const periodic = info ? await installPeriodicReadProbe(page, cdp, info) : undefined;
   const events = [], locations = [], errors = [];
   const loadedScripts = new Set();
   cdp.on("Debugger.scriptParsed", event => loadedScripts.add(event.url));
@@ -58,7 +61,7 @@ export async function installDiscoveryProbe(page, cdp) {
     finally { await cdp.send('Debugger.resume').catch(error => errors.push(String(error))); }
   });
   return {
-    events, locations, errors,
+    events, locations, errors, periodic,
     async flights() {
       return page.evaluate(() => globalThis.__r38DiscoveryObservation?.snapshot() ?? []);
     },

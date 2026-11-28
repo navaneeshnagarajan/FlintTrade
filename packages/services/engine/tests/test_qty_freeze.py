@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from flinttrade_engine import qty_freeze
-from flinttrade_engine.qty_freeze import QuantityFreezeManager
+from flinttrade_engine.qty_freeze import QuantityFreezeManager, quantity_admission_refusal
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +244,8 @@ def test_nse_defaults_seeded_on_fresh_db(tmp_path: Path) -> None:
     assert mgr.get_limit("MIDCPNIFTY", "NFO") == 2800
     assert mgr.get_limit("NIFTYNXT50", "NFO") == 600
     assert mgr.get_limit("NIFTYFPI", "NFO") == 8500
-    assert mgr.get_limit("SENSEX", "BFO") == 500
+    assert mgr.get_limit("SENSEX", "BFO") is None
+    assert mgr.get_limit("BANKEX", "BFO") is None
     mgr.close()
 
 
@@ -446,7 +447,7 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
 
     assert quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1755, lot_size=65) is None
     message = quantity_admission_refusal("NIFTY 24500 CE", "NFO", 1820, lot_size=65)
-    assert message == "Max 1,755 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 1,755 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal("BANKNIFTY", "NFO", 915, lot_size=30) == (
         "Max 900 per order for BANKNIFTY. Place smaller orders."
     )
@@ -460,7 +461,9 @@ def test_admission_uses_circular_limits_and_does_not_split() -> None:
     assert quantity_admission_refusal("NIFTYFPI", "NFO", 8500) is None
 
 
+@pytest.mark.unit
 def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
+    """Round the per-order ceiling to complete lots before admitting a quantity."""
     from flinttrade_engine.qty_freeze import max_placeable_quantity, quantity_admission_refusal
 
     assert max_placeable_quantity("NIFTY", 65) == 1755
@@ -479,7 +482,9 @@ def test_nifty_max_placeable_rounds_down_to_the_lot() -> None:
     )
 
 
+@pytest.mark.unit
 def test_order_slices_use_each_index_freeze_quantity() -> None:
+    """Respect each index freeze ceiling and lot multiple when slicing quantities."""
     from flinttrade_engine.qty_freeze import slice_order_quantities
 
     published = {
@@ -508,7 +513,7 @@ def test_admission_prefers_broker_freeze_qty() -> None:
         lot_size=65,
         broker_freeze_qty=100,
     )
-    assert message == "Max 65 per order for NIFTY 24500 CE. Place smaller orders."
+    assert message == "Max 65 per order for NIFTY. Place smaller orders."
     assert quantity_admission_refusal(
         "RELIANCE",
         "NSE",
@@ -525,3 +530,75 @@ def test_admission_refuses_a_quantity_that_is_not_a_lot_multiple() -> None:
         "Quantity must be a multiple of the lot size (65)."
     )
     assert quantity_admission_refusal("SBIN", "NSE", 7) is None
+
+
+@pytest.mark.parametrize(
+    ("symbol", "freeze"),
+    [
+        ("SENSEX25DEC85000CE", 1_000),
+        ("SENSEX 85000 PE", 1_000),
+        ("SENSEX25DECFUT", 500),
+        ("BANKEX25DEC60000CE", 900),
+    ],
+)
+def test_unverified_bse_values_never_refuse(symbol, freeze):
+    assert qty_freeze.resolve_freeze_quantity(symbol) is None
+    assert qty_freeze.unverified_freeze_quantity(symbol) == freeze
+    assert quantity_admission_refusal(symbol, "BFO", freeze * 10) is None
+    assert quantity_admission_refusal(symbol, "BFO", freeze * 10, lot_size=freeze) is None
+
+
+def test_sensex_warning_compares_units_not_lots():
+    # A lot of 20 makes 1,000 units 50 lots.
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 50 * 20) is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 51 * 20) == (
+        "Max per order for SENSEX may be 1,000 qty. Split if the broker rejects."
+    )
+    assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 51 * 20, lot_size=20) is None
+
+
+def test_unverified_warning_names_the_symbol_and_freeze():
+    assert qty_freeze.quantity_freeze_warning("SENSEX", 1_001) is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX26DECFUT", 520) == (
+        "Max per order for SENSEX may be 500 qty. Split if the broker rejects."
+    )
+
+
+def test_broker_freeze_for_bse_is_still_enforced():
+    assert qty_freeze.quantity_freeze_warning("SENSEX25DEC85000CE", 2_000, broker_freeze_qty=900) is None
+    assert quantity_admission_refusal("SENSEX25DEC85000CE", "BFO", 1_000, lot_size=20, broker_freeze_qty=900) == (
+        "Max 900 per order for SENSEX. Place smaller orders."
+    )
+
+
+def test_bankex_futures_have_no_unverified_value():
+    assert qty_freeze.unverified_freeze_quantity("BANKEX25DECFUT") is None
+    assert qty_freeze.quantity_freeze_warning("BANKEX25DECFUT", 100_000) is None
+    assert qty_freeze.resolve_freeze_quantity("BANKEX25DECFUT") is None
+    assert quantity_admission_refusal("BANKEX25DECFUT", "BFO", 99_990, lot_size=30) is None
+
+
+def test_sensex50_has_no_unverified_value():
+    assert qty_freeze.unverified_freeze_quantity("SENSEX5025DEC30000CE") is None
+    assert qty_freeze.quantity_freeze_warning("SENSEX5025DEC30000CE", 100_000) is None
+
+
+def test_unverified_bse_values_are_not_in_the_verified_table():
+    assert not {"SENSEX", "BANKEX"} & set(qty_freeze._NSE_INDEX_FREEZE)
+    assert not any(exchange == "BFO" for _symbol, exchange in qty_freeze._NSE_DEFAULTS)
+
+
+@pytest.mark.parametrize(
+    ("symbol", "label"),
+    [
+        ("NIFTY 24500 CE", "NIFTY"),
+        ("NIFTY28MAR2422000CE", "NIFTY"),
+        ("BANKNIFTY-OCT2026-FUT", "BANKNIFTY"),
+        ("NIFTYNXT5026DECFUT", "NIFTYNXT50"),
+        ("SENSEX26NOV2680000CE", "SENSEX"),
+        ("RELIANCE26APRFUT", "RELIANCE"),
+        ("", "this contract"),
+    ],
+)
+def test_freeze_refusal_names_the_underlying(symbol, label):
+    assert qty_freeze.order_symbol_label(symbol) == label

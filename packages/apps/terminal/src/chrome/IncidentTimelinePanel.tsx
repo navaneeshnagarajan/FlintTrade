@@ -1,33 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Timeline, deliveryLabels, incidentAction, submitBrowserIncident } from '@/services/systemIncidents';
+import { Timeline, browserIncidentQueue, deliveryLabels, incidentAction } from '@/services/systemIncidents';
 import { useAuthStore } from '@/stores/authStore';
 import { useModeStore } from '@/stores/modeStore';
 import { IncidentChannelSettings } from './IncidentChannelSettings';
 
 export function IncidentTimelinePanel({ value, current, refresh }: { value: unknown; current:boolean; refresh:()=>unknown }) {
   const parsed = useMemo(() => Timeline.safeParse(value), [value]);
-  const attempted = useRef(new Set<string>());
   const authenticated = useAuthStore(s => s.status === 'logged-in');
   const mode = useModeStore(s => s.mode);
+  const client = useQueryClient();
   const [error, setError] = useState<string|null>(null);
   const refreshRef = useRef(refresh); refreshRef.current = refresh;
   useEffect(() => {
     if (!parsed.success || !current || !authenticated || mode === 'explore') return;
-    const controller = new AbortController();
-    const pending = parsed.data.incidents.flatMap(i=>i.deliveries).filter(r=>r.channel==='desktop' && r.state==='browser_pending' && !attempted.current.has(`${r.id}:${r.attempts}`));
-    if (pending.length === 0) return;
-    void (async () => {
-      for (const receipt of pending) {
-        if (controller.signal.aborted) break;
-        attempted.current.add(`${receipt.id}:${receipt.attempts}`);
-        try { await submitBrowserIncident(receipt, controller.signal); }
-        catch { if (!controller.signal.aborted) setError('Desktop delivery or receipt unavailable. No automatic resend.'); }
-      }
-      if (!controller.signal.aborted) void refreshRef.current();
-    })();
-    return () => controller.abort();
-  }, [parsed, current, authenticated, mode]);
+    let visible = true;
+    const queue = browserIncidentQueue(client);
+    const pending = queue.discover(parsed.data, true);
+    const refreshIfNeeded = () => {
+      if (!visible) return;
+      if (queue.takeRefresh().needed) void refreshRef.current();
+    };
+    if (pending) void pending.then(refreshIfNeeded);
+    else refreshIfNeeded();
+    return () => { visible = false; };
+  }, [parsed, current, authenticated, mode, client]);
   if (!parsed.success) return <section aria-label="Incident timeline" className="space-y-2 rounded-lg border border-border-default bg-surface-card p-4"><h3 className="ft-text-card-title text-text-primary">Incident timeline</h3><p className="text-sm text-text-secondary">Durable timeline unavailable. No delivery success can be inferred.</p></section>;
   async function act(id:string, action:'retry'|'cancel') {
     setError(null);

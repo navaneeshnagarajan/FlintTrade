@@ -6,7 +6,7 @@
  *
  * Corrections made while porting (the tool's originals were bugs):
  *   - Every rupee figure now derives from lib/pnl `positionMtm` instead of the
- *     raw broker `pnl` field (CLAUDE.md quirk 4) — the tool's donut, table and
+ *     raw broker `pnl` field, which some brokers get wrong; the tool's donut, table and
  *     winners/losers could contradict the Live headline on the same book.
  *   - The headline card shows the parent's corrected day P&L (realised +
  *     unrealised incl. tradebook partial closes), not a raw position sum.

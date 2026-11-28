@@ -48,13 +48,15 @@ The Test workflow has no path filter on its pull-request trigger, so every non-d
 
 All repository and Python script tests run in `python-invariants` on every non-draft PR. Documentation guards, install/frozen-lockfile rules, catalogue/count pins and workflow-coverage guards remain present even on docs-only changes.
 
-Python package tests run across four deterministic `python-shards` jobs. A stable SHA-256 hash of each collected node ID assigns it to exactly one shard; no tests are excluded by this partition. Each shard keeps xdist workspace isolation, frozen installation, optional ML compatibility tests, strict markers and watchdog timeouts. Its JUnit artefact and slowest-test report make future balancing evidence-based.
+Python package tests run across five shards: shard 0 inside the required `python-tests` job and shards 1 to 4 in the `python-shards` matrix. `scripts/pytest_shard_durations.json` records how long each test file took in CI, and whole files are placed longest first onto the least loaded shard, so the shards finish close together. Every collected test lands in exactly one shard; a file missing from the record is charged a small default per test and still runs. Each shard keeps xdist workspace isolation, frozen installation, optional ML compatibility tests, strict markers and watchdog timeouts, and uploads a JUnit artefact. Refresh the record from one full run's artefacts with `python scripts/update_shard_durations.py python-*.xml` when the shards drift apart.
 
-The required `python-tests` context is an aggregate. It succeeds only when invariants pass and every selected shard succeeds. A failed classifier, malformed selection, failure, cancellation or unexpected skip makes it fail. Documentation-only PRs expect the package shard job to be skipped and still require the invariant result.
+The Python jobs classify the diff themselves instead of waiting for `changed-surfaces`, so they queue as soon as the run starts. When Python is not selected, each shard reports success without installing anything.
+
+The required `python-tests` context runs shard 0 and then waits, through the Actions API, for `python-invariants` and every `python-shards` job in the same run. It succeeds only when its own shard passes and every one of those jobs ends in success. A failed classifier, malformed selection, failure, cancellation, skip, or a job that never appears or finishes within 75 minutes makes it fail. Keeping the summary inside a job that already holds a runner avoids a separate summary job queueing for a new runner after the shards finish.
 
 The existing required terminal, widget, Rust, Electron and secrets check names remain intact. An unrelated surface is skipped at job level. The Python aggregate remains reachable even when the classifier fails. Do not add a PR-level path filter to Test: omitted required contexts can block merging.
 
-Terminal suites retain one worker per lane and cover every test file exactly once. Analysis, routes and components are spread across the existing widget runners instead of concentrating in one job. TradeIdea runs as an isolated 4 GiB step: the October audit measured its 14 tests at 316 MiB peak memory, so the former OOM exclusion is removed.
+The Playwright infrastructure checks and selected browser journeys run at the end of `node-widget-tests-3`, reusing its dependency install instead of queueing for a separate runner. Terminal suites retain one worker per lane and cover every test file exactly once. Analysis, routes and components are spread across the existing widget runners instead of concentrating in one job. TradeIdea runs as an isolated 4 GiB step: the October audit measured its 14 tests at 316 MiB peak memory, so the former OOM exclusion is removed.
 
 Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive selected surfaces. Cross-platform Python, target-version canaries and native desktop packages remain in the weekly/manual cross-platform workflow.
 
@@ -64,7 +66,7 @@ Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive 
 |---|---|
 | `test.yml` | Required quality checks; affected non-draft PRs, exhaustive main/dev pushes, weekly Sunday 04:00 UTC and manual runs |
 | `site.yml` | Reusable site typecheck, tests and build; called by Test using the shared selection plan and exhaustive triggers |
-| `supply-chain.yml` | Scoped dependency PR assurance; exhaustive main/dev pushes, weekly Monday and manual runs; native install/ACL smoke remains weekly/manual |
+| `supply-chain.yml` | Python, Rust and Node audits on every non-draft PR; scoped dependency PR assurance; exhaustive main/dev pushes, weekly Monday and manual runs; native install/ACL smoke remains weekly/manual |
 | `visual-a11y.yml` | Advisory terminal screenshots and axe checks for relevant non-draft changes; manual baseline regeneration |
 | `nightly-cross-platform.yml` | Weekly/manual macOS, Windows and Linux tests, toolchain-target canaries and native desktop package smoke |
 | `desktop-release.yml` | manual dispatch only; Release Please supplies the immutable release tag and expected commit SHA. Builds the four Electron installers, verifies their packaged contract and publishes them with `SHA256SUMS.txt` only to an empty release target. |
@@ -75,13 +77,13 @@ Main/dev pushes, weekly Test runs and manual Test dispatches run the exhaustive 
 | `toolchain-freshness.yml` | Scheduled/manual and relevant toolchain-version checks. The managed Ollama pin is advisory: it warns, and does not fail, once it trails the latest stable release by more than two minor versions. |
 | `broker-sdk-freshness.yml` | Scheduled/manual broker SDK drift checks |
 
-Supply Chain retains Python/Rust/Node audits, licence/provenance checks, NOTICE and lock drift, frozen/hashed-install enforcement and external-contributor CLA binding. Changes to installation/build support files select assurance even if the lockfiles are unchanged. Mutable upstream advisory state is still checked on protected-branch pushes and scheduled runs.
+Supply Chain retains Python/Rust/Node audits, licence/provenance checks, NOTICE and lock drift, frozen/hashed-install enforcement and external-contributor CLA binding. Changes to installation/build support files select assurance even if the lockfiles are unchanged. The Python, Rust and Node audits run on every non-draft PR as well as on protected-branch pushes and scheduled runs, so a new upstream advisory shows up on the next PR.
 
 Electron Linux directory verification has one authoritative Test lane: bootstrap-manifest verification, full desktop tests/typecheck, bundling, required native promotion harness, packaging and packaged-security verification. Removing the duplicate Supply Chain packaging lane preserves this union and its weekly/manual coverage.
 
 Visual checks remain advisory while `VISUAL_AXE_GATE` is `0`; they do not prove application state or network behaviour. Manual baseline updates commit only after successful regeneration. Reticle verifies running user flows when application behaviour changes; CI/tooling-only changes do not require an unrelated UI session.
 
-Dependency version PRs remain grouped across the week, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Concurrency cancellation supersedes older runs for the same ref. Draft PRs skip runnable quality jobs until marked ready for review.
+Dependency version PRs remain grouped across the week, with at most two open version PRs per ecosystem. Security updates remain separately enabled. Test and Supply Chain cancel only superseded pull request runs. Pushes to dev queue in one group per ref. Each main run gets its own group, so a later push never replaces a queued main run. Draft PRs skip runnable quality jobs until marked ready for review.
 
 ## Verification and review
 
@@ -92,9 +94,11 @@ Workflow changes must retain timeouts, least-privilege permissions, pinned actio
 Run the focused policy checks after editing workflow selection:
 
 ```text
-python scripts/ft.py test-fast tests/test_workflow_policy.py tests/test_required_check_reachability.py tests/test_check_changes.py tests/test_check_workflow_efficiency.py tests/test_pytest_sharding.py tests/test_ci_vitest_shard_coverage.py
+python scripts/ft.py test-fast tests/test_workflow_policy.py tests/test_required_check_reachability.py tests/test_check_changes.py tests/test_check_workflow_efficiency.py tests/test_pytest_sharding.py tests/test_ci_require_jobs.py tests/test_ci_vitest_shard_coverage.py
 ```
 
 A shard failure is investigated using the named test and uploaded JUnit evidence. An unexpected skip is a failure to schedule required work, not a passing test. Do not weaken an assertion, timeout or safety guard to get a green result.
 
-Four-way sharding and focused invariant lanes keep the per-push suite inside the hosted job budget. Local timings do not establish GitHub runner timings.
+Five time-balanced shards and focused invariant lanes keep the per-push suite inside the hosted job budget. Local timings do not establish GitHub runner timings.
+
+Hosted runners are shared across every open pull request, so most of a run's wall time is spent waiting for a free runner rather than running tests. Pull request runs of Test, Supply Chain, Visual and accessibility, and PR Title cancel when a newer commit arrives on the same branch, which frees runners for the newest code. Pushes to main and dev are never cancelled; they queue so every protected commit keeps a complete result.

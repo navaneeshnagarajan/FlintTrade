@@ -9,5 +9,5 @@ export default {
  outputDir:'/run/test/artifacts/playwright',
  reporter:[['list'],['json',{outputFile:'/run/test/artifacts/results.json'}],['junit',{outputFile:'/run/test/artifacts/results.xml'}]],
  use:{...base.use,baseURL:'http://127.0.0.1:5173',serviceWorkers:'block',trace:'on',screenshot:'on',actionTimeout:8000},
- webServer:{cwd:terminal,command:'pnpm exec vite --config '+quote(path.join(terminal,'vite.reticle.config.ts'))+' --configLoader runner --host 127.0.0.1 --port 5173 --strictPort',port:5173,reuseExistingServer:false,timeout:60000,env:{...process.env,RETICLE_CONNECT:'1',RETICLE_TELEMETRY:'0',CHOKIDAR_USEPOLLING:'1'}}
+ webServer:{cwd:terminal,command:quote(process.execPath)+' '+quote(path.join(terminal,'node_modules/vite/bin/vite.js'))+' --config '+quote(path.join(terminal,'vite.reticle.config.ts'))+' --configLoader runner --host 127.0.0.1 --port 5173 --strictPort',port:5173,reuseExistingServer:false,timeout:60000,env:{...process.env,RETICLE_CONNECT:'1',RETICLE_TELEMETRY:'0',CHOKIDAR_USEPOLLING:'1'}}
 };

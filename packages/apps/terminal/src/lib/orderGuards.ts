@@ -19,6 +19,7 @@
  * inline field error, status line).
  */
 
+import { missingLotRefusal } from "@/lib/instrumentLots";
 import type { SessionMode } from "@/lib/modeClaim";
 
 // ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ export function checkLotSizeVerified(
 ): string | null {
   if (!isDerivativeExchange(exchange)) return null;
   if (!verified || lotSize == null || lotSize <= 0) {
-    return `Not placed. The lot size for ${symbol} isn't verified.`;
+    return missingLotRefusal(symbol);
   }
   return null;
 }
@@ -249,6 +250,42 @@ export const NSE_INDEX_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
   NIFTYFPI: 8500,
 };
 
+/**
+ * Unverified BSE freeze values in units, not lots. None is checked against a
+ * current BSE notice, so they never refuse an order: a larger quantity gets a
+ * warning when the broker sends no `freeze_qty`. BANKEX has a value for
+ * options only. SENSEX50 has no entry.
+ */
+export const BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  SENSEX: 1000,
+  BANKEX: 900,
+};
+export const BSE_UNVERIFIED_FUTURE_FREEZE_QUANTITY: Readonly<Record<string, number>> = {
+  SENSEX: 500,
+};
+
+const BSE_UNLISTED_LONGER_NAMES = ["SENSEX50"];
+
+/** Unverified BSE freeze value for a SENSEX or BANKEX contract. */
+export function unverifiedFreezeQuantity(symbol: string): number | null {
+  return unverifiedFreezeEntry(symbol)?.[1] ?? null;
+}
+
+function unverifiedFreezeEntry(symbol: string): [string, number] | null {
+  const compact = symbol.toUpperCase().replace(/\s+/g, "");
+  if (BSE_UNLISTED_LONGER_NAMES.some((name) => compact.startsWith(name))) return null;
+  const table = /(CE|PE)$/.test(compact)
+    ? BSE_UNVERIFIED_OPTION_FREEZE_QUANTITY
+    : compact.endsWith("FUT")
+      ? BSE_UNVERIFIED_FUTURE_FREEZE_QUANTITY
+      : null;
+  if (!table) return null;
+  for (const [name, limit] of Object.entries(table)) {
+    if (compact.startsWith(name)) return [name, limit];
+  }
+  return null;
+}
+
 const INDEX_FREEZE_NAMES = Object.keys(NSE_INDEX_FREEZE_QUANTITY).sort(
   (left, right) => right.length - left.length,
 );
@@ -263,14 +300,21 @@ export function indexUnderlying(symbol: string): string | null {
   return null;
 }
 
-/** Symbol named in the freeze refusal. */
+const EXPIRY_IN_SYMBOL = /^([A-Z0-9&]+?)\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/;
+
+/** Underlying named in the freeze refusal. */
 export function orderSymbolLabel(symbol: string): string {
-  const text = symbol.trim().replace(/\s+/g, " ");
-  return text || "this contract";
+  const text = symbol.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!text) return "this contract";
+  const index = indexUnderlying(text);
+  if (index) return index;
+  const head = text.split(/[ -]/)[0] ?? text;
+  return EXPIRY_IN_SYMBOL.exec(head)?.[1] ?? head;
 }
 
 /** Visible quantity sentences. Match engine admission so wording is one edit. */
 export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
+export const UNVERIFIED_FREEZE_WARNING = "Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.";
 export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
 export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
 
@@ -304,7 +348,7 @@ export function quantityCapLabel(lotSize: number, placeable: number): string {
 
 /**
  * Broker freeze quantity when it is a positive whole number, otherwise the
- * NSE/FAOP/77189 index table.
+ * NSE index table. Unverified BSE values only warn; see `quantityFreezeWarning`.
  */
 export function resolveFreezeQuantity(
   symbol: string,
@@ -316,6 +360,27 @@ export function resolveFreezeQuantity(
   const underlying = indexUnderlying(symbol);
   if (!underlying) return null;
   return NSE_INDEX_FREEZE_QUANTITY[underlying] ?? null;
+}
+
+/**
+ * Warning for a quantity in units above an unverified BSE freeze value.
+ *
+ * Only when the broker sends no freeze quantity and no verified limit covers
+ * the symbol. The order is still allowed.
+ */
+export function quantityFreezeWarning(
+  symbol: string,
+  quantity: number,
+  brokerFreezeQty?: number | null,
+): string | null {
+  if (!Number.isInteger(quantity) || quantity < 1) return null;
+  if (resolveFreezeQuantity(symbol, brokerFreezeQty) != null) return null;
+  const entry = unverifiedFreezeEntry(symbol);
+  if (entry == null || quantity <= entry[1]) return null;
+  const [name, limit] = entry;
+  return UNVERIFIED_FREEZE_WARNING
+    .replace("{symbol}", name)
+    .replace("{freeze}", formatIndianQuantity(limit));
 }
 
 /**

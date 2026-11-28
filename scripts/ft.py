@@ -1273,7 +1273,7 @@ _PYTEST_VALUE_OPTIONS = frozenset({
         "--log-cli-level", "--log-cli-format", "--log-cli-date-format", "--log-auto-indent",
         "-p", "--assert", "--import-mode", "--anyio-mode", "--asyncio-mode", "--asyncio-default-fixture-loop-scope",
         "--asyncio-default-test-loop-scope", "--maxschedchunk", "--rsyncdir", "--rsyncignore",
-        "--ft-shard-index", "--ft-shard-count",
+        "--ft-shard-index", "--ft-shard-count", "--ft-shard-durations",
 })
 
 
@@ -1310,7 +1310,7 @@ def _pytest_selection_requested(args: Sequence[str]) -> bool:
         "--lf", "--last-failed", "--lfnf", "--last-failed-no-failures", "--stepwise", "--sw",
         "--stepwise-skip", "--sw-skip", "--stepwise-reset", "--sw-reset", "--fixtures", "--funcargs", "--fixtures-per-test",
         "--setup-only", "--setuponly", "--setup-plan", "--setupplan", "--markers", "--cache-show",
-        "--ft-shard-index", "--ft-shard-count", "-h", "--help", "-V", "--version", "-f", "--looponfail",
+        "--ft-shard-index", "--ft-shard-count", "--ft-shard-durations", "-h", "--help", "-V", "--version", "-f", "--looponfail",
     }
     skip_value = False
     for arg in args:

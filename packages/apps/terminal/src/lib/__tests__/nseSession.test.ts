@@ -153,6 +153,30 @@ describe("dated cash phase", () => {
   });
 });
 
+describe("F&O close by session date", () => {
+  it.each([
+    [2026, 8, 2, 15 * 60 + 30, "F&O open · till 15:30"],
+    [2026, 8, 3, 15 * 60 + 40, "F&O open · till 15:40"],
+    [2026, 12, 6, 15 * 60 + 40, "F&O open · till 15:40"],
+    [2026, 12, 7, 15 * 60 + 45, "F&O open · till 15:45"],
+  ])("closes F&O on %i-%i-%i at the dated time", (year, month, day, close, label) => {
+    const schedule = nseCashSchedule(onDate(year, month, day, 12 * 60));
+    expect(schedule.foClose).toBe(close);
+    expect(schedule.foSecondaryLabel).toBe(label);
+  });
+
+  it("keeps the segment close for an index contract on its expiry day before 7 Dec 2026", () => {
+    expect(derivativeContractCloseMin(onDate(2026, 7, 28, 12 * 60), "NIFTY28JUL2624000CE")).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(onDate(2026, 8, 4, 12 * 60), "NIFTY04AUG2624000CE")).toBe(15 * 60 + 40);
+  });
+
+  it("stops an expiring index contract at 15:30 after 7 Dec 2026", () => {
+    const expiryDay = onDate(2026, 12, 15, 12 * 60);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY15DEC2624000CE", ["2026-12-15"])).toBe(15 * 60 + 30);
+    expect(derivativeContractCloseMin(expiryDay, "NIFTY22DEC2624000CE", ["2026-12-15", "2026-12-22"])).toBe(15 * 60 + 45);
+  });
+});
+
 describe("schedule boundary — 6 Dec 2026 keeps today's clock, 7 Dec 2026 uses the revision", () => {
   it("keeps the August 2026 auction and the till 15:40 label on 6 Dec", () => {
     const now = onDate(2026, 12, 6, 15 * 60 + 20);

@@ -50,7 +50,7 @@ class TestQuestDBBridgeInsertTicks:
             {"symbol": "RELIANCE", "exchange": "NSE", "ltp": 2980.0},
         ]
 
-        bridge = QuestDBBridge()
+        bridge = QuestDBBridge(allow_writes=True)
         mock_sock = MagicMock()
         mock_sock.__enter__ = MagicMock(return_value=mock_sock)
         mock_sock.__exit__ = MagicMock(return_value=False)
@@ -73,7 +73,7 @@ class TestQuestDBBridgeInsertTicks:
             {"symbol": "TCS", "exchange": "NSE", "ltp": 3500.0},  # valid
         ]
 
-        bridge = QuestDBBridge()
+        bridge = QuestDBBridge(allow_writes=True)
         mock_sock = MagicMock()
         mock_sock.__enter__ = MagicMock(return_value=mock_sock)
         mock_sock.__exit__ = MagicMock(return_value=False)
@@ -86,7 +86,7 @@ class TestQuestDBBridgeInsertTicks:
     def test_insert_ticks_empty_list_returns_zero(self):
         from flinttrade_data.questdb_bridge import QuestDBBridge
 
-        bridge = QuestDBBridge()
+        bridge = QuestDBBridge(allow_writes=True)
         with patch("flinttrade_data.questdb_bridge.socket.create_connection") as mock_conn:
             count = bridge.insert_ticks([])
 
@@ -97,7 +97,7 @@ class TestQuestDBBridgeInsertTicks:
         from flinttrade_data.questdb_bridge import QuestDBBridge, QuestDBBridgeError
 
         ticks = [{"symbol": "NIFTY", "exchange": "NFO", "ltp": 22450.0}]
-        bridge = QuestDBBridge()
+        bridge = QuestDBBridge(allow_writes=True)
 
         with patch(
             "flinttrade_data.questdb_bridge.socket.create_connection",
@@ -156,7 +156,7 @@ class TestQuestDBBridgeQuery:
         bridge = QuestDBBridge()
         with patch.object(bridge._http, "get", return_value=mock_resp):
             try:
-                bridge.query("INVALID SQL")
+                bridge.query("SELECT * FROM ticks")
                 assert False, "Expected QuestDBBridgeError"
             except QuestDBBridgeError as exc:
                 assert "400" in str(exc)

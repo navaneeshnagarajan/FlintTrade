@@ -1,6 +1,6 @@
 # Data
 
-> Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and a (dormant) QuestDB writer.
+> Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and an optional QuestDB client (writes off by default).
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade):** the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -10,7 +10,8 @@
 
 - `src/flinttrade_data/tick_recorder.py`: local tick buffering/storage; native capture unavailable
 - `src/flinttrade_data/audit_logger.py`: append-only audit trail
-- `src/flinttrade_data/questdb_bridge.py`: ILP-based ingestion
+- `src/flinttrade_data/questdb_bridge.py`: ILP-based ingestion (writes require QUESTDB_WRITE_ENABLED=true or allow_writes=True)
+- `src/flinttrade_data/questdb_client.py`: PostgreSQL-wire client (same write default)
 
 (See the source for the full surface.)
 

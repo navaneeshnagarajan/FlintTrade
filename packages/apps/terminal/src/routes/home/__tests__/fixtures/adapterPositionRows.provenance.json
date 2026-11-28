@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "fixture": "adapterPositionRows.json",
+  "sha256": "49196f3f753e4daa7ac51295094e7839ea85f7a4a108ba8b39422f14ecf14cf6",
+  "origin": "Outputs of real mapper functions applied to hardcoded synthetic test inputs; not captured provider or account data.",
+  "source_test": "packages/integrations/gateway/tests/brokers/test_home_position_card_rows.py",
+  "source_test_sha256": "6af28f0f27f9c55d145cc551e6994be84ec72eda1f59672c30ea69a543a598d1",
+  "source_inputs": [
+    "_DHAN_WITHOUT_PNL",
+    "_DHAN_WITH_PNL",
+    "_DHAN_NO_COST",
+    "_NEO_OPEN_LEG",
+    "_NEO_NO_COST"
+  ],
+  "source_assertion": "test_home_position_card_rows_match_live_adapters",
+  "consumer": "packages/apps/terminal/src/routes/home/__tests__/PositionsCard.brokerRows.test.tsx",
+  "payload_policy": "Fixture bytes and row identities remain unchanged; provenance is adjacent to avoid altering consumers."
+}

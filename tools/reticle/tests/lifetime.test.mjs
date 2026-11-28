@@ -18,15 +18,21 @@ const wait=async f=>{for(let i=0;i<400;i++){if(f())return;await new Promise(r=>s
 before(async()=>{server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>owned fixture</title><main>real browser lifecycle</main>');});server.listen(5173,'127.0.0.1');await once(server,'listening');daemon=await startDaemon({port:4400,token:'synthetic-r101',reticleRoot:'/run/test/r101-life',pairingTokenDir:'/run/test/r101-token',captureRetention:{maxEvents:10000,maxAgeMs:120000,maxBytes:33554432}});await daemon.bridge.ready;browser=await chromium.launch({headless:true});});
 after(async()=>{await browser?.close();await daemon?.close();if(server)await new Promise(r=>server.close(r));});
 const call=async(name,args)=>{const t=TOOLS.find(t=>t.name===name);return t.handler({sessions:daemon.bridge.sessions},z.object(t.inputSchema).parse(args));};
-async function fixture(fn){
+async function fixture(fn,withWitness=false){
  const ctx=await browser.newContext({serviceWorkers:'block'}),page=await ctx.newPage();const id='life-'+ordinal++,frames=[],startedAtMs=Date.now();
+  let info;
+  if(withWitness){
+    info={testId:id,outputPath:name=>'/run/test/artifacts/'+id+'-'+name};
+    const witness=await import(here+'/../runtime/consumer/witness.mjs');
+    witness.startWitness(page,info);
+  }
  page.on('websocket',ws=>ws.on('framesent',f=>frames.push({at:Date.now(),payload:f.payload.toString()})));
  async function connect(sessionId,doc='first',signal='ready'){
   await page.goto('http://127.0.0.1:5173/');
   await page.evaluate(async({sessionId,doc,signal,protocol})=>{let seq=0;window.ws=new WebSocket('ws://127.0.0.1:4400/reticle');await new Promise(r=>window.ws.onopen=r);window.hello={kind:'hello',protocolVersion:protocol,sessionId,url:location.href,title:'owned fixture',adapters:[],token:'synthetic-r101',sdkVersion:'3.6.0',hasCapabilities:false};window.ws.send(JSON.stringify(window.hello));window.emit=(name,documentId=doc,editEpoch=0)=>window.ws.send(JSON.stringify({kind:'event',event:{sessionId:'[REDACTED]',documentId,editEpoch,seq:seq++,t:seq,type:'signal',data:{name,payload:{}}}}));window.emit(signal);},{sessionId,doc,signal,protocol:RETICLE_PROTOCOL_VERSION});
   await wait(()=>daemon.bridge.sessions.all().some(s=>s.id===sessionId&&s.eventsSince(0).some(e=>e.data.name===signal)));
  }
- try{await connect(id);const session=daemon.bridge.sessions.all().find(s=>s.id===id);const app=await call('reticle_observe',{since:0,max_events:2000,sessionId:id,export_page:{}});const wire=await call('reticle_observe',{since:0,max_events:2000,sessionId:id,export_page:{stream:'wire'}});const scope=app.capture.scope??{sessionId:id,incarnation:wire.capture.id,documentId:'first',editEpoch:0};await fn({page,id,session,connect,scope,frames,app,wire,startedAtMs});}finally{await ctx.close();}
+ try{await connect(id);const session=daemon.bridge.sessions.all().find(s=>s.id===id);const app=await call('reticle_observe',{since:0,max_events:2000,sessionId:id,export_page:{}});const wire=await call('reticle_observe',{since:0,max_events:2000,sessionId:id,export_page:{stream:'wire'}});const scope=app.capture.scope??{sessionId:id,incarnation:wire.capture.id,documentId:'first',editEpoch:0};await fn({page,id,session,connect,scope,frames,app,wire,startedAtMs,info});}finally{await ctx.close();}
 }
 for(const during of [false,true])for(const sameId of [false,true])test('strict native lifetime rejects '+(during?'during evaluation ':'after exports ')+(sameId?'same-id reload':'successor'),async()=>fixture(async({id,session,connect,scope,frames})=>{
  const name=during?'future':'ready';const request={sessionId:id,since:0,timeout_ms:2000,predicate:{kind:'signal',name,count:1},capture_scope:scope};let result,error;
@@ -100,3 +106,59 @@ for(const sameId of [false,true])test('full causal seal refuses actual post-expo
  try{result=await materializeSeal(client,seal);assessment=assessSealedCapture(result);}catch(e){error=String(e);}
  await fs.writeFile('/run/test/artifacts/r101-full-seal-'+sameId+'.json',JSON.stringify({seal,result,assessment,error,frames},null,2));assert(error||!assessment.accepted,'successor native yes/true accepted by the complete seal gate');
 }));
+
+test('case witness routes observations and assertions with two active sessions',async()=>fixture(async({page,id,info})=>fixture(async({page:otherPage,id:otherId})=>{
+  const witness=await import(here+'/../runtime/consumer/witness.mjs');
+  assert.notEqual(id,otherId);
+  for(const ownedPage of [page,otherPage])assert.equal(await ownedPage.evaluate(()=>window.ws.readyState),1);
+  // Keep both real sockets alive. The ambiguous native refusal is the control;
+  // no global session selection, daemon reset or foreign-context cleanup.
+  await assert.rejects(call('reticle_observe',{action:'events',since:0,max_events:2000}),/multiple sessions connected/);
+  const calls=[];
+  const client={call:async(name,args)=>{calls.push({name,args});return call(name,args);}};
+  const observed=await witness.callWitness(client,info,'reticle_observe',{action:'events',since:0,max_events:2000,export_page:{}});
+  assert.equal(observed.capture.scope.sessionId,id);
+  assert.equal(observed.capture.scope.documentId,'first');
+  const verdict=await witness.callWitness(client,info,'reticle_assert',{since:0,timeout_ms:2000,predicate:{kind:'signal',name:'ready',count:1}});
+  assert.equal(verdict.verified,'yes');assert.equal(verdict.pass,true);
+  assert.deepEqual(calls.map(row=>row.args.sessionId),[id,id]);
+  await fs.writeFile(info.outputPath('scope-routing.json'),JSON.stringify({id,otherId,calls,observed,verdict},null,2));
+}),true));
+
+for(const invalid of ['missing case','foreign case','copied identity','conflicting session'])test('case witness refuses '+invalid+' before native dispatch',async()=>fixture(async({info,id})=>fixture(async({info:siblingInfo,id:siblingId})=>{
+  const witness=await import(here+'/../runtime/consumer/witness.mjs');
+  const calls=[];const client={call:async(name,args)=>{calls.push({name,args});return call(name,args);}};
+  const identity=invalid==='missing case'?{testId:'absent',outputPath:info.outputPath}:invalid==='foreign case'?{...info,testId:siblingInfo.testId}:invalid==='copied identity'?{...info}:info;
+  const args={since:0,predicate:{kind:'signal',name:'ready',count:1},...(invalid==='conflicting session'?{sessionId:siblingId}:{})};
+  let error;try{await witness.callWitness(client,identity,'reticle_assert',args);}catch(e){error=String(e);}
+  assert.match(error??'',invalid==='conflicting session'?/foreign case witness session/:/case witness owner unavailable or replaced/);
+  assert.equal(calls.length,0);
+  await fs.writeFile(info.outputPath('identity-refusal.json'),JSON.stringify({invalid,id,siblingId,args,calls,error},null,2));
+},true),true));
+
+for(const change of ['same owner','document A-B-A','epoch A-B-A','same-id reload','owner replacement'])test('case witness held native reply '+change,async()=>fixture(async({page,id,info,session,connect})=>{
+  const witness=await import(here+'/../runtime/consumer/witness.mjs');
+  let release,received=false,raw,request;
+  const gate=new Promise(resolve=>{release=resolve;});
+  // Delegate the real native handler first. The gate delays delivery of its
+  // exact reply; it never supplies authority, a verdict, or a replacement body.
+  const client={call:async(name,args)=>{request={name,args};raw=await call(name,args);received=true;await gate;return raw;}};
+  let result,error;
+  const task=witness.callWitness(client,info,'reticle_assert',{since:0,timeout_ms:2000,predicate:{kind:'signal',name:'ready',count:1}}).then(value=>{result=value;},e=>{error=String(e);});
+  try{
+    await wait(()=>received);
+    assert.equal(raw.verified,'yes');assert.equal(raw.pass,true);
+    if(change==='document A-B-A'||change==='epoch A-B-A'){
+      await page.evaluate(change=>{window.emit('drift-away',change==='document A-B-A'?'second':'first',change==='epoch A-B-A'?1:0);window.emit('drift-back','first',0);},change);
+      await wait(()=>session.eventsSince(0).some(e=>e.data.name==='drift-back'));
+    }
+    if(change==='same-id reload'){
+      await connect(id,'first','replacement-ready');
+      assert.notStrictEqual(daemon.bridge.sessions.all().find(s=>s.id===id),session);
+    }
+    if(change==='owner replacement')assert.throws(()=>witness.startWitness(page,info),/case witness owner replaced/);
+  }finally{release();await task;}
+  await fs.writeFile(info.outputPath('held-native-reply.json'),JSON.stringify({change,id,request,raw,result,error},null,2));
+  if(change==='same owner'){assert.strictEqual(result,raw);assert.equal(error,undefined);}
+  else{assert.equal(result,undefined);assert.match(error??'',change.includes('A-B-A')?/case witness document or epoch changed/:/case witness (lifecycle or identity incomplete|owner unavailable or replaced)/);}
+},true));

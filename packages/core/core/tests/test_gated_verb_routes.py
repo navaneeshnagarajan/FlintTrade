@@ -1826,8 +1826,7 @@ def test_native_cancel_all_with_strategy_scope_fails_closed(*, backend_lease_fac
     native sweep — the native ``cancel_all_orders`` verb has no per-strategy
     narrowing (it forwards only tag/segment), so honouring a bare ``strategy``
     would wipe every open order incl. other strategies' protective exits. It
-    fails closed with 400 and the router is NEVER invoked (Codex-wave review
-    finding 3)."""
+    fails closed with 400 and the router is NEVER invoked."""
     router = _gated_router(result={"status": "ok"})
     client = _app(
         broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory

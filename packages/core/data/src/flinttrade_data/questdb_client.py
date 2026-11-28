@@ -18,7 +18,7 @@ Usage::
 
     from flinttrade_data.questdb_client import QuestDBClient
 
-    with QuestDBClient(host="127.0.0.1") as client:
+    with QuestDBClient(host="127.0.0.1", allow_writes=True) as client:
         client.create_tables()
         client.insert_ltp("NIFTY", "NSE_INDEX", 24500.0)
         candles = client.generate_candles("NIFTY", "NSE_INDEX", interval="5m")
@@ -31,6 +31,8 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+from .questdb_config import require_writes, resolve_allow_writes, resolve_host, resolve_pg_port
 
 logger = logging.getLogger("flinttrade.data.questdb_client")
 
@@ -165,11 +167,15 @@ class QuestDBClient:
     current UTC time.
 
     Args:
-        host: QuestDB host. Default ``"127.0.0.1"``.
-        port: PostgreSQL wire protocol port. Default ``8812``.
+        host: QuestDB host. Default ``"127.0.0.1"``, or ``QUESTDB_HOST``
+            when omitted.
+        port: PostgreSQL wire protocol port. Default ``8812``, or
+            ``QUESTDB_PG_PORT`` when omitted.
         user: QuestDB username. Default ``"admin"``.
         password: QuestDB password. Default ``"quest"``.
         database: QuestDB database name. Default ``"qdb"``.
+        allow_writes: Enable table creation and inserts. Default is off;
+            pass ``True`` or set ``QUESTDB_WRITE_ENABLED=true`` to enable.
 
     Raises:
         QuestDBClientError: If psycopg2 is not installed or the connection
@@ -177,7 +183,7 @@ class QuestDBClient:
 
     Example::
 
-        with QuestDBClient() as client:
+        with QuestDBClient(allow_writes=True) as client:
             client.create_tables()
             client.insert_ltp("RELIANCE", "NSE", 2985.5)
             bars = client.generate_candles("RELIANCE", "NSE", interval="1m")
@@ -185,17 +191,19 @@ class QuestDBClient:
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 8812,
+        host: str | None = None,
+        port: int | None = None,
         user: str = "admin",
         password: str = "quest",
         database: str = "qdb",
+        allow_writes: bool | None = None,
     ) -> None:
-        self.host = host
-        self.port = port
+        self.host = resolve_host(host)
+        self.port = resolve_pg_port(port)
         self.user = user
         self.password = password
         self.database = database
+        self.allow_writes = resolve_allow_writes(allow_writes)
 
         self._conn: Any | None = None
         self._cursor: Any | None = None
@@ -278,6 +286,10 @@ class QuestDBClient:
         if not self.is_connected():
             raise QuestDBClientError("Not connected to QuestDB. Call connect() first.")
 
+    def _require_writes(self, operation: str) -> None:
+        """Raise :class:`QuestDBWritesDisabledError` if writes are disabled."""
+        require_writes(self.allow_writes, operation)
+
     # ------------------------------------------------------------------
     # DDL
     # ------------------------------------------------------------------
@@ -293,8 +305,10 @@ class QuestDBClient:
         All tables use ``PARTITION BY DAY`` for efficient time-range queries.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected or table creation fails.
         """
+        self._require_writes("create_tables")
         self._require_connection()
 
         for ddl in (_DDL_TICKS_LTP, _DDL_TICKS_QUOTE, _DDL_TICKS_DEPTH):
@@ -330,8 +344,10 @@ class QuestDBClient:
             ``True`` on success, ``False`` on failure (error is logged).
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected.
         """
+        self._require_writes("insert_ltp")
         self._require_connection()
         ts = _coerce_ts(timestamp)
         try:
@@ -360,8 +376,10 @@ class QuestDBClient:
             Number of rows successfully inserted. ``0`` on failure.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected or psycopg2 not available.
         """
+        self._require_writes("insert_ltp_bulk")
         self._require_connection()
         if not rows:
             return 0
@@ -414,8 +432,10 @@ class QuestDBClient:
             ``True`` on success, ``False`` on failure.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected.
         """
+        self._require_writes("insert_quote")
         self._require_connection()
         ts = _coerce_ts(timestamp)
         try:
@@ -446,8 +466,10 @@ class QuestDBClient:
             Number of rows successfully inserted.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected.
         """
+        self._require_writes("insert_quote_bulk")
         self._require_connection()
         if not rows:
             return 0
@@ -502,8 +524,10 @@ class QuestDBClient:
             ``True`` on success, ``False`` on failure.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected.
         """
+        self._require_writes("insert_depth")
         self._require_connection()
         ts = _coerce_ts(timestamp)
         try:
@@ -534,8 +558,10 @@ class QuestDBClient:
             Number of rows successfully inserted.
 
         Raises:
+            QuestDBWritesDisabledError: If writes are disabled.
             QuestDBClientError: If not connected.
         """
+        self._require_writes("insert_depth_bulk")
         self._require_connection()
         if not rows:
             return 0

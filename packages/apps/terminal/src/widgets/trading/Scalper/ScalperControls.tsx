@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { OrderRuleLine } from "@/components/orders/OrderRuleLine";
+import type { RuleResult } from "@/lib/orderRules";
 import { NumberInput, Stepper, StatusPill, ToggleGroup } from "./ScalperPrimitives";
 import type { IntervalValue, OrderTypeValue, ProductType, StatusState } from "./types";
 import { LOT_SIZE_MASTER_HINT, SYMBOLS } from "./types";
@@ -77,6 +79,8 @@ export interface ScalperControlsProps {
   oneClickLockedTitle: string;
   /** Explore: orders stay disarmed. Sample disclosure is the Mode honesty bar. */
   isExplore: boolean;
+  /** Order rule results for the current preset, worked out on the CE strike. */
+  ruleResults?: readonly RuleResult[];
 }
 
 export function ScalperControls({
@@ -103,8 +107,6 @@ export function ScalperControls({
   onLotsInc,
   product,
   onProductChange,
-  orderType,
-  onOrderTypeChange,
   limitPrice,
   onLimitPriceChange,
   slPoints,
@@ -118,6 +120,7 @@ export function ScalperControls({
   ordersArmed,
   orderBlockCopy,
   oneClickLockedTitle,
+  ruleResults = [],
 }: ScalperControlsProps) {
   return (
     <div className="shrink-0 bg-surface-card border-b border-border-default">
@@ -243,24 +246,14 @@ export function ScalperControls({
           onChange={(v) => onProductChange(v as ProductType)}
         />
 
-        {/* Order type toggle */}
-        <ToggleGroup
-          label="Type"
-          value={orderType}
-          options={["MARKET", "LIMIT"] as const}
-          onChange={(v) => onOrderTypeChange(v as OrderTypeValue)}
+        {/* Blank sends at the contract's live premium. Options only accept a limit. */}
+        <NumberInput
+          label="Limit ₹"
+          value={limitPrice}
+          onChange={onLimitPriceChange}
+          min={0}
+          placeholder="Live premium"
         />
-
-        {/* Limit price — required for LIMIT orders (₹0 limits are rejected) */}
-        {orderType === "LIMIT" && (
-          <NumberInput
-            label="Limit ₹"
-            value={limitPrice}
-            onChange={onLimitPriceChange}
-            min={0}
-            placeholder="0.00"
-          />
-        )}
 
         {/* Optional protective exit leg, in points from the entry price.
             Leave both blank for a plain order; enter EXACTLY ONE to place a
@@ -319,6 +312,10 @@ export function ScalperControls({
             {oneClick ? "1-CLICK ON" : "1-CLICK"}
           </Button>
         </div>
+      </div>
+
+      <div className="px-3 pb-1" data-testid="scalper-rule-line">
+        <OrderRuleLine id="scalper-rule-line" results={ruleResults} />
       </div>
 
       {!ordersArmed && (
