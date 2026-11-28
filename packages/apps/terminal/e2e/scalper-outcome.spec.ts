@@ -107,6 +107,7 @@ for (const lost of LOST_SUBMITS) {
       await page.clock.runFor(5_000);
       const lot = page.getByText("1 (65)", { exact: true });
       await expect(lot).toBeAttached({ timeout: 15_000 });
+      await page.getByRole("spinbutton", { name: "Limit ₹" }).fill("12");
       // The CE buttons sit under the chart. Opening the folded note moves focus
       // into the Scalper so Shift+ArrowUp takes the same Buy CE path as the button.
       await page.getByRole("button", { name: "Add a reason (optional)" }).click();
@@ -125,7 +126,8 @@ for (const lost of LOST_SUBMITS) {
       await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
 
       // The hotkey on a locked contract opens nothing and sends nothing.
-      await page.getByRole("button", { name: "Add a reason (optional)" }).click();
+      // The folded note is already open from the first submit.
+      await page.getByRole("textbox", { name: "Add a reason (optional)" }).click();
       await expect(page.getByRole("textbox", { name: "Add a reason (optional)" })).toBeFocused();
       await page.keyboard.press("Shift+ArrowUp");
       await page.keyboard.press("Shift+ArrowUp");
@@ -180,6 +182,7 @@ test.describe("lost Scalper Bracket exit leg", () => {
     await expect(lot).toBeAttached({ timeout: 15_000 });
     // Option orders go as limits; this run has no streamed premium to price from.
     await page.getByRole("spinbutton", { name: "Limit ₹" }).fill("12");
+    await page.getByLabel("Stop-loss points").fill("2");
     // The CE buttons sit under the chart. Opening the folded note moves focus
     // into the Scalper so Shift+ArrowUp takes the same Buy CE path as the button.
     await page.getByRole("button", { name: "Add a reason (optional)" }).click();
