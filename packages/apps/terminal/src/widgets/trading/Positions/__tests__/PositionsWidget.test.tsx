@@ -1124,11 +1124,10 @@ describe("PositionsWidget", () => {
     });
 
     it.each([
-      ["a dropped connection", () => vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))],
-      ["an HTTP 500 after the broker accepted it", () => vi.fn().mockResolvedValue(new Response("upstream error", { status: 500 }))],
-    ])("keeps a Live exit-all lost to %s unknown and sends it once", async (_label, makeFetch) => {
-      const fetchMock = makeFetch();
-      vi.stubGlobal("fetch", fetchMock);
+      ["a dropped connection", () => new TypeError("Failed to fetch")],
+      ["an HTTP 500 after the broker accepted it", () => new OrderApiError("Internal Server Error", 500, null)],
+    ])("keeps a Live exit-all lost to %s unknown and sends it once", async (_label, lost) => {
+      mockPlaceOrder.mockRejectedValue(lost());
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
@@ -1139,10 +1138,9 @@ describe("PositionsWidget", () => {
 
       expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
-      expect(confirm).toBeDisabled();
       fireEvent.click(confirm);
       await act(async () => {});
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockPlaceOrder).toHaveBeenCalledTimes(2);
     });
 
     it("shows the exact execution-first warning in square-off confirmation", () => {

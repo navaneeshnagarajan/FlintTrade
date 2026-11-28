@@ -742,8 +742,7 @@ describe("ScalperWidget", () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    setLimit("185.5");
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
     await buyCeWithConfirm();
 
@@ -764,6 +763,7 @@ describe("ScalperWidget", () => {
 
   async function armOneClick(): Promise<void> {
     await screen.findByText("1 (75)");
+    setLimit("185.5");
     fireEvent.click(screen.getByTitle(/one-click off/i));
     await waitFor(() => {
       const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
@@ -881,8 +881,7 @@ describe("ScalperWidget", () => {
     mockPlaceBracketOrder.mockRejectedValue(new TypeError("Failed to fetch"));
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    setLimit("185.5");
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
     await buyCeWithConfirm();
 
@@ -899,8 +898,7 @@ describe("ScalperWidget", () => {
     mockPlaceBracketOrder.mockRejectedValue(lostExit);
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
-    fireEvent.click(screen.getByText("LIMIT"));
-    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "185.5" } });
+    setLimit("185.5");
     fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
     await buyCeWithConfirm();
 
