@@ -272,7 +272,7 @@ describe("ScalperWidget", () => {
 
       await act(async () => release({}));
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
-      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
       expect(cancelAllButton().parentElement).not.toHaveAttribute("tabindex");
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
@@ -341,6 +341,15 @@ describe("ScalperWidget", () => {
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
     });
 
+    it("labels Close All and Cancel All without a function key", () => {
+      render(<ScalperWidget {...defaultProps} />);
+
+      expect(screen.queryByText("F6")).not.toBeInTheDocument();
+      expect(screen.queryByText("F7")).not.toBeInTheDocument();
+      expect(screen.getByText("Close All").closest("button")).toHaveAttribute("title", "Close all positions");
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
+    });
+
     it("releases the guard after a failed request", async () => {
       mockCancelAllOrders.mockRejectedValueOnce(new Error("Gateway Timeout"));
       render(<ScalperWidget {...defaultProps} />);
@@ -348,7 +357,7 @@ describe("ScalperWidget", () => {
       fireEvent.click(screen.getByText("Cancel All Orders"));
       await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
-      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
     });
   });
 

@@ -286,21 +286,19 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={onCloseAll}
-            title="Close all positions (F6)"
+            title="Close all positions"
             variant="warning"
             icon={<X size={14} />}
             label="Close All"
-            shortcut="F6"
           />
           <ActionButton
             onClick={onCancelAll}
             disabled={cancelAllBusy}
-            title="Cancel all orders (F7)"
+            title="Cancel all orders"
             reason={cancelAllBusy ? CANCEL_ALL_SENT_WAITING : null}
             variant="neutral"
             icon={<RefreshCw size={14} />}
             label="Cancel All"
-            shortcut="F7"
           />
         </div>
       </div>

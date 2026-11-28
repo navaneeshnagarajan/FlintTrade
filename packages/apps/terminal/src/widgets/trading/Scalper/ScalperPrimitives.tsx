@@ -239,7 +239,7 @@ export interface ActionButtonProps {
   variant: "buy" | "sell" | "neutral" | "warning";
   icon: React.ReactNode;
   label: string;
-  shortcut: string;
+  shortcut?: string;
   "aria-label"?: string;
 }
 
@@ -275,7 +275,7 @@ export function ActionButton({
           {icon}
           {label}
         </span>
-        <span className="text-xxs text-text-muted font-sans font-normal">{shortcut}</span>
+        {shortcut ? <span className="text-xxs text-text-muted font-sans font-normal">{shortcut}</span> : null}
       </button>
     </DisabledReason>
   );
