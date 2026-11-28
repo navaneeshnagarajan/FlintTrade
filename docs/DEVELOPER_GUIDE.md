@@ -1,6 +1,6 @@
 # FlintTrade Developer Guide
 
-Native adapter code exists for Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. The terminal broker list offers Dhan and Kotak Neo. Upstox adapter code exists but is not offered in the UI. An existing Upstox account keeps its row with `Upstox can't be reconnected. Disconnect to remove it.` A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
+Native adapter code exists for Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. The terminal broker list offers Dhan and Kotak Neo. Upstox adapter code exists but is not offered in the UI. A saved account for a broker that is not offered keeps its row, without Reconnect, and shows `<Broker> can't be reconnected. Disconnect to remove it.` A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 
 This guide is for contributors and integrators. It assumes you have read
@@ -377,8 +377,7 @@ been cleared and its evidence captured. A real account-path trial may satisfy a
 declared evidence blocker, but it does not override an unresolved broker-safety,
 SDK-attestation, or emergency-reduction blocker. The terminal broker list offers Dhan and Kotak Neo. Other adapters may keep
 their code, mappings, and mock coverage, but they are not offered in the UI.
-Upstox adapter code exists but is not offered in the UI. An existing Upstox
-account keeps its row with `Upstox can't be reconnected. Disconnect to remove it.`
+Upstox adapter code exists but is not offered in the UI. A saved account for a broker that is not offered keeps its row, without Reconnect, and shows `<Broker> can't be reconnected. Disconnect to remove it.`
 
 ---
 

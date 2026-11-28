@@ -1,6 +1,6 @@
 # FlintTrade Architecture
 
-Native adapter code exists for Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. The terminal broker list offers Dhan and Kotak Neo. Upstox adapter code exists but is not offered in the UI. An existing Upstox account keeps its row with `Upstox can't be reconnected. Disconnect to remove it.` A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
+Native adapter code exists for Dhan, Upstox, Kotak Neo, INDmoney, Groww, and Delta Exchange. The terminal broker list offers Dhan and Kotak Neo. Upstox adapter code exists but is not offered in the UI. A saved account for a broker that is not offered keeps its row, without Reconnect, and shows `<Broker> can't be reconnected. Disconnect to remove it.` A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
 
 > Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React

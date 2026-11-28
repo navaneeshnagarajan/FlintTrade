@@ -202,7 +202,7 @@ Do not treat catalogue metadata as a working operator path.
 
 The broker list offers Dhan and Kotak Neo. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
 
-An existing Upstox account keeps its row with `Upstox can't be reconnected. Disconnect to remove it.` Upstox is not offered in the broker list.
+A saved account for a broker that is not offered keeps its row, without Reconnect, and shows `<Broker> can't be reconnected. Disconnect to remove it.` Upstox is not offered in the broker list.
 
 **Broker HTTP.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
@@ -220,7 +220,7 @@ clients, but no live-account or market-hours stream proof has been recorded.
 The previous non-funded Connected (read) evidence covers REST reads only.
 INDmoney uses a dashboard-generated token that resets
 at the daily 06:00 IST dashboard cycle, and it is not offered in the broker list.
-Setup → Brokers still fails on those routes. Read smoke uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+Setup → Brokers still fails on the broker HTTP routes above. Read smoke uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 See [Broker static IP](#broker-static-ip).
@@ -1978,13 +1978,14 @@ configured LLM or rule-based fallback. Separate summary and ticker endpoints
 synchronously analyse the static RSS publisher profiles (MoneyControl,
 ET Markets, LiveMint). Production composition starts neither a background news
 scheduler nor a social-media source. If sentiment is unavailable, the panel
-says so and offers **Retry**. Start the named service from the status chrome,
-then retry.
+shows `Market sentiment unavailable. Start Core and set an LLM in
+workspace.json.` with **Retry**.
 
 ### Regime
 
-If regime is unavailable for the selected symbol, the panel says so and offers
-**Retry**. Start the named service from the status chrome, then retry.
+If regime is unavailable for the selected symbol, the panel shows
+`Regime unavailable for <symbol>. Start Core and load price history, then retry.`
+with **Retry**.
 
 ### RAG
 
