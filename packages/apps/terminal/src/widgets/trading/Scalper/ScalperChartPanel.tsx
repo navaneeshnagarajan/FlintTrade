@@ -276,7 +276,7 @@ export function ScalperChartPanel({
           <ActionButton
             onClick={onCancelAll}
             disabled={cancelAllBusy}
-            title="Cancel all orders (F7)"
+            title={cancelAllBusy ? "Cancel all sent. Waiting for reply." : "Cancel all orders (F7)"}
             variant="neutral"
             icon={<RefreshCw size={14} />}
             label="Cancel All"

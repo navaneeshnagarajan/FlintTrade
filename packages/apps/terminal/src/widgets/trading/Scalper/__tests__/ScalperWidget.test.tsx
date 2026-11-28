@@ -264,10 +264,11 @@ describe("ScalperWidget", () => {
       fireEvent.click(cancelAllButton());
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
-      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all sent. Waiting for reply.");
 
       await act(async () => release({}));
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
     });
@@ -279,6 +280,7 @@ describe("ScalperWidget", () => {
       fireEvent.click(screen.getByText("Cancel All Orders"));
       await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
     });
   });
 

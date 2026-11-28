@@ -253,6 +253,7 @@ describe("useGlobalKeys", () => {
 
     expect(window.confirm).toHaveBeenCalledTimes(1);
     expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+    expect(mockEmitNotification).not.toHaveBeenCalled();
     release();
     await waitFor(() => expect(mockEmitNotification).toHaveBeenCalled());
 
