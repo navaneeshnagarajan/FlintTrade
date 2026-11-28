@@ -360,8 +360,8 @@ export default function RegimePanel() {
           <div className="flex items-start gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              Regime unavailable for {symbol}. Check that the AI backend is running
-              and has price history for {symbol}.
+              Regime unavailable for {symbol}. Start Core and load price history,
+              then retry.
             </span>
           </div>
           <Button

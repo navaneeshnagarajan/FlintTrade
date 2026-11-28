@@ -211,12 +211,12 @@ describe("RegimePanel", () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          "Regime unavailable for NIFTY. Check that the AI backend is running and has price history for NIFTY.",
+          "Regime unavailable for NIFTY. Start Core and load price history, then retry.",
         ),
       ).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent(/coming soon|not yet available/i);
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available|AI backend/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Not enough bars")).not.toBeInTheDocument();
   });

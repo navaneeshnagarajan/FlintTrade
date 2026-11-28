@@ -235,12 +235,12 @@ describe("SentimentPanel", () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          "Market sentiment unavailable. Check that the AI backend is running and an LLM is configured.",
+          "Market sentiment unavailable. Start Core and set an LLM in workspace.json.",
         ),
       ).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent(/coming soon|not yet available/i);
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available|AI backend/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Backend unavailable")).not.toBeInTheDocument();
   });

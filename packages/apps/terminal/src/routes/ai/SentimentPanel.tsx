@@ -438,8 +438,8 @@ export default function SentimentPanel() {
           <div className="flex items-start gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              Market sentiment unavailable. Check that the AI backend is running
-              and an LLM is configured.
+              Market sentiment unavailable. Start Core and set an LLM in
+              workspace.json.
             </span>
           </div>
           <Button
