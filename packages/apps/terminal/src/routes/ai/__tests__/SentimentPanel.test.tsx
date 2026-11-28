@@ -320,3 +320,37 @@ describe("SentimentPanel", () => {
     });
   });
 });
+
+describe("SentimentPanel: error state matches the loading slot", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTickerSentiments.mockResolvedValue({ tickers: [] });
+  });
+
+  const MIN_HEIGHT = "min-h-[8.5rem]";
+
+  it("keeps the error card as tall as the loading slot so the swap does not shift the layout", async () => {
+    mockGetMarketSentimentSummary.mockReturnValue(new Promise(() => {}));
+    const loading = renderPanel();
+    const slot = screen.getByText(/Generating market summary/).parentElement as HTMLElement;
+    expect(slot).toHaveClass(MIN_HEIGHT);
+    loading.unmount();
+
+    mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const card = (await screen.findByText(/Market sentiment unavailable/)).closest("[class*='bearish-border']") as HTMLElement;
+    expect(card).toHaveClass(MIN_HEIGHT);
+  });
+
+  it("gives the Retry button the standard Button focus ring and retries on click", async () => {
+    mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(retry).toHaveClass("focus-visible:ring-[3px]", "focus-visible:ring-ring/50", "outline-none");
+
+    const before = mockGetMarketSentimentSummary.mock.calls.length;
+    fireEvent.click(retry);
+    await waitFor(() => expect(mockGetMarketSentimentSummary.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+

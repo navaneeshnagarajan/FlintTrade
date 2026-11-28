@@ -349,14 +349,14 @@ export default function RegimePanel() {
 
       {/* Loading */}
       {isLoading && (
-        <div className="flex flex-col items-center gap-3 py-10 text-text-muted">
+        <div className="flex min-h-[8.5rem] flex-col items-center justify-center gap-3 py-10 text-text-muted">
           <Loader2 className="w-6 h-6 animate-spin" />
           <span className="text-sm">Detecting regime for {symbol}…</span>
         </div>
       )}
 
       {isError && (
-        <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
+        <Card className="flex min-h-[8.5rem] flex-col justify-center bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-start gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
