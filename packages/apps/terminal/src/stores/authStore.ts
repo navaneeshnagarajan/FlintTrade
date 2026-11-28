@@ -104,6 +104,20 @@ function authStateMatchesFence(
   );
 }
 
+const MAX_TIMEOUT_MS = 2_147_483_647; // signed 32-bit setTimeout cap
+
+function expiryDeadlineMs(expiresAt: string | null | undefined): number | undefined {
+  if (!expiresAt) return undefined;
+  const ms = Date.parse(expiresAt);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function resolveExpiresAt(provided: string, stored: string | null): string {
+  if (expiryDeadlineMs(provided) !== undefined) return provided;
+  if (stored && expiryDeadlineMs(stored) !== undefined) return stored;
+  return new Date(Date.now() + msUntilNext8amIST()).toISOString();
+}
+
 /**
  * Returns milliseconds until the next 08:00 IST (UTC+05:30 = UTC+02:30).
  * If it is already past 08:00 IST today the timer targets tomorrow's 08:00.
@@ -144,6 +158,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     if (token !== "demo-user") clearDemoSession();
 
     const previousPrincipal = normalisePrincipal(current.username);
+    const resolvedExpiresAt = resolveExpiresAt(expiresAt, current.expiresAt);
     const nextGeneration = current.sessionGeneration + 1;
     set({
       status: "transitioning",
@@ -169,7 +184,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         token,
         reauthToken: null,
         username,
-        expiresAt,
+        expiresAt: resolvedExpiresAt,
         lastActivity: Date.now(),
       };
     });
@@ -178,7 +193,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (previousPrincipal && nextPrincipal && previousPrincipal !== nextPrincipal) {
         clearForeverPendingCancels();
       }
-      writePersistedAuthSession({ token, username, expiresAt });
+      writePersistedAuthSession({ token, username, expiresAt: resolvedExpiresAt });
       get().startExpiryTimer();
     }
     return installed;
@@ -196,14 +211,24 @@ export const useAuthStore = create<AuthState>((set, get) => {
     _expiryTimerId: null,
 
     startExpiryTimer: () => {
-      // Clear any existing timer before setting a new one
       const existing = get()._expiryTimerId;
       if (existing !== null) clearTimeout(existing);
 
-      const untilExpiry = Date.parse(get().expiresAt ?? "") - Date.now();
-      const ms = Number.isFinite(untilExpiry) ? Math.max(0, untilExpiry) : msUntilNext8amIST();
+      const deadline = expiryDeadlineMs(get().expiresAt);
+      const remaining = deadline !== undefined ? deadline - Date.now() : msUntilNext8amIST();
+      if (remaining <= 0) {
+        const timerId = setTimeout(() => get().setLoggedOut(), 0);
+        set({ _expiryTimerId: timerId });
+        return;
+      }
+      const ms = Math.min(remaining, MAX_TIMEOUT_MS);
       const timerId = setTimeout(() => {
-        get().setLoggedOut();
+        const left = expiryDeadlineMs(get().expiresAt);
+        if (left !== undefined && left - Date.now() <= 0) {
+          get().setLoggedOut();
+          return;
+        }
+        get().startExpiryTimer();
       }, ms);
 
       set({ _expiryTimerId: timerId });

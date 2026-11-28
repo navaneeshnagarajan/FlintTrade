@@ -322,6 +322,59 @@ describe("authStore", () => {
       // Timer IDs should differ (previous one was cleared, new one created)
       expect(secondTimerId).not.toBe(firstTimerId);
     });
+
+    it("keeps a far-future session after the first timer chunk fires", () => {
+      vi.setSystemTime(new Date("2026-11-28T10:00:00.000Z"));
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2099-01-01T00:00:00.000Z");
+
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      vi.advanceTimersByTime(2_147_483_647);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      expect(useAuthStore.getState().token).toBe("tok");
+      expect(useAuthStore.getState()._expiryTimerId).not.toBeNull();
+    });
+
+    it("signs out when the stored expiry is already in the past", () => {
+      vi.setSystemTime(new Date("2026-11-28T10:00:00.000Z"));
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2026-11-28T09:00:00.000Z");
+
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      vi.advanceTimersByTime(0);
+      expect(useAuthStore.getState().status).toBe("logged-out");
+      expect(useAuthStore.getState().token).toBeNull();
+    });
+
+    it("uses the next 08:00 IST when expiry is missing and none is stored", () => {
+      vi.setSystemTime(new Date("2026-11-28T02:00:00.000Z"));
+      useAuthStore.getState().setLoggedIn("tok", "user", "");
+
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      vi.advanceTimersByTime(29 * 60 * 1000);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(useAuthStore.getState().status).toBe("logged-out");
+    });
+
+    it("keeps a last-hour sign-in expiry across a PIN unlock", () => {
+      vi.setSystemTime(new Date("2026-11-28T02:00:00.000Z"));
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2026-11-29T02:30:00.000Z");
+
+      vi.setSystemTime(new Date("2026-11-28T02:15:00.000Z"));
+      useAuthStore.getState().setPinRequired();
+      useAuthStore.getState().setLoggedIn("tok-unlocked", "user", "");
+
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      expect(useAuthStore.getState().expiresAt).toBe("2026-11-29T02:30:00.000Z");
+      vi.advanceTimersByTime(15 * 60 * 1000);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      expect(useAuthStore.getState().token).toBe("tok-unlocked");
+    });
   });
 
   // --- Multiple setLoggedIn calls -------------------------------------------

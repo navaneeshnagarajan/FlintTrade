@@ -168,7 +168,7 @@ export default function LoginRoute({
       if (!useAuthStore.getState().setLoggedInIfCurrent(
         token,
         requestFence.principal || "user",
-        "",
+        useAuthStore.getState().expiresAt ?? "",
         requestFence,
       )) return;
       useModeStore.getState().adoptSessionToken(token);

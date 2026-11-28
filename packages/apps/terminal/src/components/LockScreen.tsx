@@ -92,7 +92,8 @@ export function LockScreen() {
       // server reads Mode from the session; this screen does not send one
       // and does not apply a mode from the response.
       const result = await unlockWithPin(value);
-      setLoggedInIfCurrent(result.token, requestFence.principal ?? "", "", requestFence);
+      const expiresAt = useAuthStore.getState().expiresAt ?? "";
+      setLoggedInIfCurrent(result.token, requestFence.principal ?? "", expiresAt, requestFence);
     } catch (err) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
       // Surface the server's message — the backend distinguishes a wrong PIN
