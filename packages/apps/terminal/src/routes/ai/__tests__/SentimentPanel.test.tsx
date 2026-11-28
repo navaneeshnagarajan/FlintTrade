@@ -227,28 +227,45 @@ describe("SentimentPanel", () => {
     });
   });
 
-  it("shows an honest 'coming soon' state on API failure", async () => {
-    // The endpoint fails closed (e.g. 404 / no LLM configured); the panel
-    // degrades to a calm preview placeholder, not a raw backend error.
+  it("states the fact and the fix when the sentiment request fails", async () => {
     mockGetMarketSentimentSummary.mockRejectedValue(
       new Error("Backend unavailable"),
     );
     renderPanel();
     await waitFor(() => {
       expect(
-        screen.getByText("Market sentiment coming soon"),
+        screen.getByText(
+          "Market sentiment unavailable. Check that the AI backend is running and an LLM is configured.",
+        ),
       ).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Backend unavailable")).not.toBeInTheDocument();
   });
 
-  it("'Check again' button re-fetches after the coming-soon state", async () => {
+  it("shows only the score when the summary has no indices or key points", async () => {
+    mockGetMarketSentimentSummary.mockResolvedValue({
+      ...MOCK_SUMMARY,
+      indices: [],
+      key_points: [],
+    });
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByText("Market Sentiment Dashboard")).toBeInTheDocument();
+      expect(screen.queryByText("Indices")).not.toBeInTheDocument();
+      expect(screen.queryByText("Key Points")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/unavailable/i)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon/i);
+  });
+
+  it("Retry re-fetches from the down state", async () => {
     mockGetMarketSentimentSummary.mockRejectedValue(new Error("fail"));
     renderPanel();
-    await waitFor(() => screen.getByText("Market sentiment coming soon"));
-    expect(screen.getByText("Check again")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Check again"));
+    await waitFor(() => screen.getByText(/Market sentiment unavailable/));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     // Refetch is triggered — mock gets called again
     await waitFor(() => {
       expect(mockGetMarketSentimentSummary).toHaveBeenCalledTimes(2);

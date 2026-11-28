@@ -25,6 +25,7 @@ import {
   TrendingUp,
   TrendingDown,
   Activity,
+  AlertCircle,
   Zap,
   ZapOff,
   Wind,
@@ -354,33 +355,22 @@ export default function RegimePanel() {
         </div>
       )}
 
-      {/* Unavailable state — honest "coming soon" rather than an error.
-          Regime detection is not yet enabled in this build (the endpoint is
-          not wired / historical data is unavailable), so the request fails
-          closed. We degrade to a calm preview placeholder instead of
-          surfacing a raw backend error. */}
       {isError && (
-        <Card className="bg-surface-card border border-border-default rounded-lg p-5">
-          <div className="flex items-start gap-3 text-text-secondary">
-            <Activity className="w-4 h-4 shrink-0 mt-0.5 text-text-muted" />
-            <div>
-              <p className="text-sm font-semibold mb-1 text-text-primary">
-                Regime detection coming soon
-              </p>
-              <p className="text-xs text-text-muted">
-                Market regime detection is not yet available in this build.
-                Once the AI backend is enabled and historical data is available
-                for {symbol}, the live regime will appear here.
-              </p>
-            </div>
+        <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
+          <div className="flex items-start gap-2 text-loss text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Regime unavailable for {symbol}. Check that the AI backend is running
+              and has price history for {symbol}.
+            </span>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
-            className="mt-3 text-text-muted hover:text-text-primary text-xs"
+            className="mt-2 text-text-muted hover:text-text-primary text-xs"
           >
-            Check again
+            Retry
           </Button>
         </Card>
       )}

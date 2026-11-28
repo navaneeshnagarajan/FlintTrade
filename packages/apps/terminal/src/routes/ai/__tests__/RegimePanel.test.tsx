@@ -205,18 +205,31 @@ describe("RegimePanel", () => {
     });
   });
 
-  it("shows an honest 'coming soon' state on API failure", async () => {
-    // The endpoint fails closed (e.g. 404 / no historical data); the panel
-    // degrades to a calm preview placeholder, not a raw backend error.
+  it("states the fact and the fix when the regime request fails", async () => {
     mockGetRegimeDetector.mockRejectedValue(new Error("Not enough bars"));
     renderPanel();
     await waitFor(() => {
       expect(
-        screen.getByText("Regime detection coming soon"),
+        screen.getByText(
+          "Regime unavailable for NIFTY. Check that the AI backend is running and has price history for NIFTY.",
+        ),
       ).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|not yet available/i);
     // Raw backend error message must not leak into the UI.
     expect(screen.queryByText("Not enough bars")).not.toBeInTheDocument();
+  });
+
+  it("names the selected instrument in the down state", async () => {
+    mockGetRegimeDetector.mockRejectedValue(new Error("fail"));
+    renderPanel();
+    await waitFor(() => screen.getByText(/Regime unavailable for NIFTY/));
+
+    fireEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Regime unavailable for BANKNIFTY/)).toBeInTheDocument();
+    });
   });
 
   it("clicking a quick symbol updates the query symbol", async () => {
@@ -297,15 +310,15 @@ describe("RegimePanel", () => {
     );
   });
 
-  it("'Check again' button triggers refetch after the coming-soon state", async () => {
+  it("Retry triggers a refetch from the down state", async () => {
     mockGetRegimeDetector
       .mockRejectedValueOnce(new Error("fail"))
       .mockResolvedValueOnce(TRENDING_UP_RESULT);
 
     renderPanel();
-    await waitFor(() => screen.getByText("Regime detection coming soon"));
+    await waitFor(() => screen.getByText(/Regime unavailable for NIFTY/));
 
-    fireEvent.click(screen.getByText("Check again"));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(mockGetRegimeDetector).toHaveBeenCalledTimes(2);
     });
