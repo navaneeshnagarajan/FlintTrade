@@ -1043,7 +1043,7 @@ In a narrow Scalper panel, the line shortens to `Status unknown` with **Open Ord
 
 Orders shows one summary line above the rows, for example `2 cancellations requested · 1 order status unknown`. When the only notice is one order whose status is unknown, the line names it, for example `BUY 65 RELIANCE · order status unknown`.
 
-A disabled **Buy** or **Sell** shows its reason as a tooltip on hover and on keyboard focus, for example `Order status unknown. Check Orders before trying again.` or `Order sent. Waiting for reply.` While a Cancel all request is pending, the Scalper **Cancel All** button stays disabled with `Cancel all sent. Waiting for reply.`, and a second `C` sends nothing.
+A disabled **Buy** or **Sell** shows its reason as a tooltip on hover and on keyboard focus, for example `Order status unknown. Check Orders before trying again.` or `Order sent. Waiting for reply.` While a Scalper **Cancel All** request is pending, the button stays disabled with `Cancel all sent. Waiting for reply.` While a Cancel all sent with `C` is pending, a second `C` sends nothing.
 
 A Bracket can show each leg on its own. In Orders, a Bracket whose entry was placed and whose stop-loss reply was lost shows an `SL unknown` chip. Its tooltip reads `Entry placed · Stop-loss status unknown`. Placed means the broker shows the order, not that it filled.
 
