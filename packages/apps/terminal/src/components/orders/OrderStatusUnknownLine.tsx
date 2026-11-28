@@ -35,12 +35,12 @@ export function OrderStatusUnknownLink({ className = "" }: { className?: string 
   );
 }
 
-/** Short label used when a Scalper panel is narrower than 260px. */
+/** Short label used when the full unknown sentence does not fit on one row. */
 export const ORDER_STATUS_UNKNOWN_COMPACT = "Status unknown";
 
 /**
- * One-line unknown status for a narrow Scalper panel. The approved sentence
- * is the tooltip and accessible description.
+ * One-line unknown status when the full sentence does not fit. The approved
+ * sentence is the tooltip and accessible description.
  */
 export function OrderStatusUnknownCompact({ className = "" }: { className?: string }) {
   const id = useId();
@@ -54,6 +54,27 @@ export function OrderStatusUnknownCompact({ className = "" }: { className?: stri
       <AlertTriangle size={12} aria-hidden className="shrink-0" />
       <span>{ORDER_STATUS_UNKNOWN_COMPACT}</span>
       <span aria-hidden="true">·</span>
+      <OpenOrdersButton title={ORDER_STATUS_UNKNOWN} describedBy={id} />
+      <span id={id} hidden>{ORDER_STATUS_UNKNOWN}</span>
+    </p>
+  );
+}
+
+/**
+ * Tightest one-line unknown status: drops the icon and mid-dot so
+ * "Status unknown Open Orders" stays on one row in a narrow slot. The
+ * approved sentence is still the tooltip and accessible description.
+ */
+export function OrderStatusUnknownTight({ className = "" }: { className?: string }) {
+  const id = useId();
+  return (
+    <p
+      role="status"
+      title={ORDER_STATUS_UNKNOWN}
+      aria-describedby={id}
+      className={`flex items-center gap-0 text-xxs text-warning whitespace-nowrap ${className}`}
+    >
+      <span className="pr-0.5">{ORDER_STATUS_UNKNOWN_COMPACT}</span>
       <OpenOrdersButton title={ORDER_STATUS_UNKNOWN} describedBy={id} />
       <span id={id} hidden>{ORDER_STATUS_UNKNOWN}</span>
     </p>

@@ -1,33 +1,108 @@
 // ─── Scalper — 3-panel chart area (CE / Spot / PE) ───────────────────────────
 
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
-import { OrderStatusUnknownCompact, OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { OrderStatusUnknownCompact, OrderStatusUnknownLine, OrderStatusUnknownTight } from "@/components/orders/OrderStatusUnknownLine";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
 import { fmtInt } from "./helpers";
 import type { IntervalValue, OrderAction, TickMap } from "./types";
 
-const SCALPER_UNKNOWN_COMPACT_BELOW_PX = 260;
+type UnknownLineTier = "full" | "compact" | "tight";
+
+function measuredLineWidth(node: HTMLElement | null): number {
+  return node?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY;
+}
+
+function pickUnknownLineTier(availablePx2: number, full: number, compact: number): UnknownLineTier {
+  if (availablePx2 <= 0 || !Number.isFinite(full) || full <= 0) return "full";
+  if (full <= availablePx2) return "full";
+  if (Number.isFinite(compact) && compact > 0 && compact <= availablePx2) return "compact";
+  if (Number.isFinite(compact) && compact > 0) return "tight";
+  return "full";
+}
 
 function ScalperStatusSlot({ unknown, testId }: { unknown: boolean; testId: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const update = () => {
-      const width = el.getBoundingClientRect().width;
-      setNarrow(width > 0 && width < SCALPER_UNKNOWN_COMPACT_BELOW_PX);
+  const slotRef = useRef<HTMLDivElement>(null);
+  const fullMeasureRef = useRef<HTMLDivElement>(null);
+  const compactMeasureRef = useRef<HTMLDivElement>(null);
+  const tightMeasureRef = useRef<HTMLDivElement>(null);
+  const [tier, setTier] = useState<UnknownLineTier>("full");
+  const [probes, setProbes] = useState(false);
+
+  useLayoutEffect(() => {
+    const slot = slotRef.current;
+    if (!slot || !unknown) {
+      setProbes(false);
+      setTier((current) => (current === "full" ? current : "full"));
+      return;
+    }
+    const sync = () => {
+      // Full and compact use px-2 (16px). The tight line uses px-1 so
+      // "Status unknown Open Orders" still fits the content box of an
+      // ~180px panel (~164px). A 0-width slot (jsdom) keeps the full
+      // sentence and does not mount the hidden probes.
+      if (slot.clientWidth <= 16) {
+        setProbes(false);
+        setTier((current) => (current === "full" ? current : "full"));
+        return;
+      }
+      setProbes(true);
+      const next = pickUnknownLineTier(
+        slot.clientWidth - 16,
+        measuredLineWidth(fullMeasureRef.current),
+        measuredLineWidth(compactMeasureRef.current),
+      );
+      setTier((current) => (current === next ? current : next));
     };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
+    sync();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(slot);
     return () => observer.disconnect();
-  }, []);
+  }, [unknown, probes]);
+
+  const line = !unknown
+    ? null
+    : tier === "tight"
+      ? <OrderStatusUnknownTight />
+      : tier === "compact"
+        ? <OrderStatusUnknownCompact />
+        : <OrderStatusUnknownLine />;
+
   return (
-    <div ref={ref} className="shrink-0 h-8 overflow-hidden px-2 py-1" data-testid={testId}>
-      {unknown ? (narrow ? <OrderStatusUnknownCompact /> : <OrderStatusUnknownLine />) : null}
+    <div className="shrink-0">
+      {unknown && probes ? (
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: -10080,
+            top: 0,
+            visibility: "hidden",
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <div ref={fullMeasureRef} className="inline-flex w-max">
+            <OrderStatusUnknownLine />
+          </div>
+          <div ref={compactMeasureRef} className="inline-flex w-max">
+            <OrderStatusUnknownCompact />
+          </div>
+          <div ref={tightMeasureRef} className="inline-flex w-max">
+            <OrderStatusUnknownTight />
+          </div>
+        </div>
+      ) : null}
+      <div
+        ref={slotRef}
+        data-testid={testId}
+        data-unknown-tier={unknown ? tier : undefined}
+        className={`h-8 overflow-hidden py-1 ${tier === "tight" ? "px-1" : "px-2"}`}
+      >
+        {line}
+      </div>
     </div>
   );
 }
@@ -88,6 +163,7 @@ export function ScalperChartPanel({
       {/* CE PANEL */}
       <div
         className="flex flex-col border-r border-border-default"
+        data-scalper-panel
         style={{ width: "28%", minWidth: 0 }}
       >
         {/* CE header */}
@@ -208,6 +284,7 @@ export function ScalperChartPanel({
       {/* PE PANEL */}
       <div
         className="flex flex-col border-l border-border-default"
+        data-scalper-panel
         style={{ width: "28%", minWidth: 0 }}
       >
         {/* PE header */}
