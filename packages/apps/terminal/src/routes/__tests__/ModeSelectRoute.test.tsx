@@ -77,11 +77,11 @@ describe("ModeSelectRoute", () => {
     );
     expect(screen.queryByRole("radio", { name: /Connected \(read\)/i })).not.toBeInTheDocument();
 
-    // Live stays fail-closed until funded unlock — never a Live place call to action.
+    // The Live card states the limit and never offers a place call to action.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
     expect(liveButton).toHaveTextContent(/broker required/i);
-    expect(liveButton).toHaveTextContent(/fail-closed/i);
-    expect(liveButton).toHaveTextContent(/funded unlock/i);
+    expect(liveButton).toHaveTextContent("Live orders can't be sent to the broker.");
+    expect(liveButton).not.toHaveTextContent(/fail-closed/i);
   });
 
   it("enrols a deferred authenticator before unlocking Live", async () => {

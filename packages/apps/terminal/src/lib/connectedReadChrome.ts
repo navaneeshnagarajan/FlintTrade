@@ -11,7 +11,7 @@ import type { BrokerAccount } from "@/types/broker";
 export const CONNECTED_READ_BROKERS = ["dhan", "kotakneo"] as const;
 export const CONNECTED_READ_LABEL = "Connected (read)";
 export const API_SMOKE_LABEL = "API smoke";
-export const NEO_OPERATOR_COPY = "Live read only until funded unlock.";
+export const NEO_OPERATOR_COPY = "Read only. Live orders can't be sent to the broker.";
 
 export function isConnectedReadBroker(broker: string): boolean {
   return (CONNECTED_READ_BROKERS as readonly string[]).includes(broker);
