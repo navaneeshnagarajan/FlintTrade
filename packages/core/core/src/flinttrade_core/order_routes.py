@@ -54,8 +54,10 @@ from .order_outcome import (
     ORDER_STATUS_UNKNOWN,
     REASON_BROKER_REJECTED,
     REASON_RESPONSE_UNCONFIRMED,
+    DispatchProgress as _LiveWriteProgress,
     annotate,
     cancel_acknowledgement,
+    single_leg_outcomes,
 )
 from .rate_limiter import rate_limit
 
@@ -64,36 +66,6 @@ logger = logging.getLogger("flinttrade.order_routes")
 # HTTP backstop above the 10-per-second-per-exchange cap, so an NSE burst and
 # a BSE order in the same second reach the order rate limiter.
 _ORDER_ROUTE_USER_RATE = 30
-
-
-@dataclass
-class _LiveWriteProgress:
-    """Request-local invocation evidence, not execution or durable authority.
-
-    A sync wait can time out while the router coroutine still runs. Only its
-    completed failure before the invocation hook proves no adapter invocation.
-    """
-
-    started: bool = False
-    invoked: bool = False
-    failed_before_invoke: bool = False
-    before_invoke: Callable[[], None] | None = None
-
-    def on_adapter_invoke(self) -> None:
-        if self.before_invoke is not None:
-            self.before_invoke()
-        self.invoked = True
-
-    @property
-    def outcome_unknown(self) -> bool:
-        return self.started and not self.failed_before_invoke
-
-    async def run(self, coroutine: Any) -> Any:
-        try:
-            return await coroutine
-        except BaseException:
-            self.failed_before_invoke = not self.invoked
-            raise
 
 
 @dataclass(frozen=True)
@@ -288,6 +260,7 @@ def _live_write_error(
     if unknown:
         response["order_outcome"] = "unknown"
         response["reason"] = REASON_RESPONSE_UNCONFIRMED
+        response["leg_outcomes"] = single_leg_outcomes("unknown")
     else:
         from flinttrade_core.order_rules import OrderRuleRefused, results_payload  # noqa: PLC0415
 
@@ -4163,13 +4136,23 @@ def _gated_verb_write(
     response: dict[str, Any] = {"status": "success", "data": result}
     if ref:
         response["orderid"] = ref
-    if verb == "cancel_forever":
-        response.update(_forever_cancel_fields(result))
+    if verb in _CANCEL_VERBS:
+        response.update(_cancel_outcome_fields(result))
     return jsonify(response), 200
 
 
-def _forever_cancel_fields(result: object) -> dict[str, Any]:
-    """Label a forever-order cancel without turning an acknowledgement into a fill."""
+# Cancel verbs whose 200 is a broker acknowledgement. Each one says
+# "Cancellation requested" until the returned status itself says cancelled.
+_CANCEL_VERBS = frozenset({
+    "cancel_forever",
+    "cancel_super_order",
+    "cancel_conditional_trigger",
+    "cancel_smart_order",
+})
+
+
+def _cancel_outcome_fields(result: object) -> dict[str, Any]:
+    """Label a cancel without turning an acknowledgement into a confirmed cancel."""
     if isinstance(result, dict):
         token = ""
         for key in ("status", "order_status", "orderStatus", "attempt_state"):
@@ -4187,6 +4170,7 @@ def _forever_cancel_fields(result: object) -> dict[str, Any]:
                 "order_outcome": "rejected",
                 "reason": REASON_BROKER_REJECTED,
                 "retry_safe": False,
+                "leg_outcomes": single_leg_outcomes("rejected"),
             }
             if isinstance(message, str) and message:
                 fields["message"] = message

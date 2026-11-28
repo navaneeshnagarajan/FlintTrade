@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import { createStore, Provider } from "jotai";
 import type { Order } from "@/types/api";
 
@@ -47,7 +48,7 @@ vi.mock("@/hooks/useWebSocket", () => ({
 }));
 
 vi.mock("@/hooks/useOrders", () => ({
-  useOrders: () => ({ data: mockBrokerOrders.value }),
+  useOrders: () => ({ data: mockBrokerOrders.value, isFetching: false, isError: false, dataUpdatedAt: 0 }),
 }));
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
@@ -80,6 +81,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearPendingOrderOutcomes();
   mockMode.value = "explore";
   mockWsTicks.value = {};
   mockBrokerOrders.value = null;
@@ -357,6 +359,34 @@ describe("OrderLadderWidget live cancel", () => {
     expect(cancelBtn.disabled).toBe(true);
     fireEvent.click(cancelBtn);
     expect(mockCancelOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+  ])("locks every level beside the unknown line after a click lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValue(lost());
+    renderLiveLadder();
+
+    await placeBuyAtTopLevel();
+
+    expect(await screen.findByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+    expect(screen.getByTestId("ladder-status-unknown")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    const placeButtons = screen.getAllByRole("button").filter((button) => {
+      const name = button.getAttribute("aria-label") ?? "";
+      return /^(Buy |Sell |Place buy |Place sell )/i.test(name);
+    });
+    expect(placeButtons.length).toBeGreaterThan(2);
+    for (const level of placeButtons) {
+      expect(level).toBeDisabled();
+      expect(level).toHaveAttribute("title", "Order status unknown. Check Orders before trying again.");
+      expect(level.getAttribute("title") ?? "").not.toMatch(/^BUY |^SELL /);
+      fireEvent.click(level);
+    }
+    await act(async () => {});
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
   it("removes the pending row when placeOrder rejects", async () => {

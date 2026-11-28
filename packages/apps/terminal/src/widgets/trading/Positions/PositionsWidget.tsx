@@ -84,8 +84,11 @@ import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { EXIT_ALL_REQUESTED, EXIT_REQUESTED } from "@/lib/operatorIncident";
+import { EXIT_ALL_REQUESTED, EXIT_REQUESTED, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
+import { useOrderSubmitGuard, type OrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -139,6 +142,7 @@ import {
 } from "./positionReconcile";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
+import { OrderStatusUnknownLine, OrderStatusUnknownLink } from "@/components/orders/OrderStatusUnknownLine";
 import type { WidgetProps } from "@/types/widgets";
 import {
   countSymbolClasses,
@@ -407,6 +411,19 @@ interface SquareOffDialogProps {
   getCurrentIdentity: () => AccountAuthorityIdentity;
   onClose: () => void;
   onSquaredOff: (mutationIdentity: AccountAuthorityIdentity) => void;
+  /** Shared single-flight and lost-submit lock for this contract. */
+  submitGuard: OrderSubmitGuard;
+}
+
+/** Lock intent for the exit order of one position. */
+function exitIntent(position: PositionRow) {
+  return {
+    key: instrumentOrderKey(position.exchange, position.symbol),
+    symbol: position.symbol,
+    exchange: position.exchange,
+    action: position.quantity > 0 ? "SELL" as const : "BUY" as const,
+    quantity: Math.abs(position.quantity),
+  };
 }
 
 function squareOffProduct(position: PositionRow): (typeof PRODUCTS)[number] | null {
@@ -471,6 +488,7 @@ function SquareOffDialog({
   getCurrentIdentity,
   onClose,
   onSquaredOff,
+  submitGuard,
 }: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -508,8 +526,8 @@ function SquareOffDialog({
     setLayaNotice(null);
     try {
       // Same place route as the Order Pad: Laya, then SafetySystem on Live
-      // and the sandbox on Practice.
-      await placeOrder({
+      // and the sandbox on Practice. One request per contract at a time.
+      const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
         action: exitAction,
@@ -521,7 +539,8 @@ function SquareOffDialog({
         strategy: "FlintPositions",
         rationale: admissionRationale(note),
         ...(exitOrder.priceBasis ? { priceBasis: exitOrder.priceBasis } : {}),
-      }, mutationIdentity, { exit: true });
+      }, mutationIdentity, { exit: true }));
+      if (!submitted.sent) return;
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
@@ -562,6 +581,7 @@ function SquareOffDialog({
     onClose,
     onSquaredOff,
     note,
+    submitGuard,
   ]);
 
   return (
@@ -610,7 +630,14 @@ function SquareOffDialog({
           </p>
         )}
         <LayaAdmissionNotice notice={layaNotice} />
-        {errorMsg && <OutcomeCopy message={errorMsg} />}
+        {/* Reserved for the unknown line, so the dialog does not grow or jump. */}
+        <div className="min-h-9" data-testid="square-off-outcome-slot">
+          {submitGuard.isUnknown(exitIntent(position).key) ? (
+            <OrderStatusUnknownLine />
+          ) : errorMsg ? (
+            <OutcomeCopy message={errorMsg} />
+          ) : null}
+        </div>
         {!canSubmit && (
           <p className="text-xs text-warning" role="alert">
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
@@ -623,7 +650,7 @@ function SquareOffDialog({
           </Button>
           <Button
             onClick={() => void handleSquareOff()}
-            disabled={isSubmitting || !product || !canSubmit}
+            disabled={isSubmitting || !product || !canSubmit || submitGuard.isLocked(exitIntent(position).key)}
             aria-label={`Confirm square off ${position.symbol}`}
             className="bg-loss-action text-loss-foreground hover:bg-loss-hover active:bg-loss-pressed"
           >
@@ -658,6 +685,8 @@ interface ExitAllDialogProps {
   hasPendingExit: (position: PositionRow) => boolean;
   onOpenChange: (open: boolean) => void;
   onExited: (mutationIdentity: AccountAuthorityIdentity) => void;
+  /** Shared single-flight and lost-submit lock; Practice rows go through it. */
+  submitGuard: OrderSubmitGuard;
 }
 
 function ExitAllDialog({
@@ -671,9 +700,12 @@ function ExitAllDialog({
   hasPendingExit,
   onOpenChange,
   onExited,
+  submitGuard,
 }: ExitAllDialogProps) {
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // A Live exit-all whose reply was lost is not sent again from this dialog.
+  const [liveExitUnknown, setLiveExitUnknown] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rowFailures, setRowFailures] = useState<ExitAllRowFailure[]>([]);
   const [submittedExits, setSubmittedExits] = useState<string[]>([]);
@@ -693,6 +725,7 @@ function ExitAllDialog({
     (next: boolean) => {
       if (!next) {
         setConfirmText("");
+        setLiveExitUnknown(false);
         setErrorMsg(null);
         setRowFailures([]);
         setSubmittedExits([]);
@@ -703,7 +736,7 @@ function ExitAllDialog({
   );
 
   const handleExitAll = useCallback(async () => {
-    if (!confirmed || !isActionAllowed()) return;
+    if (!confirmed || liveExitUnknown || !isActionAllowed()) return;
     const mutationIdentity = runWithMatchingAccountAuthority(
       openingIdentity,
       getCurrentIdentity,
@@ -747,7 +780,7 @@ function ExitAllDialog({
             continue;
           }
           try {
-            await placeOrder({
+            const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
               symbol: position.symbol,
               exchange: position.exchange,
               action: position.quantity > 0 ? "SELL" : "BUY",
@@ -758,7 +791,17 @@ function ExitAllDialog({
               triggerPrice: 0,
               strategy: "FlintPositions",
               ...(exitOrder.priceBasis ? { priceBasis: exitOrder.priceBasis } : {}),
-            }, mutationIdentity, { exit: true });
+            }, mutationIdentity, { exit: true }));
+            if (!submitted.sent) {
+              // An earlier exit for this row is in flight or its outcome is unknown.
+              failures.push({
+                key: `${position.symbol}-${position.exchange}-${position.product}`,
+                symbol: label,
+                notice: null,
+                message: ORDER_STATUS_UNKNOWN,
+              });
+              continue;
+            }
             done.push(label);
           } catch (err) {
             const notice = layaNoticeFromOrderError(err);
@@ -814,6 +857,7 @@ function ExitAllDialog({
     } catch (err) {
       // Mode-guard 403s ("live mode only", PIN unlock) and broker errors are
       // shown verbatim — never a generic failure.
+      if (!practice && presentSubmitError(err).kind === "unknown") setLiveExitUnknown(true);
       setErrorMsg(exitRequestErrorMessage(err));
     } finally {
       setIsSubmitting(false);
@@ -829,6 +873,8 @@ function ExitAllDialog({
     onExited,
     close,
     hasPendingExit,
+    liveExitUnknown,
+    submitGuard,
   ]);
 
   return (
@@ -898,7 +944,7 @@ function ExitAllDialog({
           </Button>
           <Button
             onClick={() => void handleExitAll()}
-            disabled={!confirmed || isSubmitting || !canSubmit}
+            disabled={!confirmed || isSubmitting || !canSubmit || liveExitUnknown}
             aria-label="Confirm exit all positions"
             className="bg-loss-action text-loss-foreground hover:bg-loss-hover active:bg-loss-pressed"
           >
@@ -926,6 +972,8 @@ function PositionsWidget(props: WidgetProps) {
   const { identity: readIdentity, enabled: accountReadsEnabled } = accountReadContext;
   const appMode = readIdentity.mode;
   const isExplore = appMode === "explore";
+  // Shared with the Order Pad and fast paths: a lost exit locks its contract.
+  const submitGuard = useOrderSubmitGuard();
   const {
     data: positionsData,
     dataUpdatedAt,
@@ -1232,7 +1280,7 @@ function PositionsWidget(props: WidgetProps) {
       return;
     }
     try {
-      await placeOrder({
+      const submitted = await submitGuard.submit(exitIntent(position), () => placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
         action: exitAction,
@@ -1242,7 +1290,9 @@ function PositionsWidget(props: WidgetProps) {
         price: exitOrder.price,
         triggerPrice: 0,
         strategy: "FlintPositions",
-      }, identity, { exit: true });
+        ...(exitOrder.priceBasis ? { priceBasis: exitOrder.priceBasis } : {}),
+      }, identity, { exit: true }));
+      if (!submitted.sent) return;
       if (!accountAuthorityMatches(identity, getCurrentReadIdentity())) return;
       const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
@@ -1270,10 +1320,13 @@ function PositionsWidget(props: WidgetProps) {
         ),
       });
     }
-  }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions]);
+  }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions, submitGuard]);
 
   const renderRowActions = useCallback((position: PositionRow) => {
-    const exitPending = pendingExitKeys.has(positionContractKey(position));
+    const exitPending = pendingExitKeys.has(positionContractKey(position))
+      || submitGuard.isLocked(exitIntent(position).key);
+    const exitUnknown = submitGuard.isUnknown(exitIntent(position).key);
+    const pendingTitle = exitUnknown ? ORDER_STATUS_UNKNOWN : exitAlreadyPendingMessage(position.symbol);
     const unexpected = unexpectedKeys.has(positionContractKey(position));
     if (!(canSquareOff || canUseNativePositionVerbs)) {
       // Explore has no book to trade. Practice with a frozen feed omits the hint.
@@ -1292,7 +1345,7 @@ function PositionsWidget(props: WidgetProps) {
               void closeReduced(position);
             }}
             aria-label={`Close ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Close ${position.symbol}`}
+            title={exitPending ? pendingTitle : `Close ${position.symbol}`}
             className="h-5 px-1.5 text-xxs gap-1 text-text-primary hover:bg-surface-hover"
           >
             Close
@@ -1311,7 +1364,7 @@ function PositionsWidget(props: WidgetProps) {
               });
             }}
             aria-label={`Square off ${position.symbol}`}
-            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Square off ${position.symbol}`}
+            title={exitPending ? pendingTitle : `Square off ${position.symbol}`}
             className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
           >
             <SquareX size={10} aria-hidden="true" /> Square off
@@ -1342,6 +1395,7 @@ function PositionsWidget(props: WidgetProps) {
     isExplore,
     pendingExitKeys,
     readIdentity,
+    submitGuard,
     unexpectedKeys,
   ]);
 
@@ -1359,15 +1413,16 @@ function PositionsWidget(props: WidgetProps) {
         pnl: fmtPnl(row.mtm),
         pnlPercent: fmtPnlPct(row.pnlPercent),
         pnlPositive: row.mtm >= 0,
-        actions: row.quantity !== 0 && stopNotFilledKeys.has(contractKeyOf(row)) ? (
+        actions: (submitGuard.isUnknown(exitIntent(row).key) || (row.quantity !== 0 && stopNotFilledKeys.has(contractKeyOf(row)))) ? (
           <span className="inline-flex flex-wrap items-center gap-1">
-            <StopLossNotFilledChip position={row} />
+            {submitGuard.isUnknown(exitIntent(row).key) ? <OrderStatusUnknownLink /> : null}
+            {row.quantity !== 0 && stopNotFilledKeys.has(contractKeyOf(row)) ? <StopLossNotFilledChip position={row} /> : null}
             {renderRowActions(row)}
           </span>
         ) : renderRowActions(row),
       };
     }),
-    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows, stopNotFilledKeys],
+    [cancelPendingExitKeys, highlightedKeys, renderRowActions, rows, stopNotFilledKeys, submitGuard],
   );
 
   const columns = useMemo<ColumnDef<SortedTableFeatures, PositionRow>[]>(
@@ -1379,6 +1434,7 @@ function PositionsWidget(props: WidgetProps) {
           const key = positionContractKey(row.original);
           const exitPending = pendingExitKeys.has(key);
           const unexpected = unexpectedKeys.has(key);
+          const exitUnknown = submitGuard.isUnknown(exitIntent(row.original).key);
           return (
             <span className="inline-flex items-center gap-1">
               <span className="font-mono font-medium">{row.original.symbol}</span>
@@ -1395,6 +1451,7 @@ function PositionsWidget(props: WidgetProps) {
                 <StopLossNotFilledChip position={row.original} />
               ) : null}
               {row.original.restored ? <RestoredFillTag /> : null}
+              {exitUnknown ? <OrderStatusUnknownLink /> : null}
             </span>
           );
         },
@@ -1469,7 +1526,7 @@ function PositionsWidget(props: WidgetProps) {
         cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, stopNotFilledKeys, unexpectedKeys],
+    [cancelPendingExitKeys, pendingExitKeys, renderRowActions, stopNotFilledKeys, unexpectedKeys, submitGuard],
   );
 
   const table = useTable({
@@ -1846,6 +1903,7 @@ function PositionsWidget(props: WidgetProps) {
           getCurrentIdentity={getCurrentReadIdentity}
           onClose={() => setSquareOffIntent(null)}
           onSquaredOff={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
+          submitGuard={submitGuard}
         />
       )}
 
@@ -1864,6 +1922,7 @@ function PositionsWidget(props: WidgetProps) {
             if (!open) setExitAllIntent(null);
           }}
           onExited={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
+          submitGuard={submitGuard}
         />
       )}
     </div>

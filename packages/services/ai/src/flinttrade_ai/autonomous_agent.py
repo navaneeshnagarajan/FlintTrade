@@ -291,6 +291,9 @@ class AgentState:
             dicts) — the input to the post-session reflection step. The
             durable audit record stays with the journal; this list only
             avoids a read-back query over the same fills.
+        outcome_unknown: Symbols with a sent order whose result never came
+            back. The agent sends no further automatic order for them; the
+            operator checks Orders first.
     """
 
     daily_pnl: float = 0.0
@@ -302,6 +305,29 @@ class AgentState:
     last_signals: dict[str, str] = field(default_factory=dict)
     cycle_count: int = 0
     closed_trades: list[dict[str, Any]] = field(default_factory=list)
+    outcome_unknown: set[str] = field(default_factory=set)
+
+
+def _outcome_unknown(decision: Any) -> bool:
+    """True only when the gated executor says the order was sent and lost."""
+    return getattr(decision, "outcome_uncertain", False) is True
+
+
+def _unknown_outcome_result(status: str) -> dict[str, Any]:
+    from flinttrade_core.order_outcome import (  # noqa: PLC0415
+        ORDER_STATUS_UNKNOWN,
+        REASON_RESPONSE_UNCONFIRMED,
+        single_leg_outcomes,
+    )
+
+    return {
+        "status": status,
+        "order_outcome": "unknown",
+        "reason": REASON_RESPONSE_UNCONFIRMED,
+        "retry_safe": False,
+        "leg_outcomes": single_leg_outcomes("unknown"),
+        "message": ORDER_STATUS_UNKNOWN,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -951,6 +977,10 @@ class AutonomousTrader:
             logger.info("Execution blocked for %s: %s", symbol, risk.reason)
             return {"status": "blocked", "reason": risk.reason}
 
+        if symbol in self.state.outcome_unknown:
+            logger.warning("Execution blocked for %s: an earlier order status is unknown", symbol)
+            return _unknown_outcome_result("blocked")
+
         # A configured session clock is the live trader. A new entry then needs
         # the runner session and admission. Exits do not come through here.
         if self._market_session_provider is not None:
@@ -1007,6 +1037,12 @@ class AutonomousTrader:
                 }
 
             decision = await self.order_executor.route_order(order)
+
+            if _outcome_unknown(decision):
+                async with self._state_lock:
+                    self.state.outcome_unknown.add(symbol)
+                logger.warning("Order status unknown for %s %s; it will not be sent again", action, symbol)
+                return _unknown_outcome_result("error")
 
             if getattr(decision, "passed", False):
                 orderid = str(getattr(decision.order_response, "orderid", "") or "")
@@ -1383,9 +1419,24 @@ class AutonomousTrader:
                     )
                     return
 
+                if symbol in self.state.outcome_unknown:
+                    logger.warning(
+                        "SL/TP hit for %s but an earlier order status is unknown — "
+                        "no exit is sent until Orders is checked", symbol,
+                    )
+                    return
+
                 exit_action = "SELL" if action == "BUY" else "BUY"
                 order = self._build_market_order(symbol, exit_action, qty)
                 decision = await self.order_executor.route_order(order)
+                if _outcome_unknown(decision):
+                    async with self._state_lock:
+                        self.state.outcome_unknown.add(symbol)
+                    logger.warning(
+                        "Exit status unknown for %s — position stays tracked and the exit is not sent again",
+                        symbol,
+                    )
+                    return
                 if not getattr(decision, "passed", False):
                     logger.warning(
                         "Square-off refused for %s: %s — position stays tracked",
@@ -1655,10 +1706,24 @@ class AutonomousTrader:
         exited: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         for symbol, details in details_snapshot.items():
             try:
+                if symbol in self.state.outcome_unknown:
+                    logger.error(
+                        "Square-off skipped for %s: an earlier order status is unknown — check Orders",
+                        symbol,
+                    )
+                    continue
                 exit_action = "SELL" if str(details.get("action", "BUY")) == "BUY" else "BUY"
                 qty = int(details.get("quantity", self.config.max_position_size) or 1)
                 order = self._build_market_order(symbol, exit_action, qty)
                 decision = await self.order_executor.route_order(order)
+                if _outcome_unknown(decision):
+                    async with self._state_lock:
+                        self.state.outcome_unknown.add(symbol)
+                    logger.error(
+                        "Square-off status unknown for %s — position stays tracked and the exit is not sent again",
+                        symbol,
+                    )
+                    continue
                 if not getattr(decision, "passed", False):
                     logger.error(
                         "Square-off refused for %s: %s",

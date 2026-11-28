@@ -352,6 +352,7 @@ async def test_rate_limit_is_canonical_and_not_retried(runtime):
     assert (await adapter.route_order(_order())).passed
     result = await adapter.route_order(_order())
     assert not result.passed
+    assert result.outcome_uncertain is False
     assert result.response["http_status"] == 429
     assert len(runtime.sandbox.get_orders()) == 1
 
@@ -385,6 +386,8 @@ async def test_unknown_exception_after_fill_never_replays_order(runtime, monkeyp
     monkeypatch.setattr(order_routes, "place_order", lost_response)
     result = await adapter.route_order(_order())
     assert not result.passed
+    assert result.outcome_uncertain is True
+    assert result.error == "Order status unknown. Check Orders before trying again."
     assert adapter.reconciliation_required
     assert len(runtime.sandbox.get_orders()) == 1
     assert not (await adapter.route_order(_order())).passed

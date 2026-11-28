@@ -157,6 +157,14 @@ function AgentModePanel({ appMode }: { appMode: AppMode }) {
   }
   const startMutation = useMutation({ mutationFn: startAgent, onSuccess, onError });
   const stopMutation = useMutation({ mutationFn: () => stopAgent(true), onSuccess, onError });
+  // One stop request at a time. A double click lands before the disabled state
+  // renders, so the in-flight flag is set synchronously on the first click.
+  const stopInFlight = useRef(false);
+  function requestStop() {
+    if (stopInFlight.current) return;
+    stopInFlight.current = true;
+    stopMutation.mutate(undefined, { onSettled: () => { stopInFlight.current = false; } });
+  }
   const resolveMutation = useMutation({ mutationFn: resolvePracticeAgentRun, onSuccess, onError });
   const pending = startMutation.isPending || stopMutation.isPending || resolveMutation.isPending;
   const canStart = enabledMode && !!snap?.enabled && statusQuery.isSuccess && !statusQuery.isFetching
@@ -299,7 +307,7 @@ function AgentModePanel({ appMode }: { appMode: AppMode }) {
           <span>{isPractice ? "Simulated day P&L" : "Day P&L"} <span className={cn("font-mono", (snap.daily_pnl ?? 0) >= 0 ? "text-profit" : "text-loss")}>{snap.daily_pnl?.toFixed(0) ?? "—"}</span></span>
           <span>Cycles <span className="font-mono">{snap.cycle_count ?? "—"}</span></span>
           <span className="font-mono text-text-muted">{(snap.params?.symbols as string[] | undefined)?.join(", ")}</span>
-          {active && <Button size="sm" variant="outline" onClick={() => stopMutation.mutate()} disabled={pending || state === "stopping"} className="gap-1.5 h-6 text-xxs ml-auto">
+          {active && <Button size="sm" variant="outline" onClick={requestStop} disabled={pending || state === "stopping"} className="gap-1.5 h-6 text-xxs ml-auto">
             {stopMutation.isPending ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Square size={12} aria-hidden="true" />}
             Stop &amp; square off
           </Button>}

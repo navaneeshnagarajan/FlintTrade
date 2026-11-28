@@ -218,10 +218,41 @@ export function deferredResponse() {
   return { promise, release };
 }
 
-export async function mountWidget(page: Page, component: "foreverorders" | "positions" | "scalper", narrowSibling = false): Promise<void> {
-  await page.clock.install({ time: FIXED_TIME });
-  await page.clock.pauseAt(FIXED_TIME);
-  await page.addInitScript(({ widget, sibling }) => {
+export type MountableWidget = "foreverorders" | "orders" | "positions" | "scalper" | "orderladder" | "orderpad" | "quicktrade" | "optionchain";
+
+function widgetTitle(widget: MountableWidget): string {
+  if (widget === "foreverorders") return "Forever (GTT) Orders";
+  if (widget === "scalper") return "Scalper";
+  if (widget === "orders") return "Orders";
+  if (widget === "orderladder") return "DOM / Ladder";
+  if (widget === "orderpad") return "Order Pad";
+  if (widget === "quicktrade") return "Quick Trade";
+  if (widget === "optionchain") return "Option Chain";
+  return "Positions";
+}
+
+function widgetModule(widget: MountableWidget): string {
+  if (widget === "foreverorders") return "/src/widgets/orders/ForeverOrdersWidget.tsx";
+  if (widget === "scalper") return "/src/widgets/trading/Scalper/ScalperWidget.tsx";
+  if (widget === "orders") return "/src/widgets/trading/Orders/OrdersWidget.tsx";
+  if (widget === "orderladder") return "/src/widgets/trading/OrderLadder/OrderLadderWidget.tsx";
+  if (widget === "orderpad") return "/src/widgets/trading/OrderPad/OrderPadWidget.tsx";
+  if (widget === "quicktrade") return "/src/widgets/trading/QuickTrade/QuickTradeWidget.tsx";
+  if (widget === "optionchain") return "/src/widgets/analysis/OptionChain/OptionChainWidget.tsx";
+  return "/src/widgets/trading/Positions/PositionsWidget.tsx";
+}
+
+export async function mountWidget(
+  page: Page,
+  component: MountableWidget,
+  narrowSibling = false,
+  options: { realTime?: boolean; params?: Record<string, unknown> } = {},
+): Promise<void> {
+  if (!options.realTime) {
+    await page.clock.install({ time: FIXED_TIME });
+    await page.clock.pauseAt(FIXED_TIME);
+  }
+  await page.addInitScript(({ widget, sibling, params, title }) => {
     sessionStorage.setItem("flinttrade:dailyWelcomeDismissed", "true");
     localStorage.setItem("flinttrade:tourComplete", "true");
     const initialLayout: IJsonModel = {
@@ -229,7 +260,8 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
         borders: [], layout: { type: "row", weight: 100, children: [{
           type: "tabset", weight: sibling ? 60 : 100, children: [{
             type: "tab", id: "synthetic-order-flow-widget", component: widget,
-            name: widget === "foreverorders" ? "Forever (GTT) Orders" : widget === "scalper" ? "Scalper" : "Positions",
+            name: title,
+            ...(params ? { config: params } : {}),
           }],
         }, ...(sibling ? [{
           type: "tabset", weight: 40, children: [{ type: "tab", id: "synthetic-narrow-sibling", component: widget, name: "Narrow Positions" }],
@@ -252,7 +284,7 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     window.addEventListener("flinttrade:notify", (event) => {
       observedWindow.__presentationNotifications?.push((event as CustomEvent<unknown>).detail);
     });
-  }, { widget: component, sibling: narrowSibling });
+  }, { widget: component, sibling: narrowSibling, params: options.params ?? null, title: widgetTitle(component) });
 
   await page.goto("/welcome");
   await page.evaluate(async ({ token, account, widget }) => {
@@ -274,21 +306,26 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     brokers.useBrokerStore.getState().setActiveAccount(`native:dhan:${account}`);
     await Promise.all([
       importModule("/src/routes/UnifiedAppRoute.tsx"),
-      importModule(widget === "foreverorders"
-        ? "/src/widgets/orders/ForeverOrdersWidget.tsx"
-        : widget === "scalper"
-          ? "/src/widgets/trading/Scalper/ScalperWidget.tsx"
-          : "/src/widgets/trading/Positions/PositionsWidget.tsx"),
+      importModule(widget),
     ]);
     window.history.pushState(null, "", "/trade");
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: component });
+  }, { token: LIVE_TOKEN, account: ACCOUNT_A, widget: widgetModule(component) });
   await expect(page).toHaveURL(/\/terminal$/);
-  const initialControl = page.getByRole("button", {
-    name: component === "foreverorders" ? "Refresh forever orders" : "Table", exact: true,
-  }).first();
+  const initialControl = component === "orderladder"
+    ? page.getByLabel("Price ladder")
+    : component === "orderpad"
+      ? page.getByRole("button", { name: /Buy|Place BUY/i }).first()
+      : component === "quicktrade"
+        ? page.getByRole("button", { name: /^Buy .* of / }).first()
+        : component === "optionchain"
+          ? page.getByRole("button", { name: /Basket/ }).first()
+          : page.getByRole("button", {
+          name: component === "foreverorders" ? "Refresh forever orders" : component === "orders" ? "Refresh orders" : "Table", exact: true,
+        }).first();
   if (component === "scalper") {
-    await tickUntil(page, page.getByRole("button", { name: /Buy CE/ }).first());
+    if (options.realTime) await expect(page.getByRole("button", { name: /Buy CE/ }).first()).toBeVisible({ timeout: 15_000 });
+    else await tickUntil(page, page.getByRole("button", { name: /Buy CE/ }).first());
   } else if (component === "foreverorders") {
     // The explicit companion must finish its first decoded book before the
     // caller tests unavailable detail. Its generic loading warning is not a
@@ -316,6 +353,8 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     await test.info().attach("docked-companion-mount", {
       body: JSON.stringify({ advanced, queries }), contentType: "application/json",
     });
+  } else if (options.realTime) {
+    await expect(initialControl).toBeVisible({ timeout: 15_000 });
   } else await tickUntil(page, initialControl);
   if (narrowSibling) {
     // Establish the original narrow-card condition with the actual public
@@ -330,6 +369,56 @@ export async function mountWidget(page: Page, component: "foreverorders" | "posi
     await page.mouse.up();
     await page.clock.runFor(50);
   }
+}
+
+
+/** Seed a live LTP so the Ladder has a centre price without a websocket tick. */
+export async function seedInstrumentTick(page: Page, exchange: string, symbol: string, ltp: number): Promise<void> {
+  await page.evaluate(async ({ exchange, symbol, ltp }) => {
+    const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+    const { getWsService } = await importModule("/src/services/websocket.ts") as {
+      getWsService: () => { publishTick: (tick: { symbol: string; exchange: string; ltp: number }) => void };
+    };
+    getWsService().publishTick({ symbol, exchange, ltp });
+  }, { exchange, symbol, ltp });
+  try {
+    await page.clock.runFor(100);
+  } catch {
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  }
+}
+
+/** Record a lost submit in the shared lock store so the unknown line can appear. */
+export async function recordLostSubmit(
+  page: Page,
+  intent: { key: string; symbol: string; exchange: string; action: "BUY" | "SELL"; quantity?: number },
+  scope = `live:${BROKER}:${ACCOUNT_A}`,
+): Promise<void> {
+  await page.evaluate(async ({ intent, scope }) => {
+    const importModule = new Function("path", "return import(path)") as (path: string) => Promise<Record<string, unknown>>;
+    const { submitOrderOnce } = await importModule("/src/lib/orderSubmitGuard.ts") as {
+      submitOrderOnce: (
+        scope: string,
+        intent: unknown,
+        send: () => Promise<unknown>,
+      ) => Promise<unknown>;
+    };
+    await submitOrderOnce(scope, intent, () => Promise.reject(new TypeError("Failed to fetch"))).catch(() => undefined);
+  }, { intent, scope });
+}
+
+/** Names of every element Tab reaches, so a Retry cannot hide off-screen. */
+export async function tabStopNames(page: Page, stops = 60): Promise<string[]> {
+  const names: string[] = [];
+  for (let i = 0; i < stops; i += 1) {
+    await page.keyboard.press("Tab");
+    names.push(await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return "";
+      return [el.getAttribute("aria-label"), el.getAttribute("title"), el.textContent].filter(Boolean).join(" ").trim();
+    }));
+  }
+  return names;
 }
 
 export async function tickUntil(page: Page, locator: Locator): Promise<void> {

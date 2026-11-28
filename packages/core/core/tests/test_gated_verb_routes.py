@@ -797,6 +797,7 @@ def test_forever_cancel_happy_path(*, backend_lease_factory) -> None:
     assert kw["payload"] == {"_op": "cancel_forever", "order_id": "GTT-9"}
     body = resp.get_json()
     assert body["order_outcome"] == "cancel_requested"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
     assert body["reason"] == "awaiting_confirmation"
     assert body["message"] == "Cancellation requested"
     assert body["retry_safe"] is False
@@ -816,6 +817,7 @@ def test_synthetic_dhan_gtt_cancel_confirmed_only_when_status_says_cancelled(*, 
     body = resp.get_json()
     assert resp.status_code == 200
     assert body["order_outcome"] == "cancelled"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
     assert body["reason"] == "status_confirmed"
     assert body["message"] == "Order cancelled"
     assert body["retry_safe"] is False
@@ -834,6 +836,7 @@ def test_synthetic_dhan_gtt_broker_reject_stays_a_rejection(*, backend_lease_fac
     body = resp.get_json()
     assert resp.status_code == 200
     assert body["order_outcome"] == "rejected"
+    assert body["leg_outcomes"] == {"entry": "absent"}
     assert body["reason"] == "broker_rejected"
     assert body["message"] == "GTT rejected by broker"
     assert body["retry_safe"] is False
@@ -855,6 +858,7 @@ def test_synthetic_dhan_gtt_cancel_timeout_is_unknown(*, backend_lease_factory) 
     body = resp.get_json()
     assert resp.status_code == 500
     assert body["order_outcome"] == "unknown"
+    assert body["leg_outcomes"] == {"entry": "unknown"}
     assert body["reason"] == "response_unconfirmed"
     assert body["retry_safe"] is False
     assert body["dispatch_outcome"] == "unknown_after_dispatch"
@@ -880,6 +884,7 @@ def test_synthetic_dhan_gtt_modify_timeout_is_unknown(*, backend_lease_factory) 
     body = resp.get_json()
     assert resp.status_code == 500
     assert body["order_outcome"] == "unknown"
+    assert body["leg_outcomes"] == {"entry": "unknown"}
     assert body["reason"] == "response_unconfirmed"
     assert body["retry_safe"] is False
     assert body["dispatch_outcome"] == "unknown_after_dispatch"
@@ -1218,6 +1223,41 @@ def test_super_cancel_with_leg_query(*, backend_lease_factory) -> None:
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "cancel_super_order"
     assert kw["payload"]["leg"] == "TARGET_LEG"  # normalised + signed in the payload
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/orders/super/SUP-1?broker=dhan",
+        "/api/v1/orders/triggers/AL-1?broker=dhan",
+        "/api/v1/orders/smart/DRV-1?segment=DERIVATIVE&broker=indmoney",
+    ],
+)
+def test_cancel_acknowledgement_is_a_cancellation_request(path, *, backend_lease_factory) -> None:
+    """A broker accepting a cancel is not the order being cancelled."""
+    router = _gated_router(result={"status": "PENDING", "orderId": "SUP-1"})
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    resp = client.delete(path, headers=_live_headers())
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["order_outcome"] == "cancel_requested"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
+    assert body["reason"] == "awaiting_confirmation"
+    assert body["message"] == "Cancellation requested"
+    assert body["retry_safe"] is False
+
+
+def test_super_cancel_confirmed_status_is_cancelled(*, backend_lease_factory) -> None:
+    router = _gated_router(result={"status": "CANCELLED", "orderId": "SUP-1"})
+    client = _app(
+        broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory
+    ).test_client()
+    body = client.delete("/api/v1/orders/super/SUP-1?broker=dhan", headers=_live_headers()).get_json()
+    assert body["order_outcome"] == "cancelled"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
+    assert body["message"] == "Order cancelled"
 
 
 def test_super_cancel_without_leg_omits_field(*, backend_lease_factory) -> None:

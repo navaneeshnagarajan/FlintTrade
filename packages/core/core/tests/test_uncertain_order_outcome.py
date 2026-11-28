@@ -84,6 +84,7 @@ def test_practice_place_timeout_is_unknown_and_not_a_rejection(practice_client):
     assert response.status_code == 500
     assert body["status"] == "error"
     assert body["order_outcome"] == "unknown"
+    assert body["leg_outcomes"] == {"entry": "unknown"}
     assert body["reason"] == "response_unconfirmed"
     assert body["message"] == _UNKNOWN
     assert body["retry_safe"] is False
@@ -108,6 +109,7 @@ def test_practice_place_rejection_stays_a_rejection(practice_client):
     assert body["status"] == "error"
     assert body["message"] == "Practice order rejected"
     assert body["order_outcome"] == "rejected"
+    assert body["leg_outcomes"] == {"entry": "absent"}
     assert body["reason"] == "broker_rejected"
 
 
@@ -129,6 +131,7 @@ def test_acknowledged_practice_cancel_is_not_cancelled(practice_client):
     assert response.status_code == 200
     assert body["status"] == "CANCEL_PENDING"
     assert body["order_outcome"] == "cancel_requested"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
     assert body["reason"] == "awaiting_confirmation"
     assert body["message"] == _CANCEL_REQUESTED
     assert body["message"] != _CANCELLED
@@ -152,6 +155,7 @@ def test_confirmed_practice_cancel_says_order_cancelled(practice_client):
     assert response.status_code == 200
     assert body["status"] == "CANCELLED"
     assert body["order_outcome"] == "cancelled"
+    assert body["leg_outcomes"] == {"entry": "confirmed"}
     assert body["reason"] == "status_confirmed"
     assert body["message"] == _CANCELLED
 
@@ -163,6 +167,7 @@ async def test_practice_agent_dropped_dispatch_is_unknown(runtime, monkeypatch):
 
     assert result.passed is False
     assert result.response["order_outcome"] == "unknown"
+    assert result.response["leg_outcomes"] == {"entry": "unknown"}
     assert result.response["reason"] == "response_unconfirmed"
     assert result.response["message"] == _UNKNOWN
     assert result.response["retry_safe"] is False
@@ -175,23 +180,28 @@ def test_mcp_order_intent_is_a_refusal_and_a_dropped_tool_result_is_unknown():
     refused = bridge.execute("Buy RELIANCE 1 share")
     assert refused.error == "Order-capable tools are unavailable"
     assert refused.result["order_outcome"] == "rejected"
+    assert refused.result["leg_outcomes"] == {"entry": "absent"}
     assert refused.result["reason"] == "tool_unavailable"
     assert refused.result["retry_safe"] is False
 
     described = bridge.describe_order_tool_outcome(None, dropped=True)
     assert described["order_outcome"] == "unknown"
+    assert described["leg_outcomes"] == {"entry": "unknown"}
     assert described["reason"] == "response_unconfirmed"
     assert described["message"] == _UNKNOWN
     assert described["retry_safe"] is False
 
     acknowledged = bridge.describe_order_tool_outcome({"status": "CANCEL_PENDING", "order_id": "SB-1"})
     assert acknowledged["order_outcome"] == "cancel_requested"
+    assert acknowledged["leg_outcomes"] == {"entry": "confirmed"}
     assert acknowledged["message"] == _CANCEL_REQUESTED
 
     confirmed = bridge.describe_order_tool_outcome({"status": "CANCELLED", "order_id": "SB-1"})
     assert confirmed["message"] == _CANCELLED
     assert confirmed["order_outcome"] == "cancelled"
+    assert confirmed["leg_outcomes"] == {"entry": "confirmed"}
 
     rejected = bridge.describe_order_tool_outcome({"status": "REJECTED", "message": "Practice order rejected"})
     assert rejected["order_outcome"] == "rejected"
+    assert rejected["leg_outcomes"] == {"entry": "absent"}
     assert rejected["message"] == "Practice order rejected"

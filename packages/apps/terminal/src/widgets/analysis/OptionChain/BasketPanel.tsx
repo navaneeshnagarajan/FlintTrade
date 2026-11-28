@@ -6,12 +6,17 @@
 import { ShoppingBasket, X } from "lucide-react";
 import type { BasketItem, OrderParams } from "./types";
 import { NUM0, fmtLtp } from "./formatters";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 
 interface BasketPanelProps {
   basket: BasketItem[];
   onRemove: (item: BasketItem) => void;
   onClear: () => void;
   onOrder: (params: OrderParams) => void;
+  /** A place request is in flight, or a lost one is not settled yet. */
+  locked?: boolean;
+  /** A lost place request in this basket is not settled yet. */
+  statusUnknown?: boolean;
 }
 
 export default function BasketPanel({
@@ -19,6 +24,8 @@ export default function BasketPanel({
   onRemove,
   onClear,
   onOrder,
+  locked = false,
+  statusUnknown = false,
 }: BasketPanelProps) {
   return (
     <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
@@ -70,6 +77,7 @@ export default function BasketPanel({
 
           <div className="flex gap-1.5 pt-1 border-t border-border-default">
             <button
+              disabled={locked}
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
@@ -88,6 +96,7 @@ export default function BasketPanel({
               Buy All
             </button>
             <button
+              disabled={locked}
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
@@ -105,6 +114,10 @@ export default function BasketPanel({
             >
               Sell All
             </button>
+          </div>
+          {/* Reserved, so Buy All and the chain below never move when the line appears. */}
+          <div data-testid="basket-status-slot" className="min-h-9 pt-1">
+            {statusUnknown ? <OrderStatusUnknownLine /> : null}
           </div>
         </>
       )}

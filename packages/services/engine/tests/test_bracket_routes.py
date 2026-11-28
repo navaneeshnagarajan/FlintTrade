@@ -80,6 +80,11 @@ def _make_service(success: bool = True, bracket_id: str = "br-001") -> MagicMock
     result.message = "OK" if success else "Rejected"
     result.error = "" if success else "validation_error"
     result.bracket = bracket if success else None
+    result.leg_outcomes = (
+        {"entry": "confirmed", "stop_loss": "confirmed"} if success
+        else {"entry": "absent", "stop_loss": "absent"}
+    )
+    result.outcome_unknown = False
     svc.place_bracket.return_value = result
 
     svc.get_active_brackets.return_value = [bracket] if success else []
@@ -435,6 +440,41 @@ class TestPlaceBracket:
         assert data["data"]["status"] == "partial"
         assert data["data"]["bracket_id"] == "br-p1"
 
+    def test_place_reports_each_leg_outcome(self, client) -> None:
+        resp = client.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        assert resp.status_code == 201
+        assert resp.get_json()["leg_outcomes"] == {"entry": "confirmed", "stop_loss": "confirmed"}
+
+    def test_a_refused_bracket_reports_absent_legs(self) -> None:
+        with _make_app(_make_service(success=False)).test_client() as c:
+            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        assert resp.status_code == 422
+        assert resp.get_json()["leg_outcomes"] == {"entry": "absent", "stop_loss": "absent"}
+        assert "order_outcome" not in resp.get_json()
+
+    def test_a_lost_leg_is_order_outcome_unknown_not_a_refusal(self) -> None:
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+        svc = _make_service(success=False)
+        result = svc.place_bracket.return_value
+        result.message = ORDER_STATUS_UNKNOWN
+        result.error = "Order dispatch failed"
+        result.leg_outcomes = {"entry": "confirmed", "stop_loss": "unknown"}
+        result.outcome_unknown = True
+        partial = MagicMock()
+        partial.to_dict.return_value = {"bracket_id": "br-p1", "status": "partial"}
+        result.bracket = partial
+        with _make_app(svc).test_client() as c:
+            resp = c.post("/api/v1/orders/bracket", json=_BRACKET_BODY)
+        body = resp.get_json()
+        assert resp.status_code == 502
+        assert body["order_outcome"] == "unknown"
+        assert body["retry_safe"] is False
+        assert body["message"] == ORDER_STATUS_UNKNOWN
+        assert body["leg_outcomes"] == {"entry": "confirmed", "stop_loss": "unknown"}
+        assert body["data"]["bracket_id"] == "br-p1"
+        svc.place_bracket.assert_called_once()
+
     def test_no_service_returns_503(self, client_no_service) -> None:
         """Missing BRACKET_SERVICE returns HTTP 503.
 
@@ -695,6 +735,59 @@ class TestCancelBracket:
             "The MARKET entry position (if filled) remains open — square it off manually."
         ]
         assert "remains open" in body["message"]
+
+    def test_cancel_acknowledgement_is_only_a_cancellation_request(self, client) -> None:
+        """A swept leg cancel is a broker acknowledgement, not a confirmed cancel.
+
+        Args:
+            client: Flask test client.
+        """
+        resp = client.delete("/api/v1/orders/bracket/br-001")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["reason"] == "awaiting_confirmation"
+
+        assert body["retry_safe"] is False
+        assert body["message"] == "Cancellation requested"
+        assert "Order cancelled" not in body["message"]
+        assert "cancelled" not in body["message"].lower()
+
+    @pytest.mark.parametrize(
+        ("sl_order_id", "target_order_id", "stop_loss", "target"),
+        [("SL-1", "TG-1", "confirmed", "confirmed"), ("SL-1", None, "confirmed", "absent"), (None, None, "absent", "absent")],
+    )
+    def test_cancel_reports_each_bracket_leg_separately(
+        self, service, sl_order_id, target_order_id, stop_loss, target,
+    ) -> None:
+        """A leg that was never placed is absent; a placed leg is confirmed.
+
+        Args:
+            service: Mock service backing the client.
+            sl_order_id: Stop-loss leg order id, or None.
+            target_order_id: Target leg order id, or None.
+            stop_loss: Expected stop-loss leg outcome.
+            target: Expected target leg outcome.
+        """
+        service.get_bracket.return_value.sl_order_id = sl_order_id
+        service.get_bracket.return_value.target_order_id = target_order_id
+        with _make_app(service).test_client() as client:
+            body = client.delete("/api/v1/orders/bracket/br-001").get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["leg_outcomes"] == {"entry": "confirmed", "target": target, "stop_loss": stop_loss}
+
+    def test_cancel_request_keeps_sweep_warnings_after_the_request_copy(self, service) -> None:
+        """Warnings follow the shared request sentence instead of a cancel claim.
+
+        Args:
+            service: Mock service backing the client.
+        """
+        service.get_bracket.return_value.cancel_warnings = ["The entry position remains open."]
+        with _make_app(service).test_client() as client:
+            resp = client.delete("/api/v1/orders/bracket/br-001")
+        body = resp.get_json()
+        assert body["order_outcome"] == "cancel_requested"
+        assert body["message"] == "Cancellation requested — The entry position remains open."
 
     def test_cancel_nonexistent_bracket_returns_404(self) -> None:
         """Cancel of a non-existent bracket returns HTTP 404."""

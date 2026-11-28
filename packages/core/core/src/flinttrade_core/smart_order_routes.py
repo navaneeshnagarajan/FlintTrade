@@ -49,6 +49,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from .order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED, single_leg_outcomes
 from .rate_limiter import rate_limit
 
 logger = logging.getLogger("flinttrade.core.smart_order_routes")
@@ -115,10 +116,20 @@ class _GatedOrderResponse:
 class _GatedDecision:
     """Decision shim matching what SmartOrderRouter reads from its base router."""
 
-    def __init__(self, passed: bool, order_response: _GatedOrderResponse | None = None, error: str = "") -> None:
+    def __init__(
+        self,
+        passed: bool,
+        order_response: _GatedOrderResponse | None = None,
+        error: str = "",
+        *,
+        outcome_uncertain: bool = False,
+    ) -> None:
         self.passed = passed
         self.order_response = order_response
         self.error = error
+        # True once the adapter was invoked and no result came back. The
+        # broker may hold the order, so a caller must not place it again.
+        self.outcome_uncertain = outcome_uncertain
 
 
 class GatedChildExecutor:
@@ -184,7 +195,9 @@ class GatedChildExecutor:
         Fails CLOSED per child: any safety block, gate refusal, or dispatch
         error returns a failed decision for THIS child without raising, so the
         smart router records it honestly and continues (or stops) per its own
-        logic. Never bypasses the gate. The one exception is the pre-dispatch
+        logic. An error after the adapter was invoked is not a refusal: the
+        decision carries ``outcome_uncertain`` and the shared unknown-status
+        sentence, and the caller must not place that child again. Never bypasses the gate. The one exception is the pre-dispatch
         check, which raises ``SmartRouteAbort`` to stop the whole route.
 
         Args:
@@ -253,6 +266,7 @@ class GatedChildExecutor:
                 reason = self._pre_dispatch_check()
                 if reason:
                     raise SmartRouteAbort(reason)
+            invoked = threading.Event()
             try:
                 router = self._router_provider() if self._router_provider is not None else self._router
                 if router is None:
@@ -270,6 +284,7 @@ class GatedChildExecutor:
                     order=order,
                     safety_ctx=safety_ctx,
                     hint=RoutingHint(adapter_id=self._adapter_id, account_id=self._account_id),
+                    on_adapter_invoke=invoked.set,
                 )
                 lease.acknowledge(reservation, result)
             except Exception as exc:
@@ -280,6 +295,8 @@ class GatedChildExecutor:
                     getattr(order, "symbol", "?"),
                     exc,
                 )
+                if invoked.is_set():
+                    return _GatedDecision(False, error=ORDER_STATUS_UNKNOWN, outcome_uncertain=True)
                 if exc.__class__.__name__ == "SafetyBypassError":
                     return _GatedDecision(False, error="verification failed")
                 return _GatedDecision(False, error="dispatch failed")
@@ -377,7 +394,7 @@ def _snapshot(job: _SmartJob) -> dict[str, Any]:
         filled = result.filled_quantity
         avg_slippage = result.average_slippage_bps
         completed = result.completed
-    return {
+    snapshot: dict[str, Any] = {
         "job_id": job.job_id,
         "created_at": job.created_at,
         "status": job.status,
@@ -395,6 +412,14 @@ def _snapshot(job: _SmartJob) -> dict[str, Any]:
         "completed": completed,
         "child_orders": children,
     }
+    if any(child["status"] == "unknown" for child in children):
+        # A child was sent and its result is not known. The job response says
+        # so in the shared outcome fields, and nothing here resends it.
+        snapshot.update(
+            order_outcome="unknown", reason=REASON_RESPONSE_UNCONFIRMED, retry_safe=False,
+            leg_outcomes=single_leg_outcomes("unknown"),
+        )
+    return snapshot
 
 
 def _reset_jobs_for_tests() -> None:

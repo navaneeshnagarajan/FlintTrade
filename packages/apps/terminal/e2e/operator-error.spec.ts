@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { LIVE_TOKEN, assertRequest, captureEvidence, deferredResponse, expect, notifications, registerRead, test, tickUntil } from "./order-flow-fixtures";
 import { accountSnapshot, selectIndstocksScope } from "./indstocks-disclosure-fixtures";
 import { ERROR_A, ERROR_B, ERROR_BODY, ERROR_SCOPE, ERROR_WRITE, assertPainted, errorPad, errorPath, errorRaw, mountErrorPad, registerErrorReads } from "./operator-error-fixtures";
@@ -42,12 +43,28 @@ test("Native title geometry control / physical scrollbar viewport", async ({ pag
 
 const unknownCopy = "Order status unknown. Check Orders before trying again.";
 const refusedCopy = "Order refused before dispatch. No order was sent. No automatic retry.";
+
+/** Pad outcome text without the Open Orders control, which is not in the notification body. */
+async function padOutcomeText(line: Locator): Promise<string> {
+  return line.evaluate((node) => {
+    const clone = node.cloneNode(true) as HTMLElement;
+    for (const button of Array.from(clone.querySelectorAll("button"))) button.remove();
+    return (clone.innerText ?? "").trim();
+  });
+}
+
+/** The unknown line keeps the approved sentence and the Open Orders control. */
+async function expectUnknownPadLine(line: Locator, copy = unknownCopy): Promise<void> {
+  await expect(line.getByRole("button", { name: "Open Orders" })).toBeVisible();
+  expect((await padOutcomeText(line)).replace(/\s+/g, " ").trim()).toBe(copy);
+}
+
 const fixtures: Array<{ name: string; status: number; raw?: unknown; body?: string; refused?: boolean; native?: boolean }> = [
   { name: "literal native reason is an observation, not a completed fill", status: 500, raw: errorRaw(), native: true },
   { name: "matching completed pre-dispatch refusal retains bounded native reason and code", status: 400, raw: { ...errorRaw("refused_before_dispatch"), message: "Unsupported protection intent", broker_message: "Protection is unavailable", broker_code: "UNSUPPORTED" }, refused: true, native: true },
   { name: "missing body on failed response remains unknown", status: 500, body: "upstream connection closed" },
   { name: "unstructured optimistic 5xx cannot become Not placed or Retry", status: 500, raw: { status: "error", message: "Not placed. Try again.", code: "gtt_unsupported" } },
-  { name: "contradictory retry-safe true and unsupported code remain unknown", status: 400, raw: { ...errorRaw("refused_before_dispatch"), retry_safe: true, code: "gtt_unsupported", message: "Not placed" } },
+  { name: "unsupported code on an unknown dispatch remains unknown", status: 400, raw: { ...errorRaw(), code: "gtt_unsupported", message: "Not placed" } },
   { name: "mismatched affected account cannot retarget origin", status: 400, raw: { ...errorRaw("refused_before_dispatch"), affected_item: { ...errorRaw().affected_item, account_id: ERROR_B } } },
   { name: "hostile oversized fields and raw response remain absent", status: 500, raw: { ...errorRaw(), broker_code: "SECRET".repeat(20), broker_message: "SECRET".repeat(100), raw_response: { token: "RAW_SECRET" }, exception: "EXCEPTION_SECRET" } },
   { name: "native 64 and 256 field limits remain literal in a narrow panel", status: 500, raw: { ...errorRaw(), broker_code: "C".repeat(64), broker_message: "R".repeat(256) }, native: true },
@@ -80,14 +97,15 @@ for (const fixture of fixtures) test.describe(fixture.name, () => {
         await expect(alert).toContainText(`Broker reason (observation): ${raw.broker_message}.`); await expect(alert).toContainText(`Broker code: ${raw.broker_code}.`);
       }
     } else {
-      await expect(alert).toHaveText(unknownCopy);
+      await expectUnknownPadLine(alert);
       await expect(alert).not.toContainText(/Not placed|No order was sent|Origin:|Broker reason|Broker code|Order is completed/);
     }
     await assertPainted(alert, info, "pad-error"); await captureEvidence(page, info, "normal-pad-error-visible");
-    const events = await notifications(page); expect(events).toEqual([expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: fixture.refused ? "Order refused: BUY INFY" : "Order status unknown: BUY INFY", body: await alert.innerText() })]);
+    const outcomeText = await padOutcomeText(alert);
+    const events = await notifications(page); expect(events).toEqual([expect.objectContaining({ accountScopeKey: ERROR_SCOPE, skipAccountRefresh: true, title: fixture.refused ? "Order refused: BUY INFY" : "Order status unknown: BUY INFY", body: outcomeText })]);
     await page.getByRole("button", { name: /^Notifications —/ }).click(); await page.clock.runFor(700);
     const centre = page.getByRole("dialog", { name: "Notification Centre" }); await expect(centre).toBeVisible();
-    const article = centre.getByRole("article").filter({ hasText: copy }); await expect(article).toHaveCount(1); await expect(article).toContainText(await alert.innerText());
+    const article = centre.getByRole("article").filter({ hasText: copy }); await expect(article).toHaveCount(1); await expect(article).toContainText(outcomeText);
     await assertPainted(article, info, "central-error"); await captureEvidence(page, info, "normal-central-error-visible");
     await expect(centre.getByText("Back to terminal", { exact: true })).toHaveCount(0);
     expect(paths.map((path) => syntheticApi.callCount("GET", path))).toEqual(reads);
@@ -164,7 +182,8 @@ for (const viewport of [
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished(); expect(response.status()).toBe(fixture.status); expect(await response.json()).toEqual(fixture.raw);
     const alert = errorPad(page).getByRole(fixture.refused ? "alert" : "status"); await tickUntil(page, alert);
-    await expect(alert).toHaveText(fixture.expected);
+    if (fixture.refused) await expect(alert).toHaveText(fixture.expected);
+    else await expectUnknownPadLine(alert, fixture.expected);
     if (fixture.refused) await expect(alert).toContainText("Broker code: 1021.");
     else await expect(alert).not.toContainText(/Broker code|Origin:/);
     await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Try again in a few|Position flat|ACK/);
@@ -227,7 +246,8 @@ for (const viewport of [
     await errorPad(page).getByRole("button", { name: "Place BUY Order", exact: true }).click();
     const response = await arrived; await response.finished(); expect(response.status()).toBe(status); expect(await response.json()).toEqual(raw);
     const alert = errorPad(page).getByRole(fixture.title === "Order failed" ? "alert" : "status"); await tickUntil(page, alert);
-    await expect(alert).toHaveText(expected);
+    if (fixture.title === "Order failed") await expect(alert).toHaveText(expected);
+    else await expectUnknownPadLine(alert, expected);
     await expect(alert).not.toContainText(/Order filled|Position closed|Order placed|Not placed|Try again in a few|Position flat|ACK/);
     if (status === 500) await expect(alert).not.toContainText("No order was sent");
     await expect(errorPad(page).getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);

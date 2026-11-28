@@ -36,6 +36,11 @@ vi.mock("@/stores/modeStore", () => ({
     selector({ mode: "practice" }),
 }));
 
+// The shared submit lock polls the order book only while a lost submit is unsettled.
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => ({ data: [], isFetching: false, isError: false, dataUpdatedAt: 0 }),
+}));
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
@@ -49,12 +54,14 @@ import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import QuickTradeWidget from "../QuickTradeWidget";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 
 function renderQuickTrade(params: Record<string, unknown> = {}) {
   return render(<QuickTradeWidget {...makeWidgetPanelProps({ params })} />);
 }
 
 beforeEach(() => {
+  clearPendingOrderOutcomes();
   useOperatorSignalStore.setState({ decisionStatus: "down" });
   mockPlaceOrder.mockReset();
   mockPlaceOrder.mockResolvedValue({ orderId: "QT001" });
@@ -335,6 +342,28 @@ describe("QuickTradeWidget", () => {
       expect(screen.getByRole("status")).toBeTruthy();
       expect(screen.getByText(/Connection refused/i)).toBeTruthy();
     });
+  });
+
+  it.each([
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["a hang that ends in a timeout", () => new OrderApiError("Request timed out", 408, null)],
+    ["an HTTP 500 after the broker accepted it", () => new OrderApiError("Internal Server Error", 500, null)],
+  ])("locks Buy and Sell beside the unknown line after a submit lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValueOnce(lost());
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    const buy = screen.getByRole("button", { name: /buy 1 lot /i });
+    fireEvent.click(buy);
+    fireEvent.click(buy);
+
+    expect(await screen.findByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lot /i }));
+    await act(async () => {});
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
   it("shows Laya denied under Buy and Sell and leaves both off", async () => {

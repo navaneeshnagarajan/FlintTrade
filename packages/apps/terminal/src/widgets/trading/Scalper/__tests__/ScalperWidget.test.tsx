@@ -28,7 +28,8 @@ vi.mock("@/lib/instrumentLots", async () => {
     scalperLotLabel: (underlying: string) => actual.scalperLotLabel(underlying, revision.rows, "2026-09-01"),
   };
 });
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { createStore, Provider } from "jotai";
@@ -37,6 +38,7 @@ import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channel
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
 import { LOT_SIZE_MASTER_HINT } from "../types";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,7 @@ const mockTicks = vi.hoisted(() => ({
 }));
 
 const mockGetMultiQuotes = vi.hoisted(() => vi.fn());
+const mockGetOrderbook = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
@@ -68,6 +71,7 @@ vi.mock("@/services/api", () => ({
   getQuotes: mockGetQuotes,
   getSymbol: mockGetSymbol,
   getMultiQuotes: mockGetMultiQuotes,
+  getOrderbook: mockGetOrderbook,
   searchSymbol: vi.fn().mockResolvedValue([]),
   normaliseMultiQuotes: () => [],
 }));
@@ -133,6 +137,18 @@ import ScalperWidget from "../ScalperWidget";
 
 const defaultProps = makeWidgetPanelProps();
 
+/** The order-submit guard reads the order book through React Query. */
+function render(ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return {
+    client,
+    ...rtlRender(ui, {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+      ...options,
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -140,6 +156,8 @@ const defaultProps = makeWidgetPanelProps();
 describe("ScalperWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPendingOrderOutcomes();
+    mockGetOrderbook.mockResolvedValue([]);
     mockTicks.current = {};
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
       selector({ mode: "live" }),
@@ -683,7 +701,11 @@ describe("ScalperWidget", () => {
         data: { bracket_id: "brk-77", symbol: "NIFTY24APR24000CE", action: "BUY", quantity: 75, status: "partial" },
       }),
     );
-    mockCancelBracket.mockResolvedValue({ message: "Bracket cancelled", warnings: [] });
+    mockCancelBracket.mockResolvedValue({
+      message: "Cancellation requested",
+      warnings: [],
+      order_outcome: "cancel_requested",
+    });
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");
 
@@ -699,7 +721,191 @@ describe("ScalperWidget", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel bracket" }));
     await waitFor(() => expect(mockCancelBracket).toHaveBeenCalledWith("brk-77"));
-    await waitFor(() => expect(screen.queryByText("Position unprotected")).not.toBeInTheDocument());
+    // The broker acknowledged the leg cancels. That is a request, not a cancel:
+    // the banner stays, and the cancel is not offered again.
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+    expect(screen.getByText("Position unprotected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel bracket" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Bracket cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(mockCancelBracket).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a lost bracket cancel reply as a cancellation request", async () => {
+    mockPlaceBracketOrder.mockRejectedValue(
+      Object.assign(new Error("Entry leg placed but the protective exit leg failed"), {
+        code: "",
+        data: { bracket_id: "brk-78", symbol: "NIFTY24APR24000CE", action: "BUY", quantity: 75, status: "partial" },
+      }),
+    );
+    mockCancelBracket.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+
+    setLimit("185.5");
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    await buyCeWithConfirm();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel bracket" }));
+    expect(await screen.findByText("Cancellation requested")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel bracket" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(mockCancelBracket).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Lost submits: one request per intent, locked until a read settles it ──
+
+  const LOST_SUBMITS: [string, () => Error][] = [
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["a hang that ends in a gateway timeout", () => Object.assign(new Error("Gateway Timeout"), { status: 504, body: null })],
+    ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+  ];
+
+  async function armOneClick(): Promise<void> {
+    await screen.findByText("1 (75)");
+    setLimit("185.5");
+    fireEvent.click(screen.getByTitle(/one-click off/i));
+    await waitFor(() => {
+      const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  }
+
+  function expectCeLocked(): void {
+    expect((screen.getByText("Buy CE").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Sell CE").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("Order status unknown. Check Orders before trying again.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  }
+
+  it.each(LOST_SUBMITS)("locks the contract after a one-click submit lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValue(lost());
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expectCeLocked());
+    // Clicking again sends nothing; the PE side stays available.
+    fireEvent.click(screen.getByText("Buy CE"));
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect((screen.getByText("Buy PE").closest("button") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(LOST_SUBMITS)("locks the contract after a hotkey submit lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValue(lost());
+    const { container } = render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.focus(container.firstChild as HTMLElement);
+
+    fireEvent.keyDown(window, { key: "ArrowUp", shiftKey: true });
+    await waitFor(() => expectCeLocked());
+    fireEvent.keyDown(window, { key: "ArrowUp", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one place request for a double-click", async () => {
+    let release!: () => void;
+    mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    const buy = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+    fireEvent.click(buy);
+    fireEvent.click(buy);
+    fireEvent.doubleClick(buy);
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    await act(async () => release());
+    await screen.findByText(/placed$/);
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one place request for a fast double hotkey press", async () => {
+    let release!: () => void;
+    mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    const { container } = render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.focus(container.firstChild as HTMLElement);
+
+    fireEvent.keyDown(window, { key: "ArrowUp", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowUp", shiftKey: true });
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    await act(async () => release());
+    await screen.findByText(/placed$/);
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlocks only after a newer order read settles a lost submit", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "practice" }),
+    );
+    const answerReads: Array<(rows: unknown[]) => void> = [];
+    mockGetOrderbook.mockImplementation(() => new Promise((resolve) => { answerReads.push(resolve); }));
+    mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expectCeLocked());
+    await waitFor(() => expect(answerReads.length).toBeGreaterThanOrEqual(1));
+    // An empty read that started immediately after the loss does not unlock.
+    await act(async () => answerReads[0]([]));
+    expectCeLocked();
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+    act(() => { void view.client.invalidateQueries(); });
+    await waitFor(() => expect(answerReads.length).toBeGreaterThanOrEqual(2));
+    await act(async () => answerReads[1]([]));
+    await waitFor(() => {
+      expect((screen.getByText("Buy CE").closest("button") as HTMLButtonElement).disabled).toBe(false);
+    });
+    // The reserved slot remains; the persistent line beside the buttons is gone with the lock.
+    expect(screen.getByTestId("scalper-ce-status-slot")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Orders" })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  }, 20_000);
+
+  it("does not lock after a definite refusal", async () => {
+    mockPlaceOrder.mockRejectedValue(Object.assign(new Error("Quantity exceeds the freeze limit"), { status: 400, body: { message: "Quantity exceeds the freeze limit" } }));
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    await screen.findByText("Quantity exceeds the freeze limit");
+    expect((screen.getByText("Buy CE").closest("button") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Order status unknown. Check Orders before trying again.")).not.toBeInTheDocument();
+  });
+
+  it("locks the contract after a lost bracket submit", async () => {
+    mockPlaceBracketOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+    setLimit("185.5");
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    await buyCeWithConfirm();
+
+    await waitFor(() => expectCeLocked());
+    expect(mockPlaceBracketOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("locks the contract after a lost exit leg instead of calling it failed", async () => {
+    const lostExit = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      data: { bracket_id: "br-lost", status: "partial", action: "BUY", quantity: 75, symbol: "NIFTY" },
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    mockPlaceBracketOrder.mockRejectedValue(lostExit);
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+    setLimit("185.5");
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    await buyCeWithConfirm();
+
+    await waitFor(() => expectCeLocked());
+    expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+    expect(screen.queryByText(/protective exit leg failed/)).not.toBeInTheDocument();
+    expect(mockPlaceBracketOrder).toHaveBeenCalledTimes(1);
   });
 
   it("shows the SL leg in the confirm modal before placing", async () => {

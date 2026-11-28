@@ -225,6 +225,7 @@ import {
   underlyingOf,
 } from "../positionBook";
 import { SAMPLE_POSITION_BOOK } from "../sampleBook";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import { totalPositionMtm } from "@/lib/pnl";
 
 function mockBrokerAccountMatch(
@@ -334,6 +335,7 @@ describe("PositionsWidget", () => {
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
     mockUseOrders.mockReturnValue(queryResult({ data: [] }));
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    clearPendingOrderOutcomes();
   });
 
   it("shows the stop-loss not-filled chip with Exit now at the last price for the full quantity", async () => {
@@ -1050,6 +1052,97 @@ describe("PositionsWidget", () => {
       }
     });
 
+    // ── Lost exits: one request per intent, locked until a read settles it ──
+
+    const LOST_EXITS: [string, () => Error][] = [
+      ["a dropped connection", () => new TypeError("Failed to fetch")],
+      ["a hang that ends in a timeout", () => new OrderApiError("Request timed out", 408, null)],
+      ["an HTTP 500 after the broker accepted it", () => new OrderApiError("Internal Server Error", 500, null)],
+    ];
+
+    it.each(LOST_EXITS)("keeps a square-off locked after an exit lost to %s", async (_label, lost) => {
+      mockPlaceOrder.mockRejectedValue(lost());
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      const confirm = screen.getByRole("button", { name: "Confirm square off RELIANCE" });
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+      expect(confirm).toBeDisabled();
+      fireEvent.click(confirm);
+      await act(async () => {});
+      expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+      const squareOff = screen.getByRole("button", { name: "Square off RELIANCE", hidden: true });
+      expect(squareOff).toBeDisabled();
+      expect(squareOff).toHaveAttribute("title", "Order status unknown. Check Orders before trying again.");
+      expect(squareOff.getAttribute("title") ?? "").not.toMatch(/Wait for it to fill, or cancel it and try again/);
+    });
+
+    it("unlocks a square-off only after a newer order read settles the lost exit", async () => {
+      mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+      await screen.findAllByText("Order status unknown. Check Orders before trying again.");
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByText("Square off position?")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Open Orders" })).toBeInTheDocument();
+      expect(screen.getByText("Order status unknown. Check Orders before trying again.")).toBeInTheDocument();
+
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+      mockUseOrders.mockReturnValue(queryResult({ data: [], isFetching: true, dataUpdatedAt: 0 }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 2 }} />);
+      await act(async () => {});
+      mockUseOrders.mockReturnValue(queryResult({ data: [], isFetching: false, dataUpdatedAt: Date.now() }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 3 }} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Square off RELIANCE" })).toBeEnabled());
+    }, 15_000);
+
+    it.each(LOST_EXITS)("does not resend a Practice exit-all row lost to %s", async (_label, lost) => {
+      mockModeState.mode = "practice";
+      mockPlaceOrder.mockRejectedValue(lost());
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{ symbol: "INFY", pnl: 100, quantity: 10, ltp: 100, average_price: 90, exchange: "NSE", product: "CNC" }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+      const confirm = screen.getByRole("button", { name: "Confirm exit all positions" });
+      fireEvent.click(confirm);
+
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+      fireEvent.click(confirm);
+      await act(async () => {});
+      expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["a dropped connection", () => new TypeError("Failed to fetch")],
+      ["an HTTP 500 after the broker accepted it", () => new OrderApiError("Internal Server Error", 500, null)],
+    ])("keeps a Live exit-all lost to %s unknown and sends it once", async (_label, lost) => {
+      mockPlaceOrder.mockRejectedValue(lost());
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), { target: { value: "EXIT" } });
+      const confirm = screen.getByRole("button", { name: "Confirm exit all positions" });
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+      fireEvent.click(confirm);
+      await act(async () => {});
+      expect(mockPlaceOrder).toHaveBeenCalledTimes(2);
+    });
+
     it("shows the exact execution-first warning in square-off confirmation", () => {
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
@@ -1109,8 +1202,8 @@ describe("PositionsWidget", () => {
       render(<PositionsWidget {...defaultProps} />);
       fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
-      expect(await screen.findByText("Order status unknown. Check Orders before trying again."))
-        .toBeInTheDocument();
+      expect((await screen.findAllByText("Order status unknown. Check Orders before trying again.")).length)
+        .toBeGreaterThanOrEqual(1);
     });
 
     it.each(["acknowledged", "lost response"])(

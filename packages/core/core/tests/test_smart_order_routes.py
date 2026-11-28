@@ -725,6 +725,56 @@ async def test_executor_fails_closed_on_router_refusal(*, backend_lease_factory)
     assert "verification failed" in decision.error
 
 
+class _DroppedResponseAdapter(_NoIoAdapter):
+    """Accepts the gated write, then loses the broker response."""
+
+    async def place_order(self, session: object, order: object, *, _router_token: object = None) -> str:
+        await super().place_order(session, order, _router_token=_router_token)
+        raise TimeoutError("broker response timed out")
+
+
+async def test_executor_reports_unknown_when_the_response_is_dropped_after_dispatch(*, backend_lease_factory):
+    """A lost response after the adapter call is unknown, never a plain failure."""
+    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+    adapter = _DroppedResponseAdapter()
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory()),
+        request_ctx=_ctx(),
+        adapter_id="dhan",
+        account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
+    )
+    decision = await executor.route_order(_child_order())
+    assert decision.passed is False
+    assert decision.outcome_uncertain is True
+    assert decision.error == ORDER_STATUS_UNKNOWN
+    assert len(adapter.orders) == 1
+
+
+async def test_executor_refusal_before_dispatch_is_not_unknown(*, backend_lease_factory):
+    """A router refusal before the adapter call stays a definite failure."""
+
+    class _RefusingRouter:
+        backend_lease_proof = backend_lease_factory()
+
+        async def place_order(self, *args, **kwargs):
+            raise SafetyBypassError("verification failed")
+
+    executor = mod.GatedChildExecutor(
+        safety=_safety(),
+        router=_RefusingRouter(),
+        request_ctx=_ctx(),
+        adapter_id="dhan",
+        account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
+    )
+    decision = await executor.route_order(_child_order())
+    assert decision.passed is False
+    assert decision.outcome_uncertain is False
+
+
 async def test_executor_passes_real_gate_and_returns_orderid(*, backend_lease_factory):
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
@@ -1150,3 +1200,32 @@ def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_
     )
     _assert_place_required(resp, adapter)
     assert seen_ctx == []
+
+
+def test_job_snapshot_marks_an_unknown_child_outcome():
+    """The job view keeps an unknown child distinct from a failed one."""
+    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+    from flinttrade_engine.smart_router import ChildOrderResult, SmartRouteResult
+
+    result = SmartRouteResult(symbol="RELIANCE", exchange="NSE", action="BUY", total_quantity=10)
+    result.add_child(ChildOrderResult(quantity=10, price_type="MARKET", status="unknown", error=ORDER_STATUS_UNKNOWN))
+    result.error = ORDER_STATUS_UNKNOWN
+    job = mod._SmartJob(job_id="job-1", params={"symbol": "RELIANCE", "quantity": 10}, status="done", result=result)
+
+    view = mod._snapshot(job)
+
+    assert view["order_outcome"] == "unknown"
+    assert view["leg_outcomes"] == {"entry": "unknown"}
+    assert view["retry_safe"] is False
+    assert view["error"] == ORDER_STATUS_UNKNOWN
+    assert view["child_orders"][0]["status"] == "unknown"
+
+
+def test_job_snapshot_without_unknown_children_has_no_outcome_label():
+    from flinttrade_engine.smart_router import ChildOrderResult, SmartRouteResult
+
+    result = SmartRouteResult(symbol="RELIANCE", exchange="NSE", action="BUY", total_quantity=10)
+    result.add_child(ChildOrderResult(quantity=10, price_type="MARKET", status="failed", error="verification failed"))
+    job = mod._SmartJob(job_id="job-2", params={"symbol": "RELIANCE", "quantity": 10}, status="done", result=result)
+
+    assert "order_outcome" not in mod._snapshot(job)

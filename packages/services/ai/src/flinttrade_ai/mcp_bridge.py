@@ -156,6 +156,7 @@ class MCPBridge:
                     "reason": "tool_unavailable",
                     "message": "Order-capable tools are unavailable",
                     "retry_safe": False,
+                    "leg_outcomes": {"entry": "absent"},
                 },
                 raw_input=text,
             )

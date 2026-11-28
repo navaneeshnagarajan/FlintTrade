@@ -61,6 +61,8 @@ import {
 import { missingLotRefusal } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { useOptionChainData } from "./useOptionChainData";
 import OiPcrStrip from "./OiPcrStrip";
 import { strikeHasPositiveOi } from "./oiPcrStripData";
@@ -92,6 +94,11 @@ function isAbortError(error: unknown): boolean {
     && error !== null
     && "name" in error
     && error.name === "AbortError";
+}
+
+/** Lock key for one option contract, fixed at the click before symbol resolution. */
+function chainOrderKey(item: { exchange: string; symbol: string; expiry: string; strike: number; optionType: string }): string {
+  return `${item.exchange}:${item.symbol}:${item.expiry}:${item.strike}:${item.optionType}`;
 }
 
 function OptionChainWidget(props: Partial<WidgetProps> = {}) {
@@ -394,8 +401,28 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
     )));
   }
 
+  // One place request per contract at a time, and a lock after a lost reply.
+  const submitGuard = useOrderSubmitGuard();
+  const basketKeys = basket.map(chainOrderKey);
+  const basketLocked = basketKeys.some((key) => submitGuard.isLocked(key));
+  const basketStatusUnknown = basketKeys.some((key) => submitGuard.isUnknown(key));
+
+  function handleOrder(params: OrderParams) {
+    void submitGuard.submit(
+      {
+        key: chainOrderKey(params),
+        symbol: `${params.symbol} ${params.strike} ${params.optionType}`,
+        exchange: params.exchange,
+        action: params.action === "B" ? "BUY" : "SELL",
+      },
+      () => sendOrder(params),
+    ).catch(() => {
+      // The message is already on screen; a lost reply keeps the contract locked.
+    });
+  }
+
   // Order placement — resolves canonical trading symbol via getOptionSymbol
-  async function handleOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action, ltp }: OrderParams) {
+  async function sendOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action, ltp }: OrderParams) {
     // Pin both identities at the click boundary. Symbol resolution is async;
     // an account or connection switch while it is in flight must not retarget
     // the eventual order onto the newly selected real broker account.
@@ -496,7 +523,11 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         }, orderAuthority);
         setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
       } catch (e) {
-        setOrderMsg({ text: (e as Error).message, ok: false });
+        const outcome = presentSubmitError(e);
+        // An unknown outcome is not a failure: the basket's unknown line says
+        // it, and the red error strip would contradict it and move the chain.
+        if (outcome.kind === "unknown") throw e;
+        setOrderMsg({ text: outcome.message, ok: false });
       } finally {
         clearTimeout(orderMsgTimerRef.current);
         orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
@@ -799,6 +830,8 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           onRemove={removeFromBasket}
           onClear={() => setBasket([])}
           onOrder={handleOrder}
+          locked={basketLocked}
+          statusUnknown={basketStatusUnknown}
         />
       )}
 

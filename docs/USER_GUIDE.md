@@ -967,6 +967,8 @@ and `Stop-loss and target aren't supported in Practice.` in Practice.
    Practice changes virtual capital and square-off times. It does not
    place an order.
 
+If the reply to an order is lost, see [When an order's status is unknown](#order-status-unknown).
+
 A Practice order is admitted before the sandbox. When Practice itself is Down, a new order is refused with **Not placed. Decision model is down. Start it from Status.** and nothing is filled. A close that only reduces an open position is still admitted, and the Practice sandbox can fill it. While the decision model is not Ready, Positions and the Practice Order Pad show **Exit requested. Check Positions and Orders for the result.** Exit-all shows **Exit-all requested. Check positions and orders for the outcome.** A second exit on that contract, while one of yours is still unfilled, is refused with `Not placed. An exit for SYMBOL is already pending. Wait for it to fill, or cancel it and try again.` and the row shows **Exit pending**. The label is the symbol, or **this contract** when the symbol is empty. The desk chip follows the current mode. When Practice can admit, the Practice chip shows **Ready** or **Degraded** from the managed decision-model process and does not read **Down**. **Not qualified for Live** is the tooltip, not a Down label. Until a stop or a start is confirmed, the chip says **Checking** and the popover says **Checking decision model…**. When admission allows the quantity, the path is front-end → JWT guard → mode guard → `Laya.admit` → FlintTrade sandbox → simulated fill → REST refresh of Positions and Orders. No real money moved. A refusal or a quantity clamp stops before the sandbox. Example Buy never enters that path. Restoring a Practice backup marks those fills **Restored** (tooltip **Restored from backup. Not sent to a broker or checked by the decision model.**). Performance shows **Excludes N restored fills** when N is at least 1, and hides that line when N is 0.
 
 **Estimated charges.** Every Practice fill runs through the same Indian statutory calculator the backtest uses: STT, the exchange transaction charge, the SEBI fee, stamp duty, and GST. The shared table records the exchange and the date each rate took effect. Brokerage is not in that table. Practice has no broker contract rate, so a fill never says Brokerage. The fill shows one line, `Charges ₹X (estimated)`, on its own line under the price. It expands to STT, the exchange transaction named from that fill (`NSE transaction` or `BSE transaction`), the SEBI fee, stamp duty, and GST. The `Simulated at last close` tag stays on its own line.
@@ -1024,6 +1026,24 @@ stays OFF and disabled; its title is `One-click is unavailable for Example`. Sam
 BUY / Confirm SELL chrome. Practice and Live open Confirm only
 when the Mode allows it and a gateway is configured. The
 backend refuses an example-data order if the UI slips.
+
+<a id="order-status-unknown"></a>
+
+### When an order's status is unknown
+
+If the reply to an order is lost, FlintTrade shows `Order status unknown. Check Orders before trying again.` with an **Open Orders** link, and no **Retry**. The order may have reached the broker, so FlintTrade does not send it again on its own, including strategies and agents in Practice.
+
+**Buy** and **Sell** for that contract stay disabled on the Order Pad, Quick Trade, the Ladder, and the Scalper. On the Order Pad, the unknown line and **Open Orders** sit beside the disabled **Buy** and stay on screen. **Sell** and **Close** stay disabled there too. Positions keeps **Square off** and **Close** disabled for that contract. On the Option Chain, **Buy All** and **Sell All** stay disabled while a contract in the basket is locked. The Ladder disables every price on that contract. They stay disabled until a complete order read that started at least 5 seconds after the loss settles the order, either with the order or without it. FlintTrade schedules one order read 5.1 seconds after the loss, so the lock settles promptly even when the market is closed.
+
+A double-click or a double hotkey sends one order.
+
+A cancel shows `Cancellation requested` until an order read shows the order cancelled, and then `Order cancelled`. The pending line survives a reload in the same tab. If that order leaves a complete list, Orders shows `No longer in Orders. Check order history.`
+
+In a narrow Scalper panel, the line shortens to `Status unknown` with **Open Orders**, and the full sentence is its tooltip.
+
+Orders shows one summary line above the rows, for example `2 cancellations requested · 1 order status unknown`.
+
+A Bracket can show each leg on its own. In Orders, a Bracket whose entry was placed and whose stop-loss reply was lost shows an `SL unknown` chip. Its tooltip reads `Entry placed · Stop-loss status unknown`. Placed means the broker shows the order, not that it filled.
 
 ### Learn → Practice Trading
 
