@@ -73,10 +73,11 @@ interface AuthState {
   startExpiryTimer: () => void;
   /**
    * Replace the active JWT in-place (used after PIN unlock or
-   * mode-switch downgrade). Preserves status/username/expiresAt and
-   * resets activity so the idle timer doesn't immediately downgrade.
+   * mode-switch downgrade). Applies the server's expires_at when
+   * present, otherwise keeps the stored expiry, and resets activity
+   * so the idle timer doesn't immediately downgrade.
    */
-  updateToken: (token: string, expectedGeneration: number) => boolean;
+  updateToken: (token: string, expectedGeneration: number, expiresAt?: string) => boolean;
 }
 
 const IDLE_PIN_THRESHOLD = 5 * 60 * 1000;    // 5 min → PIN required
@@ -284,7 +285,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       retireAuthenticatedClientState();
     },
 
-    updateToken: (token, expectedGeneration) => {
+    updateToken: (token, expectedGeneration, expiresAt = "") => {
       const current = get();
       const expectedPrincipal = current.username?.trim();
       if (
@@ -295,6 +296,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         return false;
       }
 
+      const resolvedExpiresAt = resolveExpiresAt(expiresAt, current.expiresAt);
       const nextGeneration = expectedGeneration + 1;
       set({
         status: "transitioning",
@@ -317,13 +319,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
           status: "logged-in",
           token,
           reauthToken: null,
+          expiresAt: resolvedExpiresAt,
           lastActivity: Date.now(),
         };
       });
       if (updated) {
-        const { username, expiresAt } = get();
+        const { username } = get();
         if (username) {
-          writePersistedAuthSession({ token, username, expiresAt: expiresAt ?? "" });
+          writePersistedAuthSession({ token, username, expiresAt: resolvedExpiresAt });
         }
       }
       return updated;

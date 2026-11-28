@@ -140,3 +140,158 @@ def test_custody_grant_that_outlasts_the_session_is_refused_at_075940(
     assert readback.status_code == 200, readback.get_json()
     assert readback.get_json()["data"]["grant"] is None
     assert readback.get_json()["data"]["entry_state"] == "ungranted"
+
+
+SEVEN_THIRTY = datetime(2026, 11, 28, 7, 30, tzinfo=IST)
+SEVEN_FORTY_FIVE = datetime(2026, 11, 28, 7, 45, tzinfo=IST)
+_ACCOUNT = {
+    "username": "nav",
+    "email": "nav@example.com",
+    "password": "StrongP@ss123!",
+    "pin": "123456",
+}
+
+
+@pytest.fixture()
+def auth_client(tmp_path, monkeypatch, owned_flask_apps):
+    """Flask test client with a temporary auth service."""
+    from unittest.mock import patch
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.auth_service import AuthService
+
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    with patch("flinttrade_core.auth_routes._get_auth_service") as mock:
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        mock.return_value = svc
+        app = create_flask_app()
+        app.config["TESTING"] = True
+        with app.test_client() as client:
+            yield client, svc, app
+    owned_flask_apps.close()
+
+
+def _open_account(client: Any) -> None:
+    created = client.post("/v1/auth/setup", json=_ACCOUNT)
+    assert created.status_code == 201, created.get_json()
+
+
+def _enable_totp(svc: Any, password: str = "StrongP@ss123!") -> None:
+    import pyotp
+
+    assert svc.verify_password(password)
+    code = pyotp.TOTP(svc.get_totp_secret()).now()
+    assert svc.enable_totp(code)
+
+
+def _auth_header(token: str) -> dict[str, str]:
+    return {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+
+
+def _next_morning_iso() -> str:
+    return NEXT_EIGHT.astimezone(UTC).isoformat()
+
+
+def test_setup_create_at_0730_lasts_until_the_following_morning(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Account create at 07:30 IST uses the sign-in expiry and returns it."""
+    client, _svc, app = auth_client
+    _pin_clock(monkeypatch, SEVEN_THIRTY)
+    created = client.post("/v1/auth/setup", json=_ACCOUNT)
+    assert created.status_code == 201, created.get_json()
+    body = created.get_json()["data"]
+    assert body["expires_at"] == _next_morning_iso()
+    with app.app_context():
+        assert decode_token(body["token"])["exp"] == int(NEXT_EIGHT.astimezone(UTC).timestamp())
+
+
+def test_setup_resume_at_0745_keeps_the_create_expiry(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A setup resume that still holds the create token keeps that expiry."""
+    client, _svc, app = auth_client
+    _pin_clock(monkeypatch, SEVEN_THIRTY)
+    created = client.post("/v1/auth/setup", json=_ACCOUNT)
+    assert created.status_code == 201, created.get_json()
+    original = created.get_json()["data"]["expires_at"]
+    token = created.get_json()["data"]["token"]
+    _pin_clock(monkeypatch, SEVEN_FORTY_FIVE)
+    resumed = client.post(
+        "/v1/auth/setup/resume",
+        json={"password": "StrongP@ss123!"},
+        headers=_auth_header(token),
+    )
+    assert resumed.status_code == 200, resumed.get_json()
+    body = resumed.get_json()["data"]
+    assert body["expires_at"] == original == _next_morning_iso()
+    with app.app_context():
+        assert decode_token(body["token"])["exp"] == int(NEXT_EIGHT.astimezone(UTC).timestamp())
+
+
+def test_pin_unlock_in_the_last_hour_keeps_the_sign_in_expiry(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PIN unlock at 07:45 IST keeps the 07:30 IST sign-in expiry."""
+    client, _svc, app = auth_client
+    _open_account(client)
+    _pin_clock(monkeypatch, SEVEN_THIRTY)
+    signed_in = client.post("/v1/auth/login", json={"password": "StrongP@ss123!"})
+    assert signed_in.status_code == 200, signed_in.get_json()
+    original = signed_in.get_json()["data"]["expires_at"]
+    token = signed_in.get_json()["data"]["token"]
+    assert original == _next_morning_iso()
+    _pin_clock(monkeypatch, SEVEN_FORTY_FIVE)
+    unlocked = client.post("/v1/auth/pin", json={"pin": "123456"}, headers=_auth_header(token))
+    assert unlocked.status_code == 200, unlocked.get_json()
+    body = unlocked.get_json()["data"]
+    assert body["expires_at"] == original
+    with app.app_context():
+        assert decode_token(body["token"])["exp"] == int(NEXT_EIGHT.astimezone(UTC).timestamp())
+
+
+def test_live_switch_in_the_last_hour_keeps_the_sign_in_expiry(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Live switch at 07:45 IST keeps the 07:30 IST sign-in expiry."""
+    client, svc, app = auth_client
+    _open_account(client)
+    _pin_clock(monkeypatch, SEVEN_THIRTY)
+    signed_in = client.post("/v1/auth/login", json={"password": "StrongP@ss123!"})
+    assert signed_in.status_code == 200, signed_in.get_json()
+    original = signed_in.get_json()["data"]["expires_at"]
+    token = signed_in.get_json()["data"]["token"]
+    _enable_totp(svc)
+    _pin_clock(monkeypatch, SEVEN_FORTY_FIVE)
+    switched = client.post("/v1/auth/live", json={"pin": "123456"}, headers=_auth_header(token))
+    assert switched.status_code == 200, switched.get_json()
+    body = switched.get_json()["data"]
+    assert body["expires_at"] == original == _next_morning_iso()
+    with app.app_context():
+        assert decode_token(body["token"])["exp"] == int(NEXT_EIGHT.astimezone(UTC).timestamp())
+
+
+def test_mode_downgrade_in_the_last_hour_keeps_the_sign_in_expiry(
+    auth_client: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Mode downgrade at 07:45 IST keeps the 07:30 IST sign-in expiry."""
+    client, svc, app = auth_client
+    _open_account(client)
+    _pin_clock(monkeypatch, SEVEN_THIRTY)
+    signed_in = client.post("/v1/auth/login", json={"password": "StrongP@ss123!"})
+    assert signed_in.status_code == 200, signed_in.get_json()
+    token = signed_in.get_json()["data"]["token"]
+    original = signed_in.get_json()["data"]["expires_at"]
+    _enable_totp(svc)
+    live = client.post("/v1/auth/live", json={"pin": "123456"}, headers=_auth_header(token))
+    assert live.status_code == 200, live.get_json()
+    live_token = live.get_json()["data"]["token"]
+    _pin_clock(monkeypatch, SEVEN_FORTY_FIVE)
+    downgraded = client.post(
+        "/v1/auth/mode", json={"mode": "practice"}, headers=_auth_header(live_token),
+    )
+    assert downgraded.status_code == 200, downgraded.get_json()
+    body = downgraded.get_json()["data"]
+    assert body["expires_at"] == original == _next_morning_iso()
+    with app.app_context():
+        assert decode_token(body["token"])["exp"] == int(NEXT_EIGHT.astimezone(UTC).timestamp())

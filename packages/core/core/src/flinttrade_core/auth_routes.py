@@ -323,6 +323,34 @@ def _session_expiry() -> datetime:
     return at
 
 
+def _expiry_from_session_claims(payload: dict[str, Any]) -> datetime | None:
+    """Return the session's existing ``exp`` as an aware UTC datetime."""
+    exp = payload.get("exp")
+    if isinstance(exp, datetime):
+        return exp if exp.tzinfo is not None else exp.replace(tzinfo=UTC)
+    try:
+        stamp = float(exp)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if stamp <= 0:
+        return None
+    return datetime.fromtimestamp(stamp, tz=UTC)
+
+
+def _presented_session_expiry() -> datetime | None:
+    """Expiry of a still-valid session token presented on this request."""
+    token = _session_token_from_request()
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    if payload.get("type") != "session":
+        return None
+    return _expiry_from_session_claims(payload)
+
+
 def _create_token(
     username: str,
     *,
@@ -331,11 +359,12 @@ def _create_token(
     setup_session: bool = False,
     setup_bound: str = "",
     scopes: tuple[str, ...] | None = None,
+    expires_at: datetime | None = None,
 ) -> str:
     """Create a JWT that expires at the next 08:00 IST.
 
     A sign-in in the hour before that boundary lasts until 08:00 IST
-    the following day.
+    the following day. A replacement session keeps the presented expiry.
 
     Includes a unique ``jti`` (JWT ID) for server-side revocation and a
     ``mode`` claim so that ``order_routes`` can enforce the trading mode
@@ -358,10 +387,12 @@ def _create_token(
             a stale token cannot wipe a later replacement account.
         scopes: Verified grants for a replacement session. ``None`` is reserved
             for a fresh login/setup; an empty tuple remains unprivileged.
+        expires_at: Expiry to stamp on a replacement session. ``None``
+            applies the sign-in rule.
     """
     from .auth_scopes import DEFAULT_SESSION_SCOPES  # noqa: PLC0415 — avoid import cycle
 
-    exp = _session_expiry()
+    exp = expires_at if expires_at is not None else _session_expiry()
     payload = {
         "sub": username,
         "iat": datetime.now(UTC),
@@ -381,7 +412,9 @@ def _create_token(
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
-def _mint_setup_session(username: str, *, setup_bound: str) -> str:
+def _mint_setup_session(
+    username: str, *, setup_bound: str, expires_at: datetime | None = None,
+) -> str:
     """Mint the first-run setup session.
 
     Account create and a mid-setup resume share this call. The mode is
@@ -392,6 +425,7 @@ def _mint_setup_session(username: str, *, setup_bound: str) -> str:
         username,
         setup_session=True,
         setup_bound=setup_bound,
+        expires_at=expires_at,
     )
 
 
@@ -687,7 +721,10 @@ def auth_setup() -> tuple[Any, int]:
     # arming Live still requires PIN and a confirmed authenticator.
     # Example data is reserved for the web demo and is not minted here.
     # Resume uses the same helper, so a reload stays on that Practice session.
-    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
+    expiry = _session_expiry()
+    token = _mint_setup_session(
+        username, setup_bound=svc.get_created_at(), expires_at=expiry,
+    )
     return jsonify(
         {
             "status": "success",
@@ -696,6 +733,7 @@ def auth_setup() -> tuple[Any, int]:
                 "totp_uri": svc.get_totp_provisioning_uri(),
                 "token": token,
                 "mode": "practice",
+                "expires_at": expiry.isoformat(),
             },
         }
     ), 201
@@ -1120,11 +1158,18 @@ def auth_setup_resume() -> tuple[Any, int]:
     username = str(profile.get("username") or "")
     if not username:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
-    token = _mint_setup_session(username, setup_bound=svc.get_created_at())
+    expiry = _presented_session_expiry() or _session_expiry()
+    token = _mint_setup_session(
+        username, setup_bound=svc.get_created_at(), expires_at=expiry,
+    )
     return jsonify(
         {
             "status": "success",
-            "data": {"token": token, "username": username},
+            "data": {
+                "token": token,
+                "username": username,
+                "expires_at": expiry.isoformat(),
+            },
         }
     ), 200
 
@@ -1228,7 +1273,8 @@ def auth_login() -> tuple[Any, int]:
 
     profile = svc.get_profile()
     username = str(profile.get("username") or "user")
-    token = _create_token(username)
+    expiry = _session_expiry()
+    token = _create_token(username, expires_at=expiry)
     _tofu_authorise_login_actor(username)
 
     return jsonify(
@@ -1237,7 +1283,7 @@ def auth_login() -> tuple[Any, int]:
             "data": {
                 "token": token,
                 "username": profile.get("username"),
-                "expires_at": _session_expiry().isoformat(),
+                "expires_at": expiry.isoformat(),
                 "mode": "practice",
             },
         }
@@ -1385,11 +1431,20 @@ def _issue_pin_token(
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     profile = svc.get_profile()
+    expiry = _expiry_from_session_claims(session_payload)
+    if expiry is None:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Session token is missing an expiry.",
+            }
+        ), 400
     token = _create_token(
         profile.get("username", "user"),
         live_mode_unlocked=live_mode_unlocked,
         mode=mode,
         scopes=resolve_session_scopes(session_payload),
+        expires_at=expiry,
     )
     return jsonify(
         {
@@ -1398,6 +1453,7 @@ def _issue_pin_token(
                 "token": token,
                 "mode": mode,
                 "live_mode_unlocked": live_mode_unlocked,
+                "expires_at": expiry.isoformat(),
             },
         }
     ), 200
@@ -1720,11 +1776,21 @@ def auth_mode_switch() -> tuple[Any, int]:
     from .auth_scopes import resolve_session_scopes
 
     username = str(payload.get("sub") or svc.get_profile().get("username", "user"))
+    expiry = _expiry_from_session_claims(payload)
+    if expiry is None:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Token missing exp claim — cannot perform mode downgrade.",
+            }
+        ), 400
+
     new_token = _create_token(
         username,
         live_mode_unlocked=False,
         mode=target_mode,
         scopes=resolve_session_scopes(payload),
+        expires_at=expiry,
     )
 
     return jsonify(
@@ -1734,6 +1800,7 @@ def auth_mode_switch() -> tuple[Any, int]:
                 "token": new_token,
                 "mode": target_mode,
                 "live_mode_unlocked": False,
+                "expires_at": expiry.isoformat(),
             },
         }
     ), 200

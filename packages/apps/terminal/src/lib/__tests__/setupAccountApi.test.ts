@@ -23,6 +23,7 @@ describe("setupAccountApi", () => {
             totp_uri: "otpauth://totp/FlintTrade:alice",
             backup_codes: ["ABCD-1234"],
             token: "setup-session-jwt",
+            expires_at: "2026-11-29T02:30:00+00:00",
           },
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
@@ -42,6 +43,7 @@ describe("setupAccountApi", () => {
       // The setup response mints a Practice session so the rest of the
       // wizard (broker connect, mode select) is authenticated.
       token: "setup-session-jwt",
+      expiresAt: "2026-11-29T02:30:00+00:00",
     });
 
     expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup", {
@@ -226,7 +228,7 @@ describe("setupAccountApi", () => {
       new Response(
         JSON.stringify({
           status: "success",
-          data: { token: "resumed-setup-jwt", username: "operator" },
+          data: { token: "resumed-setup-jwt", username: "operator", expires_at: "2026-11-29T02:30:00+00:00" },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -235,6 +237,7 @@ describe("setupAccountApi", () => {
     await expect(resumeFlintTradeSetup("Secret123!")).resolves.toEqual({
       token: "resumed-setup-jwt",
       username: "operator",
+      expiresAt: "2026-11-29T02:30:00+00:00",
     });
     expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/resume", {
       method: "POST",

@@ -392,7 +392,7 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
       // D6 session-bound PIN) is authenticated. Without it those steps 401.
       // Fall back to logged-out only if an older backend returned no token.
       if (result.token) {
-        if (!setLoggedInIfCurrent(result.token, values.username, useAuthStore.getState().expiresAt ?? "", requestFence)) return;
+        if (!setLoggedInIfCurrent(result.token, values.username, result.expiresAt, requestFence)) return;
       } else {
         if (!isAuthSessionFenceCurrent(requestFence)) return;
         setLoggedOut();
@@ -1162,7 +1162,7 @@ function securedBeforeSetup(state: SetupServerState): boolean {
 function SetupResumeSignIn({
   onResumed,
 }: {
-  onResumed: (token: string, username: string) => void;
+  onResumed: (token: string, username: string, expiresAt: string) => void;
 }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -1175,7 +1175,7 @@ function SetupResumeSignIn({
     setError("");
     try {
       const result = await resumeFlintTradeSetup(password);
-      onResumed(result.token, result.username);
+      onResumed(result.token, result.username, result.expiresAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {
@@ -1764,13 +1764,14 @@ export default function SetupAccountRoute({
     // reads the mode from the JWT, so the first sandbox order needs Practice.
     try {
       const authState = useAuthStore.getState();
-      const practiceToken = await downgradeMode(
+      const { token: practiceToken, expiresAt } = await downgradeMode(
         "practice",
         authState.token,
       );
       if (!useAuthStore.getState().updateToken(
         practiceToken,
         authState.sessionGeneration,
+        expiresAt,
       )) return;
     } catch {
       setModeSyncError(
@@ -1850,8 +1851,8 @@ export default function SetupAccountRoute({
     navigate("/trade", { replace: true });
   }, [serverSetup, setupFinished, authStatus, navigate]);
 
-  function handleResumed(nextToken: string, username: string) {
-    useAuthStore.getState().setLoggedIn(nextToken, username, useAuthStore.getState().expiresAt ?? "");
+  function handleResumed(nextToken: string, username: string, expiresAt: string) {
+    useAuthStore.getState().setLoggedIn(nextToken, username, expiresAt);
     setSessionRejected(false);
     if (serverSetup?.migrationBlocked === "two_operators") return;
     if (serverSetup?.setupFinished) {

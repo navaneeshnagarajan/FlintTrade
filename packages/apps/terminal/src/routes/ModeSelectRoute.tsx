@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 import { confirmLiveMode } from "@/lib/modeAuth";
+import { useAuthStore } from "@/stores/authStore";
 import { LiveAcknowledgementDialog } from "@/components/LiveAcknowledgementDialog";
 import { pendingLiveAcknowledgement } from "@/lib/liveAcknowledgement";
 
@@ -108,7 +109,11 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         if (totpCode.length === 6) {
           await enableFlintTradeTotp(totpCode);
         }
-        const { token: liveSessionToken } = await confirmLiveMode(pin);
+        const { token: liveSessionToken, expiresAt } = await confirmLiveMode(pin);
+        const auth = useAuthStore.getState();
+        if (auth.status === "logged-in") {
+          auth.updateToken(liveSessionToken, auth.sessionGeneration, expiresAt);
+        }
         setPinError("");
         onSelect("live", liveSessionToken);
         return;

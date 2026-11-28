@@ -377,13 +377,35 @@ describe("authStore", () => {
 
       vi.setSystemTime(new Date("2026-11-28T02:15:00.000Z"));
       useAuthStore.getState().setPinRequired();
-      useAuthStore.getState().setLoggedIn("tok-unlocked", "user", "");
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok-unlocked", "user", "2026-11-29T02:30:00.000Z");
 
       expect(useAuthStore.getState().status).toBe("logged-in");
       expect(useAuthStore.getState().expiresAt).toBe("2026-11-29T02:30:00.000Z");
       vi.advanceTimersByTime(15 * 60 * 1000);
       expect(useAuthStore.getState().status).toBe("logged-in");
       expect(useAuthStore.getState().token).toBe("tok-unlocked");
+    });
+
+    it("keeps a last-hour sign-in expiry across a Live switch", () => {
+      vi.setSystemTime(new Date("2026-11-28T02:00:00.000Z"));
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2026-11-29T02:30:00.000Z");
+      const generation = useAuthStore.getState().sessionGeneration;
+
+      vi.setSystemTime(new Date("2026-11-28T02:15:00.000Z"));
+      const updated = useAuthStore
+        .getState()
+        .updateToken("tok-live", generation, "2026-11-29T02:30:00.000Z");
+
+      expect(updated).toBe(true);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      expect(useAuthStore.getState().expiresAt).toBe("2026-11-29T02:30:00.000Z");
+      vi.advanceTimersByTime(15 * 60 * 1000);
+      expect(useAuthStore.getState().status).toBe("logged-in");
+      expect(useAuthStore.getState().token).toBe("tok-live");
     });
   });
 

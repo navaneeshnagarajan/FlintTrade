@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Sign-in in the hour before 08:00 IST.** Sessions still end at 08:00 IST. Signing in during the hour before that boundary lasts until 08:00 IST the following day. A grant that would outlast the current session is refused with HTTP 409 and "Not started. Session ends at 08:00 IST. Sign in again to continue." The grant is not created.
+- **Sign-in in the hour before 08:00 IST.** Sessions still end at 08:00 IST. Signing in during the hour before that boundary lasts until 08:00 IST the following day. A grant that would outlast the current session is refused with HTTP 409 and "Not started. Session ends at 08:00 IST. Sign in again to continue." The grant is not created. PIN unlock, a Live switch, a Mode downgrade, and a Setup resume keep that expiry and return it as `expires_at`. Setup create uses the same sign-in rule and also returns `expires_at`.
 
 - **QuestDB writes are off by default.** The QuestDB client, ILP bridge, and tick-ingest route do not create tables or insert data unless `QUESTDB_WRITE_ENABLED=true`, or the client is constructed with `allow_writes=True`. Reads keep working. A refused write raises `QuestDBWritesDisabledError`, and the ingest route returns HTTP 403. Optional `QUESTDB_HOST`, `QUESTDB_HTTP_PORT`, `QUESTDB_ILP_PORT`, and `QUESTDB_PG_PORT` settings select the instance.
 
