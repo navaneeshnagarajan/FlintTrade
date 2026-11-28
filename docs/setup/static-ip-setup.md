@@ -19,7 +19,7 @@ it directly in your broker's developer console.
 | Broker | Where to configure | Notes |
 |---|---|---|
 | Dhan | DhanHQ / profile API settings | Dhan API access is typically tied to an API token and IP allow-list. Re-check the broker UI after token rotation. |
-| Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. Neo has no sandbox. Copy for Neo is `Live read only until funded unlock.` |
+| Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. Neo has no sandbox. For Neo the terminal shows `Live read only until funded unlock.` |
 
 ## Native Dhan + Kotak Neo Connected (read) / API smoke
 
