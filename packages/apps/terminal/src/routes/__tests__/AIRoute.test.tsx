@@ -176,6 +176,7 @@ vi.mock("@/services/ftApi", () => ({
 import AIRoute, { signalEventToCard } from "../AIRoute";
 import { analyzeSentiment, getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
 import type { SignalEvent } from "@/services/ftApi";
+import { FtApiError } from "@/services/ftApi.helpers";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -568,9 +569,8 @@ describe("AIRoute", () => {
 
   it.each([
     ["a network error", new TypeError("Failed to fetch")],
-    ["an HTTP error", new Error("upstream failed")],
     ["a rejection without a message", "offline"],
-  ])("shows Core and port 5100 for %s, never the raw error", async (_label, failure) => {
+  ])("says Core is not reachable on port 5100 for %s, never the raw error", async (_label, failure) => {
     vi.mocked(useSkillLevel).mockReturnValue("advanced");
     vi.mocked(analyzeSentiment).mockRejectedValue(failure);
     const user = userEvent.setup();
@@ -580,7 +580,25 @@ describe("AIRoute", () => {
     await user.type(screen.getByLabelText("Symbol for sentiment analysis"), "NIFTY{Enter}");
 
     expect(await screen.findByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
-    expect(screen.queryByText(/upstream failed|Failed to fetch/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed to fetch/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sentiment analysis failed/)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+  });
+
+  it("points at the LLM in workspace.json when Core answers the analysis with an HTTP error", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(analyzeSentiment).mockRejectedValue(new FtApiError("upstream failed", 502));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Sentiment"));
+    await user.type(screen.getByLabelText("Symbol for sentiment analysis"), "NIFTY{Enter}");
+
+    expect(
+      await screen.findByText("Sentiment analysis failed. Check the LLM in workspace.json, then retry."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/upstream failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Core not reachable/)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
   });
 

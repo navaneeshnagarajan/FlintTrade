@@ -38,7 +38,7 @@ import AISuggestionsPanel from "@/routes/ai/AISuggestionsPanel";
 import SentimentPanel from "@/routes/ai/SentimentPanel";
 import RegimePanel from "@/routes/ai/RegimePanel";
 import AgentPanel from "@/routes/ai/AgentPanel";
-import { buildHeaders, getBase } from "@/services/ftApi.helpers";
+import { buildHeaders, FtApiError, getBase } from "@/services/ftApi.helpers";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -532,7 +532,11 @@ function SentimentSection() {
         <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>Core not reachable on port 5100. Start Core, then retry.</span>
+            <span>
+              {mutation.error instanceof FtApiError
+                ? "Sentiment analysis failed. Check the LLM in workspace.json, then retry."
+                : "Core not reachable on port 5100. Start Core, then retry."}
+            </span>
           </div>
         </Card>
       )}
