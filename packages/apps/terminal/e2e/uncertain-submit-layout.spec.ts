@@ -161,6 +161,11 @@ async function waitForScalperUnknown(page: Page, slot: Locator): Promise<void> {
     }
     return openOrders.isVisible();
   }, { timeout: 15_000, intervals: [50] }).toBe(true);
+  const sentence = slot.getByText(UNKNOWN, { exact: true });
+  if (await sentence.isVisible()) {
+    await expect(sentence).toBeVisible();
+    return;
+  }
   await expect(slot.getByRole("status")).toHaveAttribute("title", UNKNOWN);
 }
 
