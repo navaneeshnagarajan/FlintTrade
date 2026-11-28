@@ -33,6 +33,8 @@ import {
   type PendingOrder,
 } from "@/services/ftApi";
 import ActionCenterWidget from "../ActionCenterWidget";
+import { FtApiError } from "@/services/ftApi.helpers";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 
 const mockGetPendingOrders = vi.mocked(getPendingOrders);
 const mockApproveOrder = vi.mocked(approveOrder);
@@ -150,6 +152,62 @@ describe("ActionCenterWidget", () => {
       fireEvent.click(screen.getByRole("button", { name: "Retry failed action" }));
       await waitFor(() => expect(mockApproveOrder).toHaveBeenCalledTimes(2));
       expect(mockApproveOrder).toHaveBeenLastCalledWith("po-1");
+    });
+
+    it("shows an unknown approval outcome with no retry", async () => {
+      mockApproveOrder.mockRejectedValue(
+        new FtApiError(ORDER_STATUS_UNKNOWN, 503, undefined, {
+          status: "error",
+          order_outcome: "unknown",
+          retry_safe: false,
+          message: ORDER_STATUS_UNKNOWN,
+        }),
+      );
+      render(<ActionCenterWidget {...defaultProps} />, { wrapper: createWrapper() });
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Approve order: BUY 75 NIFTY24APR24000CE" }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toBe(ORDER_STATUS_UNKNOWN);
+      expect(alert).not.toHaveTextContent(/still pending/i);
+      expect(screen.queryByRole("button", { name: "Retry failed action" })).not.toBeInTheDocument();
+      expect(mockApproveOrder).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats a dropped approval response as unknown, with no retry", async () => {
+      mockApproveOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+      render(<ActionCenterWidget {...defaultProps} />, { wrapper: createWrapper() });
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Approve order: BUY 75 NIFTY24APR24000CE" }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toBe(ORDER_STATUS_UNKNOWN);
+      expect(screen.queryByRole("button", { name: "Retry failed action" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Dismiss error" })).toBeInTheDocument();
+    });
+
+    it("keeps retry for an approval refused before dispatch", async () => {
+      mockApproveOrder.mockRejectedValue(
+        new FtApiError("Approval dispatch runtime unavailable; the intent remains pending.", 503, undefined, {
+          status: "error",
+          dispatch_outcome: "refused_before_dispatch",
+          retry_safe: false,
+          message: "Approval dispatch runtime unavailable; the intent remains pending.",
+        }),
+      );
+      render(<ActionCenterWidget {...defaultProps} />, { wrapper: createWrapper() });
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Approve order: BUY 75 NIFTY24APR24000CE" }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/approval failed/i);
+      expect(screen.getByRole("button", { name: "Retry failed action" })).toBeInTheDocument();
     });
 
     it("surfaces a rejection failure and clears it on dismiss", async () => {

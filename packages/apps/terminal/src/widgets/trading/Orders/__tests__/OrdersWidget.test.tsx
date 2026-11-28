@@ -6,8 +6,8 @@
  * Cancel/Modify actions wired to the REAL broker order id.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
@@ -79,6 +79,9 @@ vi.mock("@/services/api", () => ({
 // ---------------------------------------------------------------------------
 
 import OrdersWidget, { isOpenOrderStatus, toOrderRow } from "../OrdersWidget";
+import { writePersistedAuthSession, clearPersistedAuthSession } from "@/lib/homeEntry";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
+import { submitOrderOnce } from "@/lib/orderSubmitGuard";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -370,7 +373,7 @@ describe("OrdersWidget", () => {
     fireEvent.click(screen.getByLabelText("Cancel order ORD123"));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Cancellation requested");
+    expect(await screen.findByRole("status")).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(mockCancelOrder).toHaveBeenCalledTimes(1);
@@ -392,7 +395,7 @@ describe("OrdersWidget", () => {
     expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
   });
 
-  it("keeps a dropped cancel unknown instead of calling it cancelled", async () => {
+  it("calls a dropped cancel a cancellation request, never cancelled", async () => {
     mockCancelOrder.mockRejectedValue(Object.assign(new Error("Failed to fetch"), { status: 0 }));
     mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
     renderWidget();
@@ -400,9 +403,8 @@ describe("OrdersWidget", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
 
     const outcome = await screen.findByRole("status");
-    expect(outcome).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(outcome).toHaveTextContent("1 cancellation requested");
     expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
-    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
     expect(mockCancelOrder).toHaveBeenCalledTimes(1);
   });
 
@@ -586,6 +588,237 @@ describe("OrdersWidget", () => {
     fireEvent.click(screen.getByText("Cancel Order"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Order blocked in practice mode.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pending cancels: a cancel request is not a cancel
+// ---------------------------------------------------------------------------
+
+const OPERATOR = "operator";
+const LIVE_SCOPE = "live:upstox:U1";
+const pendingKey = (scope: string) =>
+  `flinttrade:order-pending-cancels:${encodeURIComponent(OPERATOR)}:${encodeURIComponent(scope)}`;
+
+const SECOND_ORDER = { ...OPEN_ORDER, orderid: "ORD789", symbol: "NIFTY24APR24100CE" };
+
+/** The three ways a cancel reply goes missing after the DELETE was sent. */
+const LOST_REPLIES: [string, () => Error][] = [
+  ["a dropped connection", () => new TypeError("Failed to fetch")],
+  ["a hang that ends in a gateway timeout", () => Object.assign(new Error("Gateway Timeout"), { status: 504, body: null })],
+  ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+];
+
+describe("OrdersWidget pending cancels", () => {
+  let client: QueryClient;
+  let revision = 0;
+  // The widget is memoised. A fresh prop object per render stands in for the
+  // query and store updates that re-render it in the app.
+  const ui = () => {
+    revision += 1;
+    const props = { ...defaultProps, revision } as typeof defaultProps;
+    return (
+      <QueryClientProvider client={client}>
+        <OrdersWidget {...props} />
+      </QueryClientProvider>
+    );
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    sessionStorage.clear();
+    writePersistedAuthSession({ token: "operator-session", username: OPERATOR, expiresAt: "" });
+    clearPendingOrderOutcomes();
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockMode.value = "live";
+    mockBrokerType.value = "";
+    mockCancelOrder.mockReset();
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], dataUpdatedAt: 1 }));
+  });
+
+  afterEach(() => {
+    clearPendingOrderOutcomes();
+    clearPersistedAuthSession();
+    sessionStorage.clear();
+  });
+
+  async function cancel(orderId: string) {
+    fireEvent.click(screen.getByLabelText(`Cancel order ${orderId}`));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Cancel Order"));
+    await waitFor(() => expect(document.querySelector(`[data-pending-cancel="${orderId}"]`)).not.toBeNull());
+  }
+
+  function newerRead(data: unknown[]) {
+    mockUseOrders.mockReturnValue(queryResult({ data, dataUpdatedAt: Date.now() + 60_000 }));
+  }
+
+  it.each(LOST_REPLIES)("shows Cancellation requested after %s, with one DELETE and no Retry", async (_label, lost) => {
+    mockCancelOrder.mockRejectedValue(lost());
+    render(ui());
+    await cancel("ORD123");
+
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    // The row's own cancel is not offered again while the request is pending.
+    expect(screen.getByLabelText("Cancel order ORD123")).toBeDisabled();
+    expect(mockCancelOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Order cancelled only after a newer read shows CANCELLED", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(ui());
+    await cancel("ORD123");
+
+    newerRead([{ ...OPEN_ORDER, order_status: "open" }, SECOND_ORDER]);
+    view.rerender(ui());
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+
+    newerRead([{ ...OPEN_ORDER, order_status: "cancelled" }, SECOND_ORDER]);
+    view.rerender(ui());
+    await waitFor(() => expect(document.querySelector('[data-cancelled-order="ORD123"]')).not.toBeNull());
+    const cancelled = document.querySelector('[data-cancelled-order="ORD123"]') as HTMLElement;
+    expect(cancelled).toHaveTextContent("Order cancelled");
+    expect(cancelled.className).not.toMatch(/warning/);
+    expect(cancelled.className).not.toMatch(/bg-warning/);
+    expect(document.querySelector('[data-pending-cancel="ORD123"]')).toBeNull();
+  });
+
+  it("keeps Cancellation requested through a full reload", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const first = render(ui());
+    await cancel("ORD123");
+    first.unmount();
+
+    render(ui());
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
+    expect(document.querySelector('[data-pending-cancel="ORD123"]')).not.toBeNull();
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(mockCancelOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms only the order the read shows cancelled when two cancels are pending", async () => {
+    mockCancelOrder.mockResolvedValue({ status: "success", order_outcome: "cancel_requested" });
+    const view = render(ui());
+    await cancel("ORD123");
+    await cancel("ORD789");
+    expect(screen.getByRole("status")).toHaveTextContent("2 cancellations requested");
+
+    newerRead([{ ...OPEN_ORDER, order_status: "cancelled" }, SECOND_ORDER]);
+    view.rerender(ui());
+    await waitFor(() => expect(document.querySelector('[data-cancelled-order="ORD123"]')).not.toBeNull());
+    expect(document.querySelector('[data-cancelled-order="ORD789"]')).toBeNull();
+    expect(document.querySelector('[data-pending-cancel="ORD789"]')).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
+  });
+
+  it("clears the pending line without Order cancelled when a complete list omits the order", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(ui());
+    await cancel("ORD123");
+
+    newerRead([SECOND_ORDER]);
+    view.rerender(ui());
+    await waitFor(() => expect(document.querySelector('[data-pending-cancel="ORD123"]')).toBeNull());
+    expect(screen.getByText("No longer in Orders. Check order history.")).toBeInTheDocument();
+    expect(document.querySelector('[data-left-order="ORD123"]')).toHaveTextContent("No longer in Orders. Check order history.");
+    expect(screen.queryByText("Order cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingKey(LIVE_SCOPE))).toBeNull();
+  });
+
+  it("does not settle a pending cancel from a read that failed or is still fetching", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(ui());
+    await cancel("ORD123");
+
+    mockUseOrders.mockReturnValue(queryResult({ data: [SECOND_ORDER], isFetching: true, dataUpdatedAt: Date.now() + 60_000 }));
+    view.rerender(ui());
+    expect(document.querySelector('[data-pending-cancel="ORD123"]')).not.toBeNull();
+  });
+
+  it("clears the pending line on sign-out", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(ui());
+    await cancel("ORD123");
+
+    act(() => clearPendingOrderOutcomes());
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith("flinttrade:order-pending-cancels:"))).toEqual([]);
+  });
+
+  it("hides the pending line after a mode switch", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(ui());
+    await cancel("ORD123");
+
+    mockMode.value = "practice";
+    view.rerender(ui());
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+  });
+
+  it("hides the pending line after a broker-account switch and shows it again on return", async () => {
+    mockCancelOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = render(ui());
+    await cancel("ORD123");
+
+    mockBrokerType.value = "dhan";
+    view.rerender(ui());
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+
+    mockBrokerType.value = "";
+    view.rerender(ui());
+    expect(screen.getByRole("status")).toHaveTextContent("1 cancellation requested");
+  });
+
+  it("drops a corrupted stored value instead of showing it", () => {
+    sessionStorage.setItem(pendingKey(LIVE_SCOPE), "{not json");
+    render(ui());
+    expect(screen.queryByText("Cancellation requested")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingKey(LIVE_SCOPE))).toBeNull();
+  });
+
+  it("lists a lost fast-path submit as unknown until a newer read settles it", async () => {
+    await expect(submitOrderOnce(
+      LIVE_SCOPE,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(new TypeError("Failed to fetch")),
+    )).rejects.toThrow();
+    const view = render(ui());
+    const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
+    expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
+    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    expect(screen.queryByText("Order status unknown. Check Orders before trying again.")).not.toBeInTheDocument();
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], isFetching: true, dataUpdatedAt: 0 }));
+    view.rerender(ui());
+    await act(async () => {});
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, SECOND_ORDER], isFetching: false, dataUpdatedAt: Date.now() }));
+    view.rerender(ui());
+    await waitFor(() => expect(document.querySelector('[data-unknown-submit]')).toBeNull());
+  }, 15_000);
+
+  it("shows a confirmed entry and unknown stop-loss on that order", async () => {
+    const bracketLost = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
+      status: 502,
+      body: { order_outcome: "unknown", leg_outcomes: { entry: "confirmed", stop_loss: "unknown" } },
+    });
+    await expect(submitOrderOnce(
+      LIVE_SCOPE,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(bracketLost),
+    )).rejects.toBe(bracketLost);
+    render(ui());
+    const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
+    expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
+    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    const chip = screen.getByTestId("orders-leg-unknown");
+    expect(chip).toHaveTextContent("SL unknown");
+    expect(chip).toHaveAttribute("title", "Entry placed · Stop-loss status unknown");
+    expect(screen.queryByText("Entry placed · Stop-loss status unknown")).not.toBeInTheDocument();
   });
 });
 

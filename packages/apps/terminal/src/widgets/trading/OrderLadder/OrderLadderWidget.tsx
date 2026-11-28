@@ -60,6 +60,10 @@ import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { placeOrder, cancelOrder, getSymbol } from "@/services/api";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import {
   checkLotMultiple,
@@ -276,9 +280,20 @@ function bestAskPrice(book: NormalisedDepth): number | null {
 // Level row
 // ---------------------------------------------------------------------------
 
-function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk, onCancel }: {
+/**
+ * Submit key for one ladder price. A lost reply still records the price so
+ * the unknown line can sit next to that row, but every level of the contract
+ * stays locked until a later complete read settles it.
+ */
+function ladderOrderKey(exchange: string, symbol: string, price: number): string {
+  return `${instrumentOrderKey(exchange, symbol)}@${price}`;
+}
+
+function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid, onAsk, onCancel }: {
   level: LadderLevel; isCenter: boolean; order?: PendingOrder;
   maxQty: number; qty: number; disabled: boolean;
+  /** A place at this price is in flight or its outcome is unknown. */
+  locked: boolean;
   onBid: (p: number) => void; onAsk: (p: number) => void; onCancel: (id: string) => void;
 }) {
   return (
@@ -290,11 +305,11 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
         {fmtOrders(level.bidOrders)}
       </div>
 
-      <Button variant="ghost" onClick={() => onBid(level.price)} disabled={disabled}
+      <Button variant="ghost" onClick={() => onBid(level.price)} disabled={disabled || locked}
         className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-loss/15",
           level.bidQty ? "text-profit" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : `SELL ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `SELL ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.bidQty ? `Sell ${qty} at ${fmtPrice(level.price)}: ${level.bidQty} bids` : `Place sell at ${fmtPrice(level.price)}`}>
         {!!level.bidQty && <div className="absolute right-0 inset-y-0 bg-profit/15" style={{ width: barW(level.bidQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.bidQty)}</span>
@@ -329,11 +344,11 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
         )}
       </div>
 
-      <Button variant="ghost" onClick={() => onAsk(level.price)} disabled={disabled}
+      <Button variant="ghost" onClick={() => onAsk(level.price)} disabled={disabled || locked}
         className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-profit/15",
           level.askQty ? "text-loss" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : `BUY ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `BUY ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.askQty ? `Buy ${qty} at ${fmtPrice(level.price)}: ${level.askQty} asks` : `Place buy at ${fmtPrice(level.price)}`}>
         {!!level.askQty && <div className="absolute left-0 inset-y-0 bg-loss/15" style={{ width: barW(level.askQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.askQty)}</span>
@@ -566,6 +581,13 @@ function OrderLadderWidget(props: Props) {
     ? `Book updated ${new Date(depthQuery.dataUpdatedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}`
     : undefined;
 
+  // One place request per price at a time; a lost reply locks that price.
+  const { submit: submitOnce, isLocked, unknown: unknownSubmits } = useOrderSubmitGuard();
+  const contractKey = instrumentOrderKey(exchange, symbol);
+  const contractPrefix = `${contractKey}@`;
+  const unknownForContract = unknownSubmits.filter((record) => record.key === contractKey || record.key.startsWith(contractPrefix));
+  const ladderStatusUnknown = unknownForContract.length > 0;
+
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
     const modeRefusal = checkOrderEntryMode(mode);
     if (modeRefusal) { showMsg(modeRefusal); return; }
@@ -593,12 +615,21 @@ function OrderLadderWidget(props: Props) {
       qty,
       status: "placing",
     };
-    setPendingOrders((p) => [...p, order]);
-    try {
-      const result = await placeOrder(
+    const submitted = submitOnce(
+      { key: ladderOrderKey(exchange, symbol, price), symbol, exchange, action, quantity: qty },
+      () => placeOrder(
         { symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder", rationale: admissionRationale(note) },
         authority,
-      );
+      ),
+    );
+    setPendingOrders((p) => [...p, order]);
+    try {
+      const sent = await submitted;
+      if (!sent.sent) {
+        setPendingOrders((p) => p.filter((o) => o.localId !== localId));
+        return;
+      }
+      const result = sent.value;
       // Store the REAL broker order id — cancel is disabled until it is known,
       // so the ladder can never send a fabricated id to the broker.
       const brokerOrderId = extractBrokerOrderId(result);
@@ -611,10 +642,11 @@ function OrderLadderWidget(props: Props) {
       track("trade", `order_ladder_${action.toLowerCase()}`);
     } catch (err) {
       const outcome = presentSubmitError(err);
-      showMsg(outcome.message);
+      // A lost reply shows the persistent unknown line from the shared lock instead.
+      if (outcome.kind !== "unknown") showMsg(outcome.message);
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
-  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note]);
+  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg, note, submitOnce]);
 
   const cancelPending = useCallback(async (localId: string) => {
     const order = pendingOrders.find((o) => o.localId === localId);
@@ -730,14 +762,21 @@ function OrderLadderWidget(props: Props) {
 
       <div className="flex-1 min-h-0 overflow-y-auto" aria-label="Price ladder">
         {hasUsablePrice ? (
-          levels.map((level, idx) => (
-            <LevelRow key={level.price} level={level} isCenter={idx === LEVELS_ABOVE}
-              order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
-              disabled={!hasUsablePrice}
-              onBid={(p) => { void sendOrder("SELL", p); }}
-              onAsk={(p) => { void sendOrder("BUY", p); }}
-              onCancel={cancelPending} />
-          ))
+          levels.map((level, idx) => {
+            const isCenter = idx === LEVELS_ABOVE;
+            const contractLocked = ladderStatusUnknown
+              || isLocked(contractKey)
+              || levels.some((candidate) => isLocked(ladderOrderKey(exchange, symbol, candidate.price)));
+            return (
+              <LevelRow key={level.price} level={level} isCenter={isCenter}
+                order={orderMap.get(level.price)} maxQty={maxQty} qty={qty}
+                disabled={!hasUsablePrice}
+                locked={contractLocked}
+                onBid={(p) => { void sendOrder("SELL", p); }}
+                onAsk={(p) => { void sendOrder("BUY", p); }}
+                onCancel={cancelPending} />
+            );
+          })
         ) : (
           <div className="h-full flex flex-col items-center justify-center gap-1.5 px-4 text-center text-text-muted">
             <ArrowUpDown size={26} className="opacity-20" aria-hidden="true" />
@@ -747,6 +786,14 @@ function OrderLadderWidget(props: Props) {
             </span>
           </div>
         )}
+      </div>
+
+      {/* Fixed strip outside the price list, so no price row ever moves. */}
+      <div
+        data-testid="ladder-status-unknown"
+        className="flex-none h-7 flex items-center overflow-hidden px-2.5 border-t border-border-subtle bg-surface-card"
+      >
+        {ladderStatusUnknown ? <OrderStatusUnknownLine /> : null}
       </div>
 
       {hasBook && (

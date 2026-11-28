@@ -227,8 +227,8 @@ export default function SuperOrdersWidget() {
             </Button>
           </form>
         )}
-        {modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} />}
-        {cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} />}
+        {modifyMutation.isError && <BrokerOrdersErrorNotice error={modifyMutation.error} write="submit" />}
+        {cancelMutation.isError && <BrokerOrdersErrorNotice error={cancelMutation.error} write="cancel" />}
 
         {/* Listing */}
         {listQuery.isError && <BrokerOrdersErrorNotice error={listQuery.error} />}

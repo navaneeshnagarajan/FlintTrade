@@ -7,6 +7,8 @@ ledger, which refuses a second broker write while an outcome is unknown.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 ORDER_STATUS_UNKNOWN = "Order status unknown. Check Orders before trying again."
@@ -21,6 +23,59 @@ REASON_TOOL_UNAVAILABLE = "tool_unavailable"
 
 _CONFIRMED_CANCELLED = frozenset({"CANCELLED", "CANCELED"})
 
+@dataclass
+class DispatchProgress:
+    """Request-local invocation evidence, not execution or durable authority.
+
+    A sync wait can time out while the router coroutine still runs. Only its
+    completed failure before the invocation hook proves no adapter invocation.
+    """
+
+    started: bool = False
+    invoked: bool = False
+    failed_before_invoke: bool = False
+    before_invoke: Callable[[], None] | None = None
+
+    def on_adapter_invoke(self) -> None:
+        if self.before_invoke is not None:
+            self.before_invoke()
+        self.invoked = True
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self.started and not self.failed_before_invoke
+
+    async def run(self, coroutine: Any) -> Any:
+        try:
+            return await coroutine
+        except BaseException:
+            self.failed_before_invoke = not self.invoked
+            raise
+
+
+# Each leg of an order record is unknown (its reply was lost), confirmed (a
+# reply or read shows it at the broker) or absent (it was refused or never
+# placed). A single-leg order has only an entry leg.
+LEG_NAMES = ("entry", "target", "stop_loss")
+LEG_STATES = frozenset({"unknown", "confirmed", "absent"})
+_ENTRY_LEG_FOR_OUTCOME = {"unknown": "unknown", "rejected": "absent"}
+
+
+def leg_outcomes(**legs: str | None) -> dict[str, str]:
+    """One outcome per named leg; legs passed as None are left out."""
+    shaped: dict[str, str] = {}
+    for name, state in legs.items():
+        if name not in LEG_NAMES or (state is not None and state not in LEG_STATES):
+            raise ValueError(f"invalid leg outcome {name}={state!r}")
+        if state is not None:
+            shaped[name] = state
+    return shaped
+
+
+def single_leg_outcomes(outcome: str) -> dict[str, str]:
+    """The entry leg of a single-leg order, read from its order_outcome."""
+    return leg_outcomes(entry=_ENTRY_LEG_FOR_OUTCOME.get(outcome, "confirmed"))
+
 
 def annotate(
     payload: dict[str, Any],
@@ -34,6 +89,7 @@ def annotate(
     annotated["order_outcome"] = outcome
     annotated["reason"] = reason
     annotated["retry_safe"] = False
+    annotated.setdefault("leg_outcomes", single_leg_outcomes(outcome))
     if message is not None:
         annotated["message"] = message
     return annotated
@@ -62,12 +118,15 @@ def result_is_cancelled(result: object) -> bool:
     return any(_status_token(result.get(key)) in _CONFIRMED_CANCELLED for key in ("status", "order_status", "attempt_state"))
 
 
-def cancel_acknowledgement(result: object, *, message: str | None = None) -> dict[str, str | bool]:
+def cancel_acknowledgement(
+    result: object, *, message: str | None = None,
+) -> dict[str, str | bool | dict[str, str]]:
     """Label a cancel that returned, without turning an acknowledgement into a cancel."""
     if result_is_cancelled(result):
-        fields: dict[str, str | bool] = {
+        fields: dict[str, str | bool | dict[str, str]] = {
             "order_outcome": "cancelled",
             "reason": REASON_STATUS_CONFIRMED,
+            "leg_outcomes": single_leg_outcomes("cancelled"),
         }
         if message is not None:
             fields["message"] = message
@@ -76,6 +135,7 @@ def cancel_acknowledgement(result: object, *, message: str | None = None) -> dic
         "order_outcome": "cancel_requested",
         "reason": REASON_AWAITING_CONFIRMATION,
         "message": CANCELLATION_REQUESTED,
+        "leg_outcomes": single_leg_outcomes("cancel_requested"),
     }
 
 
@@ -86,6 +146,7 @@ def describe_tool_outcome(payload: dict[str, Any] | None, *, dropped: bool = Fal
     if payload.get("order_outcome") in {"unknown", "cancel_requested", "cancelled", "rejected"}:
         described = dict(payload)
         described["retry_safe"] = False
+        described.setdefault("leg_outcomes", single_leg_outcomes(described["order_outcome"]))
         return described
     status = _status_token(payload.get("status"))
     if status in _CONFIRMED_CANCELLED:

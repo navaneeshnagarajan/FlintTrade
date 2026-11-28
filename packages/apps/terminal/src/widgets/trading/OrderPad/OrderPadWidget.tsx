@@ -64,6 +64,9 @@ import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import { resolveAccountAuthorityIdentity, resolveDataScope, useDataScope } from "@/hooks/useDataScope";
 import { capturedOrderTitle, nativeOrderErrorPresentation } from "@/lib/orderErrorPresentation";
 import { presentSubmitError } from "@/lib/orderOutcome";
+import { instrumentOrderKey, submitReplyWasLost } from "@/lib/orderSubmitGuard";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import {
   checkLotMultiple,
   checkOrderEntryMode,
@@ -392,12 +395,12 @@ function Toast({ msg }: { msg: ToastMsg | null }) {
       role={unknown ? "status" : "alert"}
       aria-live={unknown ? "polite" : "assertive"}
       data-testid="order-pad-outcome"
-      className={`flex items-center gap-2 px-3 py-2 text-xs border-t ${
+      className={`flex items-start gap-2 text-xs leading-tight ${
         unknown
-          ? "bg-warning/10 border-warning/20 text-warning"
+          ? "text-warning"
           : ok
-            ? "bg-profit/10 border-profit/20 text-profit"
-            : "bg-loss/10 border-loss/20 text-loss"
+            ? "text-profit"
+            : "text-loss"
       }`}
     >
       {unknown ? <AlertCircle size={13} aria-hidden="true" /> : ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
@@ -1102,6 +1105,13 @@ function OrderPadWidget(props: WidgetProps) {
     return () => clearTimeout(toastTimerRef.current);
   }, []);
 
+  // Shared single-flight and lost-submit lock, the same one the fast paths use.
+  const submitGuard = useOrderSubmitGuard();
+  const { submit: guardSubmit, isLocked: isSubmitLocked } = submitGuard;
+  const padKey = instrumentOrderKey(exchange, symbol);
+  const padLocked = isSubmitLocked(padKey);
+  const padStatusUnknown = submitGuard.isUnknown(padKey);
+
   const submitOrder = useCallback(async (
     params: Readonly<PlaceOrderParams>,
     authority?: { mode: "practice" | "live" },
@@ -1113,14 +1123,29 @@ function OrderPadWidget(props: WidgetProps) {
       showToast("error", "Unavailable. No order was sent.", 6000);
       return false;
     }
+    const lockKey = instrumentOrderKey(params.exchange, params.symbol);
+    // One place request per intent: a second submit while the first is in
+    // flight, or while a lost one is unsettled, sends nothing.
+    if (isSubmitLocked(lockKey)) return false;
     const submissionScope = resolveDataScope({ ...useBrokerStore.getState(), mode: submissionMode });
     const submissionIdentity = resolveAccountAuthorityIdentity({ ...useBrokerStore.getState(), mode: submissionMode });
     setNativeDisclosure(null);
     setLoading(true);
     try {
-      const result = options?.exit
-        ? await placeOrder(params, authority, { exit: true })
-        : await placeOrder(params, authority);
+      const submitted = await guardSubmit(
+        { key: lockKey, symbol: params.symbol, exchange: params.exchange, action: params.action, quantity: params.quantity },
+        () => options?.exit
+          ? placeOrder(params, authority, { exit: true })
+          : placeOrder(params, authority),
+        // Lock exactly when the pad will say the status is unknown.
+        (err) => submissionMode === "live"
+          ? nativeOrderErrorPresentation(err, {
+            broker: submissionIdentity.brokerType, accountId: submissionIdentity.accountId, params,
+          })?.body === ORDER_STATUS_UNKNOWN
+          : submitReplyWasLost(err),
+      );
+      if (!submitted.sent) return false;
+      const result = submitted.value;
       const scopeStillCurrent = isOperatorIncidentScopeCurrent(incidentScope) && submissionScope === resolveDataScope({
         ...useBrokerStore.getState(), mode: useModeStore.getState().mode,
       });
@@ -1230,10 +1255,10 @@ function OrderPadWidget(props: WidgetProps) {
       const outcome = presentSubmitError(err);
       if (outcome.kind === "unknown") {
         setPracticeReview(null);
-        showToast("unknown", outcome.message, 6000);
         emitNotification({
           category: "order",
-          ...(submissionMode === "live" ? { accountScopeKey: submissionScope, skipAccountRefresh: true } : {}),
+          skipAccountRefresh: true,
+          ...(submissionMode === "live" ? { accountScopeKey: submissionScope } : {}),
           ...(submissionMode === "live" ? { originDisclosure: { version: 1, kind: "none" } as const } : {}),
           title: capturedOrderTitle("Order status unknown", params),
           body: outcome.message,
@@ -1277,7 +1302,7 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [getValues, setError, setValue, showToast]);
+  }, [getValues, guardSubmit, isSubmitLocked, setError, setValue, showToast]);
 
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
@@ -1322,6 +1347,7 @@ function OrderPadWidget(props: WidgetProps) {
   }, [currentIntentIdentity, practiceReview, showToast]);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
+    if (isSubmitLocked(instrumentOrderKey(values.exchange, values.symbol))) return;
     clearErrors("qty");
     const qtyRefusal = checkOrderQuantityLimit(values.exchange, values.qty)
       ?? (lotSizeKnown
@@ -2172,12 +2198,17 @@ function OrderPadWidget(props: WidgetProps) {
           </div>
         ) : null}
 
-        {/* Submit button */}
+        {/* Submit button and its outcome line stay pinned to the bottom of the
+            pad, so a short window never hides them behind the scroll edge. */}
+        <div
+          data-testid="order-pad-actions"
+          className="sticky -bottom-3 z-10 -mx-3 -mb-3 mt-auto flex flex-col gap-2 border-t border-border-subtle bg-surface-base px-3 pt-2 pb-3"
+        >
         {openQty > 0 && exitSide ? (
           <Button
             type="button"
             data-testid="orderpad-close"
-            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "decision_model")}
+            disabled={loading || padLocked || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "decision_model")}
             onClick={() => void handleClosePosition()}
             className={`${btnBase} bg-surface-hover text-text-primary border border-border-default hover:bg-surface-card`}
           >
@@ -2191,12 +2222,25 @@ function OrderPadWidget(props: WidgetProps) {
         ) : null}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted || ruleBlocked || admission?.kind === "deny" || admission?.kind === "clamp"}
+          disabled={loading || padLocked || !symbol || !qty || liveMuted || ruleBlocked || admission?.kind === "deny" || admission?.kind === "clamp"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
+        {/* Reserved so Buy does not move when a refusal or unknown line appears. */}
+        <div data-testid="order-pad-status-slot" className="min-h-9">
+          {padStatusUnknown ? (
+            <div data-testid="order-pad-status-unknown" className="line-clamp-2">
+              <OrderStatusUnknownLine />
+            </div>
+          ) : (
+            <div className="line-clamp-2">
+              <Toast msg={toast?.scopeKey === dataScope && toast.type !== "unknown" ? toast : null} />
+            </div>
+          )}
+        </div>
+        </div>
         {showPracticeLayaDown ? (
           <p role="status" data-testid="laya-down-notice" className="text-xs text-loss">
             {LAYA_DOWN_BANNER}
@@ -2217,9 +2261,6 @@ function OrderPadWidget(props: WidgetProps) {
           />
         )}
       </form>
-
-      {/* Toast */}
-      <Toast msg={toast?.scopeKey === dataScope ? toast : null} />
 
       {practiceReview && appMode !== "unavailable" ? (
         <PracticeOrderReviewStage

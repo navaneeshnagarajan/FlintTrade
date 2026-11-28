@@ -2,6 +2,7 @@ import type { Page, Request } from "@playwright/test";
 
 import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes, test } from "./fixture-registry";
 import { registerSystemDiagnosticsRead } from "./visual/desk-mocks";
+import { tabStopNames } from "./order-flow-fixtures";
 
 const LIVE_AUTHORITY_PAYLOAD = {
   sub: "synthetic-order-pad-operator",
@@ -178,9 +179,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "read empty Practice sandbox orders",
     method: "GET",
     path: "/ft-api/v1/sandbox/orders",
-    // The paused mount reads the book three times. A visible-desk rearm
-    // may add one more read before the assertion.
-    expectedCalls: { minimum: 3, maximum: 4 },
+    // The paused mount reads the book twice. A visible-desk rearm may add
+    // one more. A lost submit does not refresh the book immediately.
+    expectedCalls: { minimum: 2, maximum: 4 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { status: "success", data: { orders: [] } } };
@@ -352,18 +353,37 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);
 });
 
-test.describe("dropped Practice order response", () => {
+// The three ways a place reply goes missing after the request left the browser.
+const LOST_SUBMITS = [
+  {
+    name: "dropped connection",
+    consoleError: "Failed to load resource: net::ERR_CONNECTION_RESET",
+    lose: (route: import("@playwright/test").Route) => route.abort("connectionreset"),
+  },
+  {
+    name: "hang until timeout",
+    consoleError: "Failed to load resource: net::ERR_TIMED_OUT",
+    lose: (route: import("@playwright/test").Route) => route.abort("timedout"),
+  },
+  {
+    name: "HTTP 500 after the broker accepted",
+    consoleError: "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    lose: (route: import("@playwright/test").Route) => route.fulfill({ status: 500, contentType: "text/plain", body: "upstream error" }),
+  },
+];
+
+for (const lost of LOST_SUBMITS) test.describe(`lost Practice order response: ${lost.name}`, () => {
   test.use({
     benignConsoleErrors: [
       {
-        text: "Failed to load resource: net::ERR_CONNECTION_RESET",
+        text: lost.consoleError,
         url: "http://localhost:5173/ft-api/api/v1/orders/place",
         expectedCalls: 1,
       },
     ],
   });
 
-  test("a dropped Practice submit says the outcome is unknown and does not offer Retry", async ({
+  test("a lost Practice submit says the outcome is unknown, locks Buy, and does not offer Retry", async ({
     page,
     syntheticApi,
   }) => {
@@ -440,9 +460,9 @@ test.describe("dropped Practice order response", () => {
     name: "read empty Practice sandbox orders",
     method: "GET",
     path: "/ft-api/v1/sandbox/orders",
-    // The paused mount reads the book three times. A visible-desk rearm
-    // may add one more read before the assertion.
-    expectedCalls: { minimum: 3, maximum: 4 },
+    // The paused mount reads the book twice. A visible-desk rearm may add
+    // one more. A lost submit does not refresh the book immediately.
+    expectedCalls: { minimum: 2, maximum: 4 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { status: "success", data: { orders: [] } } };
@@ -522,7 +542,7 @@ test.describe("dropped Practice order response", () => {
   let droppedSubmits = 0;
   await page.route("**/ft-api/api/v1/orders/place", async (route) => {
     droppedSubmits += 1;
-    await route.abort("connectionreset");
+    await lost.lose(route);
   });
 
   await page.goto("/welcome");
@@ -567,12 +587,16 @@ test.describe("dropped Practice order response", () => {
   await expect(review.getByText("₹123.45", { exact: true }).first()).toBeVisible();
   await review.getByRole("button", { name: "Confirm simulated Practice order" }).click();
 
-  const outcome = page.getByRole("status").filter({
-    hasText: "Order status unknown. Check Orders before trying again.",
-  });
-  await expect(outcome).toBeVisible();
-  await expect(outcome).not.toContainText(/rejected|order failed/i);
+  const unknownLine = page.getByTestId("order-pad-status-unknown");
+  await expect(unknownLine).toHaveText(/Order status unknown\. Check Orders before trying again\./);
+  await expect(unknownLine.getByRole("button", { name: "Open Orders" })).toBeVisible();
+  await expect(page.getByTestId("order-pad-outcome")).toHaveCount(0);
+  await expect(page.getByText("Order status unknown. Check Orders before trying again.", { exact: true })).toHaveCount(1);
+  const buy = page.getByRole("button", { name: "Practice Buy" });
+  await expect(buy).toBeDisabled();
+  await buy.click({ force: true });
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+  expect((await tabStopNames(page)).filter((name) => /retry/i.test(name))).toEqual([]);
   await expect(review).toBeHidden();
   expect(droppedSubmits).toBe(1);
   await expect(page.getByText(/Order placed(?: · ID:)?/i)).toHaveCount(0);

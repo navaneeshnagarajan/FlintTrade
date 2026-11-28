@@ -37,6 +37,8 @@ import {
 import { placeOrder } from "@/services/api";
 import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
+import { presentSubmitError } from "@/lib/orderOutcome";
+import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import type { PlaceOrderParams } from "@/types/api";
 import type { AISymbolContext } from "@/lib/aiSymbolContext";
 
@@ -69,13 +71,16 @@ export interface ToolCall {
   payload: Record<string, unknown>;
 }
 
+/** "unknown": approved and sent, but the reply was lost. Nothing resends it. */
+export type ToolStatus = "pending" | "approved" | "rejected" | "failed" | "unknown";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: number;
   toolCall?: ToolCall;
-  toolStatus?: "pending" | "approved" | "rejected" | "failed";
+  toolStatus?: ToolStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +240,8 @@ export interface ApprovedToolCallOutcome {
   message: string;
   /** True only when the order was actually submitted successfully. */
   executed: boolean;
+  /** Set when an order request was sent: a lost reply is unknown, never a failure. */
+  orderOutcome?: "submitted" | "unknown" | "rejected";
 }
 
 export async function executeApprovedToolCall(toolCall: ToolCall): Promise<ApprovedToolCallOutcome> {
@@ -281,14 +288,19 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
     const result = await placeOrder(params, { mode: "practice" });
     return {
       executed: true,
+      orderOutcome: "submitted",
       message:
         `Order submitted through the gated order path — order ID ${result.orderId}.\n\n` +
         `\`${params.action} ${params.quantity} × ${params.symbol} (${params.exchange}) ` +
         `${params.orderType} ${params.product}\``,
     };
   } catch (err: unknown) {
-    const errText = err instanceof Error ? err.message : String(err);
-    return { executed: false, message: `Order failed: ${errText}` };
+    // A dropped, timed-out or 5xx reply may follow a broker accept. Say so and
+    // never resend; a definite refusal stays a refusal.
+    const outcome = presentSubmitError(err);
+    return outcome.kind === "unknown"
+      ? { executed: false, orderOutcome: "unknown", message: outcome.message }
+      : { executed: false, orderOutcome: "rejected", message: `Order failed: ${outcome.message}` };
   }
 }
 
@@ -315,7 +327,7 @@ function advisorRequestContext(
 
 interface ToolCardProps {
   toolCall: ToolCall;
-  status: "pending" | "approved" | "rejected" | "failed";
+  status: ToolStatus;
   onApprove: () => void;
   onReject: () => void;
 }
@@ -376,6 +388,8 @@ export function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProp
             {params ? "Reject" : "Dismiss"}
           </button>
         </div>
+      ) : status === "unknown" ? (
+        <p role="status" className="mt-2 text-xs font-medium text-warning">{ORDER_STATUS_UNKNOWN}</p>
       ) : (
         <div
           className={[
@@ -477,7 +491,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   // Local state for tool call augmentation — per-session, not persisted
   // toolMeta maps message id → { toolCall, toolStatus }
   // ---------------------------------------------------------------------------
-  const [toolMeta, setToolMeta] = useState<Map<string, { toolCall?: ToolCall; toolStatus?: "pending" | "approved" | "rejected" | "failed" }>>(
+  const [toolMeta, setToolMeta] = useState<Map<string, { toolCall?: ToolCall; toolStatus?: ToolStatus }>>(
     () => new Map(),
   );
 
@@ -576,7 +590,11 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
         // a green "Approved" card — the card state follows the real outcome.
         setToolMeta((prev) => {
           const next = new Map(prev);
-          next.set(msg.id, { ...prev.get(msg.id), toolCall: msg.toolCall, toolStatus: "failed" });
+          next.set(msg.id, {
+            ...prev.get(msg.id),
+            toolCall: msg.toolCall,
+            toolStatus: outcome.orderOutcome === "unknown" ? "unknown" : "failed",
+          });
           return next;
         });
       }

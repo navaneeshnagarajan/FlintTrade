@@ -11,7 +11,9 @@ import pytest
 from flinttrade_core.models import Order
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
+from flinttrade_core.exceptions import SafetyBypassError
 from flinttrade_engine.laya import DecisionStatus, process_laya
+from flinttrade_engine.local_state_provider import DISPATCH_OUTCOME_UNKNOWN, OrderLifecycleLedger
 from flinttrade_engine.strategy_execution import GatedStrategyDispatcher
 from flinttrade_gateway.brokers._base import ROUTER_TOKEN, Session
 from flinttrade_gateway.router import BrokerRouter
@@ -104,6 +106,64 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, bac
     assert adapter.orders == [order, order]
     assert len(consumed_gate_ids) == 2
     assert consumed_gate_ids[0] != consumed_gate_ids[1]
+
+
+class _LostReplyAdapter:
+    def __init__(self) -> None:
+        self.orders: list[Order] = []
+
+    async def place_order(self, _session, order, *, _router_token=None):
+        assert _router_token is ROUTER_TOKEN
+        self.orders.append(order)
+        raise TimeoutError("response lost")
+
+
+@pytest.mark.asyncio
+async def test_a_lost_strategy_order_is_sent_once_and_never_resent(
+    tmp_path, *, backend_lease_factory,
+) -> None:
+    set_safety_gate_secret(b"strategy-execution-test-secret-32")
+    adapter = _LostReplyAdapter()
+    lifecycle = OrderLifecycleLedger(ledger_path=tmp_path / "order-lifecycle.sqlite3")
+
+    def session_provider(_ctx, adapter_id: str, account_id: str) -> Session:
+        return Session(
+            access_token="token",
+            expires_at=datetime.now(tz=timezone.utc).timestamp() + 60,
+            account_id=account_id,
+            adapter_id=adapter_id,
+        )
+
+    router = BrokerRouter(
+        {"broker": adapter},
+        session_provider,
+        consume_gate=lambda _gate_id: True,
+        lifecycle_store=lifecycle,
+        backend_lease_proof=backend_lease_factory(),
+    )
+    request_ctx = RequestContext(
+        jti="strategy-jti", actor_type="agent", actor_id="strategy:ema", mode="live", selector="broker:default",
+    )
+    dispatcher = GatedStrategyDispatcher(
+        safety=_passing_safety(),
+        request_context_provider=lambda: request_ctx,
+        router_provider=lambda: router,
+        adapter_id="broker",
+        account_id="default",
+        portfolio_state_provider=_portfolio_state,
+    )
+    order = Order(symbol="RELIANCE", action="BUY", quantity="1")
+
+    with pytest.raises(TimeoutError):
+        await dispatcher.dispatch_order(order)
+    # The strategy's next signal for the same order is refused until the
+    # unknown outcome is reconciled; the adapter is never called again.
+    with pytest.raises(SafetyBypassError, match="lifecycle"):
+        await dispatcher.dispatch_order(order)
+
+    assert adapter.orders == [order]
+    attempts = lifecycle.list_dispatch_attempts()
+    assert [attempt["dispatch_state"] for attempt in attempts] == [DISPATCH_OUTCOME_UNKNOWN]
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { queryKeys } from "@/services/queryKeys";
+import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import {
   PRIMARY_NATIVE_ACCOUNT,
   PRIMARY_SCOPE,
@@ -83,6 +84,7 @@ beforeEach(() => {
   unexpected.length = 0;
   notifications.length = 0;
   fetchMock.mockClear();
+  clearPendingOrderOutcomes();
   setAccountRuntime({ activeAccountId: brokerAccountKey(PRIMARY_NATIVE_ACCOUNT) });
   onlineManager.setOnline(true);
   useOperatorSignalStore.setState({ ...originalSignals, decisionStatus: "ready", layaPracticeStatus: "ready" });
@@ -97,6 +99,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  clearPendingOrderOutcomes();
   window.removeEventListener("flinttrade:notify", captureNotification);
   onlineManager.setOnline(true);
   resetAccountRuntime();

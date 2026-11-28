@@ -317,6 +317,40 @@ test("Practice navigation validates model bounds and submits one explicit start 
   await captureAgentEvidence(page, panel, stop, "Stopping", testInfo, "practice-agent-stopping");
 });
 
+test("double-clicking Stop & square off sends exactly one stop request", async ({ page, syntheticApi }) => {
+  const state = idleState();
+  state.snapshot.params = { symbols: ["RELIANCE"], exchange: "NSE" };
+  setRunState(state, "running", true);
+  registerAgentReads(syntheticApi, state);
+  let releaseStop!: () => void;
+  const stopHeld = new Promise<void>((resolve) => { releaseStop = resolve; });
+  syntheticApi.register({
+    name: "one held Practice stop and square-off", method: "POST", path: `${AGENT}/stop`,
+    expectedCalls: 1,
+    handler: async (request) => {
+      expectPracticeAuthority(request);
+      expect(request.postDataJSON()).toEqual({ square_off: true });
+      // Hold the reply so both clicks land while the stop is in flight.
+      await stopHeld;
+      setRunState(state, "stopping", true);
+      return { status: 202, json: { status: "success", data: state.snapshot } };
+    },
+  });
+  const panel = await openPracticeAgent(page, syntheticApi);
+  await expect(panel.getByRole("status")).toHaveText("Running");
+  const stop = panel.getByRole("button", { name: "Stop & square off" });
+  await expect(stop).toBeEnabled();
+  await stop.dblclick();
+  await expect.poll(() => syntheticApi.callCount("POST", `${AGENT}/stop`)).toBe(1);
+  await expect(stop).toBeDisabled();
+  await stop.click({ force: true });
+  await page.waitForTimeout(300);
+  expect(syntheticApi.callCount("POST", `${AGENT}/stop`)).toBe(1);
+  releaseStop();
+  await expect(panel.getByRole("status")).toHaveText("Stopping");
+  expect(syntheticApi.callCount("POST", `${AGENT}/stop`)).toBe(1);
+});
+
 test.describe("Practice reconciliation", () => {
   test.use({ benignConsoleErrors: [{
     text: "Failed to load resource: the server responded with a status of 409 (Conflict)",

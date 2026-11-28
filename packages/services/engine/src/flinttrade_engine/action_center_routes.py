@@ -136,6 +136,8 @@ def approve_order(order_id: str) -> tuple[Any, int]:
         return jsonify({
             "status": "error",
             "message": "Approval dispatch runtime unavailable; the intent remains pending.",
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
         }), 503
 
     queue = _get_queue()
@@ -153,7 +155,7 @@ def approve_order(order_id: str) -> tuple[Any, int]:
             raise TypeError("Approval dispatcher returned an invalid result")
     except Exception:  # noqa: BLE001 - post-claim exceptions have uncertain outcome
         logger.exception("Action Centre dispatch failed for request %s", order_id)
-        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED, single_leg_outcomes
 
         failed = queue.mark_failed(
             order_id,
@@ -165,6 +167,7 @@ def approve_order(order_id: str) -> tuple[Any, int]:
             "order_outcome": "unknown",
             "reason": REASON_RESPONSE_UNCONFIRMED,
             "retry_safe": False,
+            "leg_outcomes": single_leg_outcomes("unknown"),
             "message": ORDER_STATUS_UNKNOWN,
             "data": {"request": failed.to_dict()},
         }), 503
@@ -184,17 +187,21 @@ def approve_order(order_id: str) -> tuple[Any, int]:
 
     detail = result.message or "Approval was refused"
     if result.outcome_uncertain:
-        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED
+        from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, REASON_RESPONSE_UNCONFIRMED, single_leg_outcomes
 
         message = ORDER_STATUS_UNKNOWN
         extra = {
             "order_outcome": "unknown",
             "reason": REASON_RESPONSE_UNCONFIRMED,
             "retry_safe": False,
+            "leg_outcomes": single_leg_outcomes("unknown"),
         }
     else:
         message = f"Order was not dispatched: {detail}. This intent will not be replayed."
-        extra = {}
+        extra = {
+            "dispatch_outcome": "refused_before_dispatch",
+            "retry_safe": False,
+        }
     failed = queue.mark_failed(
         order_id,
         reason=ORDER_STATUS_UNKNOWN if result.outcome_uncertain else detail,

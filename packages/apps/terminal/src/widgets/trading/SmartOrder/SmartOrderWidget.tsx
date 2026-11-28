@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { parseWholeNumber } from "@/lib/orderGuards";
+import { presentSubmitError } from "@/lib/orderOutcome";
 import { useModeStore } from "@/stores/modeStore";
 import {
   cancelSmartRoute,
@@ -269,13 +270,15 @@ export default function SmartOrderWidget() {
           </div>
         </form>
 
-        {startMutation.isError && (
-          <p role="alert" className="text-xs text-loss">
-            {startMutation.error instanceof Error
-              ? startMutation.error.message
-              : "Smart route failed"}
-          </p>
-        )}
+        {startMutation.isError && (() => {
+          // A lost start reply may have begun routing. Say so; never offer a resend.
+          const outcome = presentSubmitError(startMutation.error);
+          return (
+            <p role="alert" className={cn("text-xs", outcome.kind === "unknown" ? "text-warning" : "text-loss")}>
+              {outcome.message}
+            </p>
+          );
+        })()}
 
         {/* Poll failure — the job is gone (e.g. backend restart), say so. */}
         {jobQuery.isError && (
@@ -313,7 +316,7 @@ export default function SmartOrderWidget() {
             </div>
 
             {job.error && (
-              <p role="alert" className="text-xs text-loss">
+              <p role="alert" className={cn("text-xs", job.order_outcome === "unknown" ? "text-warning" : "text-loss")}>
                 {job.error}
               </p>
             )}
@@ -340,7 +343,9 @@ export default function SmartOrderWidget() {
                             ? "text-profit"
                             : child.status === "failed"
                               ? "text-loss"
-                              : "text-text-muted",
+                              : child.status === "unknown"
+                                ? "text-warning"
+                                : "text-text-muted",
                         )}
                       >
                         {child.status}

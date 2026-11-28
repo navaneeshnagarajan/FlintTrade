@@ -9,12 +9,15 @@ import { OrderPreflightRefusal } from "@/services/orderPreflightRefusal";
 export class FtApiError<T = unknown> extends Error {
   readonly status: number;
   readonly data: T | undefined;
+  /** The whole error envelope, so order-outcome fields beside `data` stay readable. */
+  readonly body: unknown;
 
-  constructor(message: string, status: number, data?: T) {
+  constructor(message: string, status: number, data?: T, body?: unknown) {
     super(message);
     this.name = "FtApiError";
     this.status = status;
     this.data = data;
+    this.body = body;
   }
 }
 
@@ -79,8 +82,9 @@ export function buildHeaders(includeJson: boolean, mode?: AppMode): Record<strin
 async function throwHttpError(resp: Response, endpoint: string, scope: OperatorIncidentScope): Promise<never> {
   let message: string | null = null;
   let data: unknown;
+  let body: unknown;
   try {
-    const body: unknown = await resp.json();
+    body = await resp.json();
     const record = body !== null && typeof body === "object"
       ? body as Record<string, unknown>
       : null;
@@ -104,7 +108,7 @@ async function throwHttpError(resp: Response, endpoint: string, scope: OperatorI
   // faults may still latch; broker classes must not, or Chat and backtests
   // would mute Live.
   noteObservedFailure({ message: resolved, httpStatus: resp.status, provenance: "general", scope });
-  throw new FtApiError(resolved, resp.status, data);
+  throw new FtApiError(resolved, resp.status, data, body);
 }
 
 export async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {
@@ -120,7 +124,7 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
         ? String((json as { message: unknown }).message)
         : `FT API ${endpoint} error`;
     const data = "data" in json ? (json as { data: unknown }).data : undefined;
-    throw new FtApiError(msg, res.status, data);
+    throw new FtApiError(msg, res.status, data, json);
   }
   const hasEnvelope = json !== null && typeof json === "object" && "data" in json;
   const data = hasEnvelope ? (json as { data: unknown }).data : json;

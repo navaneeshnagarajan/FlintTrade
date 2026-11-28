@@ -237,6 +237,7 @@ def test_existing_error_policy_preserves_http_invocation_and_holds(policy_stack,
     if after:
         expected_body["order_outcome"] = "unknown"
         expected_body["reason"] = "response_unconfirmed"
+        expected_body["leg_outcomes"] = {"entry": "unknown"}
     if kind == "broker":
         expected_body["broker_code"] = "503"
     assert response.status_code == expected_status, body
@@ -291,6 +292,7 @@ def test_existing_success_is_ack_only_and_real_one_shot_replay_is_refused(policy
             "order_outcome": "cancel_requested",
             "reason": "awaiting_confirmation",
             "message": "Cancellation requested",
+            "leg_outcomes": {"entry": "confirmed"},
         }
     else:
         assert "data" in body

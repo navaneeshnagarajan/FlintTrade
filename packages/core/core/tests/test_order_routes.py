@@ -784,6 +784,7 @@ class TestPracticeMode:
             "order_outcome": "rejected",
             "reason": "broker_rejected",
             "retry_safe": False,
+            "leg_outcomes": {"entry": "absent"},
             "rule_results": [
                 {
                     "level": "info",

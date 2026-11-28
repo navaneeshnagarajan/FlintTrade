@@ -726,6 +726,15 @@ describe("model tool-call boundary", () => {
     expect(approve).not.toHaveBeenCalled();
     useModeStore.setState({ mode: "explore" });
   });
+
+  it("shows the unknown sentence after a lost approved submit, with no Approve or Retry", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<ToolCard toolCall={proposal} status="unknown" onApprove={vi.fn()} onReject={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    expect(screen.queryByText(/not executed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /approve|retry/i })).not.toBeInTheDocument();
+    useModeStore.setState({ mode: "explore" });
+  });
 });
 
 describe("toPlaceOrderParams", () => {
@@ -810,6 +819,29 @@ describe("executeApprovedToolCall", () => {
     );
     expect(outcome.executed).toBe(true);
     expect(outcome.message).toContain("FT-123");
+  });
+
+  it.each([
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["a hang that ends in a gateway timeout", () => Object.assign(new Error("Gateway Timeout"), { status: 504, body: null })],
+    ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+  ])("reports order_outcome unknown, not a failure, for a submit lost to %s", async (_label, lost) => {
+    mockPlaceOrder.mockRejectedValueOnce(lost());
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(mockPlaceOrder).toHaveBeenCalledOnce();
+    expect(outcome.executed).toBe(false);
+    expect(outcome.orderOutcome).toBe("unknown");
+    expect(outcome.message).toBe("Order status unknown. Check Orders before trying again.");
+    expect(outcome.message).not.toMatch(/order failed|retry/i);
+  });
+
+  it("keeps a definite refusal a refusal", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(
+      Object.assign(new Error("Quantity exceeds the freeze limit"), { status: 400, body: { message: "Quantity exceeds the freeze limit" } }),
+    );
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(outcome.orderOutcome).toBe("rejected");
+    expect(outcome.message).toContain("Quantity exceeds the freeze limit");
   });
 
   it("refuses Live place from the AI path — fail-closed", async () => {

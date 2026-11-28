@@ -44,7 +44,7 @@ let listRows: unknown[] = [LIST_ROW];
 let listStatus = 200;
 let listMessage = "";
 
-const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+const defaultFetch = (_input: RequestInfo | URL, init?: RequestInit) => {
   const method = init?.method ?? "GET";
   if (method === "GET") {
     if (listStatus !== 200) {
@@ -53,7 +53,8 @@ const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
     return Promise.resolve(jsonResponse({ status: "success", data: listRows }));
   }
   return Promise.resolve(jsonResponse({ status: "success", orderid: "SO-1", data: "SO-1" }));
-});
+};
+const fetchMock = vi.fn(defaultFetch);
 
 function callsByMethod(method: string): [string, RequestInit][] {
   return fetchMock.mock.calls.filter(
@@ -77,6 +78,7 @@ beforeEach(() => {
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
+  fetchMock.mockImplementation(defaultFetch);
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -116,6 +118,23 @@ describe("SuperOrdersWidget", () => {
     const [url] = callsByMethod("DELETE")[0];
     expect(url).toContain("/api/v1/orders/super/SO-1");
     expect(url).toContain("leg=ENTRY_LEG");
+  });
+
+  it("calls a lost cancel a cancellation request, with one DELETE and no Retry", async () => {
+    fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "GET") return Promise.resolve(jsonResponse({ status: "success", data: listRows }));
+      return Promise.reject(new TypeError("Failed to fetch"));
+    });
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("TCS")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Cancellation requested");
+    expect(screen.queryByText(/Order cancelled/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(callsByMethod("DELETE")).toHaveLength(1);
   });
 
   it("modifies one leg via changes.leg_name", async () => {

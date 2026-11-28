@@ -58,6 +58,7 @@ class FakeDecision:
     passed: bool
     error: str = ""
     order_response: object | None = None
+    outcome_uncertain: bool = False
 
 
 @dataclass
@@ -404,3 +405,47 @@ def test_smart_route_abort_stops_the_whole_route() -> None:
     assert calls["n"] == 2
     assert "aborted" in result.error and "revoked" in result.error
     assert result.completed is True
+
+
+def test_unknown_child_outcome_stops_the_route_without_another_child() -> None:
+    """A child whose response was lost is unknown, and no later slice is sent."""
+    from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN
+
+    calls = {"n": 0}
+
+    async def dropped_route_order(order):
+        calls["n"] += 1
+        return FakeDecision(passed=False, error=ORDER_STATUS_UNKNOWN, outcome_uncertain=True)
+
+    base = MagicMock()
+    base.route_order = dropped_route_order
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=_make_depth()),
+        volume_provider=AsyncMock(return_value=0),
+        twap_slices=4,
+        twap_window_seconds=0,
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 100, "BUY", urgency="low"))
+
+    assert calls["n"] == 1
+    assert [child.status for child in result.child_orders] == ["unknown"]
+    assert result.child_orders[0].error == ORDER_STATUS_UNKNOWN
+    assert result.filled_quantity == 0
+    assert result.error == ORDER_STATUS_UNKNOWN
+    assert result.completed is True
+
+
+def test_definite_child_failure_still_records_and_continues() -> None:
+    """A refused child is not unknown; later slices keep their own gate."""
+    base = _make_base_router(passed=False)
+    router = SmartOrderRouter(
+        base_router=base,
+        depth_provider=AsyncMock(return_value=_make_depth()),
+        volume_provider=AsyncMock(return_value=0),
+        twap_slices=3,
+        twap_window_seconds=0,
+    )
+    result = asyncio.run(router.route("NIFTY25FUT", "NFO", 3, "BUY", urgency="low"))
+    assert [child.status for child in result.child_orders] == ["failed", "failed", "failed"]
+    assert result.error == ""

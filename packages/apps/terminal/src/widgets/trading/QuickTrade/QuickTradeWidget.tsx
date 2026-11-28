@@ -26,6 +26,9 @@ import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
+import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
+import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { lotCountLabel, lotUnknownMessage, missingLotRefusal } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
@@ -106,22 +109,19 @@ function PillGroup<T extends string>({ label, options, value, onChange }: PillGr
 // Status banner
 // ---------------------------------------------------------------------------
 
-type Status = { type: "success" | "error" | "unknown"; message: string } | null;
+type Status = { type: "success" | "error"; message: string } | null;
 
 function StatusBanner({ status }: { status: Status }) {
   if (!status) return null;
   const isSuccess = status.type === "success";
-  const unknown = status.type === "unknown";
   return (
     <div
       role="status"
       aria-live="polite"
       className={`flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border ${
-        unknown
-          ? "bg-warning/10 text-warning border-warning/30"
-          : isSuccess
-            ? "bg-profit/10 text-profit border-profit/30"
-            : "bg-loss/10 text-loss border-loss/30"
+        isSuccess
+          ? "bg-profit/10 text-profit border-profit/30"
+          : "bg-loss/10 text-loss border-loss/30"
       }`}
     >
       {isSuccess ? <CheckCircle2 size={11} aria-hidden="true" /> : <AlertCircle size={11} aria-hidden="true" />}
@@ -301,6 +301,9 @@ function QuickTradeWidget(props: WidgetProps) {
   );
 
   const lastActionRef = useRef<"BUY" | "SELL" | null>(null);
+  const { submit: submitOnce, isLocked, isUnknown } = useOrderSubmitGuard();
+  const locked = isLocked(instrumentOrderKey(exchange, symbol));
+  const statusUnknown = isUnknown(instrumentOrderKey(exchange, symbol));
 
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL", quantityOverride?: number) => {
@@ -326,18 +329,23 @@ function QuickTradeWidget(props: WidgetProps) {
       setIsPending(true);
       setStatus(null);
       try {
-        await placeOrder({
-          symbol,
-          exchange,
-          action,
-          quantity,
-          price,
-          triggerPrice: 0,
-          product,
-          orderType: orderType,
-          strategy: "quicktrade",
-          rationale: admissionRationale(note),
-        });
+        // One place request per instrument at a time; a lost reply locks it.
+        const submitted = await submitOnce(
+          { key: instrumentOrderKey(exchange, symbol), symbol, exchange, action, quantity },
+          () => placeOrder({
+            symbol,
+            exchange,
+            action,
+            quantity,
+            price,
+            triggerPrice: 0,
+            product,
+            orderType: orderType,
+            strategy: "quicktrade",
+            rationale: admissionRationale(note),
+          }),
+        );
+        if (!submitted.sent) return;
         setAdmission(null);
         setStatus({
           type: "success",
@@ -356,12 +364,13 @@ function QuickTradeWidget(props: WidgetProps) {
         }
         setAdmission(null);
         const outcome = presentSubmitError(err);
-        setStatus({ type: outcome.kind === "unknown" ? "unknown" : "error", message: outcome.message });
+        // A lost reply shows the persistent unknown line from the shared lock instead.
+        setStatus(outcome.kind === "unknown" ? null : { type: "error", message: outcome.message });
       } finally {
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note, ruleBlocked],
+    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note, submitOnce, ruleBlocked],
   );
 
   const placeClamped = useCallback((quantity: number) => {
@@ -547,11 +556,15 @@ function QuickTradeWidget(props: WidgetProps) {
 
         <OrderRuleLine id="quicktrade-rule-line" results={ruleResults} />
 
-        {/* BUY / SELL */}
-        <div className="flex gap-2 mt-auto">
+        {/* BUY / SELL, with a reserved unknown-line slot directly above them */}
+        <div className="mt-auto flex flex-col gap-1">
+        <div data-testid="quicktrade-status-slot" className="min-h-9 flex items-end">
+          {statusUnknown ? <OrderStatusUnknownLine /> : null}
+        </div>
+        <div className="flex gap-2">
           <Button
             onClick={() => handleAction("BUY")}
-            disabled={isPending || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
@@ -562,7 +575,7 @@ function QuickTradeWidget(props: WidgetProps) {
           </Button>
           <Button
             onClick={() => handleAction("SELL")}
-            disabled={isPending || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >
@@ -571,6 +584,7 @@ function QuickTradeWidget(props: WidgetProps) {
             ) : null}
             SELL
           </Button>
+        </div>
         </div>
       </div>
     </div>

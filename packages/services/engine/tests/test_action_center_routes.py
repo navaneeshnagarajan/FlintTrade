@@ -173,6 +173,32 @@ def test_refused_dispatch_is_terminal_and_not_reported_as_pending(client, app, q
     assert queue.list_pending() == []
 
 
+def test_refused_dispatch_says_no_order_was_dispatched(client, app, queue):
+    from flinttrade_engine.action_center import ApprovalDispatchResult
+
+    _enqueue(queue)
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = lambda _request: ApprovalDispatchResult.refused(
+        503,
+        "Broker session unavailable",
+    )
+
+    body = client.post("/api/v1/action-center/approve/intent-1").get_json()
+
+    assert body["dispatch_outcome"] == "refused_before_dispatch"
+    assert body["retry_safe"] is False
+    assert "order_outcome" not in body
+
+
+def test_missing_dispatcher_is_a_refusal_before_dispatch(client, app, queue):
+    _enqueue(queue)
+    app.config.pop("ACTION_CENTER_APPROVAL_DISPATCHER")
+
+    body = client.post("/api/v1/action-center/approve/intent-1").get_json()
+
+    assert body["dispatch_outcome"] == "refused_before_dispatch"
+    assert queue.get("intent-1").status == "pending"
+
+
 def test_dispatch_exception_is_terminal_and_truthfully_uncertain(client, app, queue):
     _enqueue(queue)
 
@@ -186,6 +212,7 @@ def test_dispatch_exception_is_terminal_and_truthfully_uncertain(client, app, qu
     assert response.status_code == 503
     assert response.get_json()["message"] == "Order status unknown. Check Orders before trying again."
     assert response.get_json()["order_outcome"] == "unknown"
+    assert response.get_json()["leg_outcomes"] == {"entry": "unknown"}
     assert response.get_json()["retry_safe"] is False
     failed = queue.get("intent-1")
     assert failed.status == "failed"

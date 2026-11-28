@@ -136,6 +136,28 @@ describe("AgentPanel", () => {
     await waitFor(() => expect(stopAgent).toHaveBeenCalledOnce());
   });
 
+  it("sends exactly one stop when Stop & square off is double-clicked", async () => {
+    vi.mocked(getAgentStatus).mockResolvedValue(RUNNING);
+    let release!: (value: typeof RUNNING) => void;
+    vi.mocked(stopAgent).mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    renderPanel();
+    await waitFor(() => expect(screen.getByText("Running")).toBeInTheDocument());
+
+    const stop = screen.getByRole("button", { name: /stop & square off/i });
+    // Two clicks in the same task, before React re-renders the disabled state.
+    act(() => {
+      stop.click();
+      stop.click();
+    });
+    await waitFor(() => expect(stopAgent).toHaveBeenCalled());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(stopAgent).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: /stop & square off/i })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /stop & square off/i }));
+    expect(stopAgent).toHaveBeenCalledTimes(1);
+    await act(async () => { release({ ...RUNNING, running: false }); });
+  });
+
   it("blocks starting in Explore with an honest hint", async () => {
     mockMode = "explore";
     vi.mocked(getAgentStatus).mockResolvedValue(IDLE);

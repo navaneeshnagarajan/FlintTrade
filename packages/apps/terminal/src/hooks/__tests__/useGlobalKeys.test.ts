@@ -208,6 +208,54 @@ describe("useGlobalKeys", () => {
     });
   });
 
+  it.each([
+    ["a dropped connection", () => new TypeError("Failed to fetch")],
+    ["an HTTP 500 after the broker accepted it", () => Object.assign(new Error("Internal Server Error"), { status: 500, body: null })],
+  ])("reports an exit-all lost to %s as unknown, not failed", async (_label, lost) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockExitAllPositions.mockImplementationOnce(() => Promise.reject(lost()));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("x");
+
+    await waitFor(() => {
+      expect(mockEmitNotification).toHaveBeenCalledWith({
+        category: "order",
+        title: "Exit all positions: status unknown",
+        body: "Order status unknown. Check Orders before trying again.",
+      });
+    });
+  });
+
+  it("reports a lost cancel-all as a cancellation request, never cancelled", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockCancelAllOrders.mockImplementationOnce(() => Promise.reject(new TypeError("Failed to fetch")));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("c");
+
+    await waitFor(() => {
+      expect(mockEmitNotification).toHaveBeenCalledWith({
+        category: "order",
+        title: "Cancel all orders requested",
+        body: "Cancellation requested",
+      });
+    });
+  });
+
+  it("sends one exit-all for a fast double X press while the first is in flight", async () => {
+    let release!: () => void;
+    mockExitAllPositions.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("x");
+    fireKey("x");
+
+    expect(mockExitAllPositions).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalled());
+  });
+
   // Regression: the hook is mounted by BOTH AppLayout and TerminalRoute on
   // /trade. A single keypress must show ONE confirm dialog and execute the
   // destructive action ONCE — never twice.
