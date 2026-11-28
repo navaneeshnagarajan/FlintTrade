@@ -532,11 +532,7 @@ function SentimentSection() {
         <Card className="bg-surface-card border border-bearish-border rounded-lg p-4">
           <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>
-              {mutation.error instanceof Error
-                ? mutation.error.message
-                : "Core not reachable on port 5100. Start Core, then retry."}
-            </span>
+            <span>Core not reachable on port 5100. Start Core, then retry.</span>
           </div>
         </Card>
       )}
