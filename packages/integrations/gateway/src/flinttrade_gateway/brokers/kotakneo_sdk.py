@@ -11,6 +11,7 @@ import math
 import os
 import threading
 from collections.abc import Mapping
+from datetime import date
 from typing import Any, Literal
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
@@ -541,6 +542,36 @@ def validate_read_envelope(value: Any, *, operation: str) -> Any:
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise BrokerReadResponseInvalid from None
     _raise_provider_error(value, operation=operation)
+    if operation == "expiries":
+        # This resource alone documents a status-less, identity-bearing body.
+        required = {"exchange", "underlying", "expiries"}
+        if not required <= set(value) or set(value) - required - {"rateLimit"}:
+            raise BrokerReadResponseInvalid from None
+        if type(value["exchange"]) is not str or value["exchange"] not in {"nse_fo", "bse_fo", "mcx_fo"}:
+            raise BrokerReadResponseInvalid from None
+        underlying = value["underlying"]
+        if (type(underlying) is not str or not underlying
+                or underlying != underlying.strip() or not underlying.isprintable()):
+            raise BrokerReadResponseInvalid from None
+        expiries = value["expiries"]
+        if type(expiries) is not list or any(type(item) is not str for item in expiries):
+            raise BrokerReadResponseInvalid from None
+        try:
+            if any(date.fromisoformat(item).isoformat() != item for item in expiries):
+                raise ValueError
+        except ValueError:
+            raise BrokerReadResponseInvalid from None
+        if expiries != sorted(set(expiries)):
+            raise BrokerReadResponseInvalid from None
+        if "rateLimit" in value:
+            metadata = value["rateLimit"]
+            allowed = {"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"}
+            if type(metadata) is not dict or not metadata or any(
+                type(key) is not str or key not in allowed or type(item) is not str
+                or not item or not item.isprintable() for key, item in metadata.items()
+            ):
+                raise BrokerReadResponseInvalid from None
+        return value
     if operation == "option_chain":
         if _is_official_option_chain_envelope(value):
             return value
@@ -614,6 +645,7 @@ class KotakNeoSdkSession:
     """Owned, blocking NeoAPI session. Only this class invokes the installed SDK."""
 
     def __init__(self, credentials: dict[str, Any]) -> None:
+        """Authenticate through the installed View/Trade chain and retain its validated UCC receipt."""
         key = credentials.get("consumer_key") or credentials.get("access_token")
         if not isinstance(key, str) or not key.strip():
             raise CredentialsInvalid("Kotak Neo consumer key is required", broker_id="kotakneo")
@@ -637,6 +669,8 @@ class KotakNeoSdkSession:
             _validate_auth(view, step="View", ucc=credentials["ucc"])
             trade = self._neo.totp_validate(mpin=credentials["mpin"])
             _validate_auth(trade, step="Trade", ucc=credentials["ucc"])
+            from flinttrade_gateway.native_login import observe_provider_identity
+            observe_provider_identity(self, self, view["data"]["ucc"])
         except Exception as exc:
             original = _canonical_exception(exc, "login", auth=True)
             try:
@@ -726,8 +760,23 @@ class KotakNeoSdkSession:
                           ignore_50multiple=ignore_50multiple, read=True)
 
     def expiries(self, exchange: str, underlying: str, instrument_type: str | None = None) -> Any:
-        return self._call("expiries", exchange=exchange, underlying=underlying,
-                          instrument_type=instrument_type, read=True)
+        """Read expiries for the exact requested venue and underlying.
+
+        Args:
+            exchange: Native segment code, compared exactly with the response.
+            underlying: Exact requested underlying, never selected by first match.
+            instrument_type: Explicit provider type, or None for its documented
+                default. The response is not an exact listed-contract grant.
+
+        Returns:
+            The validated expiry envelope, including its documented status-less
+            variant. Other read operations retain their own success requirements.
+        """
+        result = self._call("expiries", exchange=exchange, underlying=underlying,
+                            instrument_type=instrument_type, read=True)
+        if result["exchange"] != exchange or result["underlying"] != underlying:
+            raise BrokerReadResponseInvalid from None
+        return result
 
     def option_chain(self, exchange: str, underlying: str, expiry: str | None = None,
                      instrument_type: str | None = None, count: int | None = None) -> Any:

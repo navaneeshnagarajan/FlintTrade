@@ -74,7 +74,12 @@ describe("terminal usability chrome", () => {
   it("keeps the mode pill reachable when the top bar is crowded", () => {
     const topbar = read("chrome/TopBarV2.tsx");
     expect(topbar).not.toContain("overflow-x-auto");
-    expect(topbar).toContain("overflow-x-hidden");
+    // Both rows wrap, and the inner row shrinks only within the bar's width.
+    const barClasses = topbar.match(/className="(ft-topbar\s[^"]*)"/)?.[1].split(/\s+/);
+    const contextClasses = topbar.match(/className="(ft-topbar-context\s[^"]*)"/)?.[1].split(/\s+/);
+    expect(barClasses).toContain("flex-wrap");
+    expect(contextClasses).toEqual(expect.arrayContaining(["min-w-0", "flex-wrap"]));
+    expect(read("terminal.css")).toMatch(/\.ft-topbar-context\s*\{[^}]*max-width:\s*100%\s*;/);
     expect(topbar).toContain("topbar-more-btn");
     const modeIndex = topbar.indexOf("<ModeIndicator");
     expect(modeIndex).toBeGreaterThan(0);

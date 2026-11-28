@@ -24,7 +24,7 @@ def infra_report(module: ModuleType | SimpleNamespace) -> dict[str, Any]:
             evidence = f'[fail-closed registry "{row["file"]} > {row["title"]}"] 1 failure(s):\n1. {detail}'
             message = 'Error: ' + evidence
             annotations = [{'type': 'fail', 'description': annotation}]
-            location = {'file': str(fixture_path), 'line': 639, 'column': 12}
+            location = {'file': str(fixture_path), 'line': 706, 'column': 12}
             frames = '\n'.join([
                 f'    at {owner} ({fixture_path}:{line}:{column})'
                 for owner, (line, column) in zip([
@@ -32,12 +32,12 @@ def infra_report(module: ModuleType | SimpleNamespace) -> dict[str, Any]:
                     'FailClosedSyntheticFixtureRegistry.disposeOnce',
                     'Object.baseTest.extend.syntheticApi.auto'], positions, strict=True)
             ])
-            snippet = ('   at fixture-registry.ts:639\n\n'
-                       '  637 |     }\n  638 |\n> 639 |     return new Error(\n'
+            snippet = ('   at fixture-registry.ts:706\n\n'
+                       '  704 |     }\n  705 |\n> 706 |     return new Error(\n'
                        '      |            ^\n'
-                       '  640 |       `[fail-closed registry "${this.name}"] ${evidence.length} failure(s):\\n` +\n'
-                       '  641 |         evidence.map((item, index) => `${index + 1}. ${item}`).join("\\n"),\n'
-                       '  642 |     );')
+                       '  707 |       `[fail-closed registry "${this.name}"] ${evidence.length} failure(s):\\n` +\n'
+                       '  708 |         evidence.map((item, index) => `${index + 1}. ${item}`).join("\\n"),\n'
+                       '  709 |     );')
             test.update(expectedStatus='failed', annotations=annotations)
             test['results'] = [{'status': 'failed', 'retry': 0, 'annotations': annotations,
                 'error': {'message': message, 'location': location, 'snippet': snippet,

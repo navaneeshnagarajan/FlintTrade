@@ -86,7 +86,7 @@ describe("getMCXLotSize()", () => {
   });
 
   it("returns 1 for unknown symbol", () => {
-    expect(getMCXLotSize("UNKNOWN")).toBe(1);
+    expect(getMCXLotSize("UNKNOWN")).toBeNull();
   });
 });
 

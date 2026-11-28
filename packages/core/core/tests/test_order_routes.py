@@ -11,6 +11,7 @@ modes.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -106,12 +107,10 @@ def _laya_ready_for_open_place() -> None:
 def _reset_rate_limiter(flask_app):
     """Refill the order-route token buckets before each test.
 
-    The order routes now carry ``@rate_limit("orders", 10/s)`` (Phase 1 G10)
-    and Flask-Limiter's default 50/s. ``flask_app`` is module-scoped, so both
-    limiters accumulate state across every test in this file — dozens of order
-    POSTs share one bucket keyed by the test client's remote_addr and would 429
-    after the burst. Production keys per operator and never fires that many
-    orders in one second; tests just need a clean bucket per case.
+    The order routes carry ``@rate_limit("orders")`` and Flask-Limiter's
+    default 50/s. ``flask_app`` is module-scoped, so those limiters and the
+    per-exchange order rate limiter accumulate state across every test in this
+    file. Tests need a clean bucket per case.
     """
     limiter = flask_app.config.get("RATE_LIMITER")
     if limiter is not None:
@@ -119,6 +118,15 @@ def _reset_rate_limiter(flask_app):
     flask_limiter = flask_app.config.get("LIMITER")
     if flask_limiter is not None:
         flask_limiter.reset()
+    router = flask_app.config.get("BROKER_ROUTER")
+    for candidate in (
+        getattr(router, "rate_limiter", None) if router is not None else None,
+        flask_app.config.get("ORDER_RATE_LIMITER"),
+        flask_app.config.get("PRACTICE_ORDER_RATE_LIMITER"),
+    ):
+        clear = getattr(candidate, "clear", None)
+        if callable(clear):
+            clear()
     yield
 
 
@@ -501,18 +509,12 @@ class TestMissingOrInvalidMode:
 
 
 class TestOrderRateLimiting:
-    """Phase 1 G10 — the reachable order path enforces a per-second rate limit.
+    """The place path refuses an eleventh order in one second on one exchange."""
 
-    SEBI-derived requirement: per-second order rate limiting before broker
-    submission on every order path. The ``orders`` bucket is 10/s per user
-    (100/s global). This test proves the limiter is actually wired to the core
-    ``/orders/place`` route and fires a 429 once the burst is exhausted — the
-    exact property that silently regressed for the login limiter (whose tests
-    skip because the decoration didn't fire). The ``_reset_rate_limiter``
-    autouse fixture gives this test a full burst to start from.
-    """
+    _RATE_TEXT = "Not placed. Limit is 10 orders per second per exchange. Retry in 1 second."
+    _RATE_HEADLINE = f"Regulation · {_RATE_TEXT}"
 
-    def test_place_order_429s_after_the_per_second_burst(self, flask_app, client):
+    def _practice_fill(self, flask_app):
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-RL",
@@ -520,37 +522,209 @@ class TestOrderRateLimiting:
             "message": "Practice order filled",
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        return mock_sandbox
 
-        statuses = [
-            client.post(
+    def _freeze_order_rate_clock(self, flask_app, monkeypatch, now: float = 1000.0):
+        from flinttrade_gateway.rate_limiter import BrokerRateLimiter
+
+        limiter = flask_app.config.get("PRACTICE_ORDER_RATE_LIMITER")
+        if limiter is None:
+            limiter = BrokerRateLimiter({}, clock=lambda: now)
+            flask_app.config["PRACTICE_ORDER_RATE_LIMITER"] = limiter
+            return limiter
+        monkeypatch.setattr(limiter, "_clock", lambda: now)
+        return limiter
+
+    def test_practice_eleventh_nse_order_is_refused_and_bse_is_not(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        sandbox = self._practice_fill(flask_app)
+        headers = _auth_headers(mode="practice")
+        for index in range(10):
+            response = client.post(
                 "/api/v1/orders/place",
                 json=_SAMPLE_ORDER_BODY,
-                headers=_auth_headers(mode="practice"),
-            ).status_code
-            for _ in range(20)
-        ]
+                headers=headers,
+            )
+            assert response.status_code == 200, (index, response.get_json())
+        refused = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=headers,
+        )
+        assert refused.status_code == 429
+        payload = refused.get_json()
+        assert payload["code"] == "order_rule_blocked"
+        assert payload["message"] == self._RATE_HEADLINE
+        assert payload["rule_results"][0]["rule_id"] == "order-rate-threshold"
+        assert payload["rule_results"][0]["message"] == self._RATE_TEXT
+        assert payload["rule_results"][0]["level"] == "block"
+        other = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "exchange": "BSE", "symbol": "RELIANCE"},
+            headers=headers,
+        )
+        assert other.status_code == 200, other.get_json()
+        assert sandbox.place_order.call_count == 11
 
-        # The 10-token burst lets the first orders through (200), then the
-        # limiter must start returning 429 — proof it is wired and enforcing.
-        assert 429 in statuses, f"order rate limit never fired across 20 rapid posts: {statuses}"
-        # Everything that was NOT rate-limited reached the sandbox and filled.
-        assert all(s in (200, 429) for s in statuses), statuses
-        assert statuses[0] == 200, "the very first order must not be throttled"
-
-    def test_reset_gives_a_fresh_burst(self, flask_app, client):
-        """After reset (the autouse fixture), the first order is never 429 —
-        confirms the bucket genuinely refills between test cases rather than the
-        previous test's exhaustion leaking through the module-scoped app.
-        """
-        mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {"order_id": "SB-1", "status": "COMPLETE"}
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+    def test_reset_gives_a_fresh_burst(self, flask_app, client, monkeypatch):
+        """After reset, the first order is never 429."""
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        self._practice_fill(flask_app)
         resp = client.post(
             "/api/v1/orders/place",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
         assert resp.status_code == 200
+
+    _MODIFY_TEXT = "Not modified. Limit is 10 orders per second per exchange. Retry in 1 second."
+    _CANCEL_TEXT = "Not cancelled. Limit is 10 orders per second per exchange. Retry in 1 second."
+
+    @contextmanager
+    def _pending_engine(self, flask_app, monkeypatch):
+        from flinttrade_data.sandbox_engine import SandboxEngine
+
+        engine = SandboxEngine(db_path=":memory:")
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", engine)
+        monkeypatch.setitem(flask_app.config, "TICK_RECORDER", MagicMock())
+        try:
+            yield engine
+        finally:
+            engine.close()
+
+    def _place_pending(self, client, *, exchange="NSE", symbol="NIFTY"):
+        response = client.post(
+            "/api/v1/orders/place",
+            json={
+                "symbol": symbol,
+                "exchange": exchange,
+                "action": "BUY",
+                "quantity": 1,
+                "price": 100,
+                "product": "MIS",
+                "order_type": "LIMIT",
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+        assert response.status_code == 200, response.get_json()
+        payload = response.get_json()
+        assert payload["status"] == "PENDING", payload
+        return payload["order_id"]
+
+    def _assert_change_refusal(self, response, *, action, engine, order_id, price=100):
+        text = self._MODIFY_TEXT if action == "modify" else self._CANCEL_TEXT
+        assert response.status_code == 429, response.get_json()
+        payload = response.get_json()
+        assert payload["code"] == "order_rule_blocked"
+        assert payload["message"] == f"Regulation · {text}"
+        assert payload["rule_results"][0]["rule_id"] == "order-rate-threshold"
+        assert payload["rule_results"][0]["message"] == text
+        rows = [row for row in engine.get_orders() if row["order_id"] == order_id]
+        assert len(rows) == 1
+        assert rows[0]["status"] == "PENDING"
+        assert rows[0]["price"] == price
+
+    def test_practice_modify_over_cap_is_refused(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(10)]
+            refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(
+                refused, action="modify", engine=engine, order_id=order_ids[0]
+            )
+
+    def test_practice_cancel_over_cap_is_refused(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(10)]
+            refused = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[0]},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(
+                refused, action="cancel", engine=engine, order_id=order_ids[0]
+            )
+
+    def test_practice_place_modify_cancel_share_one_budget(self, flask_app, client, monkeypatch):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            order_ids = [self._place_pending(client) for _ in range(8)]
+            modified = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert modified.status_code == 200, modified.get_json()
+            cancelled = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[1]},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert cancelled.status_code == 200, cancelled.get_json()
+            place_refused = client.post(
+                "/api/v1/orders/place",
+                json={
+                    "symbol": "NIFTY",
+                    "exchange": "NSE",
+                    "action": "BUY",
+                    "quantity": 1,
+                    "price": 100,
+                    "product": "MIS",
+                    "order_type": "LIMIT",
+                },
+                headers=_auth_headers(mode="practice"),
+            )
+            assert place_refused.status_code == 429
+            assert place_refused.get_json()["message"] == self._RATE_HEADLINE
+            modify_refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": order_ids[2], "price": 120},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(modify_refused, action="modify", engine=engine, order_id=order_ids[2])
+            cancel_refused = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": order_ids[3]},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(cancel_refused, action="cancel", engine=engine, order_id=order_ids[3])
+            remaining = {row["order_id"]: row for row in engine.get_orders()}
+            assert remaining[order_ids[0]]["price"] == 110
+            assert remaining[order_ids[1]]["status"] == "CANCELLED"
+
+    def test_practice_modify_cancel_on_another_exchange_are_unaffected(
+        self, flask_app, client, monkeypatch
+    ):
+        self._freeze_order_rate_clock(flask_app, monkeypatch)
+        with self._pending_engine(flask_app, monkeypatch) as engine:
+            nse_ids = [self._place_pending(client) for _ in range(10)]
+            bse_id = self._place_pending(client, exchange="BSE", symbol="RELIANCE")
+            modified = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": bse_id, "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert modified.status_code == 200, modified.get_json()
+            cancelled = client.post(
+                "/api/v1/orders/cancel",
+                json={"order_id": bse_id},
+                headers=_auth_headers(mode="practice"),
+            )
+            assert cancelled.status_code == 200, cancelled.get_json()
+            nse_refused = client.post(
+                "/api/v1/orders/modify",
+                json={"order_id": nse_ids[0], "price": 110},
+                headers=_auth_headers(mode="practice"),
+            )
+            self._assert_change_refusal(nse_refused, action="modify", engine=engine, order_id=nse_ids[0])
+            rows = {row["order_id"]: row for row in engine.get_orders()}
+            assert rows[bse_id]["status"] == "CANCELLED"
+            assert rows[bse_id]["price"] == 110
 
 
 class TestPracticeMode:
@@ -585,6 +759,7 @@ class TestPracticeMode:
             trigger_price=0.0,
             strategy="",
             instrument_token="",
+            exit_only=False,
         )
 
     def test_practice_rejection_is_an_http_error(self, flask_app, client):
@@ -610,6 +785,14 @@ class TestPracticeMode:
             "reason": "broker_rejected",
             "retry_safe": False,
             "leg_outcomes": {"entry": "absent"},
+            "rule_results": [
+                {
+                    "level": "info",
+                    "message": "Market orders fill within 3% of the last price.",
+                    "rule_id": "practice-market-price-cap",
+                    "source": "Practice",
+                }
+            ],
         }
 
     def test_raw_missing_ltp_is_a_plain_sentence(self, flask_app, client):
@@ -710,7 +893,7 @@ class TestPracticeMode:
         assert kwargs["price"] == 812.40
         assert kwargs["price_source"] == "last_close"
 
-    def test_option_outside_market_hours_is_refused(self, flask_app, client, monkeypatch):
+    def test_option_market_order_is_refused_before_the_sandbox(self, flask_app, client, monkeypatch):
         class Closed:
             def session_active(self, exchange, symbol=None):
                 return False
@@ -733,8 +916,9 @@ class TestPracticeMode:
 
         assert resp.status_code == 400
         assert resp.get_json()["message"] == (
-            "Option prices go stale outside market hours. Try again when the market opens."
+            "FlintTrade · Market orders aren't accepted on options. Use a limit price."
         )
+        assert resp.get_json()["code"] == "order_rule_blocked"
         mock_sandbox.place_order.assert_not_called()
 
     def test_pending_order_requires_a_running_tick_source(self, flask_app, client, monkeypatch):
@@ -751,6 +935,185 @@ class TestPracticeMode:
         assert resp.status_code == 503
         assert "tick capture" in resp.get_json()["message"].lower()
         mock_sandbox.place_order.assert_not_called()
+
+    def test_practice_exit_limit_fills_without_tick_capture(self, flask_app, client, monkeypatch):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [
+                    {
+                        "ts": now - timedelta(days=2),
+                        "prev_close": 100.0,
+                        "close": 99.0,
+                    }
+                ]
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {"symbol": "SBIN", "exchange": "NSE", "product": "MIS", "net_qty": 50},
+        ]
+        mock_sandbox.get_orders.return_value = []
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-EXIT",
+            "status": "COMPLETE",
+            "message": "Practice order filled",
+        }
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "SBIN",
+                "action": "SELL",
+                "order_type": "LIMIT",
+                "price": 97.0,
+                "quantity": 50,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        mock_sandbox.place_order.assert_called_once()
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == 97.0
+        assert kwargs["fill_price"] == 100.0
+        assert kwargs["order_type"] == "LIMIT"
+        assert kwargs["action"] == "SELL"
+        assert kwargs["exit_only"] is True
+        assert kwargs["price_source"] == "last_close"
+
+    def test_practice_exit_limit_refuses_when_last_is_outside_the_limit(
+        self, flask_app, client, monkeypatch
+    ):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [
+                    {
+                        "ts": now - timedelta(days=1),
+                        "prev_close": 90.0,
+                        "close": 89.0,
+                    }
+                ]
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {"symbol": "SBIN", "exchange": "NSE", "product": "MIS", "net_qty": 50},
+        ]
+        mock_sandbox.get_orders.return_value = []
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "SBIN",
+                "action": "SELL",
+                "order_type": "LIMIT",
+                "price": 97.0,
+                "quantity": 50,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["message"] == "The last price is outside the limit."
+        mock_sandbox.place_order.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "last,action,net_qty",
+        [
+            (0.05, "SELL", 75),
+            (0.10, "SELL", 75),
+            (41.3, "SELL", 75),
+            (100.0, "SELL", 75),
+            (150.0, "SELL", 75),
+            (0.05, "BUY", -75),
+            (41.3, "BUY", -75),
+            (150.0, "BUY", -75),
+        ],
+    )
+    def test_practice_exit_at_the_square_off_cap_fills_without_tick_capture(
+        self, flask_app, client, monkeypatch, last, action, net_qty
+    ):
+        """A Square off / Exit all cap is taken from the last price, so that last still honours the limit."""
+        from datetime import datetime, timedelta
+        from decimal import Decimal
+        from zoneinfo import ZoneInfo
+
+        from flinttrade_core.order_rules import market_price_cap
+
+        cap = market_price_cap(Decimal(str(last)), action)
+        limit = max(1, round(float(cap) * 20 + 1e-7)) / 20
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        class Store:
+            def get_ticks(self, symbol, exchange, start, end, limit=None):
+                return [{"ts": now - timedelta(days=1), "prev_close": last, "close": last}]
+
+        class Open:
+            def session_active(self, exchange, symbol=None):
+                return True
+
+        mock_sandbox = MagicMock()
+        mock_sandbox.get_positions.return_value = [
+            {
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "product": "MIS",
+                "net_qty": net_qty,
+            },
+        ]
+        mock_sandbox.get_orders.return_value = []
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-CAP",
+            "status": "COMPLETE",
+            "message": "Practice order filled",
+        }
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE", Store())
+        monkeypatch.setitem(flask_app.config, "TICK_STORAGE_LOCK", None)
+        monkeypatch.setitem(flask_app.config, "TIME_SCHEDULER", Open())
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={
+                **_SAMPLE_ORDER_BODY,
+                "symbol": "NIFTY25NOV2624000CE",
+                "exchange": "NFO",
+                "action": action,
+                "order_type": "LIMIT",
+                "price": limit,
+                "quantity": 75,
+                "exit_only": True,
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json().get("message") != "The last price is outside the limit."
+        kwargs = mock_sandbox.place_order.call_args.kwargs
+        assert kwargs["price"] == limit
+        assert kwargs["fill_price"] == last
+        assert kwargs["exit_only"] is True
 
     def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(self, flask_app, client, monkeypatch):
         mock_sandbox = MagicMock()
@@ -789,6 +1152,7 @@ class TestPracticeMode:
             order_type="LIMIT",
             trigger_price=1_490.0,
             instrument_token="",
+            exit_only=False,
             strategy="mean-revert",
         )
         recorder.add_symbols.assert_called_once_with(
@@ -1147,7 +1511,7 @@ class TestRequestBodyEdgeCases:
         )
         body = resp.get_json()
         assert resp.status_code == 403
-        assert body["code"] == "laya_denied"
+        assert body["code"] == "decision_model_denied"
         assert body["reason"] == "Symbol and exchange are required."
         mock_sandbox.place_order.assert_not_called()
 
@@ -1166,7 +1530,7 @@ class TestRequestBodyEdgeCases:
         )
         data = resp.get_json()
         assert resp.status_code == 403
-        assert data["code"] == "laya_denied"
+        assert data["code"] == "decision_model_denied"
         assert data["reason"] == "Quantity must be a positive whole number."
         mock_sandbox.place_order.assert_not_called()
 

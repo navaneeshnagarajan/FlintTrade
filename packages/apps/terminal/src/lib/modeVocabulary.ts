@@ -61,11 +61,11 @@ export function orderSuccessNotificationTitle(
 }
 
 export function orderSuccessNotificationBody(mode: AppMode, orderId?: string): string {
-  if (mode === "explore") return "Example fill — no broker contacted.";
+  if (mode === "explore") return "Example fill. No broker contacted.";
   return orderId ? `Order ID ${orderId}` : "Submitted to the broker.";
 }
 
-/** Order Pad session chip — session status, never Live mode. */
+/** Order Pad session chip: session status, never Live mode. */
 export const SESSION_OPEN_LABEL = "Session open";
 
 /** Options premium hint. Explore never says Live. */
@@ -74,15 +74,15 @@ export function optionPremiumHint(mode: SessionMode, ltp: number): string {
   const amount = ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 });
   if (mode === "explore") {
     return ltp > 0
-      ? `Example premium ₹${amount} — prefills the LIMIT/SL price field.`
-      : "Example premium unavailable — enter the limit price manually.";
+      ? `Example premium ₹${amount}. Prefills the LIMIT/SL price field.`
+      : "Example premium unavailable. Enter a limit price.";
   }
   if (mode === "practice") {
     return ltp > 0
-      ? `Practice premium ₹${amount} — prefills the LIMIT/SL price field.`
-      : "Practice premium unavailable — enter the limit price manually.";
+      ? `Practice premium ₹${amount}. Prefills the LIMIT/SL price field.`
+      : "Practice premium unavailable. Enter a limit price.";
   }
   return ltp > 0
-    ? `Live premium ₹${amount} — prefills the LIMIT/SL price field.`
-    : "Live premium unavailable — enter the limit price manually.";
+    ? `Live premium ₹${amount}. Prefills the LIMIT/SL price field.`
+    : "Live premium unavailable. Enter a limit price.";
 }

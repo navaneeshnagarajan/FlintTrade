@@ -62,19 +62,19 @@ describe("summariseDeskStatus", () => {
 
   it("puts a down Laya first", () => {
     expect(summariseDeskStatus({ ...ready, mode: "practice", decision: "Down" }))
-      .toEqual({ tone: "down", label: "Laya down" });
+      .toEqual({ tone: "down", label: "Decision model down" });
   });
 
-  it("says Laya starting, in the neutral colour, while the model downloads", () => {
+  it("says Starting decision model, in the neutral colour, while the model downloads", () => {
     expect(summariseDeskStatus({ ...ready, mode: "practice", decision: "Downloading" }))
-      .toEqual({ tone: "neutral", label: "Laya starting" });
+      .toEqual({ tone: "neutral", label: "Starting decision model" });
   });
 
   it("names the broker when it is the worst row and is never All systems ready", () => {
     expect(summariseDeskStatus({ ...ready, mode: "practice", broker: "Unavailable" }))
       .toEqual({ tone: "neutral", label: "Broker unavailable" });
     expect(summariseDeskStatus({ ...ready, mode: "practice", broker: "Unavailable", decision: "Down" }))
-      .toEqual({ tone: "down", label: "Laya down" });
+      .toEqual({ tone: "down", label: "Decision model down" });
   });
 
   it("treats a missing broker as neutral in Practice and as the first fix in Live", () => {

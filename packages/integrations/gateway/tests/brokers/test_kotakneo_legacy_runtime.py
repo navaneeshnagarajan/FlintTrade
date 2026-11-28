@@ -158,9 +158,9 @@ def test_installed_kotak_pin_and_request_chain_match_distribution_record(record_
     metadata = dist.read_text("direct_url.json")
     assert isinstance(metadata, str)
     source = json.loads(metadata)
-    assert dist.version == "3.0.9"
-    assert source["vcs_info"]["commit_id"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
-    assert source["vcs_info"]["requested_revision"] == "0ba71b7f7c295652d4c3ea2b5ce5a88849db18a3"
+    assert dist.version == "3.0.13"
+    assert source["vcs_info"]["commit_id"] == "62cf511106a0810b9ee9afb011230a34f3a12fcc"
+    assert source["vcs_info"]["requested_revision"] == "62cf511106a0810b9ee9afb011230a34f3a12fcc"
     module_path = neo_api_client.__file__
     assert isinstance(module_path, str)
     assert Path(module_path).parent.samefile(str(dist.locate_file("neo_api_client")))
@@ -391,6 +391,6 @@ def test_installed_kotak_rejects_retired_same_version_source():
 
     root = Path(__file__).resolve().parents[5]
     pin = next(row for row in attest.load_pins(root / "brokers.lock") if row["name"] == "kotakneoapi")
-    assert attest._attest_source(pin) == ("3.0.9", attest.STATUS_OK)
+    assert attest._attest_source(pin) == ("3.0.13", attest.STATUS_OK)
     retired = dict(pin, source_commit="a3233062095ad9eee574f6e5696e1f9f3aa7c0c8")
-    assert attest._attest_source(retired) == ("3.0.9", attest.STATUS_PROVENANCE_MISMATCH)
+    assert attest._attest_source(retired) == ("3.0.13", attest.STATUS_PROVENANCE_MISMATCH)

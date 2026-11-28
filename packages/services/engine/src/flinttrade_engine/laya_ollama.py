@@ -1,6 +1,6 @@
 """Ollama-backed Laya decision client.
 
-Selected only when ``FLINTTRADE_LAYA_BACKEND`` is ``ollama``. The sidecar
+Selected only when ``FLINTTRADE_DECISION_MODEL_BACKEND`` is ``ollama``. The sidecar
 client is a different type and stays in use for every other value except an
 unrecognised one, which pauses new orders.
 
@@ -47,8 +47,8 @@ from flinttrade_engine.laya_decision import DecisionCallError, load_policy
 
 _LOG = logging.getLogger("flinttrade.engine.laya_ollama")
 
-BACKEND_ENV = "FLINTTRADE_LAYA_BACKEND"
-MODEL_ENV = "FLINTTRADE_LAYA_OLLAMA_MODEL"
+BACKEND_ENV = "FLINTTRADE_DECISION_MODEL_BACKEND"
+MODEL_ENV = "FLINTTRADE_DECISION_MODEL_OLLAMA_MODEL"
 PROMPT_TOKEN_CAP = 8_192
 DECISION_TIMEOUT_SECONDS = 3.0
 # Stored only so a reason code has a legal port when the runtime has not bound one.
@@ -108,11 +108,11 @@ class LayaOllamaModel:
 
     def __post_init__(self) -> None:
         if self.route not in {"chat", "systemone"}:
-            raise ValueError("Laya Ollama route must be chat or systemone")
+            raise ValueError("Decision model Ollama route must be chat or systemone.")
         if _normalise_digest(self.digest) != self.digest:
-            raise ValueError("Laya Ollama digest must be 64 lower-case hex characters")
+            raise ValueError("Decision model Ollama digest must be 64 lower-case hex characters.")
         if not self.tag or any(char.isspace() for char in self.tag):
-            raise ValueError("Laya Ollama model tag is invalid")
+            raise ValueError("Decision model Ollama model tag is invalid.")
 
 
 # Empty until a digest is reviewed. A tag alone never admits.
@@ -148,7 +148,7 @@ def laya_backend() -> str:
     if not _unknown_logged:
         shown = raw.replace("\n", " ").replace("\r", " ")[:64]
         _LOG.warning(
-            "FLINTTRADE_LAYA_BACKEND=%r is not sidecar or ollama; new orders stay paused",
+            "FLINTTRADE_DECISION_MODEL_BACKEND=%r is not sidecar or ollama; new orders stay paused",
             shown,
         )
         _unknown_logged = True
@@ -200,12 +200,12 @@ OLLAMA_DIGEST_DETAIL = (
     "The tag is not the proof. If that digest does not match the pinned digest, the gate shows "
     "Wrong model version and new orders stay paused. You can still close positions."
 )
-OLLAMA_NOT_STARTED_MANAGED = "Ollama isn't running. Start it to bring Laya back."
+OLLAMA_NOT_STARTED_MANAGED = "Ollama not running. Start Ollama, then start the decision model."
 OLLAMA_NOT_STARTED_UNMANAGED = "Ollama isn't running. Start Ollama on this computer, then try again."
-OLLAMA_START_ACTION = "Start Laya"
+OLLAMA_START_ACTION = "Start decision model"
 OLLAMA_STARTING_ACTION = "Starting…"
-OLLAMA_START_FAILED = "Laya could not be started."
-_OLLAMA_CHECKING_DETAIL = "Checking Laya…"
+OLLAMA_START_FAILED = "Decision model failed to start."
+_OLLAMA_CHECKING_DETAIL = "Checking decision model…"
 
 
 def ollama_chip_text(
@@ -268,7 +268,7 @@ def ollama_route_visible_lines(*, managed: bool) -> tuple[str, ...]:
         lines.append(OLLAMA_START_ACTION)
         lines.append(OLLAMA_STARTING_ACTION)
     for label in ("Ready", "Degraded", "Down", "Still loading", "Checking"):
-        lines.append(f"Laya {label}")
+        lines.append(f"Decision model {label}")
     return tuple(lines)
 
 
@@ -355,7 +355,7 @@ def publish_ollama_gate_status(engine: Any | None = None) -> LayaOllamaSurface:
     try:
         return _publish_ollama_gate_status(target)
     except Exception:
-        _LOG.exception("Ollama Laya status could not be read")
+        _LOG.exception("Ollama decision model status could not be read")
         surface = LayaOllamaSurface(DecisionStatus.DOWN, LAYA_REASON_UNVERIFIED, None, False, _UNBOUND_PORT)
         apply_ollama_surface(target, surface)
         return surface
@@ -886,7 +886,7 @@ def _aliases(name: str) -> set[str]:
 def _ports(snapshot: Mapping[str, Any] | None) -> tuple[int, bool]:
     if isinstance(snapshot, Mapping):
         port = snapshot.get("port")
-        if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535:
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
             return port, True
     return _UNBOUND_PORT, False
 

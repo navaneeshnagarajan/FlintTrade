@@ -50,6 +50,7 @@ import {
 } from "@/services/api";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
+import { optionLimitPrice } from "@/lib/orderRules";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
 import {
@@ -57,6 +58,7 @@ import {
   useAccountAuthorityIdentity,
   useMarketDataScope,
 } from "@/hooks/useDataScope";
+import { missingLotRefusal } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
@@ -420,7 +422,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   }
 
   // Order placement — resolves canonical trading symbol via getOptionSymbol
-  async function sendOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action }: OrderParams) {
+  async function sendOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action, ltp }: OrderParams) {
     // Pin both identities at the click boundary. Symbol resolution is async;
     // an account or connection switch while it is in flight must not retarget
     // the eventual order onto the newly selected real broker account.
@@ -476,7 +478,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       });
       if (quantity == null) {
         setOrderMsg({
-          text: `Not placed. The lot size for ${orderSymbol} isn't verified.`,
+          text: missingLotRefusal(orderSymbol),
           ok: false,
         });
         clearTimeout(orderMsgTimerRef.current);
@@ -491,14 +493,31 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       } catch {
         return;
       }
+      // Options are never sent at market. A leg with a live premium goes as a
+      // limit at that premium; without one the ticket opens for a price.
+      const side = action === "B" ? "BUY" : "SELL";
+      const limitPrice = optionLimitPrice(ltp);
+      if (limitPrice == null) {
+        window.dispatchEvent(new CustomEvent("flinttrade:addWidget", {
+          detail: {
+            widgetId: "orderpad",
+            props: { symbol: orderSymbol, exchange: orderExchange, action: side, orderType: "LIMIT", qty: quantity, product: "MIS" },
+          },
+        }));
+        setOrderMsg({ text: `No live premium for ${orderSymbol}. Enter a limit price.`, ok: false });
+        clearTimeout(orderMsgTimerRef.current);
+        orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+        return;
+      }
       try {
         await placeOrder({
           strategy: "FlintChain",
           symbol: orderSymbol,
           exchange: orderExchange,
-          action: action === "B" ? "BUY" : "SELL",
+          action: side,
           quantity,
-          orderType: "MARKET",
+          orderType: "LIMIT",
+          price: limitPrice,
           product: "MIS",
           rationale: admissionRationale(note),
         }, orderAuthority);

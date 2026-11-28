@@ -19,8 +19,15 @@ from typing import Any
 from flask import Blueprint, Response, jsonify, request
 
 from .questdb_bridge import QuestDBBridge, QuestDBBridgeError
+from .questdb_config import QuestDBWritesDisabledError
 
 logger = logging.getLogger("flinttrade.data.questdb_routes")
+
+WRITES_DISABLED_MESSAGE = (
+    "QuestDB writes are disabled. "
+    "Enable writes by setting QUESTDB_WRITE_ENABLED=true "
+    "or by passing allow_writes=True."
+)
 
 questdb_bp = Blueprint("questdb", __name__, url_prefix="/api/v1/data/questdb")
 
@@ -105,6 +112,9 @@ def insert_ticks() -> tuple[Response, int]:
 
     try:
         count = bridge.insert_ticks(ticks)
+    except QuestDBWritesDisabledError as exc:
+        logger.warning("QuestDB write refused: %s", exc)
+        return jsonify({"status": "error", "message": WRITES_DISABLED_MESSAGE}), 403
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Upstream service failed"}), 502
 
@@ -139,6 +149,9 @@ def run_query() -> tuple[Response, int]:
 
     try:
         rows = bridge.query(sql)
+    except QuestDBWritesDisabledError as exc:
+        logger.warning("QuestDB write refused: %s", exc)
+        return jsonify({"status": "error", "message": WRITES_DISABLED_MESSAGE}), 403
     except QuestDBBridgeError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
 

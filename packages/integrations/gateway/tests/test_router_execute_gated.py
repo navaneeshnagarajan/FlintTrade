@@ -121,7 +121,7 @@ class _BlockingLimiter:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def acquire(self, _broker_id: str, _kind: str) -> None:
+    async def acquire(self, _broker_id: str, _kind: str, **_kwargs: object) -> None:
         self.entered.set()
         await self.release.wait()
 

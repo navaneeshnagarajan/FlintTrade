@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 import { confirmLiveMode } from "@/lib/modeAuth";
+import { LiveAcknowledgementDialog } from "@/components/LiveAcknowledgementDialog";
+import { pendingLiveAcknowledgement } from "@/lib/liveAcknowledgement";
 
 type ModeChoice = "practice" | "live";
 
@@ -87,10 +89,18 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
   const [pinError, setPinError] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false);
 
+  const [ackText, setAckText] = useState("");
+
   const handleContinue = async () => {
     if (selected === "live") {
       if (pin.length !== 6 || /\D/.test(pin)) {
         setPinError("Please enter your 6-digit PIN.");
+        return;
+      }
+      // First switch to Live (or changed wording): acknowledge once first.
+      const pending = pendingLiveAcknowledgement();
+      if (pending) {
+        setAckText(pending);
         return;
       }
       setIsVerifyingPin(true);
@@ -124,6 +134,14 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
 
   return (
     <div className="flex items-center justify-center">
+      <LiveAcknowledgementDialog
+        text={ackText}
+        onCancel={() => setAckText("")}
+        onAccept={() => {
+          setAckText("");
+          void handleContinue();
+        }}
+      />
       <div className="w-full space-y-6">
         {/* Heading */}
         <div className="text-center space-y-1">

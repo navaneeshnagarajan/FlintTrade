@@ -34,11 +34,13 @@ import { useChromeCollapse } from "@/chrome/useChromeCollapse";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { isPublicDemoBuild } from "@/lib/demoSession";
-import { PublicPreviewHeader } from "@/chrome/PublicPreviewHeader";
+import { WorkspaceChromeTarget } from "@/chrome/WorkspaceChrome";
+import { PublicPreviewHeader, PublicPreviewSafety } from "@/chrome/PublicPreviewHeader";
 import { loadInstrumentLotRows } from "@/lib/instrumentLots";
+import "@/styles/trading-workspace.css";
 
 
-/** Landmark names match the sidebar label and each page's H1. */
+/** Landmark names match the app catalogue label and each page's H1. */
 const ROUTE_TITLES: Record<string, string> = {
   "/home": "Home",
   "/trade": "Trade",
@@ -108,6 +110,7 @@ export default function AppLayout() {
   // content boundary rather than remaining wherever focus was before navigation.
   // preventScroll avoids a visual jump when the main area is already in view.
   const mainRef = useRef<HTMLDivElement>(null);
+  const [workspaceChrome, setWorkspaceChrome] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
   }, [location.pathname]);
@@ -245,7 +248,8 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
+    <WorkspaceChromeTarget.Provider value={workspaceChrome}>
+    <div className="ft-workspace relative flex h-dvh min-h-0 flex-col bg-surface-base">
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
@@ -256,19 +260,22 @@ export default function AppLayout() {
       </a>
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
-        {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
-        <AppNavigation />
+        <div className="ft-product-bar">
+          {isPublicDemoBuild() ? <PublicPreviewHeader /> : <TopBarV2 />}
+          <AppNavigation />
+          <div ref={setWorkspaceChrome} className="ft-workspace-chrome" />
+        </div>
         {primaryBannerKind ? (
           <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
         {!isPublicDemoBuild() && isAppMode(mode) && <ModeHonestyBar mode={mode} />}
         {showTickerStrip && <TickerBar mode={tickerMode} />}
+        {isPublicDemoBuild() && <PublicPreviewSafety />}
       </header>
-      {/* Content area: DockSidebar + main panel side by side */}
+      {/* Navigation is chrome only; the retained host stays in its owner. */}
       {/* Issue #54: aria-label on main landmark mirrors the route title. Each
           route renders its own single H1 (PageHeader, or Trade's sr-only H1). */}
-      <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
-
+      <div className="ft-workspace-body relative z-10 min-h-0 flex-1">
         <main
           id="main-content"
           ref={mainRef}
@@ -306,5 +313,6 @@ export default function AppLayout() {
         onClose={handleCloseCommandPalette}
       />
     </div>
+    </WorkspaceChromeTarget.Provider>
   );
 }

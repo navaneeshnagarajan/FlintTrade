@@ -390,8 +390,8 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
     expect(basketOrderMock).toHaveBeenCalledTimes(1);
     // Field-by-field pin of the frontend basket contract: compact option
-    // symbols, quantity = lots × lotSize, MARKET/MIS, and NO price /
-    // trigger_price keys (MARKET legs must reach the backend as None).
+    // symbols, quantity = lots × lotSize, and a LIMIT at each leg's premium.
+    // Options never go at market.
     expect(basketOrderMock).toHaveBeenCalledWith({
       strategy: "FlintLegBuilder",
       orders: [
@@ -400,7 +400,8 @@ describe("LegBuilder — order placement (gated basket path)", () => {
           exchange: "NFO",
           action: "SELL",
           quantity: 50,
-          orderType: "MARKET",
+          orderType: "LIMIT",
+          price: 150,
           product: "MIS",
         },
         {
@@ -408,7 +409,8 @@ describe("LegBuilder — order placement (gated basket path)", () => {
           exchange: "NFO",
           action: "SELL",
           quantity: 50,
-          orderType: "MARKET",
+          orderType: "LIMIT",
+          price: 150,
           product: "MIS",
         },
       ],

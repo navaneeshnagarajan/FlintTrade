@@ -60,14 +60,18 @@ def _sdk_attestations_by_pin() -> dict[str, dict[str, Any]]:
         return {}
 
 
-def _catalog_sdk_fields(broker_name: str) -> dict[str, Any]:
+def _catalog_sdk_fields(
+    broker_name: str, *, attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Expose the repo-managed SDK pin and local install status for native brokers."""
     info = BROKER_CATALOG.get(broker_name)
     if info is None or not info.native:
         return {}
     from flinttrade_core.broker_sdk_attest import sdk_attestation_fields  # noqa: PLC0415
 
-    return sdk_attestation_fields(info.sdk_pin, attestations=_sdk_attestations_by_pin())
+    if attestations is None and info.sdk_pin is not None:
+        attestations = _sdk_attestations_by_pin()
+    return sdk_attestation_fields(info.sdk_pin, attestations=attestations)
 
 
 def _minute_interval_label(minutes: int) -> str:
@@ -77,7 +81,9 @@ def _minute_interval_label(minutes: int) -> str:
     return f"{minutes}m"
 
 
-def _native_capability_fields(broker_name: str) -> dict[str, Any]:
+def _native_capability_fields(
+    broker_name: str, *, attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Expose optional native-adapter metadata alongside legacy capabilities."""
     info = BROKER_CATALOG.get(broker_name)
     native = NATIVE_BROKER_CAPABILITIES.get(broker_name)
@@ -91,7 +97,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
             else {}
         )
         data.update(_catalog_mcp_fields(broker_name))
-        data.update(_catalog_sdk_fields(broker_name))
+        data.update(_catalog_sdk_fields(broker_name, attestations=attestations))
         return data
     intraday = list(native.historical_intraday_intervals_minutes)
     intervals = [_minute_interval_label(minutes) for minutes in intraday]
@@ -151,7 +157,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         if info.exchanges == ["CRYPTO"]:
             data["broker_type"] = "crypto"
     data.update(_catalog_mcp_fields(broker_name))
-    data.update(_catalog_sdk_fields(broker_name))
+    data.update(_catalog_sdk_fields(broker_name, attestations=attestations))
     return data
 
 
@@ -163,7 +169,9 @@ def _catalog_mcp_fields(broker_name: str) -> dict[str, Any]:
     return {"mcp": info.mcp.model_dump()}
 
 
-def _caps_to_dict(caps: BrokerCapabilities) -> dict[str, Any]:
+def _caps_to_dict(
+    caps: BrokerCapabilities, *, attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Serialise a :class:`BrokerCapabilities` dataclass to a plain dict.
 
     Args:
@@ -173,7 +181,7 @@ def _caps_to_dict(caps: BrokerCapabilities) -> dict[str, Any]:
         Dict suitable for JSON serialisation.
     """
     data = dataclasses.asdict(caps)
-    data.update(_native_capability_fields(caps.broker_name))
+    data.update(_native_capability_fields(caps.broker_name, attestations=attestations))
     return data
 
 
@@ -222,12 +230,13 @@ def get_capabilities() -> tuple[Any, int]:
         )
 
     all_caps = REGISTRY.all()
+    attestations = _sdk_attestations_by_pin()
     return (
         jsonify(
             {
                 "status": "success",
                 "count": len(all_caps),
-                "brokers": [_caps_to_dict(c) for c in all_caps],
+                "brokers": [_caps_to_dict(c, attestations=attestations) for c in all_caps],
             }
         ),
         200,
@@ -246,7 +255,9 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
     return data
 
 
-def _mcp_entry(info: Any) -> dict[str, Any]:
+def _mcp_entry(
+    info: Any, *, attestations: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Serialise one broker-hosted MCP catalogue row."""
     data = {
         "adapter_id": info.name,
@@ -257,7 +268,7 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
         "native_connect_blockers": list(info.native_connect_blockers),
         "mcp": info.mcp.model_dump(),
     }
-    data.update(_catalog_sdk_fields(info.name))
+    data.update(_catalog_sdk_fields(info.name, attestations=attestations))
     return data
 
 
@@ -301,8 +312,11 @@ def get_broker_mcp_catalogue() -> tuple[Any, int]:
         return jsonify({"status": "success", "broker": _mcp_entry(info)}), 200
 
     # broker-hosted entries follow in catalogue order.
+    # Share only within this response, never across requests or write checks.
+    attestations = _sdk_attestations_by_pin()
     brokers = [
-        _mcp_entry(info) for info in BROKER_CATALOG.values() if info.mcp is not None
+        _mcp_entry(info, attestations=attestations)
+        for info in BROKER_CATALOG.values() if info.mcp is not None
     ]
     return jsonify({"status": "success", "count": len(brokers), "brokers": brokers}), 200
 

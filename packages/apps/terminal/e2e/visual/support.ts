@@ -48,9 +48,9 @@ type KnownFile = Record<string, ScreenSnap>;
  * model-download, or model-version label on this chip.
  */
 export const RENDERED_LAYA_LABELS = {
-  ready: "Laya Ready",
-  down: "Laya Down",
-  degraded: "Laya Degraded",
+  ready: "Decision model Ready",
+  down: "Decision model Down",
+  degraded: "Decision model Degraded",
 } as const;
 
 export const LAYA_COPY_NOT_RENDERED = [

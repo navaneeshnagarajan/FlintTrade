@@ -331,8 +331,7 @@ describe("bare /v1 helpers — shared gateway route client", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Auth header attachment — regression for Codex stop-gate finding
-// "Preserve auth headers for bracket order placement"
+// Auth header attachment, including bracket order placement
 // ---------------------------------------------------------------------------
 
 describe("buildHeaders — auth attachment", () => {

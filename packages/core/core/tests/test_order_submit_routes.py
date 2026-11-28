@@ -77,7 +77,7 @@ _ADMIT_NAMES = frozenset(
     }
 )
 _GTT_CHECK = "_gtt_contract_refusal"
-_BLOCKED_DHAN_URLS = ("/forever/orders", "/super/orders")
+_BLOCKED_DHAN_URLS = ("/forever/orders", "/super/orders", "/alerts/multi/orders")
 _BLOCKED_DHAN_CALLS = frozenset({"place_forever", "place_super_order"})
 _ADMIT_ATTRS = frozenset({"admit", "admit_reduce_only"})
 _DB_RECEIVERS = frozenset(

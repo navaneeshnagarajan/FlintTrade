@@ -326,9 +326,9 @@ Example-data placement is refused by the backend
 `Orders are not available for Example. Switch to Practice or Live to trade.`)
 and does not enter `Laya.admit`.
 Order Pad Example Buy is a local client fill (`Example order placed`, id starting `SAMPLE-`; no HTTP
-order route, no Laya admit, no SafetySystem). Operator and automate
+order route, no `Laya.admit`, no SafetySystem). Operator and automate
 **place** run the mode guard, then `Laya.admit`. Live place is checked
-by Laya admission and then SafetySystem L1–L5, `gate_order`, and
+by decision-model admission and then SafetySystem L1–L5, `gate_order`, and
 `BrokerRouter` on that place. `"variety": "gtt"` is HTTP 422
 `gtt_unsupported` before that admission, on place, routed place,
 exit-all, and a bracket. A refusal or a quantity clamp stops before SafetySystem.
@@ -371,14 +371,14 @@ the earliest of:
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
 
-Laya admits operator and automate place before SafetySystem (Live) or the
+The decision model admits operator and automate place before SafetySystem (Live) or the
 sandbox (Practice). It does not place an order and does not mint
 `gate_order`, and it does not replace L1–L5. A refusal or a quantity
 clamp stops before those next steps. Admit checks Down, then the hard
 rules, then typed free-text questions on the opt-in decision process.
 The model can deny or clamp only. Only Down mutes Live place. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
-smart, multi, forever modify and cancel, and the other non-place write verbs still reach SafetySystem without this place admission. `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.` and the route does not call a broker. A GTT body is HTTP 422 `gtt_unsupported` before Laya, SafetySystem, and any broker call. No submit route reaches a broker forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place. Laya starts Down; the three statuses are Ready, Degraded, and Down. `GET /health` records them from the managed Laya process when one is registered. The desk ping publishes the stored Live-facing status and does not invent Ready. A base checkpoint is not qualified for Live, so Live stays Down until a qualification record matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
+smart, multi, forever modify and cancel, and the other non-place write verbs still reach SafetySystem without this place admission. `POST /api/v1/orders/forever` does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.` and the route does not call a broker. A GTT body is HTTP 422 `gtt_unsupported` before the decision model, SafetySystem, and any broker call. No submit route reaches a broker forever or super-order endpoint. The Kotak Neo adapter refuses a `gtt` place. The decision model starts Down; the three statuses are Ready, Degraded, and Down. `GET /health` records them from the managed decision-model process when one is registered. The desk ping publishes the stored Live-facing status and does not invent Ready. A base checkpoint is not qualified for Live, so Live stays Down until a qualification record matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
 

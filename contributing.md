@@ -148,6 +148,9 @@ terminal-only change exactly as Node is for a Python-only one. The hooks half is
 skipped with a hint if `packages/apps/terminal/node_modules` is absent, so run
 `pnpm install --frozen-lockfile` first if you want it.
 
+When a change is visible in the running terminal or site, verify that flow
+with Reticle. The procedure is [`RETICLE.md`](RETICLE.md).
+
 ## How to build
 
 ```bash

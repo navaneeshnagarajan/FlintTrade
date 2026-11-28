@@ -623,8 +623,8 @@ def test_real_closed_trade_learning_persists_and_reopens_offline(desk, tmp_path)
 @pytest.mark.parametrize(
     "laya_status,quantity,code",
     [
-        (DecisionStatus.DOWN, 1, "laya_denied"),
-        (DecisionStatus.DEGRADED, 4, "laya_clamp"),
+        (DecisionStatus.DOWN, 1, "decision_model_denied"),
+        (DecisionStatus.DEGRADED, 4, "decision_model_clamp"),
     ],
 )
 def test_cycle_preserves_denial_or_clamp_in_durable_evidence(desk, laya_status, quantity, code):

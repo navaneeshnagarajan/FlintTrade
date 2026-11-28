@@ -36,11 +36,13 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { layaOrderRefused } from "@/lib/layaStatus";
+import { instrumentKind, optionExitLimitPrice } from "@/lib/orderRules";
+import { exitNowTicket, exitTicketQuote, openExitTicket } from "@/lib/stopLossState";
 import { shippedMuhuratHolidays } from "@/lib/muhuratSession";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
-import { liveWritesMuted, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
+import { LAYA_DOWN_REFUSAL, liveWritesMuted, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
@@ -262,6 +264,7 @@ function normaliseOrderBody(body: object): Record<string, unknown> {
   copyField("priceBasis", "price_basis");
   copyField("lotSize", "lot_size");
   copyField("freezeQty", "freeze_qty");
+  copyField("exitOnly", "exit_only");
 
   return normalised;
 }
@@ -1865,7 +1868,19 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     ...(priceSource ? { priceSource } : {}),
     ...(priceAgeS !== undefined ? { priceAgeS } : {}),
     ...(ltpBasis ? { ltpBasis } : {}),
+    ...practiceBidAsk(value),
   };
+}
+
+function practicePositivePrice(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function practiceBidAsk(value: Record<string, unknown>): { bid?: number; ask?: number } {
+  const bid = practicePositivePrice(value.bid ?? value.best_bid ?? value.bid_price);
+  const ask = practicePositivePrice(value.ask ?? value.best_ask ?? value.ask_price);
+  return { ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}) };
 }
 
 function normalisePracticeOrder(value: unknown): Order | undefined {
@@ -2367,10 +2382,10 @@ async function postOrder<T>(
   const mode = authority?.mode ?? currentMode;
   if (mode === "live" && LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) {
     const incident = readOperatorIncident();
-    const layaExit = options?.exit === true && incident?.failureClass === "laya";
+    const layaExit = options?.exit === true && incident?.failureClass === "decision_model";
     if (liveWritesMuted(incident) && !layaExit) {
-      const message = incident?.failureClass === "laya"
-        ? incident.headline
+      const message = incident?.failureClass === "decision_model"
+        ? LAYA_DOWN_REFUSAL
         : (incident?.rectify ?? "Live orders are closed.");
       throw new OrderPreflightRefusal(message);
     }
@@ -2588,14 +2603,10 @@ async function post<T>(
 //   engine order_bp  at /api/v1/orders : basket, split, options-strategy
 //
 // Practice opens and closes are `place` (an opposite MARKET order for a
-// close). Pre-2026-05-19 this file mixed FT-proxy names (place,
-// openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
-// so half the order endpoints 404'd in production. Codex stop-gate review
-// caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
-// review then flagged that `optionsOrder` / `optionsMultiOrder` had been
-// FT mode/safety gate. Both endpoints are now backed by /options and
-// `optionsorder` and `optionsmultiorder` through `_dispatch_order`, so
-// every options trade is mode-gated identically to a regular order.
+// close). Older proxy leaf names (openposition, basketorder, splitorder,
+// optionsorder, optionsmultiorder) did not match these routes and returned
+// 404. Options orders use /options and /options-multi, which go through
+// `_dispatch_order`, so every options trade is mode-gated like a regular order.
 //
 // `orderStatus` is a read-only query. Native-only workspaces route it through
 // path for bridge parity.
@@ -2617,10 +2628,10 @@ const PRACTICE_SQUARE_OFF_PRODUCTS = new Set(["MIS", "CNC", "NRML"]);
 function practiceSquareOffFailure(symbol: string, err: unknown): string {
   if (err instanceof OrderApiError && err.body && typeof err.body === "object") {
     const body = err.body as Record<string, unknown>;
-    if (body.code === "laya_denied") {
+    if (body.code === "decision_model_denied") {
       const reason = typeof body.reason === "string" && body.reason
         ? body.reason
-        : err.message;
+        : err.message || "Not placed. Decision model denied this order.";
       const limits = body.limits;
       const max = limits && typeof limits === "object"
         ? (limits as { max_quantity?: unknown }).max_quantity
@@ -2628,9 +2639,9 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
       const limitsLine = typeof max === "number" && Number.isInteger(max) && max >= 1
         ? ` Max quantity ${max}.`
         : "";
-      return `${symbol}: Laya denied. ${reason}${limitsLine}`;
+      return `${symbol}: Denied by decision model. ${reason}${limitsLine}`;
     }
-    if (body.code === "laya_clamp" && typeof body.message === "string" && body.message) {
+    if (body.code === "decision_model_clamp" && typeof body.message === "string" && body.message) {
       return `${symbol}: ${body.message}`;
     }
   }
@@ -2638,7 +2649,7 @@ function practiceSquareOffFailure(symbol: string, err: unknown): string {
   return `${symbol}: ${outcome.message}`;
 }
 
-/** Place one opposite MARKET order per open Practice position. */
+/** Place one opposite exit per open Practice position. */
 async function squareOffPracticePositions(): Promise<void> {
   const pinnedMode = "practice" as const;
   const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
@@ -2661,18 +2672,24 @@ async function squareOffPracticePositions(): Promise<void> {
       );
       continue;
     }
-    const price = position.ltp > 0
-      ? position.ltp
-      : position.averagePrice > 0
-        ? position.averagePrice
-        : 0;
+    const action = position.quantity > 0 ? "SELL" : "BUY";
+    const isOption = instrumentKind(position.symbol, position.exchange) === "option";
+    const last = position.ltp > 0 ? position.ltp : null;
+    if (isOption && last === null) {
+      const ticket = exitNowTicket(position, exitTicketQuote(position));
+      if (ticket) openExitTicket(ticket);
+      else failures.push(`${position.symbol}: no last price`);
+      continue;
+    }
+    const limit = isOption && last !== null ? optionExitLimitPrice(last, action) : null;
+    const price = limit ?? (last !== null ? last : position.averagePrice > 0 ? position.averagePrice : 0);
     try {
       await postOrder("place", {
         symbol: position.symbol,
         exchange: position.exchange,
-        action: position.quantity > 0 ? "SELL" : "BUY",
+        action,
         product: product as "MIS" | "CNC" | "NRML",
-        orderType: "MARKET",
+        orderType: limit !== null ? "LIMIT" : "MARKET",
         quantity: Math.abs(position.quantity),
         price,
         triggerPrice: 0,

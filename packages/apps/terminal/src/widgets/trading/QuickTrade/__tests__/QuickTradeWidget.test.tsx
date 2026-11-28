@@ -192,6 +192,27 @@ describe("QuickTradeWidget", () => {
     expect(screen.queryByLabelText("Limit price")).toBeNull();
   });
 
+
+  it("defaults an option ticket to LIMIT and shows the market refusal before submit", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "BANKNIFTY26JUN56000CE",
+      exchange: "NFO",
+      lotsize: 30,
+      tick_size: 0.05,
+    });
+    renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
+    await screen.findByText(/Qty: 1 × 30 = 30/);
+    expect(screen.getByLabelText("Limit price")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /MARKET/i }));
+    expect(await screen.findByTestId("order-rule-line")).toHaveTextContent(
+      "Market orders aren't accepted on options. Use a limit price.",
+    );
+    expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+
   it("sends quantity = lots × lot size for a derivatives contract", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "BANKNIFTY26JUN56000CE",
@@ -203,8 +224,9 @@ describe("QuickTradeWidget", () => {
 
     // Wait for the lot size to be confirmed (the qty summary appears)
     await screen.findByText(/Qty: 1 × 30 = 30/);
+    expect(screen.getByLabelText("Limit price")).toBeInTheDocument();
 
-    // Select 2 lots, then BUY
+    fireEvent.change(screen.getByLabelText("Limit price"), { target: { value: "120.5" } });
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     fireEvent.click(screen.getByRole("button", { name: /buy 2 lots/i }));
 
@@ -216,23 +238,41 @@ describe("QuickTradeWidget", () => {
           action: "BUY",
           quantity: 60, // 2 lots × 30 — NOT the raw preset number
           product: "MIS",
-          orderType: "MARKET",
+          orderType: "LIMIT",
+          price: 120.5,
         }),
       );
     });
   });
 
-  it("blocks derivative orders (fail closed) while the lot size is unverified", async () => {
+  it("disables Buy and Sell and names the underlying when the lot lookup fails", async () => {
     mockGetSymbol.mockRejectedValue(new Error("symbol not found"));
     renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
 
-    await screen.findByText(/Lot size unverified — orders blocked/);
+    expect(await screen.findByText("The lot size for BANKNIFTY isn't verified.")).toBeInTheDocument();
+    const buy = screen.getByRole("button", { name: /buy 1 lot /i });
+    const sell = screen.getByRole("button", { name: /sell 1 lot /i });
+    expect(buy).toBeDisabled();
+    expect(sell).toBeDisabled();
+    fireEvent.click(buy);
+    fireEvent.click(sell);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Not placed. The lot size for BANKNIFTY26JUN56000CE isn't verified.")).toBeInTheDocument();
+  it("never sends a derivative at lot 1 when the broker reports no lot", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY26DECFUT",
+      exchange: "NFO",
+      lotsize: 0,
+      tick_size: 0.05,
     });
+    renderQuickTrade({ symbol: "NIFTY26DECFUT", exchange: "NFO" });
+
+    expect(await screen.findByText("The lot size for NIFTY isn't verified.")).toBeInTheDocument();
+    expect(screen.queryByText(/Qty: 1 × 1/)).toBeNull();
+    const buy = screen.getByRole("button", { name: /buy 1 lot /i });
+    expect(buy).toBeDisabled();
+    fireEvent.click(buy);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
@@ -328,7 +368,7 @@ describe("QuickTradeWidget", () => {
 
   it("shows Laya denied under Buy and Sell and leaves both off", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
-      code: "laya_denied",
+      code: "decision_model_denied",
       reason: "Quantity must be a positive whole number.",
       message: "Quantity must be a positive whole number.",
       limits: { max_quantity: 1 },
@@ -337,7 +377,7 @@ describe("QuickTradeWidget", () => {
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     const denied = await screen.findByTestId("laya-denied");
-    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Denied by decision model");
     expect(denied).toHaveTextContent("Quantity must be a positive whole number.");
     expect(denied).toHaveTextContent("Max quantity 1.");
     expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
@@ -347,18 +387,18 @@ describe("QuickTradeWidget", () => {
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
-      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      "Not placed. Decision model is down. Start it from Status.",
       403,
       {
-      code: "laya_denied",
-      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
-      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",      limits: { max_quantity: 100 },
+      code: "decision_model_denied",
+      reason: "Not placed. Decision model is down. Start it from Status.",
+      message: "Not placed. Decision model is down. Start it from Status.",      limits: { max_quantity: 100 },
     }));
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
     const denied = await screen.findByTestId("laya-denied");
-    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Not placed. Decision model is down. Start it from Status.");
     expect(denied).not.toHaveTextContent("Max quantity");
     expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
 

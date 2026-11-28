@@ -73,6 +73,7 @@ const rootDocs = [
   ['docs/API.md', 'api', 'API', 'HTTP, WebSocket, and integration reference'],
   ['docs/COMPATIBILITY.md', 'compatibility', 'Docs', 'Supported brokers, exchanges, and environments'],
   ['docs/ORDER_SAFETY.md', 'order-safety', 'Operations', 'Audit, retention, and order-safety notes'],
+  ['docs/BROKER_AND_EXCHANGE_RULES.md', 'broker-and-exchange-rules', 'Operations', 'Dated exchange, broker, and product order rules checked before an order is sent'],
   ['docs/CI.md', 'ci', 'Contributing', 'Continuous integration and quality checks'],
   ['docs/REFERENCES.md', 'references', 'Credits', 'Public attribution and project influence notes'],
 ];
@@ -605,6 +606,7 @@ async function main() {
         'api',
         'compatibility',
         'order-safety',
+        'broker-and-exchange-rules',
         'ci',
         'references',
         'setup',

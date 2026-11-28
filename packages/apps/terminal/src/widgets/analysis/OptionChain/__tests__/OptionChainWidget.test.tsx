@@ -735,9 +735,48 @@ describe("OptionChainWidget", () => {
         exchange: "NFO",
         action: "BUY",
         quantity: 50,
+        orderType: "LIMIT",
+        price: 100,
       }),
       authorityAtClick,
     ));
+    expect(vi.mocked(placeOrder).mock.calls.every(([params]) => params.orderType !== "MARKET")).toBe(true);
+  });
+
+  it("opens a limit ticket instead of sending a leg with no live premium", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: null }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: null }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockRejectedValue(new Error("resolver unavailable"));
+    useModeStore.setState({ mode: "live" });
+    const opened: unknown[] = [];
+    const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+    window.addEventListener("flinttrade:addWidget", listener);
+    try {
+      render(<OptionChainWidget />, { wrapper: Wrapper });
+      await vi.waitFor(() => expect(queryClient.getQueryData([
+        "symbol",
+        "live:native:upstox:U1",
+        "NIFTY",
+        "NFO",
+      ])).toEqual({ lotsize: 50 }));
+      act(() => gridMocks.onCellClicked?.([0, 0]));
+      fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      expect(opened[0]).toEqual({
+        widgetId: "orderpad",
+        props: {
+          symbol: "NIFTY10APR2625000CE", exchange: "NFO", action: "BUY", orderType: "LIMIT", qty: 50, product: "MIS",
+        },
+      });
+      expect(placeOrder).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("flinttrade:addWidget", listener);
+    }
   });
 
   it("sends the admission note with a chain place", async () => {

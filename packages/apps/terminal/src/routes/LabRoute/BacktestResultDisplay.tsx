@@ -174,7 +174,7 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
           <MetricCard
             label={tradePnlLabel}
             value={fmtInr(tradeLogPnl.amount)}
-            subtitle={tradeLogPnl.basis === "gross" ? "Gross — net P&L not in result" : undefined}
+            subtitle={tradeLogPnl.basis === "gross" ? "Gross P&L" : undefined}
             positive={tradeLogPnl.amount >= 0}
           />
           <MetricCard

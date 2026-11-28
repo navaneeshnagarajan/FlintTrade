@@ -27,7 +27,7 @@ describe('public mode vocabulary', () => {
     expect(modes).toContain('**Example** is not a Mode');
     expect(modes).toContain('**Connected (read)** is not a claim');
     expect(modes).toContain('Idle headings `Practice desk locked`');
-    expect(modes).toContain('Laya is the shipped name of this row');
+    expect(modes).toContain('The Status row is labelled **Decision model**');
     expect(api).toContain('| `explore` | **Example**');
     expect(api).toContain('| `practice` | **Practice**');
     expect(api).toContain('| `live` | **Live**');
@@ -62,7 +62,15 @@ describe('public mode vocabulary', () => {
     expect(guide).not.toContain('session claim is example or demo');
     expect(api).toContain('`GET /api/v1/operator/status`');
     expect(api).toContain('the decision model');
-    expect(modes).toContain('**Laya decision model**');
+    expect(modes).not.toContain('(pinned)');
+    expect(glossary).not.toContain('(pinned)');
+    expect(guide).not.toContain('(pinned)');
+    expect(modes).not.toContain('**Laya decision model**');
+    expect(modes).not.toContain('Laya is the shipped name of this row');
+    expect(glossary).toContain('The Status row is labelled **Decision model**');
+    expect(glossary).not.toContain('labelled **Laya**');
+    expect(guide).toContain('The decision-model row is labelled **Decision model**');
+    expect(guide).not.toContain('**Laya decision model**');
   });
 
   it('names Downloading, and names Transition only on the revised clock', () => {

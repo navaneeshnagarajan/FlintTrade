@@ -30,12 +30,14 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from flask import Flask
 
 from flinttrade_core.models import Action, Exchange, Order, PriceType, Product
 from flinttrade_core.order_outcome import ORDER_STATUS_UNKNOWN, DispatchProgress, leg_outcomes
+from flinttrade_core.order_rules import stop_loss_limit_price
 
 logger = logging.getLogger("flinttrade.engine.bracket_order")
 
@@ -459,7 +461,7 @@ class BracketOrderService:
                     pricetype=PriceType.SL,
                     product=Product(product),
                     quantity=str(quantity),
-                    price=str(stoploss),
+                    price=str(stop_loss_limit_price(symbol, exchange, exit_action, Decimal(str(stoploss)))),
                     trigger_price=str(stoploss),
                     strategy=strategy,
                 )

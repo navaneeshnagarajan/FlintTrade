@@ -574,7 +574,7 @@ describe("AgentPanel operator entry rationale", () => {
     const field = screen.getByRole("textbox", { name: /operator entry rationale/i });
     expect(field).toHaveValue("");
     expect(field).toHaveAttribute("maxlength", "2000");
-    expect(screen.getByText(/Laya still decides every entry/)).toHaveTextContent(/does not automatically accept clamps/);
+    expect(screen.getByText(/The decision model decides every entry\./)).toHaveTextContent(/does not automatically accept clamps/);
     expect(screen.getByText(/Do not include credentials or secrets/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /start agent/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /start agent/i }));

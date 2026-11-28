@@ -17,7 +17,7 @@ import {
 } from "@flinttrade/design-system";
 import type { LegendState } from "./ChartLegend";
 import type { IndicatorSeriesRefs } from "./types";
-import { useLightweightChartTheme } from "@/hooks/useChartTheme";
+import { readLightweightChartTheme } from "@/hooks/useChartTheme";
 import { lightweightCandlestickRuntime } from "@/lib/lightweightChartRuntime";
 
 export type { IndicatorSeriesRefs };
@@ -46,8 +46,6 @@ export interface ChartInitRefs {
 export function useChartInit(
   setLegend: (state: LegendState | null) => void,
 ): ChartInitRefs {
-  const chartTheme = useLightweightChartTheme();
-
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -135,7 +133,7 @@ export function useChartInit(
     const flintChart = createFlintCandlestickChart(
       lightweightCandlestickRuntime,
       containerRef.current,
-      chartTheme,
+      readLightweightChartTheme(containerRef.current),
       { ariaLabel: "Price chart" },
     );
     const chart = flintChart.chart;

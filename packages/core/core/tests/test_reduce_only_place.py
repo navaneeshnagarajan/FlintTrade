@@ -148,7 +148,7 @@ def test_oversized_practice_close_while_down_is_refused() -> None:
     )
     body = response.get_json()
     assert response.status_code == 403
-    assert body["code"] == "laya_denied"
+    assert body["code"] == "decision_model_denied"
     assert body["reason"] == LAYA_DOWN_REASON
     assert engine.get_positions()[0]["net_qty"] == 10
     assert process_laya().decision_log() == ()
@@ -314,7 +314,7 @@ def test_live_broker_exit_reduces_the_cap_but_an_unreadable_book_refuses_reduce_
     headers = _headers("live", unlocked=True)
     over = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 7, 0), headers=headers)
     assert over.status_code == 403
-    assert over.get_json()["code"] == "laya_denied"
+    assert over.get_json()["code"] == "decision_model_denied"
     safety.check_order.assert_not_called()
 
     inside = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
@@ -332,7 +332,7 @@ def test_live_broker_exit_reduces_the_cap_but_an_unreadable_book_refuses_reduce_
     before = process_laya().decision_log()
     closed = client.post("/api/v1/orders/dhan/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
     assert closed.status_code == 403
-    assert closed.get_json()["code"] == "laya_denied"
+    assert closed.get_json()["code"] == "decision_model_denied"
     safety.check_order.assert_not_called()
     assert process_laya().decision_log() == before
     app.config["BROKER_ROUTER"].place_order.assert_not_called()
@@ -409,7 +409,7 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
         assert body["code"] == "exit_orders_unreadable"
         assert body["message"] == exit_orders_unreadable_message("INFY")
         assert body["reason"] == exit_orders_unreadable_message("INFY")
-        assert body.get("code") != "laya_denied"
+        assert body.get("code") != "decision_model_denied"
     safety.check_order.assert_not_called()
     assert process_laya().decision_log() == ()
 
@@ -516,6 +516,6 @@ def test_typed_dhan_position_rows_can_prove_a_reduce_only_exit(
         headers=_headers("live", unlocked=True),
     )
     assert closed.status_code == 403, closed.get_json()
-    assert closed.get_json().get("code") != "laya_denied"
+    assert closed.get_json().get("code") != "decision_model_denied"
     assert "L1_ORDER" in closed.get_json()["message"]
     assert process_laya().decision_log()[-1].proof_kind == "reduce_only"

@@ -154,6 +154,44 @@ describe("OrdersWidget", () => {
     mockUseOrders.mockReturnValue(queryResult({ data: [] }));
   });
 
+  it("marks a triggered stop-loss that did not fill and opens a limit exit ticket", async () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        orderid: "SL1",
+        symbol: "NIFTY24APR24000CE",
+        exchange: "NFO",
+        action: "SELL",
+        quantity: 75,
+        price: 40,
+        trigger_price: 45,
+        pricetype: "SL",
+        product: "MIS",
+        order_status: "TRIGGERED",
+      }],
+    }));
+    const opened: unknown[] = [];
+    const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+    window.addEventListener("flinttrade:addWidget", listener);
+    try {
+      renderWidget();
+      const slot = await screen.findByTestId("stop-loss-not-filled");
+      expect(slot).toHaveClass("inline-flex", "items-center", "gap-1", "-my-1");
+      expect(slot.closest("tr")).toHaveClass("h-8");
+      expect(slot).toHaveTextContent("Stop-loss triggered · not filled");
+      fireEvent.click(screen.getByRole("button", { name: "Exit now NIFTY24APR24000CE" }));
+      expect(opened).toEqual([{
+        widgetId: "orderpad",
+        props: {
+          symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "SELL", orderType: "LIMIT", qty: 75, product: "MIS",
+          exitOnly: true, openQuantity: 75,
+        },
+      }]);
+      expect(mockModifyOrder).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("flinttrade:addWidget", listener);
+    }
+  });
+
   it("renders without crashing", () => {
     const { container } = renderWidget();
     expect(container).toBeTruthy();

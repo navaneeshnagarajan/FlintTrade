@@ -246,7 +246,7 @@ exports[`FeatureLockCard > matches snapshot 1`] = `
               >
                 <span
                   class="absolute inset-[-100%] animate-[spin_3s_linear_infinite]"
-                  style="background: conic-gradient(from 90deg at 50% 50%, transparent 0%, rgb(59, 130, 246) 50%, transparent 100%);"
+                  style="background: conic-gradient(from 90deg, transparent 0%, rgb(59, 130, 246) 50%, transparent 100%);"
                 />
               </span>
               <span

@@ -11,13 +11,13 @@
  *   - Fail-closed on derivative exchanges: no order is sent until the lot
  *     size has been confirmed from the backend
  *   - Product type toggle: MIS / NRML / CNC
- *   - Order type selector: MARKET / LIMIT
+ *   - Order type selector: LIMIT for options, MARKET or LIMIT otherwise
  *   - Optional limit price input (LIMIT mode only)
  *   - Fires placeOrder from @/services/api (gated backend route)
  *   - Confirm dialog for orders of 10+ lots
  */
 
-import { useState, useCallback, useEffect, useRef, memo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, memo } from "react";
 import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,9 +29,18 @@ import { presentSubmitError } from "@/lib/orderOutcome";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
 import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
-import { lotCountLabel } from "@/lib/instrumentLots";
+import { lotCountLabel, lotUnknownMessage, missingLotRefusal } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
 import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
+import { OrderRuleLine } from "@/components/orders/OrderRuleLine";
+import {
+  brokerDisplayName,
+  evaluateOrderRules,
+  hasBlockingRule,
+  isOptionContract,
+} from "@/lib/orderRules";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { resolveAccountAuthorityIdentity } from "@/hooks/useDataScope";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
@@ -224,6 +233,28 @@ function QuickTradeWidget(props: WidgetProps) {
     setAdmission(null);
   }, [symbol, exchange, lots, product, orderType, limitPrice]);
 
+  useEffect(() => {
+    if (isOptionContract(symbol, exchange)) setOrderType("LIMIT");
+  }, [symbol, exchange]);
+
+  const ruleBroker = useBrokerStore((s) => (
+    mode === "live" ? resolveAccountAuthorityIdentity({ ...s, mode }).brokerType : "practice"
+  ));
+  const ruleResults = useMemo(() => {
+    if (!hasInstrument) return [];
+    const parsed = orderType === "LIMIT" ? Number.parseFloat(limitPrice) : null;
+    return evaluateOrderRules({
+      symbol,
+      exchange,
+      orderType,
+      action: "BUY",
+      price: parsed != null && Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+      broker: ruleBroker,
+      brokerName: brokerDisplayName(ruleBroker),
+    });
+  }, [exchange, hasInstrument, limitPrice, orderType, ruleBroker, symbol]);
+  const ruleBlocked = hasBlockingRule(ruleResults);
+
   // A denial belongs to the status and mode that produced it. When either
   // changes, Buy and Sell are retryable. A clamp stays until the ticket changes.
   useEffect(() => {
@@ -232,18 +263,23 @@ function QuickTradeWidget(props: WidgetProps) {
 
   // Real lot size for the instrument — null until confirmed by the backend.
   const [lotSize, setLotSize] = useState<number | null>(null);
+  const [lotLookupDone, setLotLookupDone] = useState(false);
   useEffect(() => {
     if (!symbol || !exchange) return;
     let cancelled = false;
     setLotSize(null);
+    setLotLookupDone(false);
     getSymbol(symbol, exchange)
       .then((info) => {
         if (cancelled) return;
-        // Equities report 0/1 — normalise to 1 so quantity = lots.
-        setLotSize(info.lotsize > 0 ? info.lotsize : 1);
+        // No lot is ever assumed. An equity without one trades lots as shares.
+        setLotSize(info.lotsize > 0 ? info.lotsize : null);
       })
       .catch(() => {
-        // Leave null — derivative orders stay blocked (fail closed).
+        // Leave null: derivative orders stay blocked.
+      })
+      .finally(() => {
+        if (!cancelled) setLotLookupDone(true);
       });
     return () => {
       cancelled = true;
@@ -276,7 +312,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (quantity == null) {
         setStatus({
           type: "error",
-          message: `Not placed. The lot size for ${symbol} isn't verified.`,
+          message: missingLotRefusal(symbol),
         });
         return;
       }
@@ -289,6 +325,7 @@ function QuickTradeWidget(props: WidgetProps) {
         setStatus({ type: "error", message: priceRefusal });
         return;
       }
+      if (ruleBlocked) return;
       setIsPending(true);
       setStatus(null);
       try {
@@ -333,7 +370,7 @@ function QuickTradeWidget(props: WidgetProps) {
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note, submitOnce],
+    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note, submitOnce, ruleBlocked],
   );
 
   const placeClamped = useCallback((quantity: number) => {
@@ -362,7 +399,7 @@ function QuickTradeWidget(props: WidgetProps) {
       if (resolveQuantity() == null) {
         setStatus({
           type: "error",
-          message: `Not placed. The lot size for ${symbol} isn't verified.`,
+          message: missingLotRefusal(symbol),
         });
         return;
       }
@@ -388,6 +425,7 @@ function QuickTradeWidget(props: WidgetProps) {
   }, []);
 
   const displayQuantity = resolveQuantity();
+  const lotUnknown = displayQuantity == null;
 
   // Fail-closed empty state — no panel params and no workspace selection means
   // there is nothing safe to trade. Rendered after all hooks (hook-order rule).
@@ -465,7 +503,11 @@ function QuickTradeWidget(props: WidgetProps) {
           {/* Effective quantity — the trader must see the real order size */}
           {displayQuantity != null ? (
             <div className="text-xxs text-text-muted font-mono tabular-nums">
-              Qty: {lots} × {lotSize ?? 1} = {displayQuantity}
+              {lotSize != null ? `Qty: ${lots} × ${lotSize} = ${displayQuantity}` : `Qty: ${displayQuantity}`}
+            </div>
+          ) : lotLookupDone ? (
+            <div className="text-xxs text-warning" role="note">
+              {lotUnknownMessage(symbol)}
             </div>
           ) : (
             <div className="text-xxs text-warning" role="note">
@@ -512,6 +554,8 @@ function QuickTradeWidget(props: WidgetProps) {
           onCancelClamp={cancelClamp}
         />
 
+        <OrderRuleLine id="quicktrade-rule-line" results={ruleResults} />
+
         {/* BUY / SELL, with a reserved unknown-line slot directly above them */}
         <div className="mt-auto flex flex-col gap-1">
         <div data-testid="quicktrade-status-slot" className="min-h-9 flex items-end">
@@ -520,7 +564,7 @@ function QuickTradeWidget(props: WidgetProps) {
         <div className="flex gap-2">
           <Button
             onClick={() => handleAction("BUY")}
-            disabled={isPending || locked || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
@@ -531,7 +575,7 @@ function QuickTradeWidget(props: WidgetProps) {
           </Button>
           <Button
             onClick={() => handleAction("SELL")}
-            disabled={isPending || locked || admission?.kind === "deny" || admission?.kind === "clamp"}
+            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >

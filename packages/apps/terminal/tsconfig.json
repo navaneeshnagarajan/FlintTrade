@@ -23,6 +23,8 @@
       "@flinttrade/design-system/brand": ["../../core/design-system/src/brand/index.ts"],
       "@flinttrade/design-system": ["../../core/design-system/src/index.ts"],
       "@flinttrade/indian-charges": ["../../core/core/src/flinttrade_core/data/indian_charges.json"],
+      "@flinttrade/order-rules": ["../../core/core/src/flinttrade_core/data/order_rules.json"],
+      "@flinttrade/order-rules-cases": ["../../core/core/tests/fixtures/order_rules_cases.json"],
       "@flinttrade/instrument-lots": ["../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json"]
     }
   },
@@ -35,10 +37,13 @@
     "e2e/service-oauth-handoff.entry.ts",
     "src",
     "e2e/about-versions.fixture.tsx",
+    "e2e/order-safety.fixture.tsx",
     "e2e/foundation-truth.fixture.tsx",
     "vite-env.d.ts",
     "vite.reticleConnectGate.ts",
     "../../core/core/src/flinttrade_core/data/indian_charges.json",
-    "../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json"
+    "../../core/core/src/flinttrade_core/data/instrument_lot_fixture.json",
+    "../../core/core/src/flinttrade_core/data/order_rules.json",
+    "../../core/core/tests/fixtures/order_rules_cases.json"
   ]
 }

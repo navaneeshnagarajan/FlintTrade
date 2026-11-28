@@ -15,6 +15,7 @@ from .orderflow_aggregator import (
 )
 from .questdb_bridge import QuestDBBridge, QuestDBBridgeError
 from .questdb_client import OHLCV, MarketStats, QuestDBClient, QuestDBClientError
+from .questdb_config import QuestDBWritesDisabledError
 from .security_tracker import SecurityTracker
 from .storage import StorageManager
 from .tick_recorder import TickRecorder
@@ -62,6 +63,7 @@ __all__ = [
     # QuestDB — PostgreSQL wire client (new)
     "QuestDBClient",
     "QuestDBClientError",
+    "QuestDBWritesDisabledError",
     "OHLCV",
     "MarketStats",
     # OrderFlow — per-symbol aggregator with IST bins (new)

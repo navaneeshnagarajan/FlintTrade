@@ -176,12 +176,14 @@ test.describe("lost Scalper Bracket exit leg", () => {
 
     await mountWidget(page, "scalper");
     await page.clock.runFor(5_000);
-    await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
-    // A LIMIT price anchors the stop-loss points without a live quote.
-    await page.getByRole("radio", { name: "LIMIT", exact: true }).click();
-    await page.getByPlaceholder("0.00").fill("12");
-    await page.getByLabel("Stop-loss points").fill("2");
-    await page.getByRole("textbox", { name: "Add a reason (optional)" }).click();
+    const lot = page.getByText("1 (65)", { exact: true });
+    await expect(lot).toBeAttached({ timeout: 15_000 });
+    // Option orders go as limits; this run has no streamed premium to price from.
+    await page.getByRole("spinbutton", { name: "Limit ₹" }).fill("12");
+    // The CE buttons sit under the chart. Opening the folded note moves focus
+    // into the Scalper so Shift+ArrowUp takes the same Buy CE path as the button.
+    await page.getByRole("button", { name: "Add a reason (optional)" }).click();
+    await expect(page.getByRole("textbox", { name: "Add a reason (optional)" })).toBeFocused();
     await page.keyboard.press("Shift+ArrowUp");
     await page.getByRole("button", { name: "Confirm BUY", exact: true }).click();
 

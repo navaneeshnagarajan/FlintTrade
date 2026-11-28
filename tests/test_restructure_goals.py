@@ -394,7 +394,7 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "Distribution-signed macOS releases require the complete Apple notarisation secret trio." in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
-    assert "prerelease: ${{ contains(inputs.tag, '-') }}" in workflow
+    assert "prerelease: ${{ fromJSON(steps.release_metadata.outputs.prerelease) }}" in workflow
     assert "target_commitish: ${{ needs.validate.outputs.source_sha }}" in workflow
     assert 'overwrite_files: false' in workflow
     assert 'overwrite_files: true' not in workflow
@@ -750,7 +750,7 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
     # flinttrade-fs-promoter.node and ship it inside the AppImage, so that
     # image's glibc is the installer's floor.
     required_posix = {
-        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-26.04"),
+        ("test.yml", "electron-desktop-suite"): (None, "ubuntu-26.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,
