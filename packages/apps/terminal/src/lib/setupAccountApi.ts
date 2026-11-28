@@ -13,6 +13,7 @@ export interface AccountSetupResult {
   /** Practice session token minted at account creation so the vault step
    * and any optional setup the operator chooses are authenticated. */
   token: string;
+  expiresAt: string;
 }
 
 export interface VaultOpenResult {
@@ -42,6 +43,7 @@ export interface SetupServerState {
 export interface SetupResumeResult {
   token: string;
   username: string;
+  expiresAt: string;
 }
 
 export type AccountSetupErrorKind = "account-exists" | "network" | "server";
@@ -136,8 +138,9 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
     ? payload.data.backup_codes.filter((code): code is string => typeof code === "string")
     : [];
   const token = typeof payload.data.token === "string" ? payload.data.token : "";
+  const expiresAt = typeof payload.data.expires_at === "string" ? payload.data.expires_at : "";
 
-  return { totpUri, backupCodes, token };
+  return { totpUri, backupCodes, token, expiresAt };
 }
 
 /** Open the credential vault. Never returns the master password. */
@@ -273,7 +276,8 @@ export async function resumeFlintTradeSetup(password: string): Promise<SetupResu
     );
   }
 
-  return { token: payload.data.token, username: payload.data.username };
+  const expiresAt = typeof payload.data.expires_at === "string" ? payload.data.expires_at : "";
+  return { token: payload.data.token, username: payload.data.username, expiresAt };
 }
 
 /** Record that the operator has finished first-run setup. */

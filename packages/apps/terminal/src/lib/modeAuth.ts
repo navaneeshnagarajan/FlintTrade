@@ -28,9 +28,24 @@ import { useAuthStore } from "@/stores/authStore";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface ModeTokenResponse {
-  data?: { token?: string; mode?: string; live_mode_unlocked?: boolean };
+  data?: {
+    token?: string;
+    mode?: string;
+    live_mode_unlocked?: boolean;
+    expires_at?: string;
+  };
   token?: string;
+  expires_at?: string;
   message?: string;
+}
+
+/** Replacement session minted by PIN unlock, Live switch, or Mode downgrade. */
+export type SessionReissue = { token: string; expiresAt: string };
+
+function sessionReissue(body: ModeTokenResponse, failureLabel: string): SessionReissue {
+  const token = body?.data?.token ?? body?.token;
+  if (!token) throw new Error(`${failureLabel} returned no token`);
+  return { token, expiresAt: body?.data?.expires_at ?? body?.expires_at ?? "" };
 }
 
 /** The desk session a password sign-in may open without re-authenticating. */
@@ -58,7 +73,7 @@ export function modeAfterPasswordSignIn(reported: unknown): "practice" {
 export async function downgradeMode(
   target: DowngradeMode,
   token: string | null,
-): Promise<string> {
+): Promise<SessionReissue> {
   const headers = buildHeaders(true);
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -70,17 +85,14 @@ export async function downgradeMode(
   if (!res.ok) {
     throw new Error(`mode downgrade to ${target} failed (${res.status})`);
   }
-  const body = (await res.json()) as ModeTokenResponse;
-  const newToken = body?.data?.token ?? body?.token;
-  if (!newToken) throw new Error("mode downgrade returned no token");
-  return newToken;
+  return sessionReissue((await res.json()) as ModeTokenResponse, "mode downgrade");
 }
 
 async function postSessionPin(
   path: "/v1/auth/pin" | "/v1/auth/live",
   pin: string,
   failureLabel: string,
-): Promise<string> {
+): Promise<SessionReissue> {
   // During an idle or manual lock the active token is nulled, but the
   // still-valid session is kept in `reauthToken` for this re-auth.
   const auth = useAuthStore.getState();
@@ -97,9 +109,7 @@ async function postSessionPin(
   if (!res.ok) {
     throw new Error(body?.message || `${failureLabel} failed (${res.status})`);
   }
-  const token = body?.data?.token ?? body?.token;
-  if (!token) throw new Error(`${failureLabel} returned no token`);
-  return token;
+  return sessionReissue(body, failureLabel);
 }
 
 /**
@@ -109,14 +119,14 @@ async function postSessionPin(
  * and does not read one from the response body. Callers copy the restored
  * token's JWT mode claim into the Mode store.
  */
-export async function unlockWithPin(pin: string): Promise<{ token: string }> {
-  return { token: await postSessionPin("/v1/auth/pin", pin, "PIN unlock") };
+export async function unlockWithPin(pin: string): Promise<SessionReissue> {
+  return postSessionPin("/v1/auth/pin", pin, "PIN unlock");
 }
 
 /**
  * Explicit Live switch. Keeps the server's authenticator enrolment check.
  * Quick unlock does not use this path.
  */
-export async function confirmLiveMode(pin: string): Promise<{ token: string }> {
-  return { token: await postSessionPin("/v1/auth/live", pin, "Live switch") };
+export async function confirmLiveMode(pin: string): Promise<SessionReissue> {
+  return postSessionPin("/v1/auth/live", pin, "Live switch");
 }

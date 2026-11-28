@@ -59,8 +59,18 @@ const nativeV2Session = z.strictObject({
 export const executionSessionSchema = z.union([paperSession, legacyLiveSession, nativeSession, nativeV2Session]);
 export type ExecutionSessionRecord = z.infer<typeof executionSessionSchema>;
 export type SessionOperation = "start" | "stop" | "rearm" | "close";
+export const SESSION_ENDS_AT_SIGN_IN = "Not started. Session ends at 08:00 IST. Sign in again to continue.";
 export class ExecutionSessionError extends Error {
-  constructor(readonly outcome: "retired" | "refused" | "unknown" | "unavailable", message: string) { super(`${outcome}: ${message}`); }
+  constructor(readonly outcome: "retired" | "refused" | "unknown" | "unavailable", message: string) {
+    super(message === SESSION_ENDS_AT_SIGN_IN ? message : `${outcome}: ${message}`);
+  }
+}
+function sessionEndingMessage(raw: unknown): string | undefined {
+  const envelope = z.object({ status: z.string(), code: z.string().optional(), message: z.string().optional() }).safeParse(raw);
+  if (envelope.success && envelope.data.code === "session_expires_soon" && envelope.data.message === SESSION_ENDS_AT_SIGN_IN) {
+    return SESSION_ENDS_AT_SIGN_IN;
+  }
+  return undefined;
 }
 function current(fence: AuthSessionFence) {
   if (!isAuthSessionFenceCurrent(fence)) throw new ExecutionSessionError("retired", "Operator session changed; the original run remains backend-owned.");
@@ -86,6 +96,8 @@ async function request(path: string, method: "GET" | "POST", fence: AuthSessionF
     throw new ExecutionSessionError(method === "POST" ? "unknown" : "unavailable", "Exact run readback required. No automatic resend.");
   }
   current(fence);
+  const ending = sessionEndingMessage(raw);
+  if (ending) throw new ExecutionSessionError("refused", ending);
   const result = z.object({ status: z.string(), data: z.unknown().optional(), code: z.string().optional() }).safeParse(raw);
   if (!result.success || !response.ok || result.data.status !== "success") {
     throw new ExecutionSessionError(method === "POST" && response.status >= 500 ? "unknown" : "unavailable",
@@ -269,6 +281,8 @@ export function createNativeV2Client() {
         "Result unknown. Read status before you try again.");
     }
     assertCurrent();
+    const ending = sessionEndingMessage(raw);
+    if (ending) throw new ExecutionSessionError("refused", ending);
     const envelope = z.object({ status: z.string(), data: z.unknown().optional(), code: z.string().optional() }).safeParse(raw);
     if (!response.ok || !envelope.success || envelope.data.status !== "success") {
       const refused = response.status >= 400 && response.status < 500;

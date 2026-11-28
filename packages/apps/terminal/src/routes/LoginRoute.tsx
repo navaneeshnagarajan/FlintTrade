@@ -130,9 +130,12 @@ export default function LoginRoute({
         const reportedMode = data.data.mode;
         const deskMode = modeAfterPasswordSignIn(reportedMode);
         let practiceToken = data.data.token as string;
+        let expiresAt = typeof data.data.expires_at === "string" ? data.data.expires_at : "";
         if (reportedMode !== "practice") {
           try {
-            practiceToken = await downgradeMode(deskMode, data.data.token);
+            const downgraded = await downgradeMode(deskMode, data.data.token);
+            practiceToken = downgraded.token;
+            if (downgraded.expiresAt) expiresAt = downgraded.expiresAt;
           } catch {
             if (!isAuthSessionFenceCurrent(requestFence)) return;
             setError("Could not open Practice. Try again.");
@@ -142,7 +145,7 @@ export default function LoginRoute({
         if (!useAuthStore.getState().setLoggedInIfCurrent(
           practiceToken,
           data.data.username,
-          data.data.expires_at,
+          expiresAt,
           requestFence,
         )) return;
         useModeStore.getState().setMode(deskMode);
@@ -164,11 +167,11 @@ export default function LoginRoute({
     try {
       // Unlock restores the existing session. Do not send a mode, and do not
       // read Mode from the response body. Copy the restored JWT claim.
-      const { token } = await unlockWithPin(pin);
+      const { token, expiresAt } = await unlockWithPin(pin);
       if (!useAuthStore.getState().setLoggedInIfCurrent(
         token,
         requestFence.principal || "user",
-        "",
+        expiresAt,
         requestFence,
       )) return;
       useModeStore.getState().adoptSessionToken(token);

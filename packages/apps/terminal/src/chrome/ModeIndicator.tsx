@@ -110,8 +110,8 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     if (mode === "practice") return true;
     try {
       const authState = useAuthStore.getState();
-      const newToken = await downgradeMode("practice", authState.token);
-      if (!updateToken(newToken, authState.sessionGeneration)) return false;
+      const { token: newToken, expiresAt } = await downgradeMode("practice", authState.token);
+      if (!updateToken(newToken, authState.sessionGeneration, expiresAt)) return false;
       // The new token's claim is the desk mode. An opaque test token has
       // no claim, so the explicit Practice assignment still applies.
       if (sessionModeFromToken(newToken)) {
@@ -156,8 +156,8 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
       const expectedGeneration = useAuthStore.getState().sessionGeneration;
       // Explicit Live switch. Quick unlock does not change Mode; this call
       // does, and only after the server accepts the PIN and enrolment check.
-      const { token: newToken } = await confirmLiveMode(pin);
-      if (!updateToken(newToken, expectedGeneration)) return;
+      const { token: newToken, expiresAt } = await confirmLiveMode(pin);
+      if (!updateToken(newToken, expectedGeneration, expiresAt)) return;
       if (sessionModeFromToken(newToken)) {
         useModeStore.getState().adoptSessionToken(newToken);
       } else {

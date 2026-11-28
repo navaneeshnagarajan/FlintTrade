@@ -1084,7 +1084,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Pre-flight checklist
 
-- [ ] Your FlintTrade JWT is fresh. It expires daily at 8 AM IST.
+- [ ] Your FlintTrade JWT is fresh. It expires daily at 08:00 IST. A sign-in in the hour before 08:00 IST lasts until 08:00 IST the following day.
 
 - [ ] The authenticator is enrolled. After **Later** on the
       **Two-factor authentication** card, the Live menu stays locked and
@@ -2366,7 +2366,7 @@ stuck on an outdated **Not configured**.
 
 ### "Token expired" when placing an order
 
-FlintTrade JWTs expire daily at 8 AM IST. Refresh the token by signing in
+FlintTrade JWTs expire daily at 08:00 IST. A sign-in in the hour before 08:00 IST lasts until 08:00 IST the following day. Refresh the token by signing in
 again. FlintTrade redirects you to `/welcome` automatically
 when it detects the 401.
 

@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, current_app, g, jsonify, request
 
+from .auth_routes import SESSION_EXPIRES_SOON_CODE, SESSION_EXPIRES_SOON_MESSAGE, SessionExpiresSoon
 from .execution_session import ExecutionSession
 from .execution_sessions import ExecutionSessions
 from .model_control_auth import ModelControlDenied, _body, principal
@@ -83,6 +84,11 @@ def authorise() -> Any:
 def no_store(response: Any) -> Any:
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@execution_sessions_bp.errorhandler(SessionExpiresSoon)
+def session_ending(_exc: SessionExpiresSoon) -> Any:
+    return jsonify(status="error", code=SESSION_EXPIRES_SOON_CODE, message=SESSION_EXPIRES_SOON_MESSAGE), 409
 
 
 @execution_sessions_bp.errorhandler(ValueError)

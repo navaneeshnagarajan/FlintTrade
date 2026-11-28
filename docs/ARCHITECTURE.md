@@ -587,8 +587,8 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
   (`POST /v1/auth/totp/enable`). `POST /v1/auth/live` refuses with
   `totp_required` until enrolment is confirmed. Quick Unlock of a session
   that is already Live keeps that check and keeps Live.
-- **Expires at 8 AM IST the next day.** No refresh tokens — sign in
-  again.
+- **Expires at the next 08:00 IST.** A sign-in in the hour before 08:00 IST
+  lasts until 08:00 IST the following day. No refresh tokens. Sign in again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or
   `live`), `jti` (unique ID), plus `oid` and `epoch`. The Mode chip is taken from that claim. Operators see Example, Practice, Live, or Unavailable. A missing or unusable claim shows Unavailable, never Example. Connected (read) is a broker status, not a session Mode.
 - PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and

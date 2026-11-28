@@ -219,7 +219,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
   });
 
   it("upgrades the JWT to practice and opens the Practice desk", async () => {
-    mocks.downgradeMode.mockResolvedValue("practice-token");
+    mocks.downgradeMode.mockResolvedValue({ token: "practice-token", expiresAt: "2026-11-29T02:30:00+00:00" });
 
     await renderSetup();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
@@ -336,7 +336,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
   });
 
   it("leaves optional setup for the Practice desk", async () => {
-    mocks.downgradeMode.mockResolvedValue("practice-token");
+    mocks.downgradeMode.mockResolvedValue({ token: "practice-token", expiresAt: "2026-11-29T02:30:00+00:00" });
     await renderSetup();
 
     expect(screen.queryByRole("button", { name: "Later Two-factor authentication" })).not.toBeInTheDocument();
@@ -389,6 +389,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       token: "fresh-setup-token",
       totpUri: "otpauth://totp/FlintTrade:alice?secret=FRESHSEED",
       backupCodes: ["FRESH001", "FRESH002"],
+      expiresAt: "2026-11-29T02:30:00+00:00",
     });
     const first = await renderSetup();
     submitAccountCreation();
@@ -415,7 +416,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     );
     expect(screen.queryByRole("button", { name: "Set up Two-factor authentication" })).not.toBeInTheDocument();
 
-    mocks.downgradeMode.mockResolvedValue("practice-token");
+    mocks.downgradeMode.mockResolvedValue({ token: "practice-token", expiresAt: "2026-11-29T02:30:00+00:00" });
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
     await waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
@@ -439,6 +440,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       token: string;
       totpUri: string;
       backupCodes: string[];
+      expiresAt: string;
     }) => void) | undefined;
     mocks.setupFlintTradeAccount.mockReturnValue(
       new Promise((resolve) => {
@@ -455,6 +457,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
         token: "late-setup-token",
         totpUri: "otpauth://totp/late",
         backupCodes: ["LATE0001"],
+        expiresAt: "2026-11-29T02:30:00+00:00",
       });
       await Promise.resolve();
     });
@@ -474,6 +477,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       token: string;
       totpUri: string;
       backupCodes: string[];
+      expiresAt: string;
     }) => void) | undefined;
     mocks.setupFlintTradeAccount.mockReturnValue(
       new Promise((resolve) => {
@@ -486,7 +490,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     act(() => useAuthStore.getState().setLoggedIn("newer-token", "bob", ""));
 
     await act(async () => {
-      finishSetup?.({ token: "", totpUri: "", backupCodes: [] });
+      finishSetup?.({ token: "", totpUri: "", backupCodes: [], expiresAt: "" });
       await Promise.resolve();
     });
 
@@ -613,6 +617,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     mocks.resumeFlintTradeSetup.mockResolvedValue({
       token: "resumed-setup-token",
       username: "operator",
+      expiresAt: "2026-11-29T02:30:00+00:00",
     });
 
     await renderSetup();
@@ -624,6 +629,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
     expect(mocks.resumeFlintTradeSetup).toHaveBeenCalledWith("Strong1!");
     expect(useAuthStore.getState().token).toBe("resumed-setup-token");
+    expect(useAuthStore.getState().expiresAt).toBe("2026-11-29T02:30:00+00:00");
     expect(screen.queryByText(/A setup session is required/i)).not.toBeInTheDocument();
   });
 
@@ -1006,6 +1012,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       token: "fresh-setup-token",
       totpUri: "otpauth://totp/FlintTrade:alice?secret=FRESHSEED",
       backupCodes: ["FRESH001"],
+      expiresAt: "2026-11-29T02:30:00+00:00",
     });
 
     await renderSetup();

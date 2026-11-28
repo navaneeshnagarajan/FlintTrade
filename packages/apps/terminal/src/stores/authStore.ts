@@ -3,8 +3,9 @@
  *
  * Token is held in memory and mirrored to tab-scoped sessionStorage so a
  * same-tab address-bar load, refresh, or bookmark of `/home` can restore the
- * session. Never localStorage. Session expires at 08:00 IST
- * daily (enforced via startExpiryTimer).
+ * session. Never localStorage. The session ends at the expiry returned
+ * at sign-in, which is the next 08:00 IST, or the following 08:00 IST
+ * when signed in during the hour before that boundary.
  */
 import { create } from "zustand";
 import { clearDemoSession } from "@/lib/demoSession";
@@ -52,7 +53,7 @@ interface AuthState {
   lastActivity: number;
   /** Monotonic fence for async work started under an older auth context. */
   sessionGeneration: number;
-  /** Internal: timer ID for the 08:00 IST daily expiry. */
+  /** Internal: timer ID for the signed-in session expiry. */
   _expiryTimerId: ReturnType<typeof setTimeout> | null;
 
   setLoggedIn: (token: string, username: string, expiresAt: string) => void;
@@ -68,14 +69,15 @@ interface AuthState {
   setSetupRequired: () => void;
   touchActivity: () => void;
   checkIdle: () => void;
-  /** Schedules automatic logout at the next 08:00 IST. Called by setLoggedIn. */
+  /** Schedules automatic logout at the signed-in session expiry. Called by setLoggedIn. */
   startExpiryTimer: () => void;
   /**
    * Replace the active JWT in-place (used after PIN unlock or
-   * mode-switch downgrade). Preserves status/username/expiresAt and
-   * resets activity so the idle timer doesn't immediately downgrade.
+   * mode-switch downgrade). Applies the server's expires_at when
+   * present, otherwise keeps the stored expiry, and resets activity
+   * so the idle timer doesn't immediately downgrade.
    */
-  updateToken: (token: string, expectedGeneration: number) => boolean;
+  updateToken: (token: string, expectedGeneration: number, expiresAt?: string) => boolean;
 }
 
 const IDLE_PIN_THRESHOLD = 5 * 60 * 1000;    // 5 min → PIN required
@@ -101,6 +103,20 @@ function authStateMatchesFence(
     normalisePrincipal(state.username) === fence.principal &&
     state.sessionGeneration === fence.generation
   );
+}
+
+const MAX_TIMEOUT_MS = 2_147_483_647; // signed 32-bit setTimeout cap
+
+function expiryDeadlineMs(expiresAt: string | null | undefined): number | undefined {
+  if (!expiresAt) return undefined;
+  const ms = Date.parse(expiresAt);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function resolveExpiresAt(provided: string, stored: string | null): string {
+  if (expiryDeadlineMs(provided) !== undefined) return provided;
+  if (stored && expiryDeadlineMs(stored) !== undefined) return stored;
+  return new Date(Date.now() + msUntilNext8amIST()).toISOString();
 }
 
 /**
@@ -143,6 +159,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     if (token !== "demo-user") clearDemoSession();
 
     const previousPrincipal = normalisePrincipal(current.username);
+    const resolvedExpiresAt = resolveExpiresAt(expiresAt, current.expiresAt);
     const nextGeneration = current.sessionGeneration + 1;
     set({
       status: "transitioning",
@@ -168,7 +185,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         token,
         reauthToken: null,
         username,
-        expiresAt,
+        expiresAt: resolvedExpiresAt,
         lastActivity: Date.now(),
       };
     });
@@ -177,7 +194,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (previousPrincipal && nextPrincipal && previousPrincipal !== nextPrincipal) {
         clearPendingOrderOutcomes();
       }
-      writePersistedAuthSession({ token, username, expiresAt });
+      writePersistedAuthSession({ token, username, expiresAt: resolvedExpiresAt });
       get().startExpiryTimer();
     }
     return installed;
@@ -195,13 +212,24 @@ export const useAuthStore = create<AuthState>((set, get) => {
     _expiryTimerId: null,
 
     startExpiryTimer: () => {
-      // Clear any existing timer before setting a new one
       const existing = get()._expiryTimerId;
       if (existing !== null) clearTimeout(existing);
 
-      const ms = msUntilNext8amIST();
+      const deadline = expiryDeadlineMs(get().expiresAt);
+      const remaining = deadline !== undefined ? deadline - Date.now() : msUntilNext8amIST();
+      if (remaining <= 0) {
+        const timerId = setTimeout(() => get().setLoggedOut(), 0);
+        set({ _expiryTimerId: timerId });
+        return;
+      }
+      const ms = Math.min(remaining, MAX_TIMEOUT_MS);
       const timerId = setTimeout(() => {
-        get().setLoggedOut();
+        const left = expiryDeadlineMs(get().expiresAt);
+        if (left !== undefined && left - Date.now() <= 0) {
+          get().setLoggedOut();
+          return;
+        }
+        get().startExpiryTimer();
       }, ms);
 
       set({ _expiryTimerId: timerId });
@@ -257,7 +285,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       retireAuthenticatedClientState();
     },
 
-    updateToken: (token, expectedGeneration) => {
+    updateToken: (token, expectedGeneration, expiresAt = "") => {
       const current = get();
       const expectedPrincipal = current.username?.trim();
       if (
@@ -268,6 +296,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         return false;
       }
 
+      const resolvedExpiresAt = resolveExpiresAt(expiresAt, current.expiresAt);
       const nextGeneration = expectedGeneration + 1;
       set({
         status: "transitioning",
@@ -290,13 +319,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
           status: "logged-in",
           token,
           reauthToken: null,
+          expiresAt: resolvedExpiresAt,
           lastActivity: Date.now(),
         };
       });
       if (updated) {
-        const { username, expiresAt } = get();
+        const { username } = get();
         if (username) {
-          writePersistedAuthSession({ token, username, expiresAt: expiresAt ?? "" });
+          writePersistedAuthSession({ token, username, expiresAt: resolvedExpiresAt });
         }
       }
       return updated;

@@ -220,7 +220,10 @@ class NativeWorkflowV2:
                         or other.get("grant") is not None and not other["grant"]["revoked"]):
                     raise ValueError("another run retains account custody")
             expires = selection["expires_at_ms"]
-            if expires > min(row["report_v2"]["expires_at_ms"], int(claims["exp"] * 1000)):
+            if expires > int(claims["exp"] * 1000):
+                from .auth_routes import SessionExpiresSoon
+                raise SessionExpiresSoon
+            if expires > row["report_v2"]["expires_at_ms"]:
                 raise ValueError("grant exceeds current qualification or session")
             model = EntryGrantV2 if row["schema_version"] == "2" else OptionsEntryGrantV2
             public = model.model_validate({

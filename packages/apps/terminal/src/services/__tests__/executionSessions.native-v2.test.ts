@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAuthStore } from "@/stores/authStore";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
-import { createNativeV2Client, ExecutionSessionError, NativeV2PreflightError, listExecutionSessions, readExecutionSession } from "../executionSessions";
+import { createNativeV2Client, ExecutionSessionError, NativeV2PreflightError, SESSION_ENDS_AT_SIGN_IN, listExecutionSessions, readExecutionSession } from "../executionSessions";
 import fixture from "./fixtures/native-v2-captured-v2.json";
 
 let generation = 9000;
@@ -184,3 +184,18 @@ it.each(["malformed acknowledgement", "successful-HTTP error envelope", "readbac
     } finally { client.dispose(); }
   },
 );
+
+it("shows the published session-ending refusal on a 409 and does not start the run", async () => {
+  const configured = fixture.samples.find(row => row.method === "POST" && row.path === `${base}/native-v2`)!;
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+    status: "error", code: "session_expires_soon", message: SESSION_ENDS_AT_SIGN_IN,
+  }), { status: 409, headers: { "Content-Type": "application/json" } })));
+  const client = createNativeV2Client();
+  try {
+    const refused = await client.configure(configured.request_json).catch(error => error);
+    expect(refused).toBeInstanceOf(ExecutionSessionError);
+    expect(refused).not.toBeInstanceOf(NativeV2PreflightError);
+    expect(refused).toMatchObject({ outcome: "refused", message: SESSION_ENDS_AT_SIGN_IN });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally { client.dispose(); }
+});

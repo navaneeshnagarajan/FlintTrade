@@ -162,7 +162,7 @@ describe("idle lock route", () => {
   });
 
   it("locks after the idle timeout, unmounts the desk, then PIN unlock restores the session", async () => {
-    useAuthStore.getState().setLoggedIn(sessionJwt("practice"), "testuser", "2026-09-10T18:00:00.000Z");
+    useAuthStore.getState().setLoggedIn(sessionJwt("practice"), "testuser", "2099-01-01T00:00:00.000Z");
     const expiryTimer = useAuthStore.getState()._expiryTimerId;
     if (expiryTimer !== null) clearTimeout(expiryTimer);
     useAuthStore.setState({ _expiryTimerId: null, lastActivity: Date.now() });
