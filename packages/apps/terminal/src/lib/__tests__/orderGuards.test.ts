@@ -30,6 +30,9 @@ import {
   needsLargeOrderConfirmation,
   LARGE_ORDER_LOTS,
   EXAMPLE_ORDERS_REFUSAL,
+  decisionModelMaxLotsReason,
+  lotSizeNotConfirmedReason,
+  strikeNotInChainReason,
 } from "../orderGuards";
 
 describe("derivative exchange classification", () => {
@@ -394,5 +397,13 @@ describe("Example order refusal", () => {
       "utf8",
     );
     expect(routes).toContain(`_EXAMPLE_ORDERS_REFUSAL = "${EXAMPLE_ORDERS_REFUSAL}"`);
+  });
+});
+
+describe("disabled order reasons", () => {
+  it("reads as the approved sentences", () => {
+    expect(lotSizeNotConfirmedReason("NIFTY26DECFUT")).toBe("Lot size not confirmed for NIFTY26DECFUT. Refresh instruments.");
+    expect(decisionModelMaxLotsReason(4)).toBe("Decision model allows max 4 lots. Reduce quantity.");
+    expect(strikeNotInChainReason(22050)).toBe("Strike 22050 not in the chain. Pick a listed strike.");
   });
 });

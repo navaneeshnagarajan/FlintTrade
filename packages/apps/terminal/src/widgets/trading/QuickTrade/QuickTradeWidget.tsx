@@ -49,6 +49,8 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
   checkOrderEntryMode,
   checkPriceForOrderType,
+  decisionModelMaxLotsReason,
+  lotSizeNotConfirmedReason,
   needsLargeOrderConfirmation,
   resolveLotQuantity,
   LARGE_ORDER_LOTS,
@@ -305,14 +307,6 @@ function QuickTradeWidget(props: WidgetProps) {
   const { submit: submitOnce, isLocked, isUnknown } = useOrderSubmitGuard();
   const locked = isLocked(instrumentOrderKey(exchange, symbol));
   const statusUnknown = isUnknown(instrumentOrderKey(exchange, symbol));
-  const disabledReason = statusUnknown
-    ? ORDER_STATUS_UNKNOWN
-    : isPending || locked
-      ? ORDER_SENT_WAITING
-      : admission?.kind === "deny"
-        ? layaDenialText(admission)
-        : null;
-
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL", quantityOverride?: number) => {
       lastActionRef.current = action;
@@ -434,6 +428,25 @@ function QuickTradeWidget(props: WidgetProps) {
 
   const displayQuantity = resolveQuantity();
   const lotUnknown = displayQuantity == null;
+  const lotUnit = lotSize != null && lotSize > 0 ? lotSize : 1;
+  const clampLots = admission?.kind === "clamp" && admission.appliedQuantity != null
+    ? Math.floor(admission.appliedQuantity / lotUnit)
+    : 0;
+  const disabledReason = statusUnknown
+    ? ORDER_STATUS_UNKNOWN
+    : isPending || locked
+      ? ORDER_SENT_WAITING
+      : admission?.kind === "deny"
+        ? layaDenialText(admission)
+        : ruleBlocked
+          ? ruleResults.find((result) => result.level === "block")?.message ?? null
+          : lotUnknown
+            ? lotSizeNotConfirmedReason(symbol)
+            : admission?.kind === "clamp"
+              ? clampLots > 0
+                ? decisionModelMaxLotsReason(clampLots)
+                : layaDenialText(admission)
+              : null;
 
   // Fail-closed empty state — no panel params and no workspace selection means
   // there is nothing safe to trade. Rendered after all hooks (hook-order rule).

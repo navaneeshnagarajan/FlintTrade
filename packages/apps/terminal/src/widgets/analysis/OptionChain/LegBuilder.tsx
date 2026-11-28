@@ -3,7 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DisabledReason } from '@/components/DisabledActionButton';
-import { ENTER_A_QUANTITY, EXAMPLE_ORDERS_REFUSAL, lotMultipleRefusal } from '@/lib/orderGuards';
+import { ENTER_A_QUANTITY, EXAMPLE_ORDERS_REFUSAL, lotMultipleRefusal, lotSizeNotConfirmedReason, strikeNotInChainReason } from '@/lib/orderGuards';
 import { ORDER_SENT_WAITING } from '@/lib/operatorIncident';
 import { buildCompactOptionSymbol } from '@/lib/optionSymbols';
 import { optionLimitPrice } from '@/lib/orderRules';
@@ -82,8 +82,10 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>((props, ref) =>
     if (mode === 'explore') return EXAMPLE_ORDERS_REFUSAL;
     if (busy) return ORDER_SENT_WAITING;
     if (legs.some(leg => !Number.isFinite(leg.lots) || leg.lots <= 0)) return ENTER_A_QUANTITY;
-    if (!lotVerified) return null;
-    return legs.some(leg => !Number.isSafeInteger(leg.lots) || !Number.isSafeInteger(leg.lots * props.lotSize)) ? lotMultipleRefusal(props.lotSize) : null;
+    if (!lotVerified) return lotSizeNotConfirmedReason(props.symLabel);
+    if (legs.some(leg => !Number.isSafeInteger(leg.lots) || !Number.isSafeInteger(leg.lots * props.lotSize))) return lotMultipleRefusal(props.lotSize);
+    const badStrike = legs.find(leg => !Number.isFinite(leg.strike) || leg.strike <= 0);
+    return badStrike ? strikeNotInChainReason(badStrike.strike) : null;
   })();
   const place = async () => {
     const pinnedIdentity = identity;

@@ -322,6 +322,15 @@ export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size
 /** Reasons a disabled order control gives, one sentence each. */
 export const ENTER_A_QUANTITY = "Enter a quantity.";
 export const NO_STRIKE_SELECTED = "No strike selected. Pick a strike.";
+export function lotSizeNotConfirmedReason(symbol: string): string {
+  return `Lot size not confirmed for ${symbol}. Refresh instruments.`;
+}
+export function decisionModelMaxLotsReason(lots: number): string {
+  return `Decision model allows max ${lots} lots. Reduce quantity.`;
+}
+export function strikeNotInChainReason(strike: number): string {
+  return `Strike ${strike} not in the chain. Pick a listed strike.`;
+}
 /** Same sentence the order routes return for Example data. */
 export const EXAMPLE_ORDERS_REFUSAL = "Orders are not available for Example. Switch to Practice or Live to trade.";
 export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";

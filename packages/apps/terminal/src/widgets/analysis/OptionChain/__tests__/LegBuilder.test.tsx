@@ -659,6 +659,20 @@ describe("LegBuilder — why Place Strategy is disabled", () => {
     await act(async () => reply({ status: "success", placed_count: 2, failed_count: 0, legs: [] }));
   });
 
+  it("names the symbol when the lot size is not confirmed", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder({ lotSize: 0 });
+    await userEvent.click(screen.getByText("SSTR"));
+    await expectReason("Lot size not confirmed for NIFTY. Refresh instruments.");
+  });
+
+  it("names the strike when a leg has none in the chain", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder({ strikes: [], atmStrike: null });
+    await userEvent.click(screen.getByRole("button", { name: "Add Leg" }));
+    await expectReason("Strike 0 not in the chain. Pick a listed strike.");
+  });
+
   it("adds no tab stop while the action is enabled", async () => {
     useModeStore.setState({ mode: "practice" });
     renderLegBuilder();
