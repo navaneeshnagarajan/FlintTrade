@@ -200,8 +200,9 @@ For step-by-step instructions tailored to each operating system, see:
 Native broker access is **not usable on this unreleased line**: native broker UX stays down on `main`.
 Do not treat catalogue metadata as a working operator path.
 
-Broker connections use six native adapters: Dhan, Upstox, Kotak Neo,
-INDmoney, Groww, and Delta Exchange. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
+The broker list offers Dhan and Kotak Neo. A broker session cannot be started from the terminal today. Practice mode and example data work without a broker. Broker writes return 503 and broker reads return 409. Live order placement stays disabled unless it is explicitly unlocked and every safety layer passes.
+
+An existing Upstox account keeps its row with `Upstox can't be reconnected. Disconnect to remove it.` Upstox is not offered in the broker list.
 
 **Broker HTTP.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
@@ -211,23 +212,15 @@ reads use the in-process `BrokerReadPort`. Exact broker reads that already exist
 port, not a working terminal Brokers screen. Service connections are an inert
 control plane only.
 
-When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
-as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
+Kotak Neo is Connected (read) / API smoke only
 after a saved REST read succeeds, and it does not place Live orders;
 Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
 async market and order feeds are wired and locally tested with synthetic SDK
 clients, but no live-account or market-hours stream proof has been recorded.
-The previous non-funded Connected (read) evidence covers REST reads only. Upstox Developer Apps analytics tokens
-would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
-at the daily 06:00 IST dashboard cycle, but remains disabled until its
-smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
-retains its displayed activation blockers and may also require approving the
-API-key session in Groww Cloud before FlintTrade can mint a token. Delta
-Exchange stays disabled until Live order safety and unattended deadman
-flattening are proven. Its configured authentication method uses an API key and secret for one venue
-(India or Global, production or testnet): `india_prod`, `india_testnet`,
-`global_prod`, or `global_testnet`. India and Global keys are not
-interchangeable, and the venue has no default. Setup → Brokers still fails on those routes. Read smoke uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+The previous non-funded Connected (read) evidence covers REST reads only.
+INDmoney uses a dashboard-generated token that resets
+at the daily 06:00 IST dashboard cycle, and it is not offered in the broker list.
+Setup → Brokers still fails on those routes. Read smoke uses the in-process native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 See [Broker static IP](#broker-static-ip).
@@ -931,6 +924,7 @@ Practice is HTTP 403 `practice_unsupported` on that route. A Practice
 the Scalper's rule line reads
 `Stop-loss and target are placed as separate orders with this broker.` in Live
 and `Stop-loss and target aren't supported in Practice.` in Practice.
+Entering both SL and Target is refused with `Not placed. Use SL or Target, not both.`
 
 ### Walkthrough
 
@@ -1983,7 +1977,14 @@ The Sentiment Analysis view scores submitted text for a symbol through the
 configured LLM or rule-based fallback. Separate summary and ticker endpoints
 synchronously analyse the static RSS publisher profiles (MoneyControl,
 ET Markets, LiveMint). Production composition starts neither a background news
-scheduler nor a social-media source.
+scheduler nor a social-media source. If sentiment is unavailable, the panel
+says so and offers **Retry**. Start the named service from the status chrome,
+then retry.
+
+### Regime
+
+If regime is unavailable for the selected symbol, the panel says so and offers
+**Retry**. Start the named service from the status chrome, then retry.
 
 ### RAG
 
@@ -2099,7 +2100,8 @@ the desk says **Sign in to reset this account. You'll need your password.**
 With an authenticator enrolled it says **Sign in to reset this account.
 You'll need your password and authenticator code.**
 
-With example data, `/settings` → **AI**, an unconfigured session
+`/settings` → **AI** intro reads `LLM provider, model, API keys and RAG settings come from workspace.json. Edit that file to change them.`
+With example data, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
 guidance `Example uses example data and cannot load or persist LLM secrets.` This is not a
 broken session; configure a provider in Live or Practice on this machine.
