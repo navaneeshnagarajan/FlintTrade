@@ -480,7 +480,7 @@
       "effective_from": "2025-08-04",
       "effective_to": null,
       "parameters": {},
-      "message": "Stop-loss and target aren't supported in Practice."
+      "message": "Not placed. Remove SL and Target for Practice orders."
     },
     {
       "id": "broker-separate-stop-loss-target",

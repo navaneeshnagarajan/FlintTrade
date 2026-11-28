@@ -5,7 +5,7 @@ Acceptance lock (2026-09-20):
 - Dhan and Kotak Neo login + ticks/depth/latency smoke (non-funded)
 - Neo v3 hist/chain where the SDK allows; Neo never Practice
 - Chrome is Connected (read) / API smoke — never placeable Live orders
-- Live place stays fail-closed without funded unlock
+- Live place stays fail-closed for a read-only login
 """
 
 from __future__ import annotations

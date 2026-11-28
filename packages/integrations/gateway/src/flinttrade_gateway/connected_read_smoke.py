@@ -4,7 +4,7 @@ Login plus ticks, depth, and latency (history and chain where the SDK
 allows). Never places, modifies, or cancels an order. A successful smoke is
 ``Connected (read)`` / ``API smoke``, not a placeable Live order.
 
-Neo has no sandbox. Operator copy is ``Live read only until funded unlock.``
+Neo has no sandbox. Operator copy is ``Read only. Live orders can't be sent to the broker.``
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 
 CHROME_CONNECTED_READ = "Connected (read)"
 CHROME_API_SMOKE = "API smoke"
-NEO_OPERATOR_COPY = "Live read only until funded unlock."
+NEO_OPERATOR_COPY = "Read only. Live orders can't be sent to the broker."
 CONNECTED_READ_BROKERS = frozenset({"dhan", "kotakneo"})
 READ_SMOKE_EXTRA_KEY = "read_smoke_ok"
 WRITE_VERBS = frozenset({

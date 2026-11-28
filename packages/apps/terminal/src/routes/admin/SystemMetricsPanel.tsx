@@ -237,7 +237,7 @@ export function SystemMetricsPanel() {
       <div className="flex flex-col items-center justify-center py-12 gap-3 text-sm text-text-muted">
         <AlertCircle className="w-5 h-5 text-red-400" />
         <p>Failed to load system metrics.</p>
-        <p className="text-xs">Ensure the FlintTrade backend is running on port 5100.</p>
+        <p className="text-xs">Core not reachable on port 5100. Start Core, then retry.</p>
         <Button
           variant="ghost"
           size="sm"

@@ -214,7 +214,7 @@ control plane only.
 
 Kotak Neo is Connected (read) / API smoke only
 after a saved REST read succeeds, and it does not place Live orders;
-Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
+Neo has no sandbox (`Read only. Live orders can't be sent to the broker.`). Kotak Neo's v3
 async market and order feeds are wired and locally tested with synthetic SDK
 clients, but no live-account or market-hours stream proof has been recorded.
 The previous non-funded Connected (read) evidence covers REST reads only.
@@ -271,7 +271,7 @@ redirect (HTTP 308) to `/demo-app/welcome`.
 | Label | What it means |
 |---|---|
 | **Practice** | Simulated fills, no real money. Mode line: `Practice. Simulated fills, no real money.` Order review: `Confirm places this simulated order.` Review confirm: **Confirm simulation**. Submit labels: **Practice Buy** / **Practice Sell**. |
-| **Connected (read)** | Broker status for a native Dhan or Kotak Neo account after a read check succeeds. It is not a session claim, not a Mode, and not in the Mode menu. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. For Neo the terminal shows `Live read only until funded unlock.` A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. |
+| **Connected (read)** | Broker status for a native Dhan or Kotak Neo account after a read check succeeds. It is not a session claim, not a Mode, and not in the Mode menu. Broker-connect helper copy may describe that read check as API smoke. For Neo the terminal shows `Read only. Live orders can't be sent to the broker.` A broker session cannot be started from the terminal today. Broker-account writes return HTTP 503 and native HTTP reads return HTTP 409. |
 | **Live** | Real orders on a live broker session. Mode line: `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Submit label: **Place BUY Order** / **Place SELL Order**. |
 | **Example** | Sample data. The chip reads **Example** for claim `explore`, including **Try with example data**, which has no JWT payload. A JWT whose `mode` is missing or not `explore`, `practice`, or `live` reads **Unavailable**, never Example. The signed-in name is **Guest**. Mode line: `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. Submit labels: **Example Buy** / **Example Sell**. Review confirm: **Continue**. That confirm records a sample fill: `Example order placed`, with an id starting `SAMPLE-`. |
 | **Unavailable** | The session mode could not be confirmed. The chip reads **Unavailable**. Orders stay blocked. Sign in again or reload. |
@@ -800,7 +800,7 @@ show an order error as a toast. An automate clamp is a dispatcher error,
 not a desk confirm. Modify, cancel, smart, multi, and similar writes
 are not on this admission. `POST /api/v1/orders/forever`
 does not place. A valid body is HTTP 501 `Orders are placed through /api/v1/orders/place.`
-No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported` on that route. A Practice `POST /api/v1/orders/place` that carries a `stop_loss_price` or `target_price` above 0 is HTTP 400 `order_rule_blocked` with `Practice · Stop-loss and target aren't supported in Practice.` A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
+No submit route reaches a broker forever or super-order endpoint. A Live bracket with exactly one stop-loss or one target is `POST /api/v1/orders/bracket`: each leg is admitted, then placed through SafetySystem. Practice is HTTP 403 `practice_unsupported` on that route. A Practice `POST /api/v1/orders/place` that carries a `stop_loss_price` or `target_price` above 0 is HTTP 400 `order_rule_blocked` with `Practice · Not placed. Remove SL and Target for Practice orders.` A broker-held variety, a stop-loss and a target together, and a trailing stop are refused before that admission. Order Pad keeps GTT visible and disabled,
 with the tooltip `GTT orders aren't supported right now.`
 
 **Feed freshness.** Feed provenance lives on the ticker chip, not in the
@@ -923,7 +923,7 @@ Practice is HTTP 403 `practice_unsupported` on that route. A Practice
 `order_rule_blocked`. With a stop-loss or target set,
 the Scalper's rule line reads
 `Stop-loss and target are placed as separate orders with this broker.` in Live
-and `Stop-loss and target aren't supported in Practice.` in Practice.
+and `Not placed. Remove SL and Target for Practice orders.` in Practice.
 Entering both SL and Target is refused with `Not placed. Use SL or Target, not both.`
 
 ### Walkthrough

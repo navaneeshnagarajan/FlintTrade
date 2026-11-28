@@ -65,7 +65,7 @@ const MODE_CARDS: ModeCardConfig[] = [
   {
     id: "live",
     label: "Live",
-    description: "Live orders stay fail-closed until funded unlock",
+    description: "Live orders can't be sent to the broker.",
     brokerNote: "Broker required · PIN and authenticator required",
     icon: <Zap size={22} aria-hidden="true" />,
     pillClass: "bg-profit/20 text-profit",

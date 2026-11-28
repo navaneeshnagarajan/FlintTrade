@@ -415,7 +415,7 @@ class TestAdvisorNativeLiveReadContext:
                 "ok": True,
                 "quotes": [{"symbol": "NSE:RELIANCE", "ltp": 1401.0}],
                 "depth": None,
-                "operator_copy": "Live read only until funded unlock.",
+                "operator_copy": "Read only. Live orders can't be sent to the broker.",
                 "error": None,
             },
         ]
@@ -446,7 +446,7 @@ class TestAdvisorNativeLiveReadContext:
         assert "dhan:Main" in feed_msgs[0].content
         assert "1400.0" in feed_msgs[0].content
         assert "not Neo Practice" in feed_msgs[0].content
-        assert "Live read only until funded unlock." in feed_msgs[0].content
+        assert "Read only. Live orders can't be sent to the broker." in feed_msgs[0].content
 
     def test_live_jwt_injects_native_reads_without_practice_book(self, app) -> None:
         """Live JWT may read Connected (read) feeds; paper book stays dark."""

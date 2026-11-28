@@ -84,7 +84,7 @@ describe("ConnectionStep", () => {
     expect(nativeHelper).toBeInTheDocument();
     expect(nativeHelper).not.toHaveTextContent(/API smoke/i);
     expect(screen.getAllByText(/Connected \(read\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Read only\. Live orders can't be sent to the broker\./i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
     // No connected accounts at all — the read-only demotion reason must not show.
@@ -260,7 +260,7 @@ describe("ConnectionStep", () => {
     expect(continueButton).toBeEnabled();
     expect(screen.getByRole("note")).toHaveTextContent(/Connected \(read\)/i);
     expect(screen.getByRole("note")).not.toHaveTextContent(/API smoke/i);
-    expect(screen.getByRole("note")).toHaveTextContent(/Live read only until funded unlock/i);
+    expect(screen.getByRole("note")).toHaveTextContent(/Read only\. Live orders can't be sent to the broker\./i);
     fireEvent.click(continueButton);
     expect(onComplete).toHaveBeenCalled();
   });

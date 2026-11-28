@@ -99,7 +99,8 @@ describe("SystemMetricsPanel", () => {
 
     render(<SystemMetricsPanel />);
     expect(screen.getByText(/failed to load system metrics/i)).toBeInTheDocument();
-    expect(screen.getByText(/port 5100/i)).toBeInTheDocument();
+    expect(screen.getByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/FlintTrade backend/i);
   });
 
   it("renders CPU, memory, and disk usage bars when data is loaded", () => {
