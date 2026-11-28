@@ -535,7 +535,7 @@ function SentimentSection() {
             <span>
               {mutation.error instanceof Error
                 ? mutation.error.message
-                : "Sentiment analysis failed. Check that the AI backend is running."}
+                : "Core not reachable on port 5100. Start Core, then retry."}
             </span>
           </div>
         </Card>
@@ -749,7 +749,7 @@ function AISettingsSection() {
         {isError && (
           <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            Could not reach the AI backend. Ensure the FT Python server is running on port 5100.
+            Core not reachable on port 5100. Start Core, then retry.
           </div>
         )}
 

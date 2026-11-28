@@ -174,7 +174,7 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import AIRoute, { signalEventToCard } from "../AIRoute";
-import { getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
+import { analyzeSentiment, getAgentStatus, getRecentSignals, queryKnowledge, startAgent } from "@/services/ftApi";
 import type { SignalEvent } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
@@ -564,6 +564,34 @@ describe("AIRoute", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/coming soon|next release|in the meantime/i);
+  });
+
+  it("names Core and port 5100 when the paste-sentiment request fails without a message", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    vi.mocked(analyzeSentiment).mockRejectedValue("offline");
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Sentiment"));
+    await user.type(screen.getByLabelText("Symbol for sentiment analysis"), "NIFTY{Enter}");
+
+    expect(await screen.findByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+  });
+
+  it("names Core and port 5100 when the LLM status request fails", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 503 }));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Settings"));
+
+    expect(await screen.findByText("Core not reachable on port 5100. Start Core, then retry.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/AI backend|FT Python server/i);
+    fetchSpy.mockRestore();
   });
 
   it("accepts the older response envelope when answer is absent", async () => {
