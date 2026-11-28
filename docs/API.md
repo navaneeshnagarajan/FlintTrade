@@ -437,7 +437,10 @@ GET needs `admin.accounts.read`. Other methods need `admin.accounts.write`.
 
 An unknown operation is HTTP 404 `unknown_session_operation`. A control body
 with any other fields is HTTP 400 `exact_session_target_required`. A refused
-scope or generation is HTTP 409 `execution_scope_or_generation_refused`. If
+scope or generation is HTTP 409 `execution_scope_or_generation_refused`. A
+grant on `…/autonomy/grant` or `…/autonomy-v2/grant` that would outlast the
+signed-in session is HTTP 409 `session_expires_soon` with message
+`Not started. Session ends at 08:00 IST. Sign in again to continue.` If
 the owner cannot be read, the response is HTTP 503
 `execution_owner_unavailable` with message
 `Read the exact run; never replay an uncertain command.`
