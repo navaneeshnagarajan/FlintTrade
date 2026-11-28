@@ -15,7 +15,6 @@ import {
   TrendingUp,
   Wallet,
   BarChart3,
-  Globe,
   Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -126,17 +125,6 @@ export function NetWorthTab() {
       icon: BarChart3,
       addLabel: "Add MF",
       addTooltip: "Connect a NAV provider (jugaad-data / mftool) in Settings to track MF folios.",
-    },
-    {
-      label: "Gold",
-      value: null,
-      note: "Manual entry available in a future update",
-      hexColor: "#f59e0b",
-      tailwindBg: "bg-amber-500",
-      tailwindText: "text-amber-400",
-      icon: Globe,
-      addLabel: "Add Gold",
-      addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in a future update.",
     },
   ];
 
