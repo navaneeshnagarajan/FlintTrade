@@ -407,6 +407,11 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   const basketLocked = basketKeys.some((key) => submitGuard.isLocked(key));
   const basketStatusUnknown = basketKeys.some((key) => submitGuard.isUnknown(key));
 
+  function chainLotQuantity(orderExchange: string): number | null {
+    const lotSize = symbolDetails?.lotsize ?? 0;
+    return resolveLotQuantity(orderExchange, 1, { lotSize, verified: lotSize > 0 });
+  }
+
   function handleOrder(params: OrderParams) {
     void submitGuard.submit(
       {
@@ -414,6 +419,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         symbol: `${params.symbol} ${params.strike} ${params.optionType}`,
         exchange: params.exchange,
         action: params.action === "B" ? "BUY" : "SELL",
+        quantity: chainLotQuantity(params.exchange) ?? undefined,
       },
       () => sendOrder(params),
     ).catch(() => {
@@ -471,11 +477,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
         return;
       }
-      const lotSize = symbolDetails?.lotsize ?? 0;
-      const quantity = resolveLotQuantity(orderExchange, 1, {
-        lotSize,
-        verified: lotSize > 0,
-      });
+      const quantity = chainLotQuantity(orderExchange);
       if (quantity == null) {
         setOrderMsg({
           text: missingLotRefusal(orderSymbol),

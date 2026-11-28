@@ -116,7 +116,9 @@ vi.mock("@/components/ui/select", () => ({
 // Mock AlertDialog similarly
 vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogAction: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  AlertDialogAction: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
   AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
   AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -125,11 +127,17 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@/lib/orderSubmitGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/orderSubmitGuard")>();
+  return { ...actual, submitOrderOnce: vi.fn(actual.submitOrderOnce) };
+});
+
 // ---------------------------------------------------------------------------
 // Import component under test
 // ---------------------------------------------------------------------------
 
 import ScalperWidget from "../ScalperWidget";
+import { submitOrderOnce } from "@/lib/orderSubmitGuard";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,6 +245,41 @@ describe("ScalperWidget", () => {
     expect(screen.getByText("Close All")).toBeInTheDocument();
     expect(screen.getByText("Cancel All")).toBeInTheDocument();
     expect(screen.getByText(/all pending orders for the selected broker account/i)).toBeInTheDocument();
+  });
+
+  describe("Cancel all in flight", () => {
+    function cancelAllButton(): HTMLButtonElement {
+      return screen.getByText("Cancel All").closest("button") as HTMLButtonElement;
+    }
+
+    it("sends one cancel-all request for rapid confirms and disables the button until it settles", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      render(<ScalperWidget {...defaultProps} />);
+
+      const confirm = screen.getByText("Cancel All Orders");
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      fireEvent.click(cancelAllButton());
+      fireEvent.click(confirm);
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      fireEvent.click(confirm);
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
+    });
+
+    it("releases the guard after a failed request", async () => {
+      mockCancelAllOrders.mockRejectedValueOnce(new Error("Gateway Timeout"));
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+    });
   });
 
   // ── Interaction tests ────────────────────────────────────────────────────
@@ -819,6 +862,17 @@ describe("ScalperWidget", () => {
     await act(async () => release());
     await screen.findByText(/placed$/);
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the lot quantity on the place request and the submit intent", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({ action: "BUY", quantity: 75 }));
+    const intent = vi.mocked(submitOrderOnce).mock.calls[0][1];
+    expect(intent).toMatchObject({ action: "BUY", exchange: "NFO", quantity: 75 });
   });
 
   it("sends one place request for a fast double hotkey press", async () => {

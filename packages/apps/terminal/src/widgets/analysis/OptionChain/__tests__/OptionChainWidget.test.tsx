@@ -118,6 +118,11 @@ vi.mock("@/lib/market", () => ({
 }));
 
 // Grid config
+vi.mock("@/lib/orderSubmitGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/orderSubmitGuard")>();
+  return { ...actual, submitOrderOnce: vi.fn(actual.submitOrderOnce) };
+});
+
 vi.mock("../gridConfig", () => ({
   getColumns: () => [{ id: "c_act", title: "CALL", width: 52 }],
   buildGetCellContent: () => () => ({ kind: "text", data: "", displayData: "" }),
@@ -155,6 +160,7 @@ import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channel
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { useModeStore } from "@/stores/modeStore";
 import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
+import { submitOrderOnce } from "@/lib/orderSubmitGuard";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -953,6 +959,15 @@ describe("OptionChainWidget", () => {
     await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledTimes(1));
     await act(async () => pending.resolve({} as never));
     expect(placeOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the lot quantity on the place request and the submit intent", async () => {
+    await renderChainWithBasket();
+
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(placeOrder).mock.calls[0][0]).toMatchObject({ action: "BUY", quantity: 50 });
+    expect(vi.mocked(submitOrderOnce).mock.calls[0][1]).toMatchObject({ action: "BUY", exchange: "NFO", quantity: 50 });
   });
 
   it("does not lock after a definite refusal", async () => {

@@ -14,6 +14,7 @@ const UNKNOWN = "Order status unknown. Check Orders before trying again.";
 const CE = "NIFTY27AUG26100CE";
 const PE = "NIFTY27AUG26100PE";
 const PLACE = "/ft-api/api/v1/orders/dhan/place";
+const CANCEL_ALL = "/ft-api/api/v1/orders/cancel-all";
 
 function historyPath(symbol: string, exchange: string): string {
   // Frozen clock is 2026-08-11. The chart's 5m history request on this
@@ -136,6 +137,11 @@ for (const lost of LOST_SUBMITS) {
       // No focusable control named Retry anywhere Tab reaches.
       const names = await tabStopNames(page);
       expect(names.filter((name) => /retry/i.test(name))).toEqual([]);
+      const quantities = await page.evaluate(() => Object.keys(sessionStorage)
+        .filter((key) => key.startsWith("flinttrade:order-unknown-submits:"))
+        .flatMap((key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as { quantity?: number }[])
+        .map((record) => record.quantity));
+      expect(quantities).toEqual([65]);
       expect(posts).toBe(1);
     });
   });
@@ -203,6 +209,42 @@ test.describe("lost Scalper Bracket exit leg", () => {
       .flatMap((key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as { legs: unknown }[])
       .map((record) => record.legs));
     expect(legs).toEqual([{ entry: "confirmed", stop_loss: "unknown" }]);
+    expect(posts).toBe(1);
+  });
+});
+
+test.describe("Scalper Cancel all", () => {
+  test("sends one request while the first is in flight and enables the button after it settles", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    registerScalperReads(syntheticApi);
+
+    let posts = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(`**${CANCEL_ALL}`, async (route) => {
+      posts += 1;
+      await gate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "success", order_outcome: "cancelled" }),
+      });
+    });
+
+    await mountWidget(page, "scalper");
+    await page.clock.runFor(5_000);
+    await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+
+    const cancelAll = page.getByRole("button", { name: /^Cancel All/ }).first();
+    await cancelAll.click();
+    const confirm = page.getByRole("alertdialog").getByRole("button", { name: "Cancel All Orders", exact: true });
+    await confirm.dblclick();
+    await expect(cancelAll).toBeDisabled();
+    await expect.poll(() => posts).toBe(1);
+
+    release();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(cancelAll).toBeEnabled();
     expect(posts).toBe(1);
   });
 });

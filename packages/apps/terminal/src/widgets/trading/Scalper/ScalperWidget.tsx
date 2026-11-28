@@ -172,6 +172,8 @@ function ScalperWidget(props: WidgetProps) {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
   const [cancelAllOpen, setCancelAllOpen] = useState(false);
+  const [cancellingAll, setCancellingAll] = useState(false);
+  const cancelAllInFlightRef = useRef(false);
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
@@ -598,13 +600,19 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       void submitOnce(
-        { key: instrumentOrderKey(exch, sym), symbol: sym, exchange: exch, action },
+        {
+          key: instrumentOrderKey(exch, sym),
+          symbol: sym,
+          exchange: exch,
+          action,
+          quantity: resolvedLot ? lots * resolvedLot.size : undefined,
+        },
         () => executeOrder(sym, exch, action),
       ).catch(() => {
         // The unknown line is on screen and the contract is locked.
       });
     },
-    [executeOrder, submitOnce],
+    [executeOrder, submitOnce, lots, resolvedLot],
   );
 
   const handleOrder = useCallback(
@@ -694,6 +702,9 @@ function ScalperWidget(props: WidgetProps) {
       showStatus("Connect a broker to manage live orders", "error");
       return;
     }
+    if (cancelAllInFlightRef.current) return;
+    cancelAllInFlightRef.current = true;
+    setCancellingAll(true);
     showStatus("Cancelling…", "pending", 0);
     try {
       const result = await cancelAllOrders();
@@ -702,6 +713,9 @@ function ScalperWidget(props: WidgetProps) {
     } catch (err) {
       const presented = presentCancelResult(undefined, err);
       showStatus(presented.message, presented.kind === "unknown" ? "unknown" : "error");
+    } finally {
+      cancelAllInFlightRef.current = false;
+      setCancellingAll(false);
     }
   }, [showStatus, isExplore]);
 
@@ -864,6 +878,7 @@ function ScalperWidget(props: WidgetProps) {
         onOrder={handleOrder}
         onCloseAll={() => setCloseAllOpen(true)}
         onCancelAll={() => setCancelAllOpen(true)}
+        cancelAllBusy={cancellingAll}
         ordersArmed={ordersArmed}
         orderBlockCopy={orderBlockCopy}
         ceLocked={ceSymbol != null && contractLocked(instrumentOrderKey(optExch, ceSymbol))}

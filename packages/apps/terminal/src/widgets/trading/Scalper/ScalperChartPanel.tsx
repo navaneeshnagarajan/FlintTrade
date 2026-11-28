@@ -122,6 +122,8 @@ export interface ScalperChartPanelProps {
   onOrder: (sym: string | null, exch: string, action: OrderAction) => void;
   onCloseAll: () => void;
   onCancelAll: () => void;
+  /** A cancel-all request is in flight. */
+  cancelAllBusy?: boolean;
   /** Explore: Buy/Sell stay disabled and never open Confirm. */
   ordersArmed: boolean;
   /** Why orders stay blocked. Null when Practice or Live may place. */
@@ -149,6 +151,7 @@ export function ScalperChartPanel({
   onOrder,
   onCloseAll,
   onCancelAll,
+  cancelAllBusy = false,
   ordersArmed,
   orderBlockCopy,
   ceLocked = false,
@@ -272,6 +275,7 @@ export function ScalperChartPanel({
           />
           <ActionButton
             onClick={onCancelAll}
+            disabled={cancelAllBusy}
             title="Cancel all orders (F7)"
             variant="neutral"
             icon={<RefreshCw size={14} />}

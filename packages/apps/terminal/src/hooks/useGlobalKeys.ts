@@ -32,6 +32,9 @@ const handledTradingKeyEvents = new WeakSet<KeyboardEvent>();
 /** One exit-all request at a time: a second X press while it is in flight sends nothing. */
 let exitAllInFlight = false;
 
+/** One cancel-all request at a time: a second C press while it is in flight sends nothing. */
+let cancelAllInFlight = false;
+
 function reportTradingActionFailure(title: string, err: unknown): void {
   const body = err instanceof Error ? err.message : "Unknown error — check the broker connection.";
   console.error(`[GlobalKeys] ${title}:`, err);
@@ -165,16 +168,21 @@ export default function useGlobalKeys({
         if (!e.ctrlKey && !e.metaKey) {
           if (handledTradingKeyEvents.has(e)) return;
           handledTradingKeyEvents.add(e);
+          if (cancelAllInFlight) return;
           if (window.confirm("Cancel ALL open orders? This cannot be undone.")) {
             try {
+              cancelAllInFlight = true;
               void cancelAllOrders().then(() =>
                 emitNotification({
                   category: "order",
                   title: "Cancel all orders requested",
                   body: "Cancel request sent for all open orders.",
                 }),
-              ).catch(reportCancelAllError);
+              ).catch(reportCancelAllError).finally(() => {
+                cancelAllInFlight = false;
+              });
             } catch (err) {
+              cancelAllInFlight = false;
               reportCancelAllError(err);
             }
           }
