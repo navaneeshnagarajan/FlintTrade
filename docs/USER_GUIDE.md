@@ -2101,7 +2101,7 @@ the desk says **Sign in to reset this account. You'll need your password.**
 With an authenticator enrolled it says **Sign in to reset this account.
 You'll need your password and authenticator code.**
 
-`/settings` → **AI** intro reads `LLM provider, model, API keys and RAG settings come from workspace.json. Edit that file to change them.`
+`/ai` → **Settings** intro reads `LLM provider, model, API keys and RAG settings come from workspace.json. Edit that file to change them.`
 With example data, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
 guidance `Example uses example data and cannot load or persist LLM secrets.` This is not a
