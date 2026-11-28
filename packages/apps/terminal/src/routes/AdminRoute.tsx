@@ -353,7 +353,7 @@ function PackagesPanel({ packages, loading, error }: {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load packages: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
+        <p className="text-text-muted mt-1">Core not reachable on port 5100. Start Core, then retry.</p>
       </div>
     );
   }
@@ -430,7 +430,7 @@ function EndpointsPanel({ endpoints, loading, error }: {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load endpoints: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
+        <p className="text-text-muted mt-1">Core not reachable on port 5100. Start Core, then retry.</p>
       </div>
     );
   }
@@ -513,7 +513,7 @@ function AbsorptionPanel(): JSX.Element {
     return (
       <div className="p-4 text-sm">
         <p className="text-red-400">Failed to load absorption data: {error}</p>
-        <p className="text-text-muted mt-1">Ensure the FlintTrade backend is running (port 5100).</p>
+        <p className="text-text-muted mt-1">Core not reachable on port 5100. Start Core, then retry.</p>
       </div>
     );
   }
@@ -790,7 +790,7 @@ function LogsPanel(): JSX.Element {
       {/* Log container */}
       {!backendAvailable && entries.length === 0 ? (
         <div className="rounded-glass-inner border border-glass-l2 bg-glass-l1 p-6 text-center text-sm text-text-muted">
-          Backend unavailable. Ensure the FlintTrade backend is running on port 5100.
+          Core not reachable on port 5100. Start Core, then retry.
         </div>
       ) : (
         <div

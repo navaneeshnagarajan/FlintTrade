@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -86,4 +87,19 @@ describe("AdminRoute", () => {
     // Deriving from the catalogue is pointless if the shortlist empties out.
     expect(ADMIN_WIDGET_SHOWCASE.length).toBeGreaterThan(20);
   });
+
+  it.each(["packages", "endpoints", "absorption", "logs"])(
+    "names Core and port 5100 on the %s tab when the service cannot be reached",
+    async (tab) => {
+      const user = userEvent.setup();
+      render(<AdminRoute />, { wrapper: Wrapper });
+
+      await user.click(screen.getByRole("tab", { name: new RegExp(tab, "i") }));
+
+      expect(
+        await screen.findByText("Core not reachable on port 5100. Start Core, then retry."),
+      ).toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent(/FlintTrade backend/i);
+    },
+  );
 });
