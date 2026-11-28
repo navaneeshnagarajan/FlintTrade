@@ -16,7 +16,6 @@ import {
   Wallet,
   BarChart3,
   Globe,
-  DollarSign,
   Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -47,8 +46,8 @@ interface AssetCategory {
   tailwindBg: string;
   tailwindText: string;
   icon: typeof TrendingUp;
-  addLabel?: string;
-  addTooltip?: string;
+  addLabel: string;
+  addTooltip: string;
 }
 
 // ─── Invested vs current bar data ────────────────────────────────────────────
@@ -138,15 +137,6 @@ export function NetWorthTab() {
       icon: Globe,
       addLabel: "Add Gold",
       addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in a future update.",
-    },
-    {
-      label: "Fixed Deposits",
-      value: null,
-      note: "Manual entry available in a future update",
-      hexColor: "#06b6d4",
-      tailwindBg: "bg-cyan-500",
-      tailwindText: "text-cyan-400",
-      icon: DollarSign,
     },
   ];
 
@@ -349,13 +339,11 @@ export function NetWorthTab() {
                       Not connected
                     </Badge>
                   )}
-                  {cat.addLabel && cat.addTooltip ? (
-                    <DisabledActionButton
-                      label={cat.addLabel}
-                      tooltip={cat.addTooltip}
-                      icon={Plus}
-                    />
-                  ) : null}
+                  <DisabledActionButton
+                    label={cat.addLabel}
+                    tooltip={cat.addTooltip}
+                    icon={Plus}
+                  />
                 </div>
               </div>
             );
