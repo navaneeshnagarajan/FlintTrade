@@ -21,6 +21,7 @@ def _make_client(**kwargs: Any):
     """Return a QuestDBClient with psycopg2 patched out."""
     from flinttrade_data.questdb_client import QuestDBClient
 
+    kwargs.setdefault("allow_writes", True)
     client = QuestDBClient(**kwargs)
     # Inject a mock connection/cursor directly so we never touch the network.
     mock_conn = MagicMock()
