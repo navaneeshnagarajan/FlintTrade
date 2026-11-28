@@ -5,6 +5,7 @@ import {
   registerAccountBooks,
   registerDeskReads,
   registerRead,
+  expectReasonTooltip,
   test,
   tabStopNames,
   tickUntil,
@@ -125,6 +126,7 @@ for (const lost of LOST_SUBMITS) {
       await expect(page.getByRole("button", { name: /^Buy CE/ }).first()).toBeDisabled();
       await expect(page.getByRole("button", { name: /^Sell CE/ }).first()).toBeDisabled();
       await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      await expectReasonTooltip(page, page.getByRole("button", { name: /^Buy CE/ }).first(), UNKNOWN);
 
       // The hotkey on a locked contract opens nothing and sends nothing.
       // The folded note is already open from the first submit.
@@ -241,6 +243,7 @@ test.describe("Scalper Cancel all", () => {
     await confirm.dblclick();
     await expect(cancelAll).toBeDisabled();
     await expect.poll(() => posts).toBe(1);
+    await expectReasonTooltip(page, cancelAll, "Cancel all sent. Waiting for reply.");
 
     release();
     await tickUntil(page, page.getByText("Order cancelled", { exact: true }));

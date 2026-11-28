@@ -13,6 +13,7 @@ import {
   registerRead,
   seedInstrumentTick,
   test,
+  expectReasonTooltip,
   tickUntil,
 } from "./order-flow-fixtures";
 import { registerExploreAdvisorStatusProbe, registerOperatorStatusProbes } from "./fixture-registry";
@@ -758,6 +759,7 @@ for (const viewport of VIEWPORTS) {
       expect(lineBox.y + lineBox.height, "line sits above BUY/SELL").toBeLessThanOrEqual(buyBox.y + 0.5);
       expect(buyBox.y - (lineBox.y + lineBox.height), "line sits directly above BUY/SELL").toBeLessThanOrEqual(16);
       await expectLineFits(slot, `quick trade ${viewport.width}`);
+      await expectReasonTooltip(page, buy, UNKNOWN);
     });
 
     test.describe("lost Option Chain basket order", () => {
@@ -803,6 +805,7 @@ for (const viewport of VIEWPORTS) {
         await expect(panel.getByText(UNKNOWN)).toHaveCount(1);
         expectUnmoved(before, await collectBoxes([buyAll, canvas]), `option chain ${viewport.width}`);
         await expectLineFits(slot, `option chain ${viewport.width}`);
+        await expectReasonTooltip(page, buyAll, UNKNOWN);
         expect(posts).toBe(1);
       });
     });

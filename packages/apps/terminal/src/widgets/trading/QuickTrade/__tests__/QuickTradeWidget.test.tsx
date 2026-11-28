@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import userEvent from "@testing-library/user-event";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { tabTo } from "@/test-utils/tabTo";
 
 // ---------------------------------------------------------------------------
 // Mocks — factory functions only; no variable references (hoisting safety)
@@ -364,6 +366,46 @@ describe("QuickTradeWidget", () => {
     fireEvent.click(screen.getByRole("button", { name: /sell 1 lot /i }));
     await act(async () => {});
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains a lost submit on Buy and Sell through a tooltip the keyboard reaches", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    await screen.findByRole("button", { name: "Open Orders" });
+
+    for (const name of [/buy 1 lot /i, /sell 1 lot /i]) {
+      const trigger = screen.getByRole("button", { name }).parentElement as HTMLElement;
+      await tabTo(user, trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    }
+  });
+
+  it("says the order was sent while its request has no reply", async () => {
+    let reply!: (value: unknown) => void;
+    mockPlaceOrder.mockImplementationOnce(() => new Promise((resolve) => { reply = resolve; }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+
+    const trigger = screen.getByRole("button", { name: /sell 1 lot /i }).parentElement as HTMLElement;
+    await tabTo(user, trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Order sent. Waiting for reply.");
+
+    await act(async () => reply({ orderId: "QT001" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeEnabled());
+    expect(screen.getByRole("button", { name: /sell 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
+  });
+
+  it("adds no tab stop around Buy and Sell while they are enabled", async () => {
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+
+    expect(screen.getByRole("button", { name: /buy 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
+    expect(screen.getByRole("button", { name: /sell 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
   });
 
   it("shows Laya denied under Buy and Sell and leaves both off", async () => {

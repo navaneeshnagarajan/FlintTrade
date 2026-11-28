@@ -3,6 +3,7 @@
 import { AlertTriangle, Minus, Plus, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmt2, fmtInt } from "./helpers";
 import type { StatusType, TickMap } from "./types";
@@ -233,6 +234,8 @@ export interface ActionButtonProps {
   onClick: () => void;
   disabled?: boolean;
   title: string;
+  /** Why the button is disabled. Replaces the title as a keyboard-reachable tooltip. */
+  reason?: string | null;
   variant: "buy" | "sell" | "neutral" | "warning";
   icon: React.ReactNode;
   label: string;
@@ -244,6 +247,7 @@ export function ActionButton({
   onClick,
   disabled = false,
   title,
+  reason = null,
   variant,
   icon,
   label,
@@ -258,19 +262,21 @@ export function ActionButton({
   };
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={ariaLabel}
-      className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 border text-sm font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${variantClasses[variant]}`}
-    >
-      <span className="flex items-center gap-1">
-        {icon}
-        {label}
-      </span>
-      <span className="text-xxs text-text-muted font-sans font-normal">{shortcut}</span>
-    </button>
+    <DisabledReason reason={disabled ? reason : null} className={`flex flex-1 ${disabled && reason ? "cursor-not-allowed" : ""}`}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        title={disabled && reason ? undefined : title}
+        aria-label={ariaLabel}
+        className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 border text-sm font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none ${variantClasses[variant]}`}
+      >
+        <span className="flex items-center gap-1">
+          {icon}
+          {label}
+        </span>
+        <span className="text-xxs text-text-muted font-sans font-normal">{shortcut}</span>
+      </button>
+    </DisabledReason>
   );
 }

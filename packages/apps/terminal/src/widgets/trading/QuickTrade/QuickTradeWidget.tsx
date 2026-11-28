@@ -24,10 +24,11 @@ import { Input } from "@/components/ui/input";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { liveWritesMuted } from "@/lib/operatorIncident";
+import { liveWritesMuted, ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { lotCountLabel, lotUnknownMessage, missingLotRefusal } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
@@ -304,6 +305,7 @@ function QuickTradeWidget(props: WidgetProps) {
   const { submit: submitOnce, isLocked, isUnknown } = useOrderSubmitGuard();
   const locked = isLocked(instrumentOrderKey(exchange, symbol));
   const statusUnknown = isUnknown(instrumentOrderKey(exchange, symbol));
+  const disabledReason = statusUnknown ? ORDER_STATUS_UNKNOWN : isPending || locked ? ORDER_SENT_WAITING : null;
 
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL", quantityOverride?: number) => {
@@ -562,28 +564,32 @@ function QuickTradeWidget(props: WidgetProps) {
           {statusUnknown ? <OrderStatusUnknownLine /> : null}
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={() => handleAction("BUY")}
-            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
-            className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
-          >
-            {isPending && pendingAction === "BUY" ? (
-              <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
-            ) : null}
-            BUY
-          </Button>
-          <Button
-            onClick={() => handleAction("SELL")}
-            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
-            className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
-          >
-            {isPending && pendingAction === "SELL" ? (
-              <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
-            ) : null}
-            SELL
-          </Button>
+          <DisabledReason reason={disabledReason} className="flex flex-1">
+            <Button
+              onClick={() => handleAction("BUY")}
+              disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+              aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
+              className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
+            >
+              {isPending && pendingAction === "BUY" ? (
+                <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
+              ) : null}
+              BUY
+            </Button>
+          </DisabledReason>
+          <DisabledReason reason={disabledReason} className="flex flex-1">
+            <Button
+              onClick={() => handleAction("SELL")}
+              disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+              aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
+              className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
+            >
+              {isPending && pendingAction === "SELL" ? (
+                <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
+              ) : null}
+              SELL
+            </Button>
+          </DisabledReason>
         </div>
         </div>
       </div>

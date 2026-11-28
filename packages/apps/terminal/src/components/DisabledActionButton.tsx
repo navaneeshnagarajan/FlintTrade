@@ -24,7 +24,7 @@ interface DisabledReasonProps {
 export function DisabledReason({ reason, className, children }: DisabledReasonProps) {
   return (
     <TooltipProvider delayDuration={200}>
-      <Tooltip open={reason ? undefined : false}>
+      <Tooltip>
         <TooltipTrigger asChild>
           <span tabIndex={reason ? 0 : undefined} className={className}>
             {children}

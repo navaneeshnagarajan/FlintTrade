@@ -89,6 +89,12 @@ export const ORDER_STATUS_UNKNOWN =
 export const FOREVER_ORDER_STATUS_UNKNOWN =
   "Order status unknown. Check Forever Orders before trying again.";
 
+/** Why a control is disabled while its place request has no reply yet. */
+export const ORDER_SENT_WAITING = "Order sent. Waiting for reply.";
+
+/** Why Cancel all is disabled while its request has no reply yet. */
+export const CANCEL_ALL_SENT_WAITING = "Cancel all sent. Waiting for reply.";
+
 /** The cancel was accepted. The order is not confirmed cancelled yet. */
 export const CANCELLATION_REQUESTED = "Cancellation requested";
 

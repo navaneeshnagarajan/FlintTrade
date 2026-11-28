@@ -37,6 +37,7 @@ import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
+import { tabTo } from "@/test-utils/tabTo";
 import { LOT_SIZE_MASTER_HINT } from "../types";
 import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
@@ -264,11 +265,14 @@ describe("ScalperWidget", () => {
       fireEvent.click(cancelAllButton());
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
-      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all sent. Waiting for reply.");
+      expect(cancelAllButton()).not.toHaveAttribute("title");
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
 
       await act(async () => release({}));
       await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
       expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders (F7)");
+      expect(cancelAllButton().parentElement).not.toHaveAttribute("tabindex");
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
     });
@@ -848,6 +852,53 @@ describe("ScalperWidget", () => {
     fireEvent.keyDown(window, { key: "ArrowUp", shiftKey: true });
     fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains the locked CE and PE buttons through a tooltip the keyboard reaches after a lost submit", async () => {
+    mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expectCeLocked());
+
+    for (const label of ["Buy CE", "Sell CE"]) {
+      const button = screen.getByText(label).closest("button") as HTMLButtonElement;
+      await tabTo(user, button.parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    }
+    const peWrapper = (screen.getByText("Buy PE").closest("button") as HTMLButtonElement).parentElement;
+    expect(peWrapper).not.toHaveAttribute("tabindex");
+  });
+
+  it("says the order was sent on the CE buttons while the request has no reply", async () => {
+    let release!: () => void;
+    mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.click(screen.getByText("Buy CE"));
+
+    const sell = screen.getByText("Sell CE").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(sell.disabled).toBe(true));
+    await tabTo(user, sell.parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Order sent. Waiting for reply.");
+
+    await act(async () => release());
+    await screen.findByText(/placed$/);
+  });
+
+  it("gives the Explore reason on the order buttons through a tooltip the keyboard reaches", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+
+    const buy = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+    expect(buy).toBeDisabled();
+    await tabTo(user, buy.parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(EXPLORE_SCALPER_ORDER_HELPER);
   });
 
   it("sends one place request for a double-click", async () => {
