@@ -815,6 +815,25 @@ describe("OrdersWidget pending cancels", () => {
     expect(screen.getByRole("status")).not.toHaveTextContent("· order status unknown");
   });
 
+  it("keeps the counts when a cancellation is also pending", async () => {
+    mockCancelOrder.mockResolvedValue({ status: "success", order_outcome: "cancel_requested" });
+    await expect(submitOrderOnce(
+      LIVE_SCOPE,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(new TypeError("Failed to fetch")),
+    )).rejects.toThrow();
+    render(ui());
+    expect(screen.getByRole("status")).toHaveTextContent("BUY 75 NIFTY24APR24000CE · order status unknown");
+
+    await cancel("ORD123");
+    await cancel("ORD789");
+
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("2 cancellations requested · 1 order status unknown");
+    expect(notice).not.toHaveTextContent("NIFTY24APR24000CE ·");
+    expect(document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]')).not.toBeNull();
+  });
+
   it("shows a confirmed entry and unknown stop-loss on that order", async () => {
     const bracketLost = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
       status: 502,
