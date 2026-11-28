@@ -110,7 +110,7 @@ export function ordersNoticeSummary(pendingCancels: number, unknownOrders: numbe
   if (pendingCancels === 1) parts.push("1 cancellation requested");
   else if (pendingCancels > 1) parts.push(`${pendingCancels} cancellations requested`);
   if (unknownOrders === 1) parts.push("1 order status unknown");
-  else if (unknownOrders > 1) parts.push(`${unknownOrders} orders status unknown`);
+  else if (unknownOrders > 1) parts.push(`${unknownOrders} order statuses unknown`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

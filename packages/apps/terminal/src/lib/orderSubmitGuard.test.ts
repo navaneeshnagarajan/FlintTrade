@@ -125,8 +125,9 @@ describe("order submit guard", () => {
     expect(unknownSubmitRowLabel(sentence)).toBe("SL unknown");
     expect(unknownSubmitRowLabel("Entry placed · Target status unknown")).toBe("Target unknown");
     expect(ordersNoticeSummary(2, 1)).toBe("2 cancellations requested · 1 order status unknown");
+    expect(ordersNoticeSummary(2, 3)).toBe("2 cancellations requested · 3 order statuses unknown");
     expect(ordersNoticeSummary(1, 0)).toBe("1 cancellation requested");
-    expect(ordersNoticeSummary(0, 2)).toBe("2 orders status unknown");
+    expect(ordersNoticeSummary(0, 2)).toBe("2 order statuses unknown");
     expect(ordersNoticeSummary(0, 0)).toBeNull();
   });
 
