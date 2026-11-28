@@ -587,8 +587,8 @@ describe("BrokersSection", () => {
     expect(screen.getByText(/Local Practice trading remains available/i)).toBeInTheDocument();
     await waitFor(() => {
       const availability = screen.getByText(/Native connection options:/i);
-      expect(availability).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
-      expect(availability).toHaveTextContent("INDmoney and Groww stay listed");
+      expect(availability).toHaveTextContent("Native connection options: Dhan and Kotak Neo.");
+      expect(availability).not.toHaveTextContent(/Upstox|INDmoney|Groww|unavailable/);
     });
   });
 
@@ -680,10 +680,7 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(listBrokerMcpCatalogue).toHaveBeenCalled());
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
-    expect(screen.getByTestId("native-connect-blockers")).not.toHaveTextContent("Kotak Neo:");
-    expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
-      "Groww: Broker-side market-data/API permission and Live order-safety proof",
-    );
+    expect(screen.queryByTestId("native-connect-blockers")).not.toBeInTheDocument();
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Read-only");
     expect(screen.getByTestId("broker-mcp-upstox")).toHaveTextContent("Static IP for live API orders");
     expect(screen.getByText(/active, non-dormant Upstox account/)).toBeInTheDocument();
@@ -743,8 +740,8 @@ describe("BrokersSection", () => {
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("static IP setup");
     expect(screen.getByTestId("broker-mcp-groww")).toHaveTextContent("future broker scope");
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    const groww = await screen.findByRole("option", { name: /Groww.*Coming soon/i });
-    expect(groww).toHaveAttribute("aria-disabled", "true");
+    expect(await screen.findByRole("option", { name: "Dhan" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Groww/ })).not.toBeInTheDocument();
   });
 
   it("reports MCP setup copy success only after the clipboard write succeeds", async () => {
@@ -1083,7 +1080,7 @@ describe("BrokersSection", () => {
 
   it("keeps every pending OAuth target alive when a second approval starts", async () => {
     const dhanAccount = makeNativeAccount({ account_id: "DHAN-LATE", broker: "dhan" });
-    const upstoxAccount = makeNativeAccount({ account_id: "UPSTOX-FIRST", broker: "upstox" });
+    const firstAccount = makeNativeAccount({ account_id: "DHAN-FIRST", broker: "dhan" });
     (oauthStartNativeAccount as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
@@ -1092,15 +1089,15 @@ describe("BrokersSection", () => {
         postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
       })
       .mockResolvedValueOnce({
-        auth_url: "https://api.upstox.com/v2/login/authorization/dialog?client_id=K",
-        state: "UPSTOX-STATE",
+        auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C2",
+        state: "DHAN-FIRST-STATE",
         redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
-        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
       });
     (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([upstoxAccount])
-      .mockResolvedValueOnce([upstoxAccount, dhanAccount]);
+      .mockResolvedValueOnce([firstAccount])
+      .mockResolvedValueOnce([firstAccount, dhanAccount]);
     vi.spyOn(window, "open").mockReturnValue(null);
     renderSection(false);
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
@@ -1116,12 +1113,10 @@ describe("BrokersSection", () => {
       fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
       await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
 
-      fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-      fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
-      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPSTOX-FIRST" } });
-      fireEvent.change(screen.getByLabelText("API key"), { target: { value: "KEY" } });
-      fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "SECRET" } });
-      fireEvent.click(screen.getByRole("button", { name: /log in with upstox/i }));
+      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-FIRST" } });
+      fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+      fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
 
       // A second approval joins the existing sequential coordinator. It must
       // not abort or overlap the in-flight/next scheduled native-source read.
@@ -1129,13 +1124,13 @@ describe("BrokersSection", () => {
         await vi.advanceTimersByTimeAsync(4000);
       });
       await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([upstoxAccount]));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([firstAccount]));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(4000);
       });
       await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(3));
-      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([upstoxAccount, dhanAccount]));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([firstAccount, dhanAccount]));
     } finally {
       vi.useRealTimers();
     }
@@ -1144,7 +1139,7 @@ describe("BrokersSection", () => {
   it("does not publish an old-session OAuth refresh into a replacement session", async () => {
     const oldRefresh = deferred<BrokerAccount[]>();
     const oldAccount = makeNativeAccount({ account_id: "DHAN-OLD", broker: "dhan" });
-    const replacementAccount = makeNativeAccount({ account_id: "UPSTOX-NEW", broker: "upstox" });
+    const replacementAccount = makeNativeAccount({ account_id: "DHAN-NEW", broker: "dhan" });
     (oauthStartNativeAccount as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=OLD",
@@ -1153,10 +1148,10 @@ describe("BrokersSection", () => {
         postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
       })
       .mockResolvedValueOnce({
-        auth_url: "https://api.upstox.com/v2/login/authorization/dialog?client_id=NEW",
+        auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=NEW",
         state: "NEW",
         redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
-        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
       });
     (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
       .mockReturnValueOnce(oldRefresh.promise)
@@ -1183,12 +1178,10 @@ describe("BrokersSection", () => {
         username: "replacement-user",
         sessionGeneration: 2,
       });
-      fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-      fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
-      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPSTOX-NEW" } });
-      fireEvent.change(screen.getByLabelText("API key"), { target: { value: "KEY" } });
-      fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "SECRET" } });
-      fireEvent.click(screen.getByRole("button", { name: /log in with upstox/i }));
+      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-NEW" } });
+      fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+      fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
       await waitFor(() => expect(oauthStartNativeAccount).toHaveBeenCalledTimes(2));
 
       await act(async () => {
@@ -1387,40 +1380,6 @@ describe("BrokersSection", () => {
     }
   });
 
-  it("launches OAuth for an oauth-method broker (Upstox)", async () => {
-    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth_url: "https://api.upstox.com/v2/login/authorization/dialog?client_id=K",
-      state: "S",
-      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
-      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
-    });
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
-    renderSection();
-    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
-    expect(screen.getByDisplayValue("http://127.0.0.1:5100/api/v1/native/oauth/callback")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("http://127.0.0.1:5100/api/v1/native/postbacks/upstox")).toBeInTheDocument();
-    expect(screen.getByText(/Primary\/Secondary IP/i)).toBeInTheDocument();
-    expect(screen.getByText(/invalidates Upstox access tokens/i)).toBeInTheDocument();
-    expect(screen.getByText(/broker-reachable public or tunnel URL/i)).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPX1" } });
-    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "K" } });
-    fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "SEC" } });
-    fireEvent.click(screen.getByRole("button", { name: /log in with upstox/i }));
-
-    await waitFor(() =>
-      expect(oauthStartNativeAccount).toHaveBeenCalledWith(
-        expect.objectContaining({ adapter_id: "upstox", account_id: "UPX1", api_key: "K", api_secret: "SEC" }),
-        expect.any(String),
-      ),
-    );
-    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("api.upstox.com"), "_blank", "noopener");
-    expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
-  });
-
   it("cannot switch broker or login method while a connection is in flight", async () => {
     const pending = deferred<{ connected: boolean; login: string }>();
     (connectNativeAccount as ReturnType<typeof vi.fn>).mockReturnValueOnce(pending.promise);
@@ -1455,50 +1414,18 @@ describe("BrokersSection", () => {
     expect(connect.mock.calls[1][1]).toBe(originalKey);
   });
 
-  it("connects Upstox analytics tokens as read-only native sessions", async () => {
-    (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
+  it("lists exactly Dhan and Kotak Neo, with no Coming soon tag", async () => {
     renderSection();
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
-    fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Analytics access token (read-only)" }));
-
-    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPX1" } });
-    fireEvent.change(screen.getByLabelText(/^Client ID/i), { target: { value: "UPX1" } });
-    fireEvent.change(screen.getByLabelText("Analytics access token"), { target: { value: "ANALYTICS-TOK" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-
-    await waitFor(() =>
-      expect(connectNativeAccount).toHaveBeenCalledWith(
-        expect.objectContaining({
-          adapter_id: "upstox",
-          account_id: "UPX1",
-          credentials: {
-            read_only: "true",
-            token_scope: "analytics",
-            client_id: "UPX1",
-            access_token: "ANALYTICS-TOK",
-          },
-        }),
-        expect.any(String),
-      ),
-    );
-    expect(await screen.findByText(/Upstox account UPX1 connected/i)).toBeInTheDocument();
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["Dhan", "Kotak Neo"]);
+    for (const option of options) expect(option).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
   });
 
-  it("shows coming-soon native brokers but disables them", async () => {
-    renderSection();
-    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    const kotak = await screen.findByRole("option", { name: "Kotak Neo" });
-    expect(kotak).not.toHaveAttribute("aria-disabled", "true");
-    expect(screen.queryByRole("option", { name: /Kotak Neo.*Coming soon/i })).not.toBeInTheDocument();
-  });
-
-  it("keeps Kotak Neo selectable for Connected (read) even if the catalogue still says coming soon", async () => {
+  it("keeps Kotak Neo selectable for Connected (read) when the catalogue marks it unconnectable", async () => {
     (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(
       BROKERS.map((broker) =>
         broker.adapter_id === "kotakneo" ? { ...broker, connectable: false } : broker,
@@ -1513,24 +1440,19 @@ describe("BrokersSection", () => {
     expect(screen.queryByRole("option", { name: /Kotak Neo.*Coming soon/i })).not.toBeInTheDocument();
     fireEvent.click(kotak);
     expect(screen.getByRole("combobox", { name: /broker/i })).toHaveTextContent("Kotak Neo");
-    expect(screen.queryByText(/native connect is coming soon/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
   });
 
-  it("keeps INDmoney disabled with its activation blockers visible", async () => {
+  it("hides brokers that cannot connect, even when the catalogue marks them connectable", async () => {
     renderSection();
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    const indmoney = await screen.findByRole("option", { name: /INDmoney.*Coming soon/i });
-    expect(indmoney).toHaveAttribute("aria-disabled", "true");
-    const blockers = screen.getByTestId("native-connect-blockers");
-    expect(blockers).toHaveTextContent(
-      "Authoritative smart-parent cancellation discriminator",
-    );
-    expect(blockers).toHaveTextContent(
-      "Broker-native atomic reduce-only close primitive",
-    );
-    expect(blockers).toHaveTextContent("Live order-safety proof");
+    await screen.findByRole("option", { name: "Dhan" });
+    for (const name of ["Upstox", "INDmoney", "Groww"]) {
+      expect(screen.queryByRole("option", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId("native-connect-blockers")).not.toBeInTheDocument();
   });
 });
 

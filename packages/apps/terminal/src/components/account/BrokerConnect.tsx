@@ -72,12 +72,7 @@ import {
   NEO_OPERATOR_COPY,
   isConnectedReadBroker,
   connectedReadChrome,
-  connectedReadConnectable,
 } from "@/lib/connectedReadChrome";
-
-function brokerSelectable(broker: Pick<NativeBroker, "adapter_id" | "connectable">): boolean {
-  return connectedReadConnectable(broker.adapter_id, broker.connectable);
-}
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
@@ -233,20 +228,10 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const brokerAccounts = useBrokerStore((s) => s.accounts);
   const operatorIncident = useOperatorIncident();
 
-  const brokers = brokersQuery.data ?? [];
+  const brokers = (brokersQuery.data ?? []).filter((b) => isConnectedReadBroker(b.adapter_id));
   const mcpBrokers = mcpQuery.data ?? [];
   const accounts = brokerAccounts.filter((a) => a.source === "native");
-  const connectableNativeNames = brokers
-    .filter((b) => brokerSelectable(b))
-    .map((b) => b.display_name);
-  const connectableNativeLabel = joinBrokerNames(connectableNativeNames);
-  const unavailableNativeNames = brokers
-    .filter((b) => !brokerSelectable(b))
-    .map((b) => b.display_name);
-  const unavailableNativeLabel = joinBrokerNames(unavailableNativeNames);
-  const unavailableNativeVerb = unavailableNativeNames.length === 1 ? "stays" : "stay";
-  const unavailableNativeBlockers = brokers
-    .filter((b) => !brokerSelectable(b) && b.native_connect_blockers.length > 0);
+  const connectableNativeLabel = joinBrokerNames(brokers.map((b) => b.display_name));
   const [selectedBroker, setSelectedBroker] = useState<string>("");
   const [selectedMethodId, setSelectedMethodId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
@@ -291,7 +276,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const broker = brokers.find((b) => b.adapter_id === selectedBroker);
   const method: NativeAuthMethod | undefined = broker?.auth_methods.find((m) => m.id === selectedMethodId);
-  const brokerConnectable = broker ? brokerSelectable(broker) : false;
   const brokerSdkReady = broker ? sdkReadyForConnect(broker) : false;
   const oauthRedirectUri = broker?.oauth_redirect_uri ?? "http://127.0.0.1:5100/api/v1/native/oauth/callback";
   const brokerPostbackUri = broker?.postback_uri ?? (
@@ -529,7 +513,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     mutationFn: async (sessionFence: ReturnType<typeof captureAuthSessionFence>) => {
       if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
       if (!broker || !method) throw new Error("Pick a broker and a login method.");
-      if (!brokerSelectable(broker)) throw new Error(`${broker.display_name} native connect is coming soon.`);
       if (!sdkReadyForConnect(broker)) {
         throw new Error(`${broker.display_name} native SDK is not ready (${sdkStatusLabel(broker)}).`);
       }
@@ -735,25 +718,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             Native broker HTTP connectivity is unavailable while native-session support is completed.
             Local Practice trading remains available.
           </p>
-          <details>
-            <summary className="cursor-pointer text-xs">Broker availability</summary>
-            <p className="mt-2 text-xs text-text-muted">
-              Native connection options: {connectableNativeLabel || "see the available brokers below"}.{" "}
-              {unavailableNativeLabel
-                ? `${unavailableNativeLabel} ${unavailableNativeVerb} listed but unavailable until their requirements are met.`
-                : "Unavailable brokers are disabled until their requirements are met."}
+          {connectableNativeLabel && (
+            <p className="text-xs text-text-muted">
+              Native connection options: {connectableNativeLabel}.
             </p>
-          {unavailableNativeBlockers.length > 0 && (
-            <ul className="space-y-1 text-xs text-text-muted" data-testid="native-connect-blockers">
-              {unavailableNativeBlockers.map((b) => (
-                <li key={b.adapter_id}>
-                  <span className="font-medium text-text-secondary">{b.display_name}:</span>{" "}
-                  {blockerLabel(b.native_connect_blockers)}
-                </li>
-              ))}
-            </ul>
           )}
-          </details>
         </div>
       </div>
 
@@ -1052,16 +1021,15 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               <SelectTrigger id="broker-select"><SelectValue placeholder="Select a broker" /></SelectTrigger>
               <SelectContent>
                 {brokers.map((b) => (
-                  <SelectItem key={b.adapter_id} value={b.adapter_id} disabled={!brokerSelectable(b)}>
-                    <span>{b.display_name}</span>
-                    {!brokerSelectable(b) && <span className="text-xs text-text-muted"> · Coming soon</span>}
+                  <SelectItem key={b.adapter_id} value={b.adapter_id}>
+                    {b.display_name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {broker && brokerConnectable && (
+          {broker && (
             <div>
               <Label htmlFor="method-select" className="text-xs text-text-secondary mb-1.5 block">Login method</Label>
               <Select value={selectedMethodId} disabled={connectMutation.isPending}
@@ -1079,13 +1047,6 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             </div>
           )}
         </div>
-
-        {broker && !brokerConnectable && (
-          <div role="status" className="flex items-center gap-2 text-sm text-warning">
-            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
-            {broker.display_name} native connect is coming soon.
-          </div>
-        )}
 
         {broker && (
           <div
@@ -1118,7 +1079,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           </div>
         )}
 
-        {method && brokerConnectable && (
+        {method && (
           <div className="space-y-3">
             <p className="text-xs text-text-muted">{method.description}</p>
             {method.kind === "oauth" && <Badge variant="outline" className="text-xs">Opens {broker?.display_name} in a new tab</Badge>}
@@ -1199,7 +1160,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
             <Button
               onClick={() => connectMutation.mutate(captureAuthSessionFence())}
-              disabled={connectMutation.isPending || !brokerConnectable || !brokerSdkReady}
+              disabled={connectMutation.isPending || !brokerSdkReady}
               className="w-full sm:w-auto"
             >
               {connectMutation.isPending && <Loader2 className="size-4 mr-2 animate-spin" aria-hidden="true" />}
