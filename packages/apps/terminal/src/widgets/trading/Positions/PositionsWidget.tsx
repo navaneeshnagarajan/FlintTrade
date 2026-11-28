@@ -142,6 +142,7 @@ import {
 } from "./positionReconcile";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { OrderStatusUnknownLine, OrderStatusUnknownLink } from "@/components/orders/OrderStatusUnknownLine";
 import type { WidgetProps } from "@/types/widgets";
 import {
@@ -202,11 +203,11 @@ function exitRequestedBody(
   return `Exit requested: ${action} ${qty} ${symbol} ${how}. Check positions and orders for the outcome.`;
 }
 
-function OutcomeCopy({ message }: { message: string }) {
+function OutcomeCopy({ message, clip = false }: { message: string; clip?: boolean }) {
   const uncertain = orderOutcomeIsUncertain(message);
   return (
-    <p className={uncertain ? "text-xs text-warning" : "text-xs text-loss"} role={uncertain ? "status" : "alert"}>
-      {message}
+    <p className={`min-w-0 ${uncertain ? "text-xs text-warning" : "text-xs text-loss"}`} role={uncertain ? "status" : "alert"}>
+      {clip ? <DisabledReason reason={message} className="block truncate">{message}</DisabledReason> : message}
     </p>
   );
 }
@@ -631,11 +632,11 @@ function SquareOffDialog({
         )}
         <LayaAdmissionNotice notice={layaNotice} />
         {/* Reserved for the unknown line, so the dialog does not grow or jump. */}
-        <div className="min-h-9" data-testid="square-off-outcome-slot">
+        <div className="h-6 min-w-0 overflow-hidden flex items-center" data-testid="square-off-outcome-slot">
           {submitGuard.isUnknown(exitIntent(position).key) ? (
-            <OrderStatusUnknownLine />
+            <OrderStatusUnknownLine clip />
           ) : errorMsg ? (
-            <OutcomeCopy message={errorMsg} />
+            <OutcomeCopy message={errorMsg} clip />
           ) : null}
         </div>
         {!canSubmit && (

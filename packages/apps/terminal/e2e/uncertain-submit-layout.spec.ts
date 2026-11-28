@@ -23,6 +23,7 @@ const CE = "NIFTY27AUG26100CE";
 const PLACE = "/ft-api/api/v1/orders/place";
 const LIVE_PLACE = "/ft-api/api/v1/orders/dhan/place";
 const VIEWPORTS = [
+  { width: 1280, height: 800 },
   { width: 1440, height: 900 },
   { width: 2560, height: 1440 },
 ] as const;
@@ -73,6 +74,12 @@ async function collectBoxes(locators: Locator[]): Promise<Box[]> {
     boxes.push(box!);
   }
   return boxes;
+}
+
+async function expectSlotHeight(slot: Locator, height: number, label: string): Promise<void> {
+  const box = await slot.boundingBox();
+  expect(box, `${label} has a box`).not.toBeNull();
+  expect(box!.height, `${label} height`).toBeCloseTo(height, 0);
 }
 
 function expectUnmoved(before: Box[], after: Box[], label: string, tolerance = 1): void {
@@ -600,6 +607,7 @@ for (const viewport of VIEWPORTS) {
       await expectOnScreenAndUncovered(page, slot.getByRole("button", { name: "Open Orders" }), `Open Orders at ${viewport.width}`);
       const after = await expectOnScreenAndUncovered(page, buy, `Buy after at ${viewport.width}`);
       expectUnmoved([before!], [after], `Order Pad Buy ${viewport.width}`);
+      await expectSlotHeight(page.getByTestId("order-pad-status-slot"), 36, `order pad slot ${viewport.width}`);
     });
   });
 }
@@ -729,14 +737,17 @@ for (const viewport of VIEWPORTS) {
       const dialog = page.getByRole("dialog", { name: "Square off position?" });
       const confirm = dialog.getByRole("button", { name: "Confirm square off SYNTHETIC-ALPHA", exact: true });
       const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      const slot = dialog.getByTestId("square-off-outcome-slot");
       await expect(confirm).toBeVisible();
       await page.clock.runFor(500);
-      const before = await collectBoxes([dialog, confirm, cancel]);
+      const before = await collectBoxes([dialog, confirm, cancel, slot]);
       await recordLostSubmit(page, { key: "NSE:SYNTHETIC-ALPHA", symbol: "SYNTHETIC-ALPHA", exchange: "NSE", action: "SELL", quantity: 10 });
       await tickUntil(page, dialog.getByText(UNKNOWN, { exact: true }));
       await expect(dialog.getByRole("button", { name: "Open Orders" })).toBeVisible();
       await expect(confirm).toBeDisabled();
-      expectUnmoved(before, await collectBoxes([dialog, confirm, cancel]), `square off dialog ${viewport.width}`);
+      expectUnmoved(before, await collectBoxes([dialog, confirm, cancel, slot]), `square off dialog ${viewport.width}`);
+      await expectSlotHeight(slot, 24, `square off slot ${viewport.width}`);
+      await expectLineFits(slot, `square off ${viewport.width}`);
     });
 
     test("Quick Trade BUY/SELL and the note stay put, with the line in a slot directly above them", async ({ page, syntheticApi }) => {
@@ -746,14 +757,15 @@ for (const viewport of VIEWPORTS) {
       const buy = page.getByRole("button", { name: /^Buy .* of RELIANCE$/ });
       const sell = page.getByRole("button", { name: /^Sell .* of RELIANCE$/ });
       const note = page.locator("#quicktrade-admission-note");
+      const slot = page.getByTestId("quicktrade-status-slot");
       await expect(buy).toBeVisible();
       await page.clock.runFor(500);
-      const before = await collectBoxes([buy, sell, note]);
+      const before = await collectBoxes([buy, sell, note, slot]);
       await recordLostSubmit(page, { key: "NSE:RELIANCE", symbol: "RELIANCE", exchange: "NSE", action: "BUY", quantity: 1 });
-      const slot = page.getByTestId("quicktrade-status-slot");
       await tickUntil(page, slot.getByText(UNKNOWN));
       await expect(buy).toBeDisabled();
-      expectUnmoved(before, await collectBoxes([buy, sell, note]), `quick trade ${viewport.width}`);
+      expectUnmoved(before, await collectBoxes([buy, sell, note, slot]), `quick trade ${viewport.width}`);
+      await expectSlotHeight(slot, 24, `quick trade slot ${viewport.width}`);
       const lineBox = (await slot.getByRole("status").boundingBox())!;
       const buyBox = (await buy.boundingBox())!;
       expect(lineBox.y + lineBox.height, "line sits above BUY/SELL").toBeLessThanOrEqual(buyBox.y + 0.5);
@@ -796,14 +808,15 @@ for (const viewport of VIEWPORTS) {
         const buyAll = panel.getByRole("button", { name: "Buy All", exact: true });
         await tickUntil(page, buyAll);
         await page.clock.runFor(200);
-        const before = await collectBoxes([buyAll, canvas]);
-        await buyAll.click();
         const slot = panel.getByTestId("basket-status-slot");
+        const before = await collectBoxes([buyAll, canvas, slot]);
+        await buyAll.click();
         await tickUntil(page, slot.getByText(UNKNOWN));
         await page.clock.runFor(200);
         await expect(buyAll).toBeDisabled();
         await expect(panel.getByText(UNKNOWN)).toHaveCount(1);
-        expectUnmoved(before, await collectBoxes([buyAll, canvas]), `option chain ${viewport.width}`);
+        expectUnmoved(before, await collectBoxes([buyAll, canvas, slot]), `option chain ${viewport.width}`);
+        await expectSlotHeight(slot, 24, `option chain slot ${viewport.width}`);
         await expectLineFits(slot, `option chain ${viewport.width}`);
         await expectReasonTooltip(page, buyAll, UNKNOWN);
         expect(posts).toBe(1);
@@ -825,7 +838,8 @@ for (const viewport of VIEWPORTS) {
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
       const rows = table.getByRole("row");
       await expect(rows.nth(1)).toBeVisible();
-      const before = await collectBoxes(await rows.all());
+      const noticeSlot = page.getByTestId("orders-notice-slot");
+      const before = await collectBoxes([...(await rows.all()), noticeSlot]);
       await recordLostSubmit(page, {
         key: "NFO:NIFTY24APR24000CE",
         symbol: "NIFTY24APR24000CE",
@@ -842,9 +856,9 @@ for (const viewport of VIEWPORTS) {
         }
         return line.isVisible();
       }, { timeout: 15_000, intervals: [50] }).toBe(true);
-      expectUnmoved(before, await collectBoxes(await rows.all()), `orders rows ${viewport.width}`);
+      expectUnmoved(before, await collectBoxes([...(await rows.all()), noticeSlot]), `orders rows ${viewport.width}`);
       const noticeBox = await page.getByTestId("orders-notice-slot").boundingBox();
-      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(44);
+      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(32);
       const rowBox = await table.getByRole("row").nth(1).boundingBox();
       expect(rowBox?.height, `orders row ${viewport.width}`).toBeLessThanOrEqual(33);
     });
@@ -920,6 +934,7 @@ for (const viewport of SHIFT_VIEWPORTS) {
       await expect(outcome).toContainText(REFUSAL);
       const after = await expectOnScreenAndUncovered(page, buy, `Buy after refusal at ${viewport.width}`);
       expectUnmoved([before!], [after], `Order Pad Buy refusal ${viewport.width}`);
+      await expectSlotHeight(slot, 36, `order pad slot ${viewport.width}`);
     });
   });
 }
@@ -956,7 +971,7 @@ for (const viewport of SHIFT_VIEWPORTS) {
       await expect(page.getByTestId("orders-notice-slot")).toContainText("BUY 75 NIFTY24APR24000CE · order status unknown");
       await expect(page.getByText(SL_UNKNOWN, { exact: true })).toHaveCount(0);
       const noticeBox = await page.getByTestId("orders-notice-slot").boundingBox();
-      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(44);
+      expect(noticeBox?.height, `orders notice slot ${viewport.width}`).toBe(32);
       const rowBox = await table.getByRole("row").nth(1).boundingBox();
       expect(rowBox?.height, `orders mixed-leg row ${viewport.width}`).toBeLessThanOrEqual(33);
     });

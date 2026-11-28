@@ -566,8 +566,8 @@ function QuickTradeWidget(props: WidgetProps) {
 
         {/* BUY / SELL, with a reserved unknown-line slot directly above them */}
         <div className="mt-auto flex flex-col gap-1">
-        <div data-testid="quicktrade-status-slot" className="min-h-9 flex items-end">
-          {statusUnknown ? <OrderStatusUnknownLine /> : null}
+        <div data-testid="quicktrade-status-slot" className="h-6 flex items-center">
+          {statusUnknown ? <OrderStatusUnknownLine clip /> : null}
         </div>
         <div className="flex gap-2">
           <DisabledReason reason={disabledReason} className="flex flex-1">

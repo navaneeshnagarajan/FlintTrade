@@ -123,8 +123,8 @@ export default function BasketPanel({
             </DisabledReason>
           </div>
           {/* Reserved, so Buy All and the chain below never move when the line appears. */}
-          <div data-testid="basket-status-slot" className="min-h-9 pt-1">
-            {statusUnknown ? <OrderStatusUnknownLine /> : null}
+          <div data-testid="basket-status-slot" className="h-6 flex items-center">
+            {statusUnknown ? <OrderStatusUnknownLine clip /> : null}
           </div>
         </>
       )}

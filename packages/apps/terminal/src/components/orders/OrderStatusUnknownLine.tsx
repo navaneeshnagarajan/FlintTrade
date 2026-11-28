@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { AlertTriangle } from "lucide-react";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 
 function openOrders(): void {
@@ -86,7 +87,27 @@ export function OrderStatusUnknownTight({ className = "" }: { className?: string
  * `linkOnly` drops the sentence while the widget's own outcome line already
  * says it, so the sentence is shown and announced once.
  */
-export function OrderStatusUnknownLine({ className = "", linkOnly = false }: { className?: string; linkOnly?: boolean }) {
+export function OrderStatusUnknownLine({
+  className = "",
+  linkOnly = false,
+  clip = false,
+}: {
+  className?: string;
+  linkOnly?: boolean;
+  /** Keep to one row: the sentence truncates and its tooltip carries the full text. */
+  clip?: boolean;
+}) {
+  if (clip && !linkOnly) {
+    return (
+      <p role="status" className={`flex min-w-0 items-center gap-1.5 text-xs text-warning ${className}`}>
+        <AlertTriangle size={12} aria-hidden className="shrink-0" />
+        <DisabledReason reason={ORDER_STATUS_UNKNOWN} className="block min-w-0 truncate">
+          {ORDER_STATUS_UNKNOWN}
+        </DisabledReason>
+        <OpenOrdersButton />
+      </p>
+    );
+  }
   if (linkOnly) {
     return (
       <p className={`flex items-center text-xs text-warning ${className}`}>
