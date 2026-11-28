@@ -57,6 +57,8 @@ export function isDerivativeExchange(exchange: string): boolean {
 // Mode
 // ---------------------------------------------------------------------------
 
+export const NO_BROKER_ORDERS = "Connect a broker to place orders.";
+
 /**
  * Refuse order entry outside a mode that can place one.
  *
@@ -69,7 +71,7 @@ export function isDerivativeExchange(exchange: string): boolean {
  */
 export function checkOrderEntryMode(mode: SessionMode): string | null {
   if (mode === "unavailable") return "Unavailable. No order was sent.";
-  if (mode === "explore") return "Connect a broker to place orders";
+  if (mode === "explore") return NO_BROKER_ORDERS;
   return null;
 }
 

@@ -70,6 +70,7 @@ import {
   checkOrderEntryMode,
   extractBrokerOrderId,
   isTerminalOrderStatus,
+  NO_BROKER_ORDERS,
 } from "@/lib/orderGuards";
 import { bookImbalance, normaliseDepth, type NormalisedDepth } from "@/lib/depth";
 import type { Order, WsInstrument } from "@/types/api";
@@ -309,7 +310,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid
         className={cn("relative flex items-center justify-end h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-loss/15",
           level.bidQty ? "text-profit" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `SELL ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? NO_BROKER_ORDERS : locked ? ORDER_STATUS_UNKNOWN : `SELL ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.bidQty ? `Sell ${qty} at ${fmtPrice(level.price)}: ${level.bidQty} bids` : `Place sell at ${fmtPrice(level.price)}`}>
         {!!level.bidQty && <div className="absolute right-0 inset-y-0 bg-profit/15" style={{ width: barW(level.bidQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.bidQty)}</span>
@@ -348,7 +349,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, locked, onBid
         className={cn("relative flex items-center h-full flex-1 px-1.5 text-xxs font-mono transition-colors select-none rounded-none",
           disabled ? "cursor-not-allowed" : "hover:bg-profit/15",
           level.askQty ? "text-loss" : "text-transparent")}
-        title={disabled ? "Connect a broker to place orders" : locked ? ORDER_STATUS_UNKNOWN : `BUY ${qty} @ ${fmtPrice(level.price)}`}
+        title={disabled ? NO_BROKER_ORDERS : locked ? ORDER_STATUS_UNKNOWN : `BUY ${qty} @ ${fmtPrice(level.price)}`}
         aria-label={level.askQty ? `Buy ${qty} at ${fmtPrice(level.price)}: ${level.askQty} asks` : `Place buy at ${fmtPrice(level.price)}`}>
         {!!level.askQty && <div className="absolute left-0 inset-y-0 bg-loss/15" style={{ width: barW(level.askQty, maxQty) }} aria-hidden="true" />}
         <span className="relative z-10">{fmtQty(level.askQty)}</span>

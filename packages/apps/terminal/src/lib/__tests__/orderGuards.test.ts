@@ -48,7 +48,7 @@ describe("derivative exchange classification", () => {
 
 describe("checkOrderEntryMode", () => {
   it("refuses order entry in explore mode", () => {
-    expect(checkOrderEntryMode("explore")).toBe("Connect a broker to place orders");
+    expect(checkOrderEntryMode("explore")).toBe("Connect a broker to place orders.");
   });
 
   it("allows practice and live", () => {
