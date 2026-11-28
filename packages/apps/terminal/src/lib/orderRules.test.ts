@@ -171,6 +171,23 @@ describe("order rules mirror", () => {
     }
   });
 
+  it("refuses a Practice stop-loss or target with one plain instruction", () => {
+    const results = evaluateOrderRules({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      orderType: "LIMIT",
+      action: "BUY",
+      price: 100,
+      hasStopLossOrTarget: true,
+      lastPrice: 100,
+      broker: "practice",
+      quantity: 1,
+    }, "2026-11-22");
+    const refusal = results.find((item) => item.rule_id === "practice-bracket-unsupported");
+    expect(refusal?.level).toBe("block");
+    expect(refusal?.message).toBe("Not placed. Remove SL and Target for Practice orders.");
+  });
+
   it("hides fill-info rows when an options market refusal fires", () => {
     for (const broker of ["practice", "dhan"] as const) {
       const results = evaluateOrderRules({

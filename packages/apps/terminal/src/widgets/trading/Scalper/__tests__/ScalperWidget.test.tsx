@@ -751,6 +751,32 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("tells a Practice user an SL or Target order will not be placed, and sends nothing", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "practice" }),
+    );
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("1 (75)");
+
+    fireEvent.change(screen.getByLabelText("Stop-loss points"), { target: { value: "20" } });
+    setLimit("150");
+
+    const line = document.getElementById("scalper-rule-line") as HTMLElement;
+    await waitFor(() =>
+      expect(line).toHaveTextContent("Not placed. Remove SL and Target for Practice orders."),
+    );
+    expect(line).toHaveAttribute("data-level", "block");
+
+    await buyCeWithConfirm();
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Not placed. Remove SL and Target for Practice orders.").length).toBeGreaterThan(1),
+    );
+    expect(document.body).not.toHaveTextContent(/aren't supported in Practice/i);
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
   it("refuses SL and Target together (no OCO fill monitor) without sending", async () => {
     render(<ScalperWidget {...defaultProps} />);
     await screen.findByText("1 (75)");

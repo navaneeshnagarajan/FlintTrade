@@ -446,7 +446,7 @@
           "level": "block",
           "source": "Practice",
           "rule_id": "practice-bracket-unsupported",
-          "message": "Stop-loss and target aren't supported in Practice."
+          "message": "Not placed. Remove SL and Target for Practice orders."
         }
       ]
     },
@@ -472,7 +472,7 @@
           "level": "block",
           "source": "Practice",
           "rule_id": "practice-bracket-unsupported",
-          "message": "Stop-loss and target aren't supported in Practice."
+          "message": "Not placed. Remove SL and Target for Practice orders."
         }
       ]
     },
