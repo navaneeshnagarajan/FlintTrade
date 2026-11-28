@@ -792,8 +792,8 @@ function AISettingsSection() {
           Configuration
         </h3>
         <p className="text-xs text-text-secondary leading-relaxed mb-4">
-          Configure the LLM provider, model selection, and AI preferences.
-          All settings persist to workspace.json.
+          The LLM provider, model, API keys, and RAG settings are read from
+          workspace.json. Edit that file to change them.
         </p>
         <div className="space-y-3">
           {[
@@ -823,14 +823,6 @@ function AISettingsSection() {
             </div>
           ))}
         </div>
-      </Card>
-
-      <Card className="bg-surface-card border border-border-default rounded-lg p-4">
-        <Badge className="bg-atm-bg text-warning text-xs">Coming soon</Badge>
-        <p className="text-xs text-text-muted mt-2">
-          Settings form controls will be available in the next release. Use workspace.json
-          directly to configure provider, model, and local vector-store paths in the meantime.
-        </p>
       </Card>
     </div>
   );

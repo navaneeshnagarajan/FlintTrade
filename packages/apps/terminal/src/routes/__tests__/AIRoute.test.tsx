@@ -550,8 +550,20 @@ describe("AIRoute", () => {
 
     await user.click(screen.getByLabelText("Settings"));
     expect(screen.getByText(/Local vector-store path, embedding model/)).toBeInTheDocument();
-    expect(screen.getByText(/local vector-store paths/)).toBeInTheDocument();
     expect(screen.queryByText(/ChromaDB/i)).not.toBeInTheDocument();
+  });
+
+  it("points the settings tab at workspace.json without a Coming soon badge", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("Settings"));
+    expect(
+      screen.getByText(/read from\s+workspace\.json\. Edit that file to change them\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/coming soon|next release|in the meantime/i);
   });
 
   it("accepts the older response envelope when answer is absent", async () => {
