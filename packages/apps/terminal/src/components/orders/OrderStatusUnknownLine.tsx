@@ -72,9 +72,9 @@ export function OrderStatusUnknownTight({ className = "" }: { className?: string
       role="status"
       title={ORDER_STATUS_UNKNOWN}
       aria-describedby={id}
-      className={`flex items-center gap-0 text-xxs text-warning whitespace-nowrap ${className}`}
+      className={`flex items-center gap-1 text-xxs text-warning whitespace-nowrap ${className}`}
     >
-      <span className="pr-0.5">{ORDER_STATUS_UNKNOWN_COMPACT}</span>
+      <span>{ORDER_STATUS_UNKNOWN_COMPACT} </span>
       <OpenOrdersButton title={ORDER_STATUS_UNKNOWN} describedBy={id} />
       <span id={id} hidden>{ORDER_STATUS_UNKNOWN}</span>
     </p>

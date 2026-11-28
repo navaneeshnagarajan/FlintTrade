@@ -1001,8 +1001,10 @@ for (const viewport of SCALPER_FIT_VIEWPORTS) {
         await expectLineFits(slot, `scalper ${panelWidth}px panel at ${viewport.width}`);
         if (panelWidth === 180) {
           const status = slot.getByRole("status");
-          await expect(status).toContainText("Status unknown");
+          await expect(status).toContainText("Status unknown Open Orders");
           await expect(status).not.toContainText("·");
+          const gap = await status.evaluate((node) => getComputedStyle(node).columnGap);
+          expect(gap).toBe("4px");
           await expect(slot.getByRole("button", { name: "Open Orders" })).toBeVisible();
           await expect(slot.getByText(UNKNOWN, { exact: true })).toBeHidden();
         }
