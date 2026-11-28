@@ -326,7 +326,7 @@ export function lotSizeNotConfirmedReason(symbol: string): string {
   return `Lot size not confirmed for ${symbol}. Refresh instruments.`;
 }
 export function decisionModelMaxLotsReason(lots: number): string {
-  return `Decision model allows max ${lots} lots. Reduce quantity.`;
+  return `Decision model allows max ${lots} ${lots === 1 ? "lot" : "lots"}. Reduce quantity.`;
 }
 export function strikeNotInChainReason(strike: number): string {
   return `Strike ${strike} not in the chain. Pick a listed strike.`;

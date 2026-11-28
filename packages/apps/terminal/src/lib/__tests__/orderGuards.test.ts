@@ -403,6 +403,8 @@ describe("Example order refusal", () => {
 describe("disabled order reasons", () => {
   it("reads as the approved sentences", () => {
     expect(lotSizeNotConfirmedReason("NIFTY26DECFUT")).toBe("Lot size not confirmed for NIFTY26DECFUT. Refresh instruments.");
+    expect(decisionModelMaxLotsReason(1)).toBe("Decision model allows max 1 lot. Reduce quantity.");
+    expect(decisionModelMaxLotsReason(2)).toBe("Decision model allows max 2 lots. Reduce quantity.");
     expect(decisionModelMaxLotsReason(4)).toBe("Decision model allows max 4 lots. Reduce quantity.");
     expect(strikeNotInChainReason(22050)).toBe("Strike 22050 not in the chain. Pick a listed strike.");
   });
