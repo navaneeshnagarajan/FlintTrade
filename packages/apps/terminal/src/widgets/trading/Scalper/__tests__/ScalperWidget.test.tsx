@@ -28,7 +28,7 @@ vi.mock("@/lib/instrumentLots", async () => {
     scalperLotLabel: (underlying: string) => actual.scalperLotLabel(underlying, revision.rows, "2026-09-01"),
   };
 });
-import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, renderHook, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -38,6 +38,7 @@ import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channel
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
 import { tabTo } from "@/test-utils/tabTo";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
 import { LOT_SIZE_MASTER_HINT } from "../types";
 import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
@@ -275,6 +276,69 @@ describe("ScalperWidget", () => {
       expect(cancelAllButton().parentElement).not.toHaveAttribute("tabindex");
       fireEvent.click(confirm);
       expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+    });
+
+    function pressC(): void {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true }));
+    }
+
+    it("sends nothing and opens no confirm on C while the button's request is pending", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderHook(() => useGlobalKeys({}));
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      pressC();
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      pressC();
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      confirmSpy.mockRestore();
+      await act(async () => release({}));
+    });
+
+    it("keeps the button disabled and sends nothing on a confirm while C's request is pending", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderHook(() => useGlobalKeys({}));
+      render(<ScalperWidget {...defaultProps} />);
+
+      pressC();
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
+      fireEvent.click(cancelAllButton());
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      pressC();
+
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      confirmSpy.mockRestore();
+    });
+
+    it("releases the shared flag when the request throws before it is sent", async () => {
+      mockCancelAllOrders.mockImplementationOnce(() => { throw new Error("offline"); });
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
     });
 
     it("releases the guard after a failed request", async () => {

@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import {
   expect,
   mountWidget,
@@ -215,39 +216,91 @@ test.describe("lost Scalper Bracket exit leg", () => {
   });
 });
 
+async function mountGatedCancelAll(page: Page, syntheticApi: Parameters<typeof registerScalperReads>[0]) {
+  registerScalperReads(syntheticApi);
+  const counter = { posts: 0 };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**${CANCEL_ALL}`, async (route) => {
+    counter.posts += 1;
+    await gate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "success", order_outcome: "cancelled" }),
+    });
+  });
+  await mountWidget(page, "scalper");
+  await page.clock.runFor(5_000);
+  await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+  return { counter, release, cancelAll: page.getByRole("button", { name: /^Cancel All/ }).first() };
+}
+
+async function pressC(page: Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("c");
+}
+
 test.describe("Scalper Cancel all", () => {
   test("sends one request while the first is in flight and enables the button after it settles", async ({ page, syntheticApi }) => {
     test.setTimeout(60_000);
-    registerScalperReads(syntheticApi);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
 
-    let posts = 0;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    await page.route(`**${CANCEL_ALL}`, async (route) => {
-      posts += 1;
-      await gate;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ status: "success", order_outcome: "cancelled" }),
-      });
-    });
-
-    await mountWidget(page, "scalper");
-    await page.clock.runFor(5_000);
-    await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
-
-    const cancelAll = page.getByRole("button", { name: /^Cancel All/ }).first();
     await cancelAll.click();
     const confirm = page.getByRole("alertdialog").getByRole("button", { name: "Cancel All Orders", exact: true });
     await confirm.dblclick();
     await expect(cancelAll).toBeDisabled();
-    await expect.poll(() => posts).toBe(1);
+    await expect.poll(() => counter.posts).toBe(1);
     await expectReasonTooltip(page, cancelAll, "Cancel all sent. Waiting for reply.");
 
     release();
     await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
     await expect(cancelAll).toBeEnabled();
-    expect(posts).toBe(1);
+    expect(counter.posts).toBe(1);
+  });
+
+  test("C opens no confirm and sends nothing while the button's request is pending", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
+    const dialogs: string[] = [];
+    page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.accept(); });
+
+    await cancelAll.click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel All Orders", exact: true }).click();
+    await expect(cancelAll).toBeDisabled();
+    await expect.poll(() => counter.posts).toBe(1);
+    await pressC(page);
+    await page.clock.runFor(250);
+
+    expect(dialogs).toEqual([]);
+    expect(counter.posts).toBe(1);
+    await expect(cancelAll).toBeDisabled();
+
+    release();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(cancelAll).toBeEnabled();
+    expect(counter.posts).toBe(1);
+  });
+
+  test("the button stays disabled with its reason while C's request is pending", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
+    const dialogs: string[] = [];
+    page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.accept(); });
+
+    await pressC(page);
+    await expect.poll(() => counter.posts).toBe(1);
+    expect(dialogs).toHaveLength(1);
+    await expect(cancelAll).toBeDisabled();
+    await expectReasonTooltip(page, cancelAll, "Cancel all sent. Waiting for reply.");
+    await pressC(page);
+    await page.clock.runFor(250);
+
+    expect(dialogs).toHaveLength(1);
+    expect(counter.posts).toBe(1);
+
+    release();
+    await expect(cancelAll).toBeEnabled({ timeout: 15_000 });
+    expect(counter.posts).toBe(1);
   });
 });

@@ -26,6 +26,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import { CANCELLATION_REQUESTED, EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { useCancelAllInFlight, sendCancelAllOnce } from "@/lib/cancelAllInFlight";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import {
@@ -172,8 +173,7 @@ function ScalperWidget(props: WidgetProps) {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
   const [cancelAllOpen, setCancelAllOpen] = useState(false);
-  const [cancellingAll, setCancellingAll] = useState(false);
-  const cancelAllInFlightRef = useRef(false);
+  const cancellingAll = useCancelAllInFlight();
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
@@ -702,20 +702,16 @@ function ScalperWidget(props: WidgetProps) {
       showStatus("Connect a broker to manage live orders", "error");
       return;
     }
-    if (cancelAllInFlightRef.current) return;
-    cancelAllInFlightRef.current = true;
-    setCancellingAll(true);
+    const request = sendCancelAllOnce(() => cancelAllOrders());
+    if (!request) return;
     showStatus("Cancelling…", "pending", 0);
     try {
-      const result = await cancelAllOrders();
+      const result = await request;
       const presented = presentCancelResult(result);
       showStatus(presented.message, presented.kind === "cancelled" ? "success" : presented.kind === "rejected" ? "error" : "unknown");
     } catch (err) {
       const presented = presentCancelResult(undefined, err);
       showStatus(presented.message, presented.kind === "unknown" ? "unknown" : "error");
-    } finally {
-      cancelAllInFlightRef.current = false;
-      setCancellingAll(false);
     }
   }, [showStatus, isExplore]);
 
