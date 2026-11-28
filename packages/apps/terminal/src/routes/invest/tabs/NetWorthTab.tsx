@@ -47,8 +47,8 @@ interface AssetCategory {
   tailwindBg: string;
   tailwindText: string;
   icon: typeof TrendingUp;
-  addLabel: string;
-  addTooltip: string;
+  addLabel?: string;
+  addTooltip?: string;
 }
 
 // ─── Invested vs current bar data ────────────────────────────────────────────
@@ -104,7 +104,7 @@ export function NetWorthTab() {
       tailwindText: "text-blue-400",
       icon: TrendingUp,
       addLabel: "Add Equity",
-      addTooltip: "Buy via your connected broker — holdings sync automatically.",
+      addTooltip: "Buy through your broker. Holdings sync automatically.",
     },
     {
       label: "Cash",
@@ -115,12 +115,12 @@ export function NetWorthTab() {
       tailwindText: "text-emerald-400",
       icon: Wallet,
       addLabel: "Add Cash",
-      addTooltip: "Deposit funds via your broker — balance syncs automatically.",
+      addTooltip: "Deposit through your broker. Balance syncs automatically.",
     },
     {
       label: "Mutual Funds",
       value: null,
-      note: "Connect NAV source — Settings → Data Sources",
+      note: "Connect a NAV source in Settings → Data Sources.",
       hexColor: "#a855f7",
       tailwindBg: "bg-purple-500",
       tailwindText: "text-purple-400",
@@ -147,8 +147,6 @@ export function NetWorthTab() {
       tailwindBg: "bg-cyan-500",
       tailwindText: "text-cyan-400",
       icon: DollarSign,
-      addLabel: "Add FD",
-      addTooltip: "Track fixed deposits with maturity dates and interest tracking — coming soon.",
     },
   ];
 
@@ -351,11 +349,13 @@ export function NetWorthTab() {
                       Not connected
                     </Badge>
                   )}
-                  <DisabledActionButton
-                    label={cat.addLabel}
-                    tooltip={cat.addTooltip}
-                    icon={Plus}
-                  />
+                  {cat.addLabel && cat.addTooltip ? (
+                    <DisabledActionButton
+                      label={cat.addLabel}
+                      tooltip={cat.addTooltip}
+                      icon={Plus}
+                    />
+                  ) : null}
                 </div>
               </div>
             );

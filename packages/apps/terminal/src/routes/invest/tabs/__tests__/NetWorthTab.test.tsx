@@ -43,8 +43,8 @@ vi.mock("@/components/motion/StaggeredList", () => ({
 
 // DisabledActionButton
 vi.mock("@/components/DisabledActionButton", () => ({
-  DisabledActionButton: ({ label }: { label: string }) => (
-    <button disabled>{label}</button>
+  DisabledActionButton: ({ label, tooltip }: { label: string; tooltip: string }) => (
+    <button disabled title={tooltip}>{label}</button>
   ),
 }));
 
@@ -113,6 +113,15 @@ describe("NetWorthTab", () => {
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
     expect(screen.getByText("Gold")).toBeInTheDocument();
     expect(screen.getByText("Fixed Deposits")).toBeInTheDocument();
+  });
+
+  it("words the add and source hints as plain sentences", () => {
+    render(<NetWorthTab />);
+
+    expect(screen.getByText("Connect a NAV source in Settings → Data Sources.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Equity" })).toHaveAttribute("title", "Buy through your broker. Holdings sync automatically.");
+    expect(screen.getByRole("button", { name: "Add Cash" })).toHaveAttribute("title", "Deposit through your broker. Balance syncs automatically.");
+    expect(screen.queryByRole("button", { name: "Add FD" })).not.toBeInTheDocument();
   });
 
   it("renders live asset visuals through Flint primitives", () => {
