@@ -1039,7 +1039,11 @@ A double-click or a double hotkey sends one order.
 
 A cancel shows `Cancellation requested` until an order read shows the order cancelled, and then `Order cancelled`. The pending line survives a reload in the same tab. If that order leaves a complete list, Orders shows `No longer in Orders. Check order history.`
 
-A Bracket can show each leg on its own. A filled entry with a lost stop-loss reads `Entry filled · Stop-loss status unknown`.
+A Scalper panel narrower than 260px shortens the line to `Status unknown` with **Open Orders**, and the full sentence is its tooltip.
+
+Orders shows one summary line above the rows, for example `2 cancellations requested · 1 order status unknown`.
+
+A Bracket can show each leg on its own. In Orders, a Bracket whose entry was placed and whose stop-loss reply was lost shows an `SL unknown` chip. Its tooltip reads `Entry placed · Stop-loss status unknown`. Placed means the broker shows the order, not that it filled.
 
 ### Learn → Practice Trading
 
