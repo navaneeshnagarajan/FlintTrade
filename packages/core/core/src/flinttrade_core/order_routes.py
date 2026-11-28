@@ -37,6 +37,7 @@ import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any
@@ -65,36 +66,6 @@ logger = logging.getLogger("flinttrade.order_routes")
 # HTTP backstop above the 10-per-second-per-exchange cap, so an NSE burst and
 # a BSE order in the same second reach the order rate limiter.
 _ORDER_ROUTE_USER_RATE = 30
-
-
-@dataclass
-class _LiveWriteProgress:
-    """Request-local invocation evidence, not execution or durable authority.
-
-    A sync wait can time out while the router coroutine still runs. Only its
-    completed failure before the invocation hook proves no adapter invocation.
-    """
-
-    started: bool = False
-    invoked: bool = False
-    failed_before_invoke: bool = False
-    before_invoke: Callable[[], None] | None = None
-
-    def on_adapter_invoke(self) -> None:
-        if self.before_invoke is not None:
-            self.before_invoke()
-        self.invoked = True
-
-    @property
-    def outcome_unknown(self) -> bool:
-        return self.started and not self.failed_before_invoke
-
-    async def run(self, coroutine: Any) -> Any:
-        try:
-            return await coroutine
-        except BaseException:
-            self.failed_before_invoke = not self.invoked
-            raise
 
 
 @dataclass(frozen=True)

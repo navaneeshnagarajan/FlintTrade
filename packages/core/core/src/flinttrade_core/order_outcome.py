@@ -7,6 +7,7 @@ ledger, which refuses a second broker write while an outcome is unknown.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,8 +34,11 @@ class DispatchProgress:
     started: bool = False
     invoked: bool = False
     failed_before_invoke: bool = False
+    before_invoke: Callable[[], None] | None = None
 
     def on_adapter_invoke(self) -> None:
+        if self.before_invoke is not None:
+            self.before_invoke()
         self.invoked = True
 
     @property
