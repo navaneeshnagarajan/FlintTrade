@@ -2,6 +2,9 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DisabledReason } from '@/components/DisabledActionButton';
+import { ENTER_A_QUANTITY, EXAMPLE_ORDERS_REFUSAL, lotMultipleRefusal, lotSizeNotConfirmedReason, strikeNotInChainReason } from '@/lib/orderGuards';
+import { ORDER_SENT_WAITING } from '@/lib/operatorIncident';
 import { buildCompactOptionSymbol } from '@/lib/optionSymbols';
 import { optionLimitPrice } from '@/lib/orderRules';
 import { builderLegsFor, CUSTOM_TEMPLATE, getStrategyTemplate } from '@/lib/strategyTemplates';
@@ -75,6 +78,15 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>((props, ref) =>
   const premium = legs.every(leg => leg.premium !== null) ? legs.reduce((sum, leg) => sum + (leg.side === 'BUY' ? 1 : -1) * leg.premium! * leg.lots * props.lotSize, 0) : null;
   const lotVerified = Number.isSafeInteger(props.lotSize) && props.lotSize > 0;
   const quantitiesValid = legs.every(leg => Number.isSafeInteger(leg.lots) && leg.lots > 0 && Number.isSafeInteger(leg.lots * props.lotSize) && Number.isFinite(leg.strike) && leg.strike > 0);
+  const placeReason = (() => {
+    if (mode === 'explore') return EXAMPLE_ORDERS_REFUSAL;
+    if (busy) return ORDER_SENT_WAITING;
+    if (legs.some(leg => !Number.isFinite(leg.lots) || leg.lots <= 0)) return ENTER_A_QUANTITY;
+    if (!lotVerified) return lotSizeNotConfirmedReason(props.symLabel);
+    if (legs.some(leg => !Number.isSafeInteger(leg.lots) || !Number.isSafeInteger(leg.lots * props.lotSize))) return lotMultipleRefusal(props.lotSize);
+    const badStrike = legs.find(leg => !Number.isFinite(leg.strike) || leg.strike <= 0);
+    return badStrike ? strikeNotInChainReason(badStrike.strike) : null;
+  })();
   const place = async () => {
     const pinnedIdentity = identity;
     const activeMode = useModeStore.getState().mode;
@@ -120,7 +132,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>((props, ref) =>
     </div>)}
     {legs.length < 4 && <Button size="sm" onClick={() => add(props.atmStrike ?? props.strikes[0]?.strike ?? 0, 'CE')}>Add Leg</Button>}
     {legs.length > 0 && <footer className="space-y-2"><p>Net {premium === null ? '—' : `${premium < 0 ? 'Credit' : 'Debit'} ${formatINR(Math.abs(premium))}`}</p>{summary && <p>B/E {summary.breakevens.join(', ') || 'None'} · Max profit {formatINR(summary.maxProfit * props.lotSize)} · Max loss {formatINR(summary.maxLoss * props.lotSize)}</p>}
-      {!lotVerified && <p>Lot size unverified</p>}<Button aria-label="Place strategy" disabled={busy || mode === 'explore' || !lotVerified || !quantitiesValid} onClick={() => void place()}>{busy ? 'Submitting…' : 'Place Strategy'}</Button></footer>}
+      {!lotVerified && <p>Lot size unverified</p>}<DisabledReason reason={placeReason}><Button aria-label="Place strategy" disabled={busy || mode === 'explore' || !lotVerified || !quantitiesValid} onClick={() => void place()}>{busy ? 'Submitting…' : 'Place Strategy'}</Button></DisabledReason></footer>}
     {message && <p role={message.urgent ? 'alert' : 'status'}>{message.text}</p>}
   </section>;
 });

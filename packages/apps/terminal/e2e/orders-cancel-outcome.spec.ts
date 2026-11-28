@@ -11,6 +11,7 @@ import {
   tabStopNames,
   test,
   tickUntil,
+  tickUntilAttached,
 } from "./order-flow-fixtures";
 import { registerSystemDiagnosticsRead } from "./visual/desk-mocks";
 
@@ -57,7 +58,7 @@ async function requestCancel(page: import("@playwright/test").Page, orderId: str
   await cancelButton.click();
   await page.getByRole("dialog", { name: "Confirm order cancellation" })
     .getByRole("button", { name: "Cancel Order", exact: true }).click();
-  await tickUntil(page, page.locator(`[data-pending-cancel="${orderId}"]`));
+  await tickUntilAttached(page, page.locator(`[data-pending-cancel="${orderId}"]`));
 }
 
 type LostCancel = {
@@ -176,7 +177,7 @@ test.describe("lost Orders cancels settle one order at a time", () => {
     book = [orderRow("cancelled", "SYNTHETIC-ORDER-A"), orderRow("open", "SYNTHETIC-ORDER-B")];
     await page.clock.runFor(10_000);
     await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
-    await tickUntil(page, page.locator('[data-cancelled-order="SYNTHETIC-ORDER-A"]'));
+    await tickUntilAttached(page, page.locator('[data-cancelled-order="SYNTHETIC-ORDER-A"]'));
     await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-A"]')).toHaveCount(0);
     await expect(page.locator('[data-pending-cancel="SYNTHETIC-ORDER-B"]')).toHaveCount(1);
     await expect(page.getByTestId("orders-notice-slot")).toContainText("1 cancellation requested");

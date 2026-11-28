@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import userEvent from "@testing-library/user-event";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { tabTo } from "@/test-utils/tabTo";
 
 // ---------------------------------------------------------------------------
 // Mocks — factory functions only; no variable references (hoisting safety)
@@ -259,6 +261,63 @@ describe("QuickTradeWidget", () => {
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
+  it("gives the rule's own text as the reason while a rule blocks the ticket", async () => {
+    mockGetSymbol.mockResolvedValue({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO", lotsize: 30, tick_size: 0.05 });
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
+    await screen.findByText(/Qty: 1 × 30 = 30/);
+    fireEvent.click(screen.getByRole("button", { name: /MARKET/i }));
+    const rule = (await screen.findByTestId("order-rule-line")).textContent ?? "";
+    expect(rule).toContain("Market orders aren't accepted on options. Use a limit price.");
+
+    await tabTo(user, screen.getByRole("button", { name: /buy 1 lot /i }).parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Market orders aren't accepted on options. Use a limit price.");
+  });
+
+  it("names the symbol when its lot size is not confirmed", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol not found"));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "BANKNIFTY26JUN56000CE", exchange: "NFO" });
+    await screen.findByText("The lot size for BANKNIFTY isn't verified.");
+
+    for (const name of [/buy 1 lot /i, /sell 1 lot /i]) {
+      await tabTo(user, screen.getByRole("button", { name }).parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Lot size not confirmed for BANKNIFTY26JUN56000CE. Refresh instruments.");
+    }
+  });
+
+  it("states the lots a decision model clamp allows", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Not placed. Decision model allows up to 4.", 409, {
+      code: "decision_model_clamp",
+      message: "Not placed. Decision model allows up to 4.",
+      applied_quantity: 4,
+      limits: { max_quantity: 4 },
+    }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    await screen.findByTestId("laya-clamp");
+
+    await tabTo(user, screen.getByRole("button", { name: /sell 1 lot /i }).parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Decision model allows max 4 lots. Reduce quantity.");
+  });
+
+  it("repeats the visible denial when a clamp leaves no quantity", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Not placed. Review the quantity and resubmit.", 409, {
+      code: "decision_model_clamp",
+      message: "Not placed. Review the quantity and resubmit.",
+    }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    const clamp = await screen.findByTestId("laya-clamp");
+
+    await tabTo(user, screen.getByRole("button", { name: /sell 1 lot /i }).parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(clamp.textContent ?? "");
+  });
+
   it("never sends a derivative at lot 1 when the broker reports no lot", async () => {
     mockGetSymbol.mockResolvedValue({
       symbol: "NIFTY26DECFUT",
@@ -366,6 +425,46 @@ describe("QuickTradeWidget", () => {
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
+  it("explains a lost submit on Buy and Sell through a tooltip the keyboard reaches", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    await screen.findByRole("button", { name: "Open Orders" });
+
+    for (const name of [/buy 1 lot /i, /sell 1 lot /i]) {
+      const trigger = screen.getByRole("button", { name }).parentElement as HTMLElement;
+      await tabTo(user, trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    }
+  });
+
+  it("says the order was sent while its request has no reply", async () => {
+    let reply!: (value: unknown) => void;
+    mockPlaceOrder.mockImplementationOnce(() => new Promise((resolve) => { reply = resolve; }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+
+    const trigger = screen.getByRole("button", { name: /sell 1 lot /i }).parentElement as HTMLElement;
+    await tabTo(user, trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Order sent. Waiting for reply.");
+
+    await act(async () => reply({ orderId: "QT001" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeEnabled());
+    expect(screen.getByRole("button", { name: /sell 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
+  });
+
+  it("adds no tab stop around Buy and Sell while they are enabled", async () => {
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+
+    expect(screen.getByRole("button", { name: /buy 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
+    expect(screen.getByRole("button", { name: /sell 1 lot /i }).parentElement).not.toHaveAttribute("tabindex");
+  });
+
   it("shows Laya denied under Buy and Sell and leaves both off", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
       code: "decision_model_denied",
@@ -383,6 +482,28 @@ describe("QuickTradeWidget", () => {
     expect(screen.getByRole("button", { name: /buy 1 lot /i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /sell 1 lot /i })).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
+  });
+
+  it("repeats the visible denial on Buy and Sell through a tooltip the keyboard reaches", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
+      code: "decision_model_denied",
+      reason: "Quantity must be a positive whole number.",
+      message: "Quantity must be a positive whole number.",
+      limits: { max_quantity: 1 },
+    }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    const denied = await screen.findByTestId("laya-denied");
+    const visible = Array.from(denied.querySelectorAll("p")).map((line) => line.textContent).join(" ");
+    expect(visible).toBe("Denied by decision model Quantity must be a positive whole number. Max quantity 1.");
+
+    for (const name of [/buy 1 lot /i, /sell 1 lot /i]) {
+      const trigger = screen.getByRole("button", { name }).parentElement as HTMLElement;
+      await tabTo(user, trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(visible);
+    }
   });
 
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {

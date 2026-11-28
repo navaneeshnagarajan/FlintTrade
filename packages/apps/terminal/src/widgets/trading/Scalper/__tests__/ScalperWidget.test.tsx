@@ -28,7 +28,7 @@ vi.mock("@/lib/instrumentLots", async () => {
     scalperLotLabel: (underlying: string) => actual.scalperLotLabel(underlying, revision.rows, "2026-09-01"),
   };
 });
-import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, renderHook, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -37,6 +37,8 @@ import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
+import { tabTo } from "@/test-utils/tabTo";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
 import { LOT_SIZE_MASTER_HINT } from "../types";
 import { clearPendingOrderOutcomes } from "@/lib/pendingOrderStore";
 import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
@@ -116,7 +118,9 @@ vi.mock("@/components/ui/select", () => ({
 // Mock AlertDialog similarly
 vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogAction: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  AlertDialogAction: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
   AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
   AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -125,11 +129,17 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@/lib/orderSubmitGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/orderSubmitGuard")>();
+  return { ...actual, submitOrderOnce: vi.fn(actual.submitOrderOnce) };
+});
+
 // ---------------------------------------------------------------------------
 // Import component under test
 // ---------------------------------------------------------------------------
 
 import ScalperWidget from "../ScalperWidget";
+import { submitOrderOnce } from "@/lib/orderSubmitGuard";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,6 +247,118 @@ describe("ScalperWidget", () => {
     expect(screen.getByText("Close All")).toBeInTheDocument();
     expect(screen.getByText("Cancel All")).toBeInTheDocument();
     expect(screen.getByText(/all pending orders for the selected broker account/i)).toBeInTheDocument();
+  });
+
+  describe("Cancel all in flight", () => {
+    function cancelAllButton(): HTMLButtonElement {
+      return screen.getByText("Cancel All").closest("button") as HTMLButtonElement;
+    }
+
+    it("sends one cancel-all request for rapid confirms and disables the button until it settles", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      render(<ScalperWidget {...defaultProps} />);
+
+      const confirm = screen.getByText("Cancel All Orders");
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      fireEvent.click(cancelAllButton());
+      fireEvent.click(confirm);
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      expect(cancelAllButton()).not.toHaveAttribute("title");
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
+      expect(cancelAllButton().parentElement).not.toHaveAttribute("tabindex");
+      fireEvent.click(confirm);
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+    });
+
+    function pressC(): void {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true }));
+    }
+
+    it("sends nothing and opens no confirm on C while the button's request is pending", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderHook(() => useGlobalKeys({}));
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      pressC();
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      pressC();
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      confirmSpy.mockRestore();
+      await act(async () => release({}));
+    });
+
+    it("keeps the button disabled and sends nothing on a confirm while C's request is pending", async () => {
+      let release!: (value: unknown) => void;
+      mockCancelAllOrders.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderHook(() => useGlobalKeys({}));
+      render(<ScalperWidget {...defaultProps} />);
+
+      pressC();
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(true));
+      await tabTo(userEvent.setup(), cancelAllButton().parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Cancel all sent. Waiting for reply.");
+      fireEvent.click(cancelAllButton());
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      pressC();
+
+      expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+
+      await act(async () => release({}));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      confirmSpy.mockRestore();
+    });
+
+    it("releases the shared flag when the request throws before it is sent", async () => {
+      mockCancelAllOrders.mockImplementationOnce(() => { throw new Error("offline"); });
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+    });
+
+    it("labels Close All and Cancel All without a function key", () => {
+      render(<ScalperWidget {...defaultProps} />);
+
+      expect(screen.queryByText("F6")).not.toBeInTheDocument();
+      expect(screen.queryByText("F7")).not.toBeInTheDocument();
+      expect(screen.getByText("Close All").closest("button")).toHaveAttribute("title", "Close all positions");
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
+    });
+
+    it("releases the guard after a failed request", async () => {
+      mockCancelAllOrders.mockRejectedValueOnce(new Error("Gateway Timeout"));
+      render(<ScalperWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByText("Cancel All Orders"));
+      await waitFor(() => expect(mockCancelAllOrders).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(cancelAllButton().disabled).toBe(false));
+      expect(cancelAllButton()).toHaveAttribute("title", "Cancel all orders");
+    });
   });
 
   // ── Interaction tests ────────────────────────────────────────────────────
@@ -805,6 +927,66 @@ describe("ScalperWidget", () => {
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
   });
 
+  it("explains the locked CE and PE buttons through a tooltip the keyboard reaches after a lost submit", async () => {
+    mockPlaceOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expectCeLocked());
+
+    for (const label of ["Buy CE", "Sell CE"]) {
+      const button = screen.getByText(label).closest("button") as HTMLButtonElement;
+      await tabTo(user, button.parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Order status unknown. Check Orders before trying again.");
+    }
+    const peWrapper = (screen.getByText("Buy PE").closest("button") as HTMLButtonElement).parentElement;
+    expect(peWrapper).not.toHaveAttribute("tabindex");
+  });
+
+  it("says the order was sent on the CE buttons while the request has no reply", async () => {
+    let release!: () => void;
+    mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+    fireEvent.click(screen.getByText("Buy CE"));
+
+    const sell = screen.getByText("Sell CE").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(sell.disabled).toBe(true));
+    await tabTo(user, sell.parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Order sent. Waiting for reply.");
+
+    await act(async () => release());
+    await screen.findByText(/placed$/);
+  });
+
+  it("gives the Explore reason on the order buttons through a tooltip the keyboard reaches", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+
+    const buy = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+    expect(buy).toBeDisabled();
+    await tabTo(user, buy.parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(EXPLORE_SCALPER_ORDER_HELPER);
+  });
+
+  it("asks for a strike on the CE and PE buttons while none is resolved", async () => {
+    mockGetQuotes.mockRejectedValue(new Error("no quote"));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+
+    for (const label of ["Buy CE", "Sell CE", "Buy PE", "Sell PE"]) {
+      const button = screen.getByText(label).closest("button") as HTMLButtonElement;
+      expect(button).toBeDisabled();
+      await tabTo(user, button.parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("No strike selected. Pick a strike.");
+    }
+  });
+
   it("sends one place request for a double-click", async () => {
     let release!: () => void;
     mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
@@ -819,6 +1001,17 @@ describe("ScalperWidget", () => {
     await act(async () => release());
     await screen.findByText(/placed$/);
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the lot quantity on the place request and the submit intent", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await armOneClick();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(expect.objectContaining({ action: "BUY", quantity: 75 }));
+    const intent = vi.mocked(submitOrderOnce).mock.calls[0][1];
+    expect(intent).toMatchObject({ action: "BUY", exchange: "NFO", quantity: 75 });
   });
 
   it("sends one place request for a fast double hotkey press", async () => {

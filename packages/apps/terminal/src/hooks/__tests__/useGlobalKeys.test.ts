@@ -243,6 +243,35 @@ describe("useGlobalKeys", () => {
     });
   });
 
+  it("sends one cancel-all for a fast double C press while the first is in flight", async () => {
+    let release!: () => void;
+    mockCancelAllOrders.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("c");
+    fireKey("c");
+
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
+    expect(mockEmitNotification).not.toHaveBeenCalled();
+    release();
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalled());
+
+    fireKey("c");
+    expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows another cancel-all after the first request fails", async () => {
+    mockCancelAllOrders.mockImplementationOnce(() => Promise.reject(new Error("Gateway Timeout")));
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("c");
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalled());
+    fireKey("c");
+
+    expect(mockCancelAllOrders).toHaveBeenCalledTimes(2);
+  });
+
   it("sends one exit-all for a fast double X press while the first is in flight", async () => {
     let release!: () => void;
     mockExitAllPositions.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));

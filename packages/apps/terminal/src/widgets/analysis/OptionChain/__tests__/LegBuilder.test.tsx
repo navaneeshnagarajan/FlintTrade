@@ -60,6 +60,7 @@ vi.mock("@/services/api", () => ({
 import LegBuilder, { type LegBuilderHandle } from "../LegBuilder";
 import type { StrikeRow } from "../types";
 import { useModeStore } from "@/stores/modeStore";
+import { tabTo } from "@/test-utils/tabTo";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -610,5 +611,72 @@ describe("LegBuilder — pre-trade guards", () => {
     } finally {
       useModeStore.setState({ mode: "explore" });
     }
+  });
+});
+
+describe("LegBuilder — why Place Strategy is disabled", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => useModeStore.setState({ mode: "explore" }));
+
+  async function expectReason(reason: string): Promise<void> {
+    const button = screen.getByRole("button", { name: "Place strategy" });
+    expect(button).toBeDisabled();
+    await tabTo(userEvent.setup(), button.parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(reason);
+  }
+
+  it("gives the Example line in Example mode", async () => {
+    useModeStore.setState({ mode: "explore" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+    await expectReason("Orders are not available for Example. Switch to Practice or Live to trade.");
+  });
+
+  it.each([["0"], ["-1"], [""]])("asks for a quantity when the lots are %j", async (value) => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+    fireEvent.change(screen.getAllByLabelText("Number of lots")[0], { target: { value } });
+    await expectReason("Enter a quantity.");
+  });
+
+  it("names the lot size when the lots are not a whole number", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+    fireEvent.change(screen.getAllByLabelText("Number of lots")[0], { target: { value: "1.5" } });
+    await expectReason("Quantity must be a multiple of the lot size (50).");
+  });
+
+  it("says the order was sent while the basket request has no reply", async () => {
+    let reply!: (value: unknown) => void;
+    basketOrderMock.mockImplementationOnce(() => new Promise((resolve) => { reply = resolve; }));
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+    await expectReason("Order sent. Waiting for reply.");
+    await act(async () => reply({ status: "success", placed_count: 2, failed_count: 0, legs: [] }));
+  });
+
+  it("names the symbol when the lot size is not confirmed", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder({ lotSize: 0 });
+    await userEvent.click(screen.getByText("SSTR"));
+    await expectReason("Lot size not confirmed for NIFTY. Refresh instruments.");
+  });
+
+  it("names the strike when a leg has none in the chain", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder({ strikes: [], atmStrike: null });
+    await userEvent.click(screen.getByRole("button", { name: "Add Leg" }));
+    await expectReason("Strike 0 not in the chain. Pick a listed strike.");
+  });
+
+  it("adds no tab stop while the action is enabled", async () => {
+    useModeStore.setState({ mode: "practice" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+    expect(screen.getByRole("button", { name: "Place strategy" }).parentElement).not.toHaveAttribute("tabindex");
   });
 });

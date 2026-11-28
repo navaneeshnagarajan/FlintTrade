@@ -16,7 +16,6 @@ import {
   Wallet,
   BarChart3,
   Globe,
-  DollarSign,
   Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
-import { DisabledActionButton } from "../DisabledActionButton";
+import { DisabledActionButton } from "@/components/DisabledActionButton";
 import {
   accountNetWorth,
   accountNetWorthAccessibleName,
@@ -104,7 +103,7 @@ export function NetWorthTab() {
       tailwindText: "text-blue-400",
       icon: TrendingUp,
       addLabel: "Add Equity",
-      addTooltip: "Buy via your connected broker — holdings sync automatically.",
+      addTooltip: "Buy through your broker. Holdings sync automatically.",
     },
     {
       label: "Cash",
@@ -115,12 +114,12 @@ export function NetWorthTab() {
       tailwindText: "text-emerald-400",
       icon: Wallet,
       addLabel: "Add Cash",
-      addTooltip: "Deposit funds via your broker — balance syncs automatically.",
+      addTooltip: "Deposit through your broker. Balance syncs automatically.",
     },
     {
       label: "Mutual Funds",
       value: null,
-      note: "Connect NAV source — Settings → Data Sources",
+      note: "Connect a NAV source in Settings → Data Sources.",
       hexColor: "#a855f7",
       tailwindBg: "bg-purple-500",
       tailwindText: "text-purple-400",
@@ -138,17 +137,6 @@ export function NetWorthTab() {
       icon: Globe,
       addLabel: "Add Gold",
       addTooltip: "Manual gold tracking (sovereign bonds, physical, ETF) coming in a future update.",
-    },
-    {
-      label: "Fixed Deposits",
-      value: null,
-      note: "Manual entry available in a future update",
-      hexColor: "#06b6d4",
-      tailwindBg: "bg-cyan-500",
-      tailwindText: "text-cyan-400",
-      icon: DollarSign,
-      addLabel: "Add FD",
-      addTooltip: "Track fixed deposits with maturity dates and interest tracking — coming soon.",
     },
   ];
 

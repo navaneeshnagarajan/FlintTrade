@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { cancelAllOrders, exitAllPositions } from "@/services/api";
+import { isCancelAllInFlight, sendCancelAllOnce } from "@/lib/cancelAllInFlight";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { presentCancelResult, presentSubmitError } from "@/lib/orderOutcome";
 import { CANCELLATION_REQUESTED } from "@/lib/operatorIncident";
@@ -165,18 +166,15 @@ export default function useGlobalKeys({
         if (!e.ctrlKey && !e.metaKey) {
           if (handledTradingKeyEvents.has(e)) return;
           handledTradingKeyEvents.add(e);
+          if (isCancelAllInFlight()) return;
           if (window.confirm("Cancel ALL open orders? This cannot be undone.")) {
-            try {
-              void cancelAllOrders().then(() =>
-                emitNotification({
-                  category: "order",
-                  title: "Cancel all orders requested",
-                  body: "Cancel request sent for all open orders.",
-                }),
-              ).catch(reportCancelAllError);
-            } catch (err) {
-              reportCancelAllError(err);
-            }
+            void sendCancelAllOnce(() => cancelAllOrders())?.then(() =>
+              emitNotification({
+                category: "order",
+                title: "Cancel all orders requested",
+                body: "Cancel request sent for all open orders.",
+              }),
+            ).catch(reportCancelAllError);
           }
           return;
         }

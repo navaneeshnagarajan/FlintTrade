@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   DERIVATIVE_EXCHANGES,
@@ -26,6 +29,10 @@ import {
   isOpenOrderStatus,
   needsLargeOrderConfirmation,
   LARGE_ORDER_LOTS,
+  EXAMPLE_ORDERS_REFUSAL,
+  decisionModelMaxLotsReason,
+  lotSizeNotConfirmedReason,
+  strikeNotInChainReason,
 } from "../orderGuards";
 
 describe("derivative exchange classification", () => {
@@ -48,7 +55,7 @@ describe("derivative exchange classification", () => {
 
 describe("checkOrderEntryMode", () => {
   it("refuses order entry in explore mode", () => {
-    expect(checkOrderEntryMode("explore")).toBe("Connect a broker to place orders");
+    expect(checkOrderEntryMode("explore")).toBe("Connect a broker to place orders.");
   });
 
   it("allows practice and live", () => {
@@ -380,5 +387,25 @@ describe("freeze refusal label", () => {
     ["", "this contract"],
   ])("names %s as %s", (symbol, label) => {
     expect(orderSymbolLabel(symbol)).toBe(label);
+  });
+});
+
+describe("Example order refusal", () => {
+  it("matches the sentence the order routes return", () => {
+    const routes = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../core/core/src/flinttrade_core/order_routes.py"),
+      "utf8",
+    );
+    expect(routes).toContain(`_EXAMPLE_ORDERS_REFUSAL = "${EXAMPLE_ORDERS_REFUSAL}"`);
+  });
+});
+
+describe("disabled order reasons", () => {
+  it("reads as the approved sentences", () => {
+    expect(lotSizeNotConfirmedReason("NIFTY26DECFUT")).toBe("Lot size not confirmed for NIFTY26DECFUT. Refresh instruments.");
+    expect(decisionModelMaxLotsReason(1)).toBe("Decision model allows max 1 lot. Reduce quantity.");
+    expect(decisionModelMaxLotsReason(2)).toBe("Decision model allows max 2 lots. Reduce quantity.");
+    expect(decisionModelMaxLotsReason(4)).toBe("Decision model allows max 4 lots. Reduce quantity.");
+    expect(strikeNotInChainReason(22050)).toBe("Strike 22050 not in the chain. Pick a listed strike.");
   });
 });

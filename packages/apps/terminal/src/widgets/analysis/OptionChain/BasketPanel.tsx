@@ -6,7 +6,9 @@
 import { ShoppingBasket, X } from "lucide-react";
 import type { BasketItem, OrderParams } from "./types";
 import { NUM0, fmtLtp } from "./formatters";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
+import { ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 
 interface BasketPanelProps {
   basket: BasketItem[];
@@ -27,6 +29,7 @@ export default function BasketPanel({
   locked = false,
   statusUnknown = false,
 }: BasketPanelProps) {
+  const disabledReason = statusUnknown ? ORDER_STATUS_UNKNOWN : locked ? ORDER_SENT_WAITING : null;
   return (
     <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5">
       <div className="flex items-center gap-2 mb-1">
@@ -76,48 +79,52 @@ export default function BasketPanel({
           </div>
 
           <div className="flex gap-1.5 pt-1 border-t border-border-default">
-            <button
-              disabled={locked}
-              onClick={() =>
-                basket.forEach((item) =>
-                  onOrder({
-                    symbol: item.symbol,
-                    exchange: item.exchange,
-                    strike: item.strike,
-                    optionType: item.optionType,
-                    expiry: item.expiry,
-                    action: "B",
-                    ltp: item.ltp,
-                  })
-                )
-              }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
-            >
-              Buy All
-            </button>
-            <button
-              disabled={locked}
-              onClick={() =>
-                basket.forEach((item) =>
-                  onOrder({
-                    symbol: item.symbol,
-                    exchange: item.exchange,
-                    strike: item.strike,
-                    optionType: item.optionType,
-                    expiry: item.expiry,
-                    action: "S",
-                    ltp: item.ltp,
-                  })
-                )
-              }
-              className="px-3 py-0.5 text-xs font-semibold rounded bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
-            >
-              Sell All
-            </button>
+            <DisabledReason reason={disabledReason}>
+              <button
+                disabled={locked}
+                onClick={() =>
+                  basket.forEach((item) =>
+                    onOrder({
+                      symbol: item.symbol,
+                      exchange: item.exchange,
+                      strike: item.strike,
+                      optionType: item.optionType,
+                      expiry: item.expiry,
+                      action: "B",
+                      ltp: item.ltp,
+                    })
+                  )
+                }
+                className="px-3 py-0.5 text-xs font-semibold rounded disabled:pointer-events-none bg-profit/10 text-profit hover:bg-profit/20 border border-profit/30 hover:border-profit/60 transition-colors"
+              >
+                Buy All
+              </button>
+            </DisabledReason>
+            <DisabledReason reason={disabledReason}>
+              <button
+                disabled={locked}
+                onClick={() =>
+                  basket.forEach((item) =>
+                    onOrder({
+                      symbol: item.symbol,
+                      exchange: item.exchange,
+                      strike: item.strike,
+                      optionType: item.optionType,
+                      expiry: item.expiry,
+                      action: "S",
+                      ltp: item.ltp,
+                    })
+                  )
+                }
+                className="px-3 py-0.5 text-xs font-semibold rounded disabled:pointer-events-none bg-loss/10 text-loss hover:bg-loss/20 border border-loss/30 hover:border-loss/60 transition-colors"
+              >
+                Sell All
+              </button>
+            </DisabledReason>
           </div>
           {/* Reserved, so Buy All and the chain below never move when the line appears. */}
-          <div data-testid="basket-status-slot" className="min-h-9 pt-1">
-            {statusUnknown ? <OrderStatusUnknownLine /> : null}
+          <div data-testid="basket-status-slot" className="h-6 flex items-center">
+            {statusUnknown ? <OrderStatusUnknownLine clip /> : null}
           </div>
         </>
       )}

@@ -3,6 +3,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
+import { NO_STRIKE_SELECTED } from "@/lib/orderGuards";
+import { CANCEL_ALL_SENT_WAITING, ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { OrderStatusUnknownCompact, OrderStatusUnknownLine, OrderStatusUnknownTight } from "@/components/orders/OrderStatusUnknownLine";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
 import { fmtInt } from "./helpers";
@@ -122,6 +124,8 @@ export interface ScalperChartPanelProps {
   onOrder: (sym: string | null, exch: string, action: OrderAction) => void;
   onCloseAll: () => void;
   onCancelAll: () => void;
+  /** A cancel-all request is in flight. */
+  cancelAllBusy?: boolean;
   /** Explore: Buy/Sell stay disabled and never open Confirm. */
   ordersArmed: boolean;
   /** Why orders stay blocked. Null when Practice or Live may place. */
@@ -132,6 +136,19 @@ export interface ScalperChartPanelProps {
   /** A lost place request for this contract is not settled yet. */
   ceStatusUnknown?: boolean;
   peStatusUnknown?: boolean;
+}
+
+function contractReason(
+  ordersArmed: boolean,
+  orderBlockCopy: string | null,
+  contractSymbol: string | null,
+  locked: boolean,
+  statusUnknown: boolean,
+): string | null {
+  if (!ordersArmed) return orderBlockCopy;
+  if (!contractSymbol) return NO_STRIKE_SELECTED;
+  if (statusUnknown) return ORDER_STATUS_UNKNOWN;
+  return locked ? ORDER_SENT_WAITING : null;
 }
 
 export function ScalperChartPanel({
@@ -149,6 +166,7 @@ export function ScalperChartPanel({
   onOrder,
   onCloseAll,
   onCancelAll,
+  cancelAllBusy = false,
   ordersArmed,
   orderBlockCopy,
   ceLocked = false,
@@ -157,6 +175,8 @@ export function ScalperChartPanel({
   peStatusUnknown = false,
 }: ScalperChartPanelProps) {
   const chartHeight = 120;
+  const ceReason = contractReason(ordersArmed, orderBlockCopy, ceSymbol, ceLocked, ceStatusUnknown);
+  const peReason = contractReason(ordersArmed, orderBlockCopy, peSymbol, peLocked, peStatusUnknown);
 
   return (
     <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -205,6 +225,7 @@ export function ScalperChartPanel({
             onClick={() => onOrder(ceSymbol, optExch, "SELL")}
             disabled={!ordersArmed || !ceSymbol || ceLocked}
             title={ordersArmed ? "Sell CE (Shift+←)" : orderBlockCopy ?? ""}
+            reason={ceReason}
             variant="sell"
             icon={<TrendingDown size={14} />}
             label="Sell CE"
@@ -215,6 +236,7 @@ export function ScalperChartPanel({
             onClick={() => onOrder(ceSymbol, optExch, "BUY")}
             disabled={!ordersArmed || !ceSymbol || ceLocked}
             title={ordersArmed ? "Buy CE (Shift+↑)" : orderBlockCopy ?? ""}
+            reason={ceReason}
             variant="buy"
             icon={<TrendingUp size={14} />}
             label="Buy CE"
@@ -264,19 +286,19 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={onCloseAll}
-            title="Close all positions (F6)"
+            title="Close all positions"
             variant="warning"
             icon={<X size={14} />}
             label="Close All"
-            shortcut="F6"
           />
           <ActionButton
             onClick={onCancelAll}
-            title="Cancel all orders (F7)"
+            disabled={cancelAllBusy}
+            title="Cancel all orders"
+            reason={cancelAllBusy ? CANCEL_ALL_SENT_WAITING : null}
             variant="neutral"
             icon={<RefreshCw size={14} />}
             label="Cancel All"
-            shortcut="F7"
           />
         </div>
       </div>
@@ -326,6 +348,7 @@ export function ScalperChartPanel({
             onClick={() => onOrder(peSymbol, optExch, "BUY")}
             disabled={!ordersArmed || !peSymbol || peLocked}
             title={ordersArmed ? "Buy Put (Shift+↓)" : orderBlockCopy ?? ""}
+            reason={peReason}
             variant="buy"
             icon={<TrendingUp size={14} />}
             label="Buy PE"
@@ -336,6 +359,7 @@ export function ScalperChartPanel({
             onClick={() => onOrder(peSymbol, optExch, "SELL")}
             disabled={!ordersArmed || !peSymbol || peLocked}
             title={ordersArmed ? "Sell Put (Shift+→)" : orderBlockCopy ?? ""}
+            reason={peReason}
             variant="sell"
             icon={<TrendingDown size={14} />}
             label="Sell PE"

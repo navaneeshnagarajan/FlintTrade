@@ -96,4 +96,9 @@ export function layaNoticeFromOrderError(
   return null;
 }
 
+/** The deny lines as they read on screen, in order, on one line. */
+export function layaDenialText(notice: LayaAdmissionNotice): string {
+  return [notice.headline, notice.reason, notice.limitsLine].filter(Boolean).join(" ");
+}
+
 export const LAYA_DEGRADED_LIMITS = "Decision model degraded. Tighter limits apply.";

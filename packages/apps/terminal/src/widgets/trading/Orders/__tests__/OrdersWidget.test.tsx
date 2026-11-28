@@ -789,7 +789,7 @@ describe("OrdersWidget pending cancels", () => {
     const view = render(ui());
     const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
     expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
-    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    expect(screen.getByRole("status")).toHaveTextContent("BUY 75 NIFTY24APR24000CE · order status unknown");
     expect(screen.queryByText("Order status unknown. Check Orders before trying again.")).not.toBeInTheDocument();
 
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5_000)); });
@@ -800,6 +800,39 @@ describe("OrdersWidget pending cancels", () => {
     view.rerender(ui());
     await waitFor(() => expect(document.querySelector('[data-unknown-submit]')).toBeNull());
   }, 15_000);
+
+  it("counts several unknown orders without naming one", async () => {
+    for (const symbol of ["NIFTY24APR24000CE", "NIFTY24APR24000PE"]) {
+      await expect(submitOrderOnce(
+        LIVE_SCOPE,
+        { key: `NFO:${symbol}`, symbol, exchange: "NFO", action: "BUY", quantity: 75 },
+        () => Promise.reject(new TypeError("Failed to fetch")),
+      )).rejects.toThrow();
+    }
+    render(ui());
+
+    expect(screen.getByRole("status")).toHaveTextContent("2 order statuses unknown");
+    expect(screen.getByRole("status")).not.toHaveTextContent("· order status unknown");
+  });
+
+  it("keeps the counts when a cancellation is also pending", async () => {
+    mockCancelOrder.mockResolvedValue({ status: "success", order_outcome: "cancel_requested" });
+    await expect(submitOrderOnce(
+      LIVE_SCOPE,
+      { key: "NFO:NIFTY24APR24000CE", symbol: "NIFTY24APR24000CE", exchange: "NFO", action: "BUY", quantity: 75 },
+      () => Promise.reject(new TypeError("Failed to fetch")),
+    )).rejects.toThrow();
+    render(ui());
+    expect(screen.getByRole("status")).toHaveTextContent("BUY 75 NIFTY24APR24000CE · order status unknown");
+
+    await cancel("ORD123");
+    await cancel("ORD789");
+
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("2 cancellations requested · 1 order status unknown");
+    expect(notice).not.toHaveTextContent("NIFTY24APR24000CE ·");
+    expect(document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]')).not.toBeNull();
+  });
 
   it("shows a confirmed entry and unknown stop-loss on that order", async () => {
     const bracketLost = Object.assign(new Error("Order status unknown. Check Orders before trying again."), {
@@ -814,7 +847,7 @@ describe("OrdersWidget pending cancels", () => {
     render(ui());
     const line = document.querySelector('[data-unknown-submit="NFO:NIFTY24APR24000CE"]');
     expect(line).toHaveTextContent("BUY 75 NIFTY24APR24000CE");
-    expect(screen.getByRole("status")).toHaveTextContent("1 order status unknown");
+    expect(screen.getByRole("status")).toHaveTextContent("BUY 75 NIFTY24APR24000CE · order status unknown");
     const chip = screen.getByTestId("orders-leg-unknown");
     expect(chip).toHaveTextContent("SL unknown");
     expect(chip).toHaveAttribute("title", "Entry placed · Stop-loss status unknown");

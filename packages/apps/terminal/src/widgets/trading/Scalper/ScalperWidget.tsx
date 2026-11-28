@@ -26,6 +26,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { scalperLotLabel, useInstrumentLotRows } from "@/lib/instrumentLots";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import { CANCELLATION_REQUESTED, EXIT_ALL_REQUESTED } from "@/lib/operatorIncident";
+import { useCancelAllInFlight, sendCancelAllOnce } from "@/lib/cancelAllInFlight";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import {
@@ -172,6 +173,7 @@ function ScalperWidget(props: WidgetProps) {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
   const [cancelAllOpen, setCancelAllOpen] = useState(false);
+  const cancellingAll = useCancelAllInFlight();
   const [focused, setFocused] = useState(false);
 
   useEffect(() => {
@@ -598,13 +600,19 @@ function ScalperWidget(props: WidgetProps) {
         return;
       }
       void submitOnce(
-        { key: instrumentOrderKey(exch, sym), symbol: sym, exchange: exch, action },
+        {
+          key: instrumentOrderKey(exch, sym),
+          symbol: sym,
+          exchange: exch,
+          action,
+          quantity: resolvedLot ? lots * resolvedLot.size : undefined,
+        },
         () => executeOrder(sym, exch, action),
       ).catch(() => {
         // The unknown line is on screen and the contract is locked.
       });
     },
-    [executeOrder, submitOnce],
+    [executeOrder, submitOnce, lots, resolvedLot],
   );
 
   const handleOrder = useCallback(
@@ -694,9 +702,11 @@ function ScalperWidget(props: WidgetProps) {
       showStatus("Connect a broker to manage live orders", "error");
       return;
     }
+    const request = sendCancelAllOnce(() => cancelAllOrders());
+    if (!request) return;
     showStatus("Cancelling…", "pending", 0);
     try {
-      const result = await cancelAllOrders();
+      const result = await request;
       const presented = presentCancelResult(result);
       showStatus(presented.message, presented.kind === "cancelled" ? "success" : presented.kind === "rejected" ? "error" : "unknown");
     } catch (err) {
@@ -864,6 +874,7 @@ function ScalperWidget(props: WidgetProps) {
         onOrder={handleOrder}
         onCloseAll={() => setCloseAllOpen(true)}
         onCancelAll={() => setCancelAllOpen(true)}
+        cancelAllBusy={cancellingAll}
         ordersArmed={ordersArmed}
         orderBlockCopy={orderBlockCopy}
         ceLocked={ceSymbol != null && contractLocked(instrumentOrderKey(optExch, ceSymbol))}

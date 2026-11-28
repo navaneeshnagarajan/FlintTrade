@@ -42,9 +42,9 @@ vi.mock("@/components/motion/StaggeredList", () => ({
 }));
 
 // DisabledActionButton
-vi.mock("../../DisabledActionButton", () => ({
-  DisabledActionButton: ({ label }: { label: string }) => (
-    <button disabled>{label}</button>
+vi.mock("@/components/DisabledActionButton", () => ({
+  DisabledActionButton: ({ label, tooltip }: { label: string; tooltip: string }) => (
+    <button disabled title={tooltip}>{label}</button>
   ),
 }));
 
@@ -112,7 +112,24 @@ describe("NetWorthTab", () => {
     expect(screen.getAllByText("Cash").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Mutual Funds")).toBeInTheDocument();
     expect(screen.getByText("Gold")).toBeInTheDocument();
-    expect(screen.getByText("Fixed Deposits")).toBeInTheDocument();
+    expect(screen.queryByText("Fixed Deposits")).not.toBeInTheDocument();
+  });
+
+  it("words the add and source hints as plain sentences", () => {
+    render(<NetWorthTab />);
+
+    expect(screen.getByText("Connect a NAV source in Settings → Data Sources.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Equity" })).toHaveAttribute("title", "Buy through your broker. Holdings sync automatically.");
+    expect(screen.getByRole("button", { name: "Add Cash" })).toHaveAttribute("title", "Deposit through your broker. Balance syncs automatically.");
+    expect(screen.queryByRole("button", { name: "Add FD" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Fixed Deposits")).not.toBeInTheDocument();
+  });
+
+  it("does not show a fixed deposit card or its leftover copy", () => {
+    render(<NetWorthTab />);
+
+    expect(screen.queryByText("Fixed Deposits")).not.toBeInTheDocument();
+    expect(screen.queryByText("Track fixed deposits with maturity dates and interest tracking — coming soon.")).not.toBeInTheDocument();
   });
 
   it("renders live asset visuals through Flint primitives", () => {

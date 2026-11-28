@@ -434,6 +434,30 @@ export async function tickUntil(page: Page, locator: Locator): Promise<void> {
   }, { timeout: 15_000, intervals: [50] }).toBe(true);
 }
 
+/** Focus the span that carries a disabled control's reason and read its tooltip. */
+export async function expectReasonTooltip(page: Page, control: Locator, reason: string): Promise<void> {
+  const trigger = control.locator("xpath=..");
+  // The first focus can scroll a clipped panel, and a scroll closes an open
+  // tooltip. Focusing again once the scroll has settled opens it for good.
+  await trigger.focus();
+  await page.clock.runFor(250);
+  await trigger.blur();
+  await trigger.focus();
+  await page.clock.runFor(250);
+  await expect(page.getByRole("tooltip")).toHaveText(reason);
+}
+
+export async function tickUntilAttached(page: Page, locator: Locator): Promise<void> {
+  let advanced = 0;
+  await expect.poll(async () => {
+    if (advanced < 2_000) {
+      await page.clock.runFor(25);
+      advanced += 25;
+    }
+    return locator.count();
+  }, { timeout: 15_000, intervals: [50] }).toBeGreaterThan(0);
+}
+
 export async function selectAccount(page: Page, account: string): Promise<void> {
   await page.evaluate(async (accountId) => {
     // Constant import adapter: the function body never interpolates user data.

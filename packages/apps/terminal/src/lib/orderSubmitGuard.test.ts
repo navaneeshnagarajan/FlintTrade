@@ -124,11 +124,21 @@ describe("order submit guard", () => {
     const sentence = "Entry placed · Stop-loss status unknown";
     expect(unknownSubmitRowLabel(sentence)).toBe("SL unknown");
     expect(unknownSubmitRowLabel("Entry placed · Target status unknown")).toBe("Target unknown");
-    expect(ordersNoticeSummary(2, 1)).toBe("2 cancellations requested · 1 order status unknown");
-    expect(ordersNoticeSummary(2, 3)).toBe("2 cancellations requested · 3 order statuses unknown");
-    expect(ordersNoticeSummary(1, 0)).toBe("1 cancellation requested");
-    expect(ordersNoticeSummary(0, 2)).toBe("2 order statuses unknown");
-    expect(ordersNoticeSummary(0, 0)).toBeNull();
+    const one = [{ action: "BUY" as const, quantity: 65, symbol: "RELIANCE" }];
+    const three = [one[0], { ...one[0], symbol: "TCS" }, { ...one[0], symbol: "INFY" }];
+    expect(ordersNoticeSummary(2, one)).toBe("2 cancellations requested · 1 order status unknown");
+    expect(ordersNoticeSummary(1, one)).toBe("1 cancellation requested · 1 order status unknown");
+    expect(ordersNoticeSummary(2, three)).toBe("2 cancellations requested · 3 order statuses unknown");
+    expect(ordersNoticeSummary(1, [])).toBe("1 cancellation requested");
+    expect(ordersNoticeSummary(0, three.slice(0, 2))).toBe("2 order statuses unknown");
+    expect(ordersNoticeSummary(0, [])).toBeNull();
+  });
+
+  it("names a single unknown order by side, quantity and symbol only when it is the only notice", () => {
+    expect(ordersNoticeSummary(0, [{ action: "BUY", quantity: 65, symbol: "RELIANCE" }]))
+      .toBe("BUY 65 RELIANCE · order status unknown");
+    expect(ordersNoticeSummary(0, [{ action: "SELL", symbol: "NIFTY 25000 CE" }]))
+      .toBe("SELL NIFTY 25000 CE · order status unknown");
   });
 
   it("keeps the approved sentence for a lone unknown entry", async () => {

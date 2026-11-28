@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { AlertTriangle } from "lucide-react";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 
 function openOrders(): void {
@@ -72,9 +73,9 @@ export function OrderStatusUnknownTight({ className = "" }: { className?: string
       role="status"
       title={ORDER_STATUS_UNKNOWN}
       aria-describedby={id}
-      className={`flex items-center gap-0 text-xxs text-warning whitespace-nowrap ${className}`}
+      className={`flex items-center gap-1 text-xxs text-warning whitespace-nowrap ${className}`}
     >
-      <span className="pr-0.5">{ORDER_STATUS_UNKNOWN_COMPACT}</span>
+      <span>{ORDER_STATUS_UNKNOWN_COMPACT} </span>
       <OpenOrdersButton title={ORDER_STATUS_UNKNOWN} describedBy={id} />
       <span id={id} hidden>{ORDER_STATUS_UNKNOWN}</span>
     </p>
@@ -86,7 +87,27 @@ export function OrderStatusUnknownTight({ className = "" }: { className?: string
  * `linkOnly` drops the sentence while the widget's own outcome line already
  * says it, so the sentence is shown and announced once.
  */
-export function OrderStatusUnknownLine({ className = "", linkOnly = false }: { className?: string; linkOnly?: boolean }) {
+export function OrderStatusUnknownLine({
+  className = "",
+  linkOnly = false,
+  clip = false,
+}: {
+  className?: string;
+  linkOnly?: boolean;
+  /** Keep to one row: the sentence truncates and its tooltip carries the full text. */
+  clip?: boolean;
+}) {
+  if (clip && !linkOnly) {
+    return (
+      <p role="status" className={`flex min-w-0 items-center gap-1.5 text-xs text-warning ${className}`}>
+        <AlertTriangle size={12} aria-hidden className="shrink-0" />
+        <DisabledReason reason={ORDER_STATUS_UNKNOWN} className="block min-w-0 truncate">
+          {ORDER_STATUS_UNKNOWN}
+        </DisabledReason>
+        <OpenOrdersButton />
+      </p>
+    );
+  }
   if (linkOnly) {
     return (
       <p className={`flex items-center text-xs text-warning ${className}`}>

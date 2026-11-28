@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import {
   expect,
   mountWidget,
@@ -5,6 +6,7 @@ import {
   registerAccountBooks,
   registerDeskReads,
   registerRead,
+  expectReasonTooltip,
   test,
   tabStopNames,
   tickUntil,
@@ -14,6 +16,7 @@ const UNKNOWN = "Order status unknown. Check Orders before trying again.";
 const CE = "NIFTY27AUG26100CE";
 const PE = "NIFTY27AUG26100PE";
 const PLACE = "/ft-api/api/v1/orders/dhan/place";
+const CANCEL_ALL = "/ft-api/api/v1/orders/cancel-all";
 
 function historyPath(symbol: string, exchange: string): string {
   // Frozen clock is 2026-08-11. The chart's 5m history request on this
@@ -124,6 +127,7 @@ for (const lost of LOST_SUBMITS) {
       await expect(page.getByRole("button", { name: /^Buy CE/ }).first()).toBeDisabled();
       await expect(page.getByRole("button", { name: /^Sell CE/ }).first()).toBeDisabled();
       await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      await expectReasonTooltip(page, page.getByRole("button", { name: /^Buy CE/ }).first(), UNKNOWN);
 
       // The hotkey on a locked contract opens nothing and sends nothing.
       // The folded note is already open from the first submit.
@@ -136,6 +140,11 @@ for (const lost of LOST_SUBMITS) {
       // No focusable control named Retry anywhere Tab reaches.
       const names = await tabStopNames(page);
       expect(names.filter((name) => /retry/i.test(name))).toEqual([]);
+      const quantities = await page.evaluate(() => Object.keys(sessionStorage)
+        .filter((key) => key.startsWith("flinttrade:order-unknown-submits:"))
+        .flatMap((key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as { quantity?: number }[])
+        .map((record) => record.quantity));
+      expect(quantities).toEqual([65]);
       expect(posts).toBe(1);
     });
   });
@@ -204,5 +213,94 @@ test.describe("lost Scalper Bracket exit leg", () => {
       .map((record) => record.legs));
     expect(legs).toEqual([{ entry: "confirmed", stop_loss: "unknown" }]);
     expect(posts).toBe(1);
+  });
+});
+
+async function mountGatedCancelAll(page: Page, syntheticApi: Parameters<typeof registerScalperReads>[0]) {
+  registerScalperReads(syntheticApi);
+  const counter = { posts: 0 };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**${CANCEL_ALL}`, async (route) => {
+    counter.posts += 1;
+    await gate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "success", order_outcome: "cancelled" }),
+    });
+  });
+  await mountWidget(page, "scalper");
+  await page.clock.runFor(5_000);
+  await expect(page.getByText("1 (65)", { exact: true })).toBeAttached({ timeout: 15_000 });
+  return { counter, release, cancelAll: page.getByRole("button", { name: /^Cancel All/ }).first() };
+}
+
+async function pressC(page: Page): Promise<void> {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("c");
+}
+
+test.describe("Scalper Cancel all", () => {
+  test("sends one request while the first is in flight and enables the button after it settles", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
+
+    await cancelAll.click();
+    const confirm = page.getByRole("alertdialog").getByRole("button", { name: "Cancel All Orders", exact: true });
+    await confirm.dblclick();
+    await expect(cancelAll).toBeDisabled();
+    await expect.poll(() => counter.posts).toBe(1);
+    await expectReasonTooltip(page, cancelAll, "Cancel all sent. Waiting for reply.");
+
+    release();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(cancelAll).toBeEnabled();
+    expect(counter.posts).toBe(1);
+  });
+
+  test("C opens no confirm and sends nothing while the button's request is pending", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
+    const dialogs: string[] = [];
+    page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.accept(); });
+
+    await cancelAll.click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel All Orders", exact: true }).click();
+    await expect(cancelAll).toBeDisabled();
+    await expect.poll(() => counter.posts).toBe(1);
+    await pressC(page);
+    await page.clock.runFor(250);
+
+    expect(dialogs).toEqual([]);
+    expect(counter.posts).toBe(1);
+    await expect(cancelAll).toBeDisabled();
+
+    release();
+    await tickUntil(page, page.getByText("Order cancelled", { exact: true }));
+    await expect(cancelAll).toBeEnabled();
+    expect(counter.posts).toBe(1);
+  });
+
+  test("the button stays disabled with its reason while C's request is pending", async ({ page, syntheticApi }) => {
+    test.setTimeout(60_000);
+    const { counter, release, cancelAll } = await mountGatedCancelAll(page, syntheticApi);
+    const dialogs: string[] = [];
+    page.on("dialog", async (dialog) => { dialogs.push(dialog.message()); await dialog.accept(); });
+
+    await pressC(page);
+    await expect.poll(() => counter.posts).toBe(1);
+    expect(dialogs).toHaveLength(1);
+    await expect(cancelAll).toBeDisabled();
+    await expectReasonTooltip(page, cancelAll, "Cancel all sent. Waiting for reply.");
+    await pressC(page);
+    await page.clock.runFor(250);
+
+    expect(dialogs).toHaveLength(1);
+    expect(counter.posts).toBe(1);
+
+    release();
+    await expect(cancelAll).toBeEnabled({ timeout: 15_000 });
+    expect(counter.posts).toBe(1);
   });
 });

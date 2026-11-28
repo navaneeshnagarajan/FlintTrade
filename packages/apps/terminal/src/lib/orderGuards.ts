@@ -57,6 +57,8 @@ export function isDerivativeExchange(exchange: string): boolean {
 // Mode
 // ---------------------------------------------------------------------------
 
+export const NO_BROKER_ORDERS = "Connect a broker to place orders.";
+
 /**
  * Refuse order entry outside a mode that can place one.
  *
@@ -69,7 +71,7 @@ export function isDerivativeExchange(exchange: string): boolean {
  */
 export function checkOrderEntryMode(mode: SessionMode): string | null {
   if (mode === "unavailable") return "Unavailable. No order was sent.";
-  if (mode === "explore") return "Connect a broker to place orders";
+  if (mode === "explore") return NO_BROKER_ORDERS;
   return null;
 }
 
@@ -316,6 +318,21 @@ export function orderSymbolLabel(symbol: string): string {
 export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
 export const UNVERIFIED_FREEZE_WARNING = "Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.";
 export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
+
+/** Reasons a disabled order control gives, one sentence each. */
+export const ENTER_A_QUANTITY = "Enter a quantity.";
+export const NO_STRIKE_SELECTED = "No strike selected. Pick a strike.";
+export function lotSizeNotConfirmedReason(symbol: string): string {
+  return `Lot size not confirmed for ${symbol}. Refresh instruments.`;
+}
+export function decisionModelMaxLotsReason(lots: number): string {
+  return `Decision model allows max ${lots} ${lots === 1 ? "lot" : "lots"}. Reduce quantity.`;
+}
+export function strikeNotInChainReason(strike: number): string {
+  return `Strike ${strike} not in the chain. Pick a listed strike.`;
+}
+/** Same sentence the order routes return for Example data. */
+export const EXAMPLE_ORDERS_REFUSAL = "Orders are not available for Example. Switch to Practice or Live to trade.";
 export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
 
 /** Indian digit grouping, matching en-IN. */

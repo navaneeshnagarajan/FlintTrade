@@ -23,11 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
-import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
-import { liveWritesMuted } from "@/lib/operatorIncident";
+import { layaDenialText, layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
+import { liveWritesMuted, ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
 import { useOrderSubmitGuard } from "@/hooks/useOrderSubmitGuard";
+import { DisabledReason } from "@/components/DisabledActionButton";
 import { OrderStatusUnknownLine } from "@/components/orders/OrderStatusUnknownLine";
 import { lotCountLabel, lotUnknownMessage, missingLotRefusal } from "@/lib/instrumentLots";
 import { placeOrder, getSymbol } from "@/services/api";
@@ -48,6 +49,8 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
   checkOrderEntryMode,
   checkPriceForOrderType,
+  decisionModelMaxLotsReason,
+  lotSizeNotConfirmedReason,
   needsLargeOrderConfirmation,
   resolveLotQuantity,
   LARGE_ORDER_LOTS,
@@ -304,7 +307,6 @@ function QuickTradeWidget(props: WidgetProps) {
   const { submit: submitOnce, isLocked, isUnknown } = useOrderSubmitGuard();
   const locked = isLocked(instrumentOrderKey(exchange, symbol));
   const statusUnknown = isUnknown(instrumentOrderKey(exchange, symbol));
-
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL", quantityOverride?: number) => {
       lastActionRef.current = action;
@@ -426,6 +428,25 @@ function QuickTradeWidget(props: WidgetProps) {
 
   const displayQuantity = resolveQuantity();
   const lotUnknown = displayQuantity == null;
+  const lotUnit = lotSize != null && lotSize > 0 ? lotSize : 1;
+  const clampLots = admission?.kind === "clamp" && admission.appliedQuantity != null
+    ? Math.floor(admission.appliedQuantity / lotUnit)
+    : 0;
+  const disabledReason = statusUnknown
+    ? ORDER_STATUS_UNKNOWN
+    : isPending || locked
+      ? ORDER_SENT_WAITING
+      : admission?.kind === "deny"
+        ? layaDenialText(admission)
+        : ruleBlocked
+          ? ruleResults.find((result) => result.level === "block")?.message ?? null
+          : lotUnknown
+            ? lotSizeNotConfirmedReason(symbol)
+            : admission?.kind === "clamp"
+              ? clampLots > 0
+                ? decisionModelMaxLotsReason(clampLots)
+                : layaDenialText(admission)
+              : null;
 
   // Fail-closed empty state — no panel params and no workspace selection means
   // there is nothing safe to trade. Rendered after all hooks (hook-order rule).
@@ -558,32 +579,36 @@ function QuickTradeWidget(props: WidgetProps) {
 
         {/* BUY / SELL, with a reserved unknown-line slot directly above them */}
         <div className="mt-auto flex flex-col gap-1">
-        <div data-testid="quicktrade-status-slot" className="min-h-9 flex items-end">
-          {statusUnknown ? <OrderStatusUnknownLine /> : null}
+        <div data-testid="quicktrade-status-slot" className="h-6 flex items-center">
+          {statusUnknown ? <OrderStatusUnknownLine clip /> : null}
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={() => handleAction("BUY")}
-            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
-            className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
-          >
-            {isPending && pendingAction === "BUY" ? (
-              <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
-            ) : null}
-            BUY
-          </Button>
-          <Button
-            onClick={() => handleAction("SELL")}
-            disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
-            aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
-            className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
-          >
-            {isPending && pendingAction === "SELL" ? (
-              <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
-            ) : null}
-            SELL
-          </Button>
+          <DisabledReason reason={disabledReason} className="flex flex-1">
+            <Button
+              onClick={() => handleAction("BUY")}
+              disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+              aria-label={`Buy ${lotCountLabel(lots)} of ${symbol}`}
+              className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
+            >
+              {isPending && pendingAction === "BUY" ? (
+                <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
+              ) : null}
+              BUY
+            </Button>
+          </DisabledReason>
+          <DisabledReason reason={disabledReason} className="flex flex-1">
+            <Button
+              onClick={() => handleAction("SELL")}
+              disabled={isPending || locked || ruleBlocked || lotUnknown || admission?.kind === "deny" || admission?.kind === "clamp"}
+              aria-label={`Sell ${lotCountLabel(lots)} of ${symbol}`}
+              className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
+            >
+              {isPending && pendingAction === "SELL" ? (
+                <Loader2 size={14} className="animate-spin mr-1" aria-hidden="true" />
+              ) : null}
+              SELL
+            </Button>
+          </DisabledReason>
         </div>
         </div>
       </div>

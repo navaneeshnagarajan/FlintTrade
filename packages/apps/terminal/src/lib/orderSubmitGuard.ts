@@ -104,13 +104,25 @@ export function unknownSubmitRowLabel(sentence: string): string {
   return "Status unknown";
 }
 
-/** One-line Orders notice for pending cancels and unknown submits. */
-export function ordersNoticeSummary(pendingCancels: number, unknownOrders: number): string | null {
+/**
+ * One-line Orders notice for pending cancels and unknown submits. A single
+ * unknown order is named by side, quantity and symbol only when it is the
+ * only notice. Beside pending cancels the line keeps the counts.
+ */
+export function ordersNoticeSummary(
+  pendingCancels: number,
+  unknownOrders: ReadonlyArray<Pick<UnknownOrderSubmit, "action" | "quantity" | "symbol">>,
+): string | null {
+  if (pendingCancels === 0 && unknownOrders.length === 1) {
+    const [order] = unknownOrders;
+    const quantity = order.quantity != null ? ` ${order.quantity}` : "";
+    return `${order.action}${quantity} ${order.symbol} · order status unknown`;
+  }
   const parts: string[] = [];
   if (pendingCancels === 1) parts.push("1 cancellation requested");
   else if (pendingCancels > 1) parts.push(`${pendingCancels} cancellations requested`);
-  if (unknownOrders === 1) parts.push("1 order status unknown");
-  else if (unknownOrders > 1) parts.push(`${unknownOrders} order statuses unknown`);
+  if (unknownOrders.length === 1) parts.push("1 order status unknown");
+  else if (unknownOrders.length > 1) parts.push(`${unknownOrders.length} order statuses unknown`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

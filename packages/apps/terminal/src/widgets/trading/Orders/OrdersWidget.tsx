@@ -949,11 +949,11 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       )}
 
-      <div className="mx-3 mt-2 h-11 overflow-hidden" data-testid="orders-notice-slot">
+      <div className="mx-3 mt-2 h-8 overflow-hidden" data-testid="orders-notice-slot">
         {(() => {
-          const summary = ordersNoticeSummary(pendingCancels.pending.length, unknownSubmits.length);
-          const noticeClass = "h-11 flex items-center px-3 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning";
-          const settledClass = "h-11 flex items-center px-3 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default truncate whitespace-nowrap";
+          const summary = ordersNoticeSummary(pendingCancels.pending.length, unknownSubmits);
+          const noticeClass = "h-8 flex items-center px-3 bg-warning/10 border border-warning/20 rounded-md text-sm text-warning";
+          const settledClass = "h-8 flex items-center px-3 rounded-md text-sm text-text-primary bg-surface-elevated border border-border-default truncate whitespace-nowrap";
           const hiddenUnknown = unknownSubmits.map((record) => (
             <span key={`unknown-${record.key}`} data-unknown-submit={record.key} hidden>
               {record.action} {record.quantity != null ? `${record.quantity} ` : ""}{record.symbol}
