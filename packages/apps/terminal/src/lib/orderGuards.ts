@@ -318,6 +318,12 @@ export function orderSymbolLabel(symbol: string): string {
 export const OVER_MAX_REFUSAL = "Max {cap} per order for {symbol}. Place smaller orders.";
 export const UNVERIFIED_FREEZE_WARNING = "Max per order for {symbol} may be {freeze} qty. Split if the broker rejects.";
 export const LOT_MULTIPLE_REFUSAL = "Quantity must be a multiple of the lot size ({lot}).";
+
+/** Reasons a disabled order control gives, one sentence each. */
+export const ENTER_A_QUANTITY = "Enter a quantity.";
+export const NO_STRIKE_SELECTED = "No strike selected. Pick a strike.";
+/** Same sentence the order routes return for Example data. */
+export const EXAMPLE_ORDERS_REFUSAL = "Orders are not available for Example. Switch to Practice or Live to trade.";
 export const QUANTITY_CAP_LABEL = "Lot {lot} · Max {cap} per order";
 
 /** Indian digit grouping, matching en-IN. */

@@ -901,6 +901,19 @@ describe("ScalperWidget", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent(EXPLORE_SCALPER_ORDER_HELPER);
   });
 
+  it("asks for a strike on the CE and PE buttons while none is resolved", async () => {
+    mockGetQuotes.mockRejectedValue(new Error("no quote"));
+    const user = userEvent.setup();
+    render(<ScalperWidget {...defaultProps} />);
+
+    for (const label of ["Buy CE", "Sell CE", "Buy PE", "Sell PE"]) {
+      const button = screen.getByText(label).closest("button") as HTMLButtonElement;
+      expect(button).toBeDisabled();
+      await tabTo(user, button.parentElement as HTMLElement);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("No strike selected. Pick a strike.");
+    }
+  });
+
   it("sends one place request for a double-click", async () => {
     let release!: () => void;
     mockPlaceOrder.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));

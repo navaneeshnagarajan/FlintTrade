@@ -427,6 +427,28 @@ describe("QuickTradeWidget", () => {
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
   });
 
+  it("repeats the visible denial on Buy and Sell through a tooltip the keyboard reaches", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
+      code: "decision_model_denied",
+      reason: "Quantity must be a positive whole number.",
+      message: "Quantity must be a positive whole number.",
+      limits: { max_quantity: 1 },
+    }));
+    const user = userEvent.setup();
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lot /i }));
+    const denied = await screen.findByTestId("laya-denied");
+    const visible = Array.from(denied.querySelectorAll("p")).map((line) => line.textContent).join(" ");
+    expect(visible).toBe("Denied by decision model Quantity must be a positive whole number. Max quantity 1.");
+
+    for (const name of [/buy 1 lot /i, /sell 1 lot /i]) {
+      const trigger = screen.getByRole("button", { name }).parentElement as HTMLElement;
+      await tabTo(user, trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(visible);
+    }
+  });
+
   it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(
       "Not placed. Decision model is down. Start it from Status.",

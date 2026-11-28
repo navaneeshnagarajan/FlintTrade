@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
-import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
+import { layaDenialText, layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted, ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { presentSubmitError } from "@/lib/orderOutcome";
 import { instrumentOrderKey } from "@/lib/orderSubmitGuard";
@@ -305,7 +305,13 @@ function QuickTradeWidget(props: WidgetProps) {
   const { submit: submitOnce, isLocked, isUnknown } = useOrderSubmitGuard();
   const locked = isLocked(instrumentOrderKey(exchange, symbol));
   const statusUnknown = isUnknown(instrumentOrderKey(exchange, symbol));
-  const disabledReason = statusUnknown ? ORDER_STATUS_UNKNOWN : isPending || locked ? ORDER_SENT_WAITING : null;
+  const disabledReason = statusUnknown
+    ? ORDER_STATUS_UNKNOWN
+    : isPending || locked
+      ? ORDER_SENT_WAITING
+      : admission?.kind === "deny"
+        ? layaDenialText(admission)
+        : null;
 
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL", quantityOverride?: number) => {

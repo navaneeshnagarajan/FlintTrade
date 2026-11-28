@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   DERIVATIVE_EXCHANGES,
@@ -26,6 +29,7 @@ import {
   isOpenOrderStatus,
   needsLargeOrderConfirmation,
   LARGE_ORDER_LOTS,
+  EXAMPLE_ORDERS_REFUSAL,
 } from "../orderGuards";
 
 describe("derivative exchange classification", () => {
@@ -380,5 +384,15 @@ describe("freeze refusal label", () => {
     ["", "this contract"],
   ])("names %s as %s", (symbol, label) => {
     expect(orderSymbolLabel(symbol)).toBe(label);
+  });
+});
+
+describe("Example order refusal", () => {
+  it("matches the sentence the order routes return", () => {
+    const routes = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../core/core/src/flinttrade_core/order_routes.py"),
+      "utf8",
+    );
+    expect(routes).toContain(`_EXAMPLE_ORDERS_REFUSAL = "${EXAMPLE_ORDERS_REFUSAL}"`);
   });
 });

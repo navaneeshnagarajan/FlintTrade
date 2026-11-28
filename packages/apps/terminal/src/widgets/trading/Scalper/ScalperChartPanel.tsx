@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
+import { NO_STRIKE_SELECTED } from "@/lib/orderGuards";
 import { CANCEL_ALL_SENT_WAITING, ORDER_SENT_WAITING, ORDER_STATUS_UNKNOWN } from "@/lib/operatorIncident";
 import { OrderStatusUnknownCompact, OrderStatusUnknownLine, OrderStatusUnknownTight } from "@/components/orders/OrderStatusUnknownLine";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
@@ -140,10 +141,12 @@ export interface ScalperChartPanelProps {
 function contractReason(
   ordersArmed: boolean,
   orderBlockCopy: string | null,
+  contractSymbol: string | null,
   locked: boolean,
   statusUnknown: boolean,
 ): string | null {
   if (!ordersArmed) return orderBlockCopy;
+  if (!contractSymbol) return NO_STRIKE_SELECTED;
   if (statusUnknown) return ORDER_STATUS_UNKNOWN;
   return locked ? ORDER_SENT_WAITING : null;
 }
@@ -172,8 +175,8 @@ export function ScalperChartPanel({
   peStatusUnknown = false,
 }: ScalperChartPanelProps) {
   const chartHeight = 120;
-  const ceReason = contractReason(ordersArmed, orderBlockCopy, ceLocked, ceStatusUnknown);
-  const peReason = contractReason(ordersArmed, orderBlockCopy, peLocked, peStatusUnknown);
+  const ceReason = contractReason(ordersArmed, orderBlockCopy, ceSymbol, ceLocked, ceStatusUnknown);
+  const peReason = contractReason(ordersArmed, orderBlockCopy, peSymbol, peLocked, peStatusUnknown);
 
   return (
     <div className="flex-1 flex min-h-0 overflow-hidden">
