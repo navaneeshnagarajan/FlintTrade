@@ -1039,7 +1039,7 @@ A double-click or a double hotkey sends one order.
 
 A cancel shows `Cancellation requested` until an order read shows the order cancelled, and then `Order cancelled`. The pending line survives a reload in the same tab. If that order leaves a complete list, Orders shows `No longer in Orders. Check order history.`
 
-A Scalper panel narrower than 260px shortens the line to `Status unknown` with **Open Orders**, and the full sentence is its tooltip.
+In a narrow Scalper panel, the line shortens to `Status unknown` with **Open Orders**, and the full sentence is its tooltip.
 
 Orders shows one summary line above the rows, for example `2 cancellations requested · 1 order status unknown`.
 
